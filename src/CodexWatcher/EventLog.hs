@@ -46,7 +46,7 @@ data WatcherEvent
   | IssueTriageAlreadyFixedEvent
   | IssueTriageNeedsImplementationEvent
   | IssueTriageBlockedEvent BlockedReason
-  | IssueStartPlanMode TurnId
+  | IssuePlanTurnStartedEvent TurnId
   | IssuePlanCompletedEvent (Maybe TurnId)
   | IssuePullRequestCreatedEvent PrNumber
   | IssuePullRequestReusedEvent PrNumber
@@ -131,11 +131,8 @@ instance FromJSON WatcherEvent where
       "issue_triage_blocked" ->
         IssueTriageBlockedEvent
           <$> (BlockedReason <$> object .: "reason")
-      "issue_start_plan_mode" ->
-        IssueStartPlanMode
-          <$> (TurnId <$> object .: "planTurnId")
       "issue_plan_turn_started" ->
-        IssueStartPlanMode
+        IssuePlanTurnStartedEvent
           <$> (TurnId <$> object .: "planTurnId")
       "issue_plan_completed" ->
         IssuePlanCompletedEvent
@@ -252,10 +249,10 @@ applyEvent (SomeWatcherState state@IssueTriageActive {}) IssueTriageNeedsImpleme
   fromDecision (step state IssueTriageNeedsImplementation)
 applyEvent (SomeWatcherState state@IssueTriageActive {}) (IssueTriageBlockedEvent reason) =
   fromDecision (step state (IssueTriageBlocked reason))
-applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssueStartPlanMode turnId) =
-  fromDecision (step state (StartIssuePlanMode (ActiveTurn threadId turnId)))
-applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssueStartPlanMode turnId) =
-  fromDecision (step state (StartReadyIssuePlanMode (ActiveTurn threadId turnId)))
+applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
+  fromDecision (step state (StartIssuePlanTurn (ActiveTurn threadId turnId)))
+applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
+  fromDecision (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId)))
 applyEvent (SomeWatcherState state@(IssueInPlanMode _config (WorkerActive activeTurn))) (IssuePlanCompletedEvent turnId) =
   fromDecision (step state (IssuePlanCompleted (ActiveTurn (activeThreadId activeTurn) <$> turnId)))
 applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssuePlanCompletedEvent turnId) =
@@ -364,7 +361,7 @@ eventName = \case
   IssueTriageAlreadyFixedEvent -> "issue_triage_already_fixed"
   IssueTriageNeedsImplementationEvent -> "issue_triage_needs_implementation"
   IssueTriageBlockedEvent {} -> "issue_triage_blocked"
-  IssueStartPlanMode {} -> "issue_start_plan_mode"
+  IssuePlanTurnStartedEvent {} -> "issue_plan_turn_started"
   IssuePlanCompletedEvent {} -> "issue_plan_completed"
   IssuePullRequestCreatedEvent {} -> "issue_pr_created"
   IssuePullRequestReusedEvent {} -> "issue_pr_reused"

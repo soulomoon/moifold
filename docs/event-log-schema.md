@@ -42,8 +42,7 @@ Valid replay path:
 
 Compatibility notes:
 
-- `issue_start_plan_mode` is accepted as a legacy alias for `issue_plan_turn_started`.
-- `issue_plan_completed` may include legacy `implementationTurnId`; when present, replay starts the first implementation turn immediately.
+- `issue_plan_completed` may include `implementationTurnId`; when present, replay starts the first implementation turn immediately.
 - Without `implementationTurnId`, `issue_plan_completed` moves to implementation-ready and emits effects to push the branch and create or reuse a PR before any implementation turn starts.
 
 Important replay rules:

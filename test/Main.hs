@@ -262,7 +262,7 @@ prop_eventLogFullIssueImplementationPathCompletes :: IssueConfig -> ThreadId -> 
 prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn implementationTurn prNumber =
   case replayEventLog
     [ IssueImplementInitialized config workerThread
-    , IssueStartPlanMode planTurn
+    , IssuePlanTurnStartedEvent planTurn
     , IssuePlanCompletedEvent (Just implementationTurn)
     , IssueImplementationCompletedEvent prNumber
     ] of
@@ -299,7 +299,7 @@ prop_eventLogIssueIncompleteCanContinueToComplete config workerThread triageTurn
         [ IssueImplementInitialized config workerThread
         , IssueTriageTurnStartedEvent triageTurn
         , IssueTriageNeedsImplementationEvent
-        , IssueStartPlanMode planTurn
+        , IssuePlanTurnStartedEvent planTurn
         , IssuePlanCompletedEvent Nothing
         , IssuePullRequestCreatedEvent prNumber
         , IssueImplementationTurnStartedEvent firstImplementationTurn

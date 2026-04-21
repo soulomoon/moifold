@@ -38,8 +38,8 @@ data Event (domain :: Domain) (phase :: Phase) where
   IssueTriageAlreadyFixed :: Event 'IssueImplement 'Triage
   IssueTriageNeedsImplementation :: Event 'IssueImplement 'Triage
   IssueTriageBlocked :: BlockedReason -> Event 'IssueImplement 'Triage
-  StartIssuePlanMode :: ActiveTurn -> Event 'IssueImplement 'Triage
-  StartReadyIssuePlanMode :: ActiveTurn -> Event 'IssueImplement 'PlanMode
+  StartIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'Triage
+  StartReadyIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePlanCompleted :: Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePullRequestReady :: PrNumber -> Event 'IssueImplement 'Implementing
   StartIssueImplementationTurn :: ActiveTurn -> Event 'IssueImplement 'Implementing
@@ -98,13 +98,13 @@ step (IssueTriageActive config (WorkerActive activeTurn)) IssueTriageNeedsImplem
     [SomeEffect SleepUntilNextPoll]
 step _ (IssueTriageBlocked reason) =
   Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
-step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssuePlanMode activeTurn) =
+step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
     [SomeEffect (StartWorkerTurn threadId)]
-step state@IssueTriageActive {} (StartIssuePlanMode _activeTurn) =
+step state@IssueTriageActive {} (StartIssuePlanTurn _activeTurn) =
   Decision state []
-step (IssuePlanReady config (WorkerIdle threadId)) (StartReadyIssuePlanMode activeTurn) =
+step (IssuePlanReady config (WorkerIdle threadId)) (StartReadyIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
     [SomeEffect (StartWorkerTurn threadId)]
