@@ -1,0 +1,59 @@
+cabal-version: 3.8
+name:          codex-watcher-hs
+version:       0.1.0.0
+synopsis:      Type-level Codex watcher state machine core
+description:   Haskell-first rewrite of Codex watcher orchestration with type-level lifecycle invariants.
+license:       MIT
+author:        soulomoon
+maintainer:    soulomoon
+category:      Development
+build-type:    Simple
+
+source-repository head
+  type:     git
+  location: https://github.com/soulomoon/codex-watcher-hs.git
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wpartial-fields
+    -Wredundant-constraints
+
+library
+  import:           warnings
+  hs-source-dirs:   src
+  exposed-modules:
+    CodexWatcher.Effects
+    CodexWatcher.StateMachine
+    CodexWatcher.Types
+  build-depends:
+    base >=4.18 && <5,
+    text >=2.0 && <3
+  default-language: GHC2021
+
+executable codex-watcher-hs
+  import:           warnings
+  hs-source-dirs:   app
+  main-is:          Main.hs
+  build-depends:
+    base >=4.18 && <5,
+    codex-watcher-hs,
+    text >=2.0 && <3
+  default-language: GHC2021
+
+test-suite watcher-core-test
+  import:           warnings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Main.hs
+  build-depends:
+    base >=4.18 && <5,
+    codex-watcher-hs,
+    QuickCheck >=2.14 && <3,
+    text >=2.0 && <3
+  default-language: GHC2021
