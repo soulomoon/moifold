@@ -18,6 +18,7 @@ module CodexWatcher.StateMachine
 import CodexWatcher.Effects
 import CodexWatcher.Types
 import Data.Kind (Constraint)
+import qualified Data.Text as Text
 import GHC.TypeLits (ErrorMessage (..), TypeError)
 
 type family CanBlock (phase :: Phase) :: Constraint where
@@ -33,8 +34,18 @@ data Event (domain :: Domain) (phase :: Phase) where
   StartPlanningTurn :: ActiveTurn -> Event 'IssuePlanning 'Initialized
   PlannerTurnCompleted :: Event 'IssuePlanning 'PlanMode
 
+  StartIssueTriageTurn :: ActiveTurn -> Event 'IssueImplement 'Triage
+  IssueTriageAlreadyFixed :: Event 'IssueImplement 'Triage
+  IssueTriageNeedsImplementation :: Event 'IssueImplement 'Triage
+  IssueTriageBlocked :: BlockedReason -> Event 'IssueImplement 'Triage
   StartIssuePlanMode :: ActiveTurn -> Event 'IssueImplement 'Triage
-  IssuePlanCompleted :: ActiveTurn -> Event 'IssueImplement 'PlanMode
+  StartReadyIssuePlanMode :: ActiveTurn -> Event 'IssueImplement 'PlanMode
+  IssuePlanCompleted :: Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
+  IssuePullRequestReady :: PrNumber -> Event 'IssueImplement 'Implementing
+  StartIssueImplementationTurn :: ActiveTurn -> Event 'IssueImplement 'Implementing
+  IssueImplementationIncomplete :: Event 'IssueImplement 'Implementing
+  IssueReviewHandoffInitialized :: PrNumber -> Event 'IssueImplement 'Implementing
+  IssueReviewHandoffStarted :: PrNumber -> Event 'IssueImplement 'Implementing
   IssueImplementationCompleted :: PrNumber -> Event 'IssueImplement 'Implementing
 
   ReviewThreadsFound :: ReviewEvidence -> ActiveTurn -> Event 'PrReview 'CheckingReviews
@@ -71,27 +82,79 @@ step (PlanningTurnActive config _activeTurn) PlannerTurnCompleted =
   Decision
     (PlanningReady config)
     [SomeEffect SleepUntilNextPoll]
+step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssueTriageTurn activeTurn) =
+  Decision
+    (IssueTriageActive config (WorkerActive activeTurn))
+    [SomeEffect (StartWorkerTurn threadId)]
+step state@IssueTriageActive {} (StartIssueTriageTurn _activeTurn) =
+  Decision state []
+step (IssueTriageActive config _activeTurn) IssueTriageAlreadyFixed =
+  Decision
+    (CompleteState (IssueAlreadyResolved (issueNumber config)))
+    [SomeEffect SleepUntilNextPoll]
+step (IssueTriageActive config (WorkerActive activeTurn)) IssueTriageNeedsImplementation =
+  Decision
+    (IssuePlanReady config (WorkerIdle (activeThreadId activeTurn)))
+    [SomeEffect SleepUntilNextPoll]
+step _ (IssueTriageBlocked reason) =
+  Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
 step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssuePlanMode activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
     [SomeEffect (StartWorkerTurn threadId)]
 step state@IssueTriageActive {} (StartIssuePlanMode _activeTurn) =
   Decision state []
-step (IssueInPlanMode config (WorkerActive _activeTurn)) (IssuePlanCompleted nextTurn) =
+step (IssuePlanReady config (WorkerIdle threadId)) (StartReadyIssuePlanMode activeTurn) =
   Decision
-    (IssueImplementing config (WorkerActive nextTurn))
+    (IssueInPlanMode config (WorkerActive activeTurn))
+    [SomeEffect (StartWorkerTurn threadId)]
+step (IssueInPlanMode config (WorkerActive activeTurn)) (IssuePlanCompleted Nothing) =
+  Decision
+    (IssueImplementationReady config Nothing (WorkerIdle (activeThreadId activeTurn)))
+    [ SomeEffect (PushBranch (issueBranch config))
+    , SomeEffect (CreatePullRequest config)
+    ]
+step (IssueInPlanMode config (WorkerActive _activeTurn)) (IssuePlanCompleted (Just nextTurn)) =
+  Decision
+    (IssueImplementing config Nothing (WorkerActive nextTurn))
     [ SomeEffect (PushBranch (issueBranch config))
     , SomeEffect (CreatePullRequest config)
     , SomeEffect (StartWorkerTurn (activeThreadId nextTurn))
     ]
-step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted nextTurn) =
+step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted Nothing) =
   Decision
-    (IssueImplementing config (WorkerActive nextTurn))
+    (IssueImplementationReady config Nothing (WorkerIdle _threadId))
+    [ SomeEffect (PushBranch (issueBranch config))
+    , SomeEffect (CreatePullRequest config)
+    ]
+step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted (Just nextTurn)) =
+  Decision
+    (IssueImplementing config Nothing (WorkerActive nextTurn))
     [ SomeEffect (PushBranch (issueBranch config))
     , SomeEffect (CreatePullRequest config)
     , SomeEffect (StartWorkerTurn (activeThreadId nextTurn))
     ]
-step (IssueImplementing _config _thread) (IssueImplementationCompleted prNumber) =
+step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady prNumber) =
+  Decision
+    (IssueImplementationReady config (Just prNumber) worker)
+    [SomeEffect SleepUntilNextPoll]
+step (IssueImplementationReady config maybePr (WorkerIdle threadId)) (StartIssueImplementationTurn activeTurn) =
+  Decision
+    (IssueImplementing config maybePr (WorkerActive activeTurn))
+    [SomeEffect (StartWorkerTurn threadId)]
+step (IssueImplementing config maybePr (WorkerActive activeTurn)) IssueImplementationIncomplete =
+  Decision
+    (IssueImplementationReady config maybePr (WorkerIdle (activeThreadId activeTurn)))
+    [SomeEffect (StartWorkerTurn (activeThreadId activeTurn))]
+step state@IssueImplementationReady {} (IssueReviewHandoffInitialized _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@IssueImplementationReady {} (IssueReviewHandoffStarted _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@IssueImplementing {} (IssueReviewHandoffInitialized _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@IssueImplementing {} (IssueReviewHandoffStarted _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step (IssueImplementing _config _maybePr _thread) (IssueImplementationCompleted prNumber) =
   Decision
     (CompleteState (IssueComplete prNumber))
     [SomeEffect SleepUntilNextPoll]
@@ -131,6 +194,11 @@ step (PrMerging _config _evidence) (MergeCompleted mergeCommit) =
   Decision
     (CompleteState (PrMerged mergeCommit))
     [SomeEffect StopDaemon]
+step _ _ =
+  let reason = BlockedReason (Text.pack "invalid state/event transition")
+   in Decision
+        (BlockedState reason)
+        [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
 
 effectsForTerminalState :: WatcherState domain phase -> EffectPlan
 effectsForTerminalState = \case

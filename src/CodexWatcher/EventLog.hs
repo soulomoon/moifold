@@ -42,8 +42,19 @@ data WatcherEvent
   | PrReviewReviewIncomplete Text
   | PrReviewMergeCompleted MergeCommit
   | IssueImplementInitialized IssueConfig ThreadId
+  | IssueTriageTurnStartedEvent TurnId
+  | IssueTriageAlreadyFixedEvent
+  | IssueTriageNeedsImplementationEvent
+  | IssueTriageBlockedEvent BlockedReason
   | IssueStartPlanMode TurnId
-  | IssuePlanCompletedEvent TurnId
+  | IssuePlanCompletedEvent (Maybe TurnId)
+  | IssuePullRequestCreatedEvent PrNumber
+  | IssuePullRequestReusedEvent PrNumber
+  | IssueImplementationTurnStartedEvent TurnId
+  | IssueImplementationIncompleteEvent Text
+  | IssueImplementationBlockedEvent BlockedReason
+  | IssueReviewHandoffInitializedEvent PrNumber
+  | IssueReviewHandoffStartedEvent PrNumber
   | IssueImplementationCompletedEvent PrNumber
   | WatcherBlocked BlockedReason
   | WatcherStopped StopReason
@@ -110,12 +121,46 @@ instance FromJSON WatcherEvent where
         IssueImplementInitialized
           <$> parseIssueConfig object
           <*> (ThreadId <$> object .: "workerThreadId")
+      "issue_triage_turn_started" ->
+        IssueTriageTurnStartedEvent
+          <$> (TurnId <$> object .: "triageTurnId")
+      "issue_triage_already_fixed" ->
+        pure IssueTriageAlreadyFixedEvent
+      "issue_triage_needs_implementation" ->
+        pure IssueTriageNeedsImplementationEvent
+      "issue_triage_blocked" ->
+        IssueTriageBlockedEvent
+          <$> (BlockedReason <$> object .: "reason")
       "issue_start_plan_mode" ->
+        IssueStartPlanMode
+          <$> (TurnId <$> object .: "planTurnId")
+      "issue_plan_turn_started" ->
         IssueStartPlanMode
           <$> (TurnId <$> object .: "planTurnId")
       "issue_plan_completed" ->
         IssuePlanCompletedEvent
+          <$> (fmap TurnId <$> object .:? "implementationTurnId")
+      "issue_pr_created" ->
+        IssuePullRequestCreatedEvent
+          <$> (PrNumber <$> object .: "prNumber")
+      "issue_pr_reused" ->
+        IssuePullRequestReusedEvent
+          <$> (PrNumber <$> object .: "prNumber")
+      "issue_implementation_turn_started" ->
+        IssueImplementationTurnStartedEvent
           <$> (TurnId <$> object .: "implementationTurnId")
+      "issue_implementation_incomplete" ->
+        IssueImplementationIncompleteEvent
+          <$> (object .:? "reason" .!= "incomplete")
+      "issue_implementation_blocked" ->
+        IssueImplementationBlockedEvent
+          <$> (BlockedReason <$> object .: "reason")
+      "issue_review_handoff_initialized" ->
+        IssueReviewHandoffInitializedEvent
+          <$> (PrNumber <$> object .: "prNumber")
+      "issue_review_handoff_started" ->
+        IssueReviewHandoffStartedEvent
+          <$> (PrNumber <$> object .: "prNumber")
       "issue_implementation_completed" ->
         IssueImplementationCompletedEvent
           <$> (PrNumber <$> object .: "prNumber")
@@ -199,11 +244,43 @@ applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewReviewIncomplet
   fromDecision (step state ReviewerTurnIncomplete)
 applyEvent (SomeWatcherState state@PrMerging {}) (PrReviewMergeCompleted mergeCommit) =
   fromDecision (step state (MergeCompleted mergeCommit))
+applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssueTriageTurnStartedEvent turnId) =
+  fromDecision (step state (StartIssueTriageTurn (ActiveTurn threadId turnId)))
+applyEvent (SomeWatcherState state@IssueTriageActive {}) IssueTriageAlreadyFixedEvent =
+  fromDecision (step state IssueTriageAlreadyFixed)
+applyEvent (SomeWatcherState state@IssueTriageActive {}) IssueTriageNeedsImplementationEvent =
+  fromDecision (step state IssueTriageNeedsImplementation)
+applyEvent (SomeWatcherState state@IssueTriageActive {}) (IssueTriageBlockedEvent reason) =
+  fromDecision (step state (IssueTriageBlocked reason))
 applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssueStartPlanMode turnId) =
   fromDecision (step state (StartIssuePlanMode (ActiveTurn threadId turnId)))
+applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssueStartPlanMode turnId) =
+  fromDecision (step state (StartReadyIssuePlanMode (ActiveTurn threadId turnId)))
 applyEvent (SomeWatcherState state@(IssueInPlanMode _config (WorkerActive activeTurn))) (IssuePlanCompletedEvent turnId) =
-  fromDecision (step state (IssuePlanCompleted (ActiveTurn (activeThreadId activeTurn) turnId)))
-applyEvent (SomeWatcherState state@(IssueImplementing _config _worker)) (IssueImplementationCompletedEvent prNumber) =
+  fromDecision (step state (IssuePlanCompleted (ActiveTurn (activeThreadId activeTurn) <$> turnId)))
+applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssuePlanCompletedEvent turnId) =
+  fromDecision (step state (IssuePlanCompleted (ActiveTurn threadId <$> turnId)))
+applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestCreatedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestReady prNumber))
+applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestReady prNumber))
+applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr (WorkerIdle threadId))) (IssueImplementationTurnStartedEvent turnId) =
+  fromDecision (step state (StartIssueImplementationTurn (ActiveTurn threadId turnId)))
+applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationIncompleteEvent _reason) =
+  fromDecision (step state IssueImplementationIncomplete)
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueReviewHandoffInitializedEvent prNumber) =
+  fromDecision (step state (IssueReviewHandoffInitialized prNumber))
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueReviewHandoffStartedEvent prNumber) =
+  fromDecision (step state (IssueReviewHandoffStarted prNumber))
+applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueReviewHandoffInitializedEvent prNumber) =
+  fromDecision (step state (IssueReviewHandoffInitialized prNumber))
+applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueReviewHandoffStartedEvent prNumber) =
+  fromDecision (step state (IssueReviewHandoffStarted prNumber))
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueImplementationBlockedEvent reason) =
+  fromDecision (step state (MarkBlocked reason))
+applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueImplementationBlockedEvent reason) =
+  fromDecision (step state (MarkBlocked reason))
+applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
@@ -283,8 +360,19 @@ eventName = \case
   PrReviewReviewIncomplete {} -> "pr_review_review_incomplete"
   PrReviewMergeCompleted {} -> "pr_review_merge_completed"
   IssueImplementInitialized {} -> "issue_implement_initialized"
+  IssueTriageTurnStartedEvent {} -> "issue_triage_turn_started"
+  IssueTriageAlreadyFixedEvent -> "issue_triage_already_fixed"
+  IssueTriageNeedsImplementationEvent -> "issue_triage_needs_implementation"
+  IssueTriageBlockedEvent {} -> "issue_triage_blocked"
   IssueStartPlanMode {} -> "issue_start_plan_mode"
   IssuePlanCompletedEvent {} -> "issue_plan_completed"
+  IssuePullRequestCreatedEvent {} -> "issue_pr_created"
+  IssuePullRequestReusedEvent {} -> "issue_pr_reused"
+  IssueImplementationTurnStartedEvent {} -> "issue_implementation_turn_started"
+  IssueImplementationIncompleteEvent {} -> "issue_implementation_incomplete"
+  IssueImplementationBlockedEvent {} -> "issue_implementation_blocked"
+  IssueReviewHandoffInitializedEvent {} -> "issue_review_handoff_initialized"
+  IssueReviewHandoffStartedEvent {} -> "issue_review_handoff_started"
   IssueImplementationCompletedEvent {} -> "issue_implementation_completed"
   WatcherBlocked {} -> "watcher_blocked"
   WatcherStopped {} -> "watcher_stopped"

@@ -20,14 +20,40 @@ Valid replay path:
 
 ```json
 {"type":"issue_implement_initialized","repoFullName":"owner/name","issueNumber":42,"branch":"codex/issue-42","workerThreadId":"thread-id"}
-{"type":"issue_start_plan_mode","planTurnId":"turn-plan"}
-{"type":"issue_plan_completed","implementationTurnId":"turn-implementation"}
+{"type":"issue_triage_turn_started","triageTurnId":"turn-triage"}
+{"type":"issue_triage_already_fixed","evidence":"already fixed on base branch"}
+{"type":"issue_triage_needs_implementation"}
+{"type":"issue_triage_blocked","reason":"missing reproduction"}
+{"type":"issue_plan_turn_started","planTurnId":"turn-plan"}
+{"type":"issue_plan_completed"}
+{"type":"issue_pr_created","prNumber":7,"prUrl":"https://github.com/owner/name/pull/7"}
+{"type":"issue_pr_reused","prNumber":7,"prUrl":"https://github.com/owner/name/pull/7"}
+{"type":"issue_implementation_turn_started","implementationTurnId":"turn-implementation"}
+{"type":"issue_implementation_incomplete","reason":"worker marked implementation incomplete"}
+{"type":"issue_implementation_blocked","reason":"human-readable blocker"}
+{"type":"issue_review_handoff_initialized","prNumber":7}
+{"type":"issue_review_handoff_started","prNumber":7}
 {"type":"issue_implementation_completed","prNumber":7}
 ```
 
 Valid replay path:
 
 `IssueImplement / Triage -> PlanMode -> Implementing -> Complete`
+
+Compatibility notes:
+
+- `issue_start_plan_mode` is accepted as a legacy alias for `issue_plan_turn_started`.
+- `issue_plan_completed` may include legacy `implementationTurnId`; when present, replay starts the first implementation turn immediately.
+- Without `implementationTurnId`, `issue_plan_completed` moves to implementation-ready and emits effects to push the branch and create or reuse a PR before any implementation turn starts.
+
+Important replay rules:
+
+- `issue_triage_already_fixed` moves directly to `Complete`.
+- `issue_triage_needs_implementation` moves to `PlanMode`; implementation cannot start before a plan event.
+- `issue_plan_completed` must occur before `issue_pr_created` or `issue_pr_reused`.
+- `issue_implementation_incomplete` returns to implementation-ready and emits a worker-start effect; it is not a blocked state.
+- `issue_implementation_blocked` moves to `Blocked`.
+- Review handoff events are accepted before final `issue_implementation_completed` so the issue watcher only completes after PR review handoff has been initialized and started.
 
 ## PR Review
 

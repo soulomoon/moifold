@@ -224,6 +224,7 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
 
   IssueImplementing
     :: IssueConfig
+    -> Maybe PrNumber
     -> WorkerThread 'Active
     -> WatcherState 'IssueImplement 'Implementing
 

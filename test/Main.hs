@@ -159,12 +159,53 @@ prop_cleanReviewIsRequiredToMerge config commit workerThread reviewerActive clea
 
 prop_issuePlanCompletionCreatesPrBeforeImplementation :: IssueConfig -> ActiveTurn -> ActiveTurn -> Bool
 prop_issuePlanCompletionCreatesPrBeforeImplementation config planningTurn implementationTurn =
-  case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted implementationTurn) of
+  case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted (Just implementationTurn)) of
     Decision state effects ->
       phaseOf state == Implementing
         && any effectIsPush effects
         && any effectIsCreatePr effects
         && any effectIsStartWorker effects
+
+prop_issueTriageAlreadyFixedCompletesWithoutPlan :: IssueConfig -> ActiveTurn -> Bool
+prop_issueTriageAlreadyFixedCompletesWithoutPlan config triageTurn =
+  case step (IssueTriageActive config (WorkerActive triageTurn)) IssueTriageAlreadyFixed of
+    Decision state effects ->
+      phaseOf state == Complete
+        && not (any effectIsCreatePr effects)
+        && not (any effectIsStartWorker effects)
+
+prop_issueTriageNeedsImplementationWaitsForPlan :: IssueConfig -> ActiveTurn -> Bool
+prop_issueTriageNeedsImplementationWaitsForPlan config triageTurn =
+  case step (IssueTriageActive config (WorkerActive triageTurn)) IssueTriageNeedsImplementation of
+    Decision state effects ->
+      phaseOf state == PlanMode
+        && not (any effectIsCreatePr effects)
+        && not (any effectIsStartWorker effects)
+
+prop_issuePlanCompletionWithoutImmediateTurnCreatesPrOnly :: IssueConfig -> ActiveTurn -> Bool
+prop_issuePlanCompletionWithoutImmediateTurnCreatesPrOnly config planningTurn =
+  case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted Nothing) of
+    Decision state effects ->
+      phaseOf state == Implementing
+        && any effectIsPush effects
+        && any effectIsCreatePr effects
+        && not (any effectIsStartWorker effects)
+
+prop_issueImplementationIncompleteRestartsWorker :: IssueConfig -> PrNumber -> ActiveTurn -> Bool
+prop_issueImplementationIncompleteRestartsWorker config prNumber activeTurn =
+  case step (IssueImplementing config (Just prNumber) (WorkerActive activeTurn)) IssueImplementationIncomplete of
+    Decision state effects ->
+      phaseOf state == Implementing
+        && any effectIsStartWorker effects
+        && not (any effectIsRecordBlocked effects)
+
+prop_issueImplementationBlockedStops :: IssueConfig -> PrNumber -> ActiveTurn -> BlockedReason -> Bool
+prop_issueImplementationBlockedStops config prNumber activeTurn reason =
+  case step (IssueImplementing config (Just prNumber) (WorkerActive activeTurn)) (MarkBlocked reason) of
+    Decision state effects ->
+      phaseOf state == Blocked
+        && any effectIsRecordBlocked effects
+        && SomeEffect StopDaemon `elem` effects
 
 prop_plannerCompletionReturnsToReady :: PlannerConfig -> ActiveTurn -> Bool
 prop_plannerCompletionReturnsToReady config activeTurn =
@@ -222,7 +263,7 @@ prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn i
   case replayEventLog
     [ IssueImplementInitialized config workerThread
     , IssueStartPlanMode planTurn
-    , IssuePlanCompletedEvent implementationTurn
+    , IssuePlanCompletedEvent (Just implementationTurn)
     , IssueImplementationCompletedEvent prNumber
     ] of
     Right replay ->
@@ -238,6 +279,40 @@ prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
     ] of
     Left _ -> True
     Right _ -> False
+
+prop_eventLogIssueAlreadyFixedCompletes :: IssueConfig -> ThreadId -> TurnId -> Bool
+prop_eventLogIssueAlreadyFixedCompletes config workerThread triageTurn =
+  case replayEventLog
+    [ IssueImplementInitialized config workerThread
+    , IssueTriageTurnStartedEvent triageTurn
+    , IssueTriageAlreadyFixedEvent
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssueImplement
+        && somePhase replay.replayState == Complete
+    Left _ -> False
+
+prop_eventLogIssueIncompleteCanContinueToComplete :: IssueConfig -> ThreadId -> TurnId -> TurnId -> TurnId -> PrNumber -> Bool
+prop_eventLogIssueIncompleteCanContinueToComplete config workerThread triageTurn planTurn firstImplementationTurn prNumber =
+  let secondImplementationTurn = TurnId (unTurnId firstImplementationTurn <> "-next")
+   in case replayEventLog
+        [ IssueImplementInitialized config workerThread
+        , IssueTriageTurnStartedEvent triageTurn
+        , IssueTriageNeedsImplementationEvent
+        , IssueStartPlanMode planTurn
+        , IssuePlanCompletedEvent Nothing
+        , IssuePullRequestCreatedEvent prNumber
+        , IssueImplementationTurnStartedEvent firstImplementationTurn
+        , IssueImplementationIncompleteEvent "incomplete"
+        , IssueImplementationTurnStartedEvent secondImplementationTurn
+        , IssueReviewHandoffInitializedEvent prNumber
+        , IssueReviewHandoffStartedEvent prNumber
+        , IssueImplementationCompletedEvent prNumber
+        ] of
+        Right replay ->
+          someDomain replay.replayState == IssueImplement
+            && somePhase replay.replayState == Complete
+        Left _ -> False
 
 prop_eventLogFullIssuePlanningPathReturnsReady :: PlannerConfig -> ThreadId -> TurnId -> Bool
 prop_eventLogFullIssuePlanningPathReturnsReady config plannerThread plannerTurn =
@@ -534,7 +609,7 @@ actionIsTurnStartFor threadId = \case
 
 prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker :: IssueConfig -> ActiveTurn -> ActiveTurn -> Bool
 prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planningTurn implementationTurn =
-  case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted implementationTurn) of
+  case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted (Just implementationTurn)) of
     Decision _state effects ->
       let compiled =
             compileEffectPlan
@@ -662,6 +737,12 @@ goldenEventLogCases = do
       , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-worker-incomplete/events.jsonl" PrReview CheckingReviews
       , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-reviewer-incomplete/events.jsonl" PrReview CheckingReviews
       , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-complete/events.jsonl" IssueImplement Complete
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-already-fixed/events.jsonl" IssueImplement Complete
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-triage-blocked/events.jsonl" IssueImplement Blocked
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-pr-created/events.jsonl" IssueImplement Implementing
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-pr-reused/events.jsonl" IssueImplement Implementing
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-incomplete-then-complete/events.jsonl" IssueImplement Complete
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-implementation-blocked/events.jsonl" IssueImplement Blocked
       , goldenEventLogCase "golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl" IssuePlanning Initialized
       ]
   pure (and results)
@@ -677,6 +758,11 @@ main = do
       , quickCheckResult prop_noUnresolvedReviewsStartsReviewerOnly
       , quickCheckResult prop_cleanReviewIsRequiredToMerge
       , quickCheckResult prop_issuePlanCompletionCreatesPrBeforeImplementation
+      , quickCheckResult prop_issueTriageAlreadyFixedCompletesWithoutPlan
+      , quickCheckResult prop_issueTriageNeedsImplementationWaitsForPlan
+      , quickCheckResult prop_issuePlanCompletionWithoutImmediateTurnCreatesPrOnly
+      , quickCheckResult prop_issueImplementationIncompleteRestartsWorker
+      , quickCheckResult prop_issueImplementationBlockedStops
       , quickCheckResult prop_plannerCompletionReturnsToReady
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       , quickCheckResult prop_eventLogFullPrReviewPathCompletes
@@ -684,6 +770,8 @@ main = do
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
+      , quickCheckResult prop_eventLogIssueAlreadyFixedCompletes
+      , quickCheckResult prop_eventLogIssueIncompleteCanContinueToComplete
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking

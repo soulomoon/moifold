@@ -111,7 +111,7 @@ replayActiveIssueTurn snapshot purpose activeTurn
   | purpose == "plan" =
       pure (typedIssueImplement (IssueInPlanMode (toIssueConfig snapshot.config) (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'PlanMode) [])
   | purpose == "implement" =
-      pure (typedIssueImplement (IssueImplementing (toIssueConfig snapshot.config) (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'Implementing) [])
+      pure (typedIssueImplement (IssueImplementing (toIssueConfig snapshot.config) (PrNumber <$> (snapshot.issueState >>= (.issuePrNumber))) (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'Implementing) [])
   | otherwise =
       pure
         ( typedIssueImplement
