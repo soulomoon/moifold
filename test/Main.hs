@@ -10,6 +10,7 @@ module Main (main) where
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
+import CodexWatcher.Protocol
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
@@ -225,6 +226,37 @@ prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
     Left _ -> True
     Right _ -> False
 
+prop_protocolPrReviewWorkerCompletedReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
+prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn =
+  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+      (_finished, events) = runPrReviewWorkerProtocol workerTurn WorkerCompleted session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == CheckingReviews
+        Left _ -> False
+
+prop_protocolPrReviewWorkerBlockedStopsInBlocked :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
+prop_protocolPrReviewWorkerBlockedStopsInBlocked config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reason =
+  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+      (_finished, events) = runPrReviewWorkerProtocol workerTurn (WorkerBlocked reason) session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == Blocked
+        Left _ -> False
+
+prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent :: PrConfig -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
+prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent config workerThread reviewThreadIds reviewedCommit workerTurn =
+  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+      (_finished, events) = runPrReviewWorkerProtocol workerTurn WorkerCompleted session
+   in case events of
+        [PrReviewUnresolvedFound emittedThreads emittedCommit emittedTurn, PrReviewFixCompleted] ->
+          emittedThreads == reviewThreadIds
+            && emittedCommit == reviewedCommit
+            && emittedTurn == workerTurn
+        _ -> False
+
 assert :: String -> Bool -> IO Bool
 assert assertionName condition = do
   if condition
@@ -320,6 +352,9 @@ main = do
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
+      , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
+      , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked
+      , quickCheckResult prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases

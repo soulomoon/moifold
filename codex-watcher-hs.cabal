@@ -32,6 +32,7 @@ library
     CodexWatcher.EventLog
     CodexWatcher.GoldenReplay
     CodexWatcher.Json
+    CodexWatcher.Protocol
     CodexWatcher.Snapshot
     CodexWatcher.StateMachine
     CodexWatcher.Types
