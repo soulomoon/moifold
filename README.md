@@ -35,6 +35,15 @@ Replay a Node watcher event log:
 cabal run codex-watcher-hs -- replay-events /path/to/events.jsonl
 ```
 
+Run the read-only Haskell healthcheck over existing Node watcher state:
+
+```bash
+bin=$(cabal list-bin codex-watcher-hs)
+"$bin" healthcheck --state-root /workspace/artifacts
+```
+
+The command emits JSON and checks command availability, `gh auth`, watcher state files, workdir/git health, PR review event-log replay, duplicate ownership, and planner `maxParallel` invariants. It intentionally does not mutate GitHub, app-server threads, or local checkouts.
+
 ## Design Rule
 
 The type-level model owns lifecycle correctness. Runtime policy and external IO stay outside the core until the model is stable.

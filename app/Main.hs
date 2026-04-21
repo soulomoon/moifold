@@ -6,6 +6,7 @@ module Main (main) where
 
 import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
+import CodexWatcher.Healthcheck
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
 import Data.Text qualified as Text
@@ -19,16 +20,32 @@ main =
     ["replay-pr-review", dir] -> replayPrReview dir
     ["replay-issue-implement", dir] -> replayIssueImplement dir
     ["replay-events", path] -> replayEvents path
+    "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
     [] -> do
       putStrLn "codex-watcher-hs"
       putStrLn "usage: codex-watcher-hs replay <node-watcher-state-dir>"
       putStrLn "       codex-watcher-hs replay-pr-review <node-pr-review-state-dir>"
       putStrLn "       codex-watcher-hs replay-issue-implement <node-issue-implement-state-dir>"
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
+      putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name]"
       putStrLn "type-level domains:"
       print [IssuePlanning, IssueImplement, PrReview]
       putStrLn ("example repo newtype is available: " <> Text.unpack (unRepoName (RepoName "soulomoon/mlf2")))
-    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl>"
+    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl> | healthcheck [--state-root <path>] [--repo owner/name]"
+
+parseHealthcheckOptions :: [String] -> HealthcheckOptions
+parseHealthcheckOptions args =
+  HealthcheckOptions
+    { stateRoot = maybe "/workspace/artifacts" id (lookupFlag "--state-root" args)
+    , repoFilter = Text.pack <$> lookupFlag "--repo" args
+    }
+
+lookupFlag :: String -> [String] -> Maybe String
+lookupFlag _ [] = Nothing
+lookupFlag flag (current : value : rest)
+  | current == flag = Just value
+  | otherwise = lookupFlag flag (value : rest)
+lookupFlag _ [_] = Nothing
 
 replayAny :: FilePath -> IO ()
 replayAny dir = do
