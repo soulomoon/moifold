@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -8,6 +9,7 @@
 module Main (main) where
 
 import CodexWatcher.AppServerProtocol
+import CodexWatcher.ActionExecutor
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
@@ -19,12 +21,16 @@ import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.Aeson
   ( Value (..)
+  , eitherDecodeStrict'
+  , encode
   , object
   , toJSON
   , (.=)
   )
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.ByteString.Lazy qualified as LazyByteString
+import Data.IORef
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -334,6 +340,98 @@ prop_eventLogCannotCompletePlanningBeforeStart config =
     ] of
     Left _ -> True
     Right _ -> False
+
+canonicalEventExamples :: [WatcherEvent]
+canonicalEventExamples =
+  [ IssuePlanningInitialized plannerConfig
+  , IssuePlanningTurnStarted plannerThread plannerTurn
+  , IssuePlanningTurnCompleted
+  , PrReviewInitialized prConfig workerThread reviewerThread
+  , PrReviewUnresolvedFound (ReviewThreadId "review-thread-1" :| [ReviewThreadId "review-thread-2"]) commit workerTurn
+  , PrReviewNoUnresolvedFound commit reviewerTurn
+  , PrReviewFixCompleted
+  , PrReviewFixIncomplete "worker marked incomplete"
+  , PrReviewCleanFound cleanEvidence
+  , PrReviewProblemsAdded commit
+  , PrReviewReviewIncomplete "reviewer state missing required fields"
+  , PrReviewMergeCompleted mergeCommit
+  , IssueImplementInitialized issueConfig workerThread
+  , IssueTriageTurnStartedEvent triageTurn
+  , IssueTriageAlreadyFixedEvent
+  , IssueTriageNeedsImplementationEvent
+  , IssueTriageBlockedEvent blockedReason
+  , IssuePlanTurnStartedEvent plannerTurn
+  , IssuePlanCompletedEvent Nothing
+  , IssuePlanCompletedEvent (Just implementationTurn)
+  , IssuePullRequestCreatedEvent prNumber
+  , IssuePullRequestReusedEvent prNumber
+  , IssueImplementationTurnStartedEvent implementationTurn
+  , IssueImplementationIncompleteEvent "implementation incomplete"
+  , IssueImplementationBlockedEvent blockedReason
+  , IssueReviewHandoffInitializedEvent prNumber
+  , IssueReviewHandoffStartedEvent prNumber
+  , IssueImplementationCompletedEvent prNumber
+  , WatcherBlocked blockedReason
+  , WatcherStopped stopReason
+  ]
+ where
+  repo = RepoName "owner/name"
+  plannerConfig = PlannerConfig repo 8
+  issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+  prNumber = PrNumber 7
+  prConfig = PrConfig repo prNumber (BranchName "codex/pr-7")
+  plannerThread = ThreadId "planner-thread"
+  workerThread = ThreadId "worker-thread"
+  reviewerThread = ThreadId "reviewer-thread"
+  triageTurn = TurnId "turn-triage"
+  plannerTurn = TurnId "turn-plan"
+  implementationTurn = TurnId "turn-implement"
+  workerTurn = TurnId "turn-worker"
+  reviewerTurn = TurnId "turn-reviewer"
+  commit = CommitSha "0123456789abcdef"
+  cleanEvidence = CleanReviewEvidence commit "LGTM"
+  mergeCommit = MergeCommit (CommitSha "fedcba9876543210")
+  blockedReason = BlockedReason "blocked for test"
+  stopReason = StopReason "stopped for test"
+
+prop_eventLogCanonicalJsonRoundTrips :: Bool
+prop_eventLogCanonicalJsonRoundTrips =
+  all roundTrips canonicalEventExamples
+ where
+  roundTrips event =
+    (eitherDecodeStrict' (LazyByteString.toStrict (encode event)) :: Either String WatcherEvent)
+      == Right event
+
+prop_eventLogCanonicalIssuePlanStartName :: TurnId -> Bool
+prop_eventLogCanonicalIssuePlanStartName turnId =
+  lookupValue "type" (toJSON (IssuePlanTurnStartedEvent turnId)) == Just (String "issue_plan_turn_started")
+
+prop_eventLogRejectsLegacyIssuePlanAliases :: Bool
+prop_eventLogRejectsLegacyIssuePlanAliases =
+  all rejects legacyAliasValues
+ where
+  rejects value =
+    case eitherDecodeStrict' (LazyByteString.toStrict (encode value)) :: Either String WatcherEvent of
+      Left _ -> True
+      Right _ -> False
+  legacyAliasValues =
+    [ object ["type" .= ("issue_plan_started" :: Text), "planTurnId" .= ("turn-plan" :: Text)]
+    , object ["type" .= ("issue_implement_plan_turn_started" :: Text), "planTurnId" .= ("turn-plan" :: Text)]
+    ]
+
+prop_eventLogRejectsEmptyReviewThreads :: Bool
+prop_eventLogRejectsEmptyReviewThreads =
+  case eitherDecodeStrict' (LazyByteString.toStrict (encode value)) :: Either String WatcherEvent of
+    Left _ -> True
+    Right _ -> False
+ where
+  value =
+    object
+      [ "type" .= ("pr_review_unresolved_found" :: Text)
+      , "reviewThreadIds" .= ([] :: [Text])
+      , "commitSha" .= ("0123456789abcdef" :: Text)
+      , "workerTurnId" .= ("turn-worker" :: Text)
+      ]
 
 prop_protocolPrReviewWorkerCompletedReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn =
@@ -649,6 +747,22 @@ prop_effectInterpreterMergeUsesConfiguredRepoAndMethod prNumber cleanEvidence =
       compiled = compileEffectPlan config [SomeEffect (MergePullRequest prNumber cleanEvidence)]
    in compiled.compiledActions == [PlannedCommand (GhPrMerge repo prNumber "squash")]
 
+prop_actionExecutorDryRunPreservesActionOrder :: Bool
+prop_actionExecutorDryRunPreservesActionOrder =
+  let compiled =
+        compileEffectPlan
+          (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 50)
+          [ SomeEffect (PushBranch (BranchName "codex/example"))
+          , SomeEffect (StartWorkerTurn (ThreadId "worker-thread"))
+          , SomeEffect (RecordBlocked (BlockedReason "blocked"))
+          , SomeEffect SleepUntilNextPoll
+          , SomeEffect StopDaemon
+          ]
+      reports = dryRunCompiledEffectPlan compiled
+   in fmap actionExecutionAction reports == compiled.compiledActions
+        && all ((== DryRunActions) . actionExecutionMode) reports
+        && all ((== DryRunActionResult) . actionExecutionResult) reports
+
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
   PlannedAppServerRequest request -> Just request.requestId
@@ -747,6 +861,113 @@ goldenEventLogCases = do
       ]
   pure (and results)
 
+data FakeActionCall
+  = FakeCommand RuntimeCommand
+  | FakeReadJson FilePath
+  | FakeWriteJson FilePath Value
+  | FakeAppendJsonLine FilePath Value
+  | FakeAppServer AppServerRequest
+  | FakeSleep
+  | FakeStop
+  deriving stock (Eq, Show)
+
+fakeActionExecutor :: IO (ActionExecutor IO, IO [FakeActionCall])
+fakeActionExecutor = do
+  calls <- newIORef []
+  let record call = modifyIORef' calls (<> [call])
+      runtime =
+        RuntimeInterpreter
+          { runtimeRunCommand = \command -> do
+              record (FakeCommand command)
+              pure CommandReport {ok = True, status = Just 0, stdout = "ok", stderr = "", errorMessage = Nothing}
+          , runtimeReadJsonValue = \path -> do
+              record (FakeReadJson path)
+              pure (Left "not implemented in fake")
+          , runtimeWriteJsonValue = \path value -> record (FakeWriteJson path value)
+          , runtimeAppendJsonLine = \path value -> record (FakeAppendJsonLine path value)
+          }
+      appServer =
+        AppServerInterpreter
+          { appServerSendRequest = \request -> do
+              record (FakeAppServer request)
+              pure (object ["ok" .= True])
+          }
+      executor =
+        ActionExecutor
+          { actionRuntime = runtime
+          , actionAppServer = appServer
+          , actionSleepUntilNextPoll = record FakeSleep
+          , actionStopDaemon = record FakeStop
+          }
+  pure (executor, readIORef calls)
+
+actionExecutorDryRunDoesNotCallInterpreters :: IO Bool
+actionExecutorDryRunDoesNotCallInterpreters = do
+  (executor, getCalls) <- fakeActionExecutor
+  let compiled =
+        compileEffectPlan
+          (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 60)
+          [ SomeEffect (PushBranch (BranchName "codex/example"))
+          , SomeEffect (StartWorkerTurn (ThreadId "worker-thread"))
+          , SomeEffect (RecordBlocked (BlockedReason "blocked"))
+          , SomeEffect SleepUntilNextPoll
+          , SomeEffect StopDaemon
+          ]
+  reports <- executeCompiledEffectPlan executor DryRunActions compiled
+  calls <- getCalls
+  results <-
+    sequence
+      [ assert "dry-run records every planned action" (length reports == length compiled.compiledActions)
+      , assert "dry-run does not call interpreters" (null calls)
+      , assert "dry-run reports skipped execution" (all ((== DryRunActionResult) . actionExecutionResult) reports)
+      ]
+  pure (and results)
+
+actionExecutorExecuteCallsInjectedInterpreters :: IO Bool
+actionExecutorExecuteCallsInjectedInterpreters = do
+  (executor, getCalls) <- fakeActionExecutor
+  let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 70
+      blockedReason = BlockedReason "blocked"
+      compiled =
+        compileEffectPlan
+          config
+          [ SomeEffect (PushBranch (BranchName "codex/example"))
+          , SomeEffect (StartWorkerTurn (ThreadId "worker-thread"))
+          , SomeEffect (RecordBlocked blockedReason)
+          , SomeEffect SleepUntilNextPoll
+          , SomeEffect StopDaemon
+          ]
+  reports <- executeCompiledEffectPlan executor ExecuteActions compiled
+  calls <- getCalls
+  let expectedBlockPath = config.effectRuntimeStateDir </> "block-state.json"
+      expectedBlockJson = object ["blocked" .= True, "reason" .= unBlockedReason blockedReason]
+      expectedCalls =
+        [ FakeCommand (GitPush "/tmp/work" (BranchName "codex/example"))
+        , FakeAppServer (turnStartRequest 70 (turnStartOptionsForTest (ThreadId "worker-thread")))
+        , FakeWriteJson expectedBlockPath expectedBlockJson
+        , FakeSleep
+        , FakeStop
+        ]
+  results <-
+    sequence
+      [ assert "execute records every planned action" (length reports == length compiled.compiledActions)
+      , assert "execute calls injected interpreters in order" (calls == expectedCalls)
+      , assert "execute reports executed mode" (all ((== ExecuteActions) . actionExecutionMode) reports)
+      ]
+  pure (and results)
+ where
+  turnStartOptionsForTest threadId =
+    TurnStartOptions
+      { turnThreadId = threadId
+      , turnCwd = "/tmp/work"
+      , turnEffort = "xhigh"
+      , turnModel = "gpt-5.4"
+      , turnApprovalPolicy = "never"
+      , turnSandboxPolicy = "danger-full-access"
+      , turnInput = "worker prompt"
+      , turnCollaborationMode = Nothing
+      }
+
 main :: IO ()
 main = do
   results <-
@@ -774,6 +995,10 @@ main = do
       , quickCheckResult prop_eventLogIssueIncompleteCanContinueToComplete
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
+      , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
+      , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
+      , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
+      , quickCheckResult prop_eventLogRejectsEmptyReviewThreads
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked
@@ -797,7 +1022,10 @@ main = do
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
+      , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases
-  if all isSuccess results && goldenOk && eventLogOk then pure () else exitFailure
+  actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
+  actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
+  if all isSuccess results && goldenOk && eventLogOk && actionExecutorDryRunOk && actionExecutorExecuteOk then pure () else exitFailure

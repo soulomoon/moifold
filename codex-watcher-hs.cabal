@@ -28,6 +28,7 @@ library
   import:           warnings
   hs-source-dirs:   src
   exposed-modules:
+    CodexWatcher.ActionExecutor
     CodexWatcher.AppServerProtocol
     CodexWatcher.EffectInterpreter
     CodexWatcher.Effects
@@ -70,6 +71,7 @@ test-suite watcher-core-test
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,
+    bytestring >=0.12 && <0.13,
     codex-watcher-hs,
     filepath >=1.4 && <1.6,
     QuickCheck >=2.14 && <3,

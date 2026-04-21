@@ -14,7 +14,7 @@ module CodexWatcher.Healthcheck
 
 import CodexWatcher.EventLog
 import CodexWatcher.Runtime
-import CodexWatcher.Types (BranchName (..), PrNumber (..), RepoName (..), someDomain, somePhase)
+import CodexWatcher.Types (BranchName (..), Domain (..), PrNumber (..), RepoName (..), someDomain, somePhase)
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad (filterM)
@@ -465,7 +465,7 @@ checkRemotePr config =
     _ -> pure (skippedRemotePr "not a PR watcher")
 
 checkEventReplay :: WatcherKind -> Maybe FilePath -> IO EventReplayReport
-checkEventReplay PrReviewKind (Just path') = do
+checkEventReplay kind (Just path') = do
   exists <- doesFileExist path'
   if not exists
     then pure (skippedEventReplay "events log does not exist" (Just path'))
@@ -476,19 +476,32 @@ checkEventReplay PrReviewKind (Just path') = do
         Right events ->
           case replayEventLog events of
             Left failure -> failedEventReplay path' (Text.pack (formatReplayFailureForHealthcheck failure))
-            Right replay ->
-              EventReplayReport
-                { skipped = False
-                , ok = True
-                , reason = Nothing
-                , eventsPath = Just path'
-                , domain = Just (Text.pack (show (someDomain replay.replayState)))
-                , phase = Just (Text.pack (show (somePhase replay.replayState)))
-                , eventCount = Just (length events)
-                , effectBatchCount = Just (length replay.replayEffects)
-                }
-checkEventReplay PrReviewKind Nothing = pure (skippedEventReplay "missing eventsPath" Nothing)
-checkEventReplay _ _ = pure (skippedEventReplay "not a PR watcher" Nothing)
+            Right replay
+              | someDomain replay.replayState /= expectedDomain kind ->
+                  failedEventReplay
+                    path'
+                    ( "events replayed as "
+                        <> Text.pack (show (someDomain replay.replayState))
+                        <> " but config is "
+                        <> Text.pack (show kind)
+                    )
+              | otherwise ->
+                  EventReplayReport
+                    { skipped = False
+                    , ok = True
+                    , reason = Nothing
+                    , eventsPath = Just path'
+                    , domain = Just (Text.pack (show (someDomain replay.replayState)))
+                    , phase = Just (Text.pack (show (somePhase replay.replayState)))
+                    , eventCount = Just (length events)
+                    , effectBatchCount = Just (length replay.replayEffects)
+                    }
+checkEventReplay _ Nothing = pure (skippedEventReplay "missing eventsPath" Nothing)
+
+expectedDomain :: WatcherKind -> Domain
+expectedDomain IssuePlanningKind = IssuePlanning
+expectedDomain IssueImplementKind = IssueImplement
+expectedDomain PrReviewKind = PrReview
 
 failedEventReplay :: FilePath -> Text -> EventReplayReport
 failedEventReplay path' reason' =
@@ -703,7 +716,7 @@ logicReview =
            , "planner maxParallel not exceeded"
            , "review/implement workdirs exist, are git checkouts, and are not dirty"
            , "gh-authenticated git push dry-run works for workdirs with branches"
-           , "PR review events.jsonl can replay through the Haskell lifecycle model when present"
+           , "watcher events.jsonl can replay through the Haskell lifecycle model when present"
            , "blocked states are surfaced instead of retried forever"
            ]
     , "notes"

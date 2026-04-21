@@ -12,6 +12,7 @@ module CodexWatcher.EventLog
   ( WatcherEvent (..)
   , ReplayFailure (..)
   , EventReplayResult (..)
+  , eventName
   , loadEventLogFile
   , replayEventLog
   ) where
@@ -19,8 +20,9 @@ module CodexWatcher.EventLog
 import CodexWatcher.Effects
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
-import Data.Aeson (FromJSON (..), Object, eitherDecodeStrict', withObject, (.:), (.:?), (.!=))
-import Data.Aeson.Types (Parser)
+import Data.Aeson (FromJSON (..), Object, ToJSON (..), eitherDecodeStrict', object, withObject, (.:), (.:?), (.!=), (.=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.Types (Pair, Parser)
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as ByteString.Char8
 import Data.Char (isSpace)
@@ -73,100 +75,181 @@ data EventReplayResult = EventReplayResult
   }
   deriving stock (Show)
 
+instance ToJSON WatcherEvent where
+  toJSON event =
+    object case event of
+      IssuePlanningInitialized config ->
+        eventType event <> plannerConfigFields config
+      IssuePlanningTurnStarted plannerThreadId plannerTurnId ->
+        eventType event
+          <> [ "plannerThreadId" .= unThreadId plannerThreadId
+             , "plannerTurnId" .= unTurnId plannerTurnId
+             ]
+      IssuePlanningTurnCompleted ->
+        eventType event
+      PrReviewInitialized config workerThreadId reviewerThreadId ->
+        eventType event
+          <> prConfigFields config
+          <> [ "workerThreadId" .= unThreadId workerThreadId
+             , "reviewerThreadId" .= unThreadId reviewerThreadId
+             ]
+      PrReviewUnresolvedFound reviewThreadIds' commitSha workerTurnId ->
+        eventType event
+          <> [ "reviewThreadIds" .= fmap unReviewThreadId (nonEmptyToList reviewThreadIds')
+             , "commitSha" .= unCommitSha commitSha
+             , "workerTurnId" .= unTurnId workerTurnId
+             ]
+      PrReviewNoUnresolvedFound commitSha reviewerTurnId ->
+        eventType event
+          <> [ "commitSha" .= unCommitSha commitSha
+             , "reviewerTurnId" .= unTurnId reviewerTurnId
+             ]
+      PrReviewFixCompleted ->
+        eventType event
+      PrReviewFixIncomplete reason ->
+        eventType event <> ["reason" .= reason]
+      PrReviewCleanFound evidence ->
+        eventType event
+          <> [ "commitSha" .= unCommitSha (cleanReviewCommit evidence)
+             , "comment" .= cleanReviewComment evidence
+             ]
+      PrReviewProblemsAdded commitSha ->
+        eventType event <> ["commitSha" .= unCommitSha commitSha]
+      PrReviewReviewIncomplete reason ->
+        eventType event <> ["reason" .= reason]
+      PrReviewMergeCompleted mergeCommit ->
+        eventType event <> ["mergeCommitSha" .= unCommitSha (unMergeCommit mergeCommit)]
+      IssueImplementInitialized config workerThreadId ->
+        eventType event
+          <> issueConfigFields config
+          <> ["workerThreadId" .= unThreadId workerThreadId]
+      IssueTriageTurnStartedEvent triageTurnId ->
+        eventType event <> ["triageTurnId" .= unTurnId triageTurnId]
+      IssueTriageAlreadyFixedEvent ->
+        eventType event
+      IssueTriageNeedsImplementationEvent ->
+        eventType event
+      IssueTriageBlockedEvent reason ->
+        eventType event <> ["reason" .= unBlockedReason reason]
+      IssuePlanTurnStartedEvent planTurnId ->
+        eventType event <> ["planTurnId" .= unTurnId planTurnId]
+      IssuePlanCompletedEvent maybeImplementationTurnId ->
+        eventType event <> maybe [] (\turnId -> ["implementationTurnId" .= unTurnId turnId]) maybeImplementationTurnId
+      IssuePullRequestCreatedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssuePullRequestReusedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssueImplementationTurnStartedEvent implementationTurnId ->
+        eventType event <> ["implementationTurnId" .= unTurnId implementationTurnId]
+      IssueImplementationIncompleteEvent reason ->
+        eventType event <> ["reason" .= reason]
+      IssueImplementationBlockedEvent reason ->
+        eventType event <> ["reason" .= unBlockedReason reason]
+      IssueReviewHandoffInitializedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssueReviewHandoffStartedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssueImplementationCompletedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      WatcherBlocked reason ->
+        eventType event <> ["reason" .= unBlockedReason reason]
+      WatcherStopped reason ->
+        eventType event <> ["reason" .= unStopReason reason]
+
 instance FromJSON WatcherEvent where
-  parseJSON = withObject "WatcherEvent" \object -> do
-    eventType <- object .: "type"
-    case eventType :: Text of
+  parseJSON = withObject "WatcherEvent" \objectValue -> do
+    eventTypeValue <- objectValue .: "type"
+    case eventTypeValue :: Text of
       "issue_planning_initialized" ->
         IssuePlanningInitialized
-          <$> parsePlannerConfig object
+          <$> parsePlannerConfig objectValue
       "issue_planning_turn_started" ->
         IssuePlanningTurnStarted
-          <$> (ThreadId <$> object .: "plannerThreadId")
-          <*> (TurnId <$> object .: "plannerTurnId")
+          <$> (ThreadId <$> nonEmptyTextField objectValue "plannerThreadId")
+          <*> (TurnId <$> nonEmptyTextField objectValue "plannerTurnId")
       "issue_planning_turn_completed" ->
         pure IssuePlanningTurnCompleted
       "pr_review_initialized" ->
         PrReviewInitialized
-          <$> parsePrConfig object
-          <*> (ThreadId <$> object .: "workerThreadId")
-          <*> (ThreadId <$> object .: "reviewerThreadId")
+          <$> parsePrConfig objectValue
+          <*> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
+          <*> (ThreadId <$> nonEmptyTextField objectValue "reviewerThreadId")
       "pr_review_unresolved_found" ->
         PrReviewUnresolvedFound
-          <$> (reviewThreadIds =<< object .: "reviewThreadIds")
-          <*> (CommitSha <$> object .: "commitSha")
-          <*> (TurnId <$> object .: "workerTurnId")
+          <$> (reviewThreadIds =<< objectValue .: "reviewThreadIds")
+          <*> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
+          <*> (TurnId <$> nonEmptyTextField objectValue "workerTurnId")
       "pr_review_no_unresolved_found" ->
         PrReviewNoUnresolvedFound
-          <$> (CommitSha <$> object .: "commitSha")
-          <*> (TurnId <$> object .: "reviewerTurnId")
+          <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
+          <*> (TurnId <$> nonEmptyTextField objectValue "reviewerTurnId")
       "pr_review_fix_completed" ->
         pure PrReviewFixCompleted
       "pr_review_fix_incomplete" ->
         PrReviewFixIncomplete
-          <$> (object .:? "reason" .!= "incomplete")
+          <$> (objectValue .:? "reason" .!= "incomplete")
       "pr_review_clean_found" ->
         PrReviewCleanFound
-          <$> (CleanReviewEvidence <$> (CommitSha <$> object .: "commitSha") <*> (object .:? "comment" .!= "LGTM"))
+          <$> (CleanReviewEvidence <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha") <*> (objectValue .:? "comment" .!= "LGTM"))
       "pr_review_problems_added" ->
         PrReviewProblemsAdded
-          <$> (CommitSha <$> object .: "commitSha")
+          <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
       "pr_review_review_incomplete" ->
         PrReviewReviewIncomplete
-          <$> (object .:? "reason" .!= "incomplete")
+          <$> (objectValue .:? "reason" .!= "incomplete")
       "pr_review_merge_completed" ->
-        PrReviewMergeCompleted
-          <$> (MergeCommit . CommitSha <$> object .: "mergeCommitSha")
+        PrReviewMergeCompleted . MergeCommit . CommitSha
+          <$> nonEmptyTextField objectValue "mergeCommitSha"
       "issue_implement_initialized" ->
         IssueImplementInitialized
-          <$> parseIssueConfig object
-          <*> (ThreadId <$> object .: "workerThreadId")
+          <$> parseIssueConfig objectValue
+          <*> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
       "issue_triage_turn_started" ->
         IssueTriageTurnStartedEvent
-          <$> (TurnId <$> object .: "triageTurnId")
+          <$> (TurnId <$> nonEmptyTextField objectValue "triageTurnId")
       "issue_triage_already_fixed" ->
         pure IssueTriageAlreadyFixedEvent
       "issue_triage_needs_implementation" ->
         pure IssueTriageNeedsImplementationEvent
       "issue_triage_blocked" ->
         IssueTriageBlockedEvent
-          <$> (BlockedReason <$> object .: "reason")
+          <$> (BlockedReason <$> nonEmptyTextField objectValue "reason")
       "issue_plan_turn_started" ->
         IssuePlanTurnStartedEvent
-          <$> (TurnId <$> object .: "planTurnId")
+          <$> (TurnId <$> nonEmptyTextField objectValue "planTurnId")
       "issue_plan_completed" ->
         IssuePlanCompletedEvent
-          <$> (fmap TurnId <$> object .:? "implementationTurnId")
+          <$> (traverse nonEmptyTurnId =<< objectValue .:? "implementationTurnId")
       "issue_pr_created" ->
         IssuePullRequestCreatedEvent
-          <$> (PrNumber <$> object .: "prNumber")
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_pr_reused" ->
         IssuePullRequestReusedEvent
-          <$> (PrNumber <$> object .: "prNumber")
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_implementation_turn_started" ->
         IssueImplementationTurnStartedEvent
-          <$> (TurnId <$> object .: "implementationTurnId")
+          <$> (TurnId <$> nonEmptyTextField objectValue "implementationTurnId")
       "issue_implementation_incomplete" ->
         IssueImplementationIncompleteEvent
-          <$> (object .:? "reason" .!= "incomplete")
+          <$> (objectValue .:? "reason" .!= "incomplete")
       "issue_implementation_blocked" ->
         IssueImplementationBlockedEvent
-          <$> (BlockedReason <$> object .: "reason")
+          <$> (BlockedReason <$> nonEmptyTextField objectValue "reason")
       "issue_review_handoff_initialized" ->
         IssueReviewHandoffInitializedEvent
-          <$> (PrNumber <$> object .: "prNumber")
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_review_handoff_started" ->
         IssueReviewHandoffStartedEvent
-          <$> (PrNumber <$> object .: "prNumber")
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_implementation_completed" ->
         IssueImplementationCompletedEvent
-          <$> (PrNumber <$> object .: "prNumber")
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "watcher_blocked" ->
         WatcherBlocked
-          <$> (BlockedReason <$> object .: "reason")
+          <$> (BlockedReason <$> nonEmptyTextField objectValue "reason")
       "watcher_stopped" ->
         WatcherStopped
-          <$> (StopReason <$> object .: "reason")
+          <$> (StopReason <$> nonEmptyTextField objectValue "reason")
       unknown ->
         fail ("unknown watcher event type: " <> Text.unpack unknown)
 
@@ -307,28 +390,75 @@ stopSameDomain :: forall domain phase. KnownDomain domain => WatcherState domain
 stopSameDomain _ reason = SomeWatcherState (StoppedState reason :: WatcherState domain 'Stopped)
 
 parsePlannerConfig :: Object -> Parser PlannerConfig
-parsePlannerConfig object =
+parsePlannerConfig objectValue =
   PlannerConfig
-    <$> (RepoName <$> object .: "repoFullName")
-    <*> object .: "maxParallel"
+    <$> (RepoName <$> nonEmptyTextField objectValue "repoFullName")
+    <*> positiveIntField objectValue "maxParallel"
 
 parsePrConfig :: Object -> Parser PrConfig
-parsePrConfig object =
+parsePrConfig objectValue =
   PrConfig
-    <$> (RepoName <$> object .: "repoFullName")
-    <*> (PrNumber <$> object .: "prNumber")
-    <*> (BranchName <$> object .: "branch")
+    <$> (RepoName <$> nonEmptyTextField objectValue "repoFullName")
+    <*> (PrNumber <$> positiveIntField objectValue "prNumber")
+    <*> (BranchName <$> nonEmptyTextField objectValue "branch")
 
 parseIssueConfig :: Object -> Parser IssueConfig
-parseIssueConfig object =
+parseIssueConfig objectValue =
   IssueConfig
-    <$> (RepoName <$> object .: "repoFullName")
-    <*> (IssueNumber <$> object .: "issueNumber")
-    <*> (BranchName <$> object .: "branch")
+    <$> (RepoName <$> nonEmptyTextField objectValue "repoFullName")
+    <*> (IssueNumber <$> positiveIntField objectValue "issueNumber")
+    <*> (BranchName <$> nonEmptyTextField objectValue "branch")
 
 reviewThreadIds :: [Text] -> Parser (NonEmpty ReviewThreadId)
 reviewThreadIds [] = fail "reviewThreadIds must not be empty"
-reviewThreadIds (first : rest) = pure (ReviewThreadId first :| fmap ReviewThreadId rest)
+reviewThreadIds (first : rest) = do
+  first' <- nonEmptyText "reviewThreadIds[]" first
+  rest' <- traverse (nonEmptyText "reviewThreadIds[]") rest
+  pure (ReviewThreadId first' :| fmap ReviewThreadId rest')
+
+nonEmptyTextField :: Object -> Key.Key -> Parser Text
+nonEmptyTextField objectValue key = objectValue .: key >>= nonEmptyText (Key.toString key)
+
+nonEmptyText :: String -> Text -> Parser Text
+nonEmptyText field value
+  | Text.null (Text.strip value) = fail (field <> " must not be empty")
+  | otherwise = pure value
+
+positiveIntField :: Object -> Key.Key -> Parser Int
+positiveIntField objectValue key = do
+  value <- objectValue .: key
+  if value > 0
+    then pure value
+    else fail (Key.toString key <> " must be positive")
+
+nonEmptyTurnId :: Text -> Parser TurnId
+nonEmptyTurnId value = TurnId <$> nonEmptyText "implementationTurnId" value
+
+eventType :: WatcherEvent -> [Pair]
+eventType event = ["type" .= eventName event]
+
+plannerConfigFields :: PlannerConfig -> [Pair]
+plannerConfigFields config =
+  [ "repoFullName" .= unRepoName (plannerRepo config)
+  , "maxParallel" .= plannerMaxParallel config
+  ]
+
+issueConfigFields :: IssueConfig -> [Pair]
+issueConfigFields config =
+  [ "repoFullName" .= unRepoName (issueRepo config)
+  , "issueNumber" .= unIssueNumber (issueNumber config)
+  , "branch" .= unBranchName (issueBranch config)
+  ]
+
+prConfigFields :: PrConfig -> [Pair]
+prConfigFields config =
+  [ "repoFullName" .= unRepoName (prRepo config)
+  , "prNumber" .= unPrNumber (prNumber config)
+  , "branch" .= unBranchName (prBranch config)
+  ]
+
+nonEmptyToList :: NonEmpty a -> [a]
+nonEmptyToList (first :| rest) = first : rest
 
 numberedNonBlankLines :: ByteString.ByteString -> [(Int, ByteString.ByteString)]
 numberedNonBlankLines =
