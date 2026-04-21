@@ -226,6 +226,27 @@ prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
     Left _ -> True
     Right _ -> False
 
+prop_eventLogFullIssuePlanningPathReturnsReady :: PlannerConfig -> ThreadId -> TurnId -> Bool
+prop_eventLogFullIssuePlanningPathReturnsReady config plannerThread plannerTurn =
+  case replayEventLog
+    [ IssuePlanningInitialized config
+    , IssuePlanningTurnStarted plannerThread plannerTurn
+    , IssuePlanningTurnCompleted
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssuePlanning
+        && somePhase replay.replayState == Initialized
+    Left _ -> False
+
+prop_eventLogCannotCompletePlanningBeforeStart :: PlannerConfig -> Bool
+prop_eventLogCannotCompletePlanningBeforeStart config =
+  case replayEventLog
+    [ IssuePlanningInitialized config
+    , IssuePlanningTurnCompleted
+    ] of
+    Left _ -> True
+    Right _ -> False
+
 prop_protocolPrReviewWorkerCompletedReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn =
   let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
@@ -409,6 +430,7 @@ goldenEventLogCases = do
       , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-worker-incomplete/events.jsonl" PrReview CheckingReviews
       , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-reviewer-incomplete/events.jsonl" PrReview CheckingReviews
       , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-complete/events.jsonl" IssueImplement Complete
+      , goldenEventLogCase "golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl" IssuePlanning Initialized
       ]
   pure (and results)
 
@@ -430,6 +452,8 @@ main = do
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
+      , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
+      , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked

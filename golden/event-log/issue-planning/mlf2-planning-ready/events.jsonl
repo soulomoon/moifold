@@ -1,0 +1,3 @@
+{"type":"issue_planning_initialized","repoFullName":"soulomoon/mlf2","maxParallel":8}
+{"type":"issue_planning_turn_started","plannerThreadId":"planner-thread-mlf2","plannerTurnId":"turn-plan-issues"}
+{"type":"issue_planning_turn_completed"}

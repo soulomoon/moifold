@@ -29,7 +29,10 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 data WatcherEvent
-  = PrReviewInitialized PrConfig ThreadId ThreadId
+  = IssuePlanningInitialized PlannerConfig
+  | IssuePlanningTurnStarted ThreadId TurnId
+  | IssuePlanningTurnCompleted
+  | PrReviewInitialized PrConfig ThreadId ThreadId
   | PrReviewUnresolvedFound (NonEmpty ReviewThreadId) CommitSha TurnId
   | PrReviewNoUnresolvedFound CommitSha TurnId
   | PrReviewFixCompleted
@@ -63,6 +66,15 @@ instance FromJSON WatcherEvent where
   parseJSON = withObject "WatcherEvent" \object -> do
     eventType <- object .: "type"
     case eventType :: Text of
+      "issue_planning_initialized" ->
+        IssuePlanningInitialized
+          <$> parsePlannerConfig object
+      "issue_planning_turn_started" ->
+        IssuePlanningTurnStarted
+          <$> (ThreadId <$> object .: "plannerThreadId")
+          <*> (TurnId <$> object .: "plannerTurnId")
+      "issue_planning_turn_completed" ->
+        pure IssuePlanningTurnCompleted
       "pr_review_initialized" ->
         PrReviewInitialized
           <$> parsePrConfig object
@@ -139,6 +151,11 @@ replayEventLog = go 1 Nothing []
 
 initializeFromEvent :: WatcherEvent -> Either Text (SomeWatcherState, EffectPlan)
 initializeFromEvent = \case
+  IssuePlanningInitialized config ->
+    Right
+      ( SomeWatcherState (PlanningReady config :: WatcherState 'IssuePlanning 'Initialized)
+      , []
+      )
   PrReviewInitialized config workerThread reviewerThread ->
     Right
       ( SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread) :: WatcherState 'PrReview 'CheckingReviews)
@@ -160,6 +177,12 @@ applyEvent _ event@PrReviewInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)
 applyEvent _ event@IssueImplementInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)
+applyEvent _ event@IssuePlanningInitialized {} =
+  Left ("duplicate initialization event: " <> eventName event)
+applyEvent (SomeWatcherState state@PlanningReady {}) (IssuePlanningTurnStarted plannerThread turnId) =
+  fromDecision (step state (StartPlanningTurn (ActiveTurn plannerThread turnId)))
+applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
+  fromDecision (step state PlannerTurnCompleted)
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
   fromDecision (step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
@@ -209,6 +232,12 @@ blockSameDomain _ reason = SomeWatcherState (BlockedState reason :: WatcherState
 stopSameDomain :: forall domain phase. KnownDomain domain => WatcherState domain phase -> StopReason -> SomeWatcherState
 stopSameDomain _ reason = SomeWatcherState (StoppedState reason :: WatcherState domain 'Stopped)
 
+parsePlannerConfig :: Object -> Parser PlannerConfig
+parsePlannerConfig object =
+  PlannerConfig
+    <$> (RepoName <$> object .: "repoFullName")
+    <*> object .: "maxParallel"
+
 parsePrConfig :: Object -> Parser PrConfig
 parsePrConfig object =
   PrConfig
@@ -241,6 +270,9 @@ parseLine (lineNumber, line) =
 
 eventName :: WatcherEvent -> Text
 eventName = \case
+  IssuePlanningInitialized {} -> "issue_planning_initialized"
+  IssuePlanningTurnStarted {} -> "issue_planning_turn_started"
+  IssuePlanningTurnCompleted -> "issue_planning_turn_completed"
   PrReviewInitialized {} -> "pr_review_initialized"
   PrReviewUnresolvedFound {} -> "pr_review_unresolved_found"
   PrReviewNoUnresolvedFound {} -> "pr_review_no_unresolved_found"
