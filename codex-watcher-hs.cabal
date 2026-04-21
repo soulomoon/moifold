@@ -29,10 +29,17 @@ library
   hs-source-dirs:   src
   exposed-modules:
     CodexWatcher.Effects
+    CodexWatcher.GoldenReplay
+    CodexWatcher.Json
+    CodexWatcher.Snapshot
     CodexWatcher.StateMachine
     CodexWatcher.Types
   build-depends:
+    aeson >=2.2 && <3,
     base >=4.18 && <5,
+    bytestring >=0.12 && <0.13,
+    directory >=1.3 && <1.4,
+    filepath >=1.4 && <1.6,
     text >=2.0 && <3
   default-language: GHC2021
 

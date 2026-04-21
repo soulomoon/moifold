@@ -39,6 +39,8 @@ module CodexWatcher.Types
   , SomeWatcherState (..)
   , domainOf
   , phaseOf
+  , someDomain
+  , somePhase
   , isTerminalPhase
   ) where
 
@@ -249,7 +251,7 @@ deriving stock instance Eq (WatcherState domain phase)
 deriving stock instance Show (WatcherState domain phase)
 
 data SomeWatcherState where
-  SomeWatcherState :: WatcherState domain phase -> SomeWatcherState
+  SomeWatcherState :: KnownDomain domain => WatcherState domain phase -> SomeWatcherState
 
 deriving stock instance Show SomeWatcherState
 
@@ -269,6 +271,12 @@ phaseOf PrMerging {} = Merging
 phaseOf BlockedState {} = Blocked
 phaseOf CompleteState {} = Complete
 phaseOf StoppedState {} = Stopped
+
+someDomain :: SomeWatcherState -> Domain
+someDomain (SomeWatcherState state) = domainOf state
+
+somePhase :: SomeWatcherState -> Phase
+somePhase (SomeWatcherState state) = phaseOf state
 
 isTerminalPhase :: Phase -> Bool
 isTerminalPhase Blocked = True

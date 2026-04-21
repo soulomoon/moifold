@@ -2,11 +2,14 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Main (main) where
 
 import CodexWatcher.Effects
+import CodexWatcher.GoldenReplay
+import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.List.NonEmpty (NonEmpty (..))
@@ -164,6 +167,37 @@ prop_terminalStateHasNoImplicitEffects mergeCommit blockedReason stopReason =
     , effectsForTerminalState (StoppedState stopReason :: WatcherState 'PrReview 'Stopped)
     ]
 
+assert :: String -> Bool -> IO Bool
+assert assertionName condition = do
+  if condition
+    then putStrLn ("PASS " <> assertionName)
+    else putStrLn ("FAIL " <> assertionName)
+  pure condition
+
+goldenReplayPr6Merged :: IO Bool
+goldenReplayPr6Merged = do
+  loaded <- loadNodePrReviewSnapshot "golden/pr-review/mlf2-pr6-merged"
+  case loaded of
+    Left err -> do
+      putStrLn ("FAIL golden decode: " <> err)
+      pure False
+    Right snapshot -> do
+      let replayed = replayNodePrReviewSnapshot snapshot
+      case replayed of
+        Left err -> do
+          putStrLn ("FAIL golden replay: " <> Text.unpack err)
+          pure False
+        Right replay -> do
+          results <-
+            sequence
+              [ assert "golden repo parsed" (snapshot.config.repoFullName == "soulomoon/mlf2")
+              , assert "golden PR parsed" (snapshot.config.prNumber == 6)
+              , assert "golden replay domain" (someDomain replay.replayState == PrReview)
+              , assert "golden replay phase" (somePhase replay.replayState == Complete)
+              , assert "golden replay carries stale reviewer warning" (not (null replay.replayWarnings))
+              ]
+          pure (and results)
+
 main :: IO ()
 main = do
   results <-
@@ -178,4 +212,5 @@ main = do
       , quickCheckResult prop_plannerCompletionReturnsToReady
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       ]
-  if all isSuccess results then pure () else exitFailure
+  goldenOk <- goldenReplayPr6Merged
+  if all isSuccess results && goldenOk then pure () else exitFailure

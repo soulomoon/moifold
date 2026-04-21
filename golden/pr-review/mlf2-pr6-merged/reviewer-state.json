@@ -1,0 +1,10 @@
+{
+  "review_status": "blocked",
+  "reviewed_commit_sha": "ba1faf7645ca86c48104cd640a708cca0311b204",
+  "reviewer_prompt_version": "haskell-pro-style-v1",
+  "added_review_comment_count": 0,
+  "submitted_approval": false,
+  "approval_comment": null,
+  "findings_summary": [],
+  "blocked_reason": "GitHub rejected the approval review for ba1faf7645ca86c48104cd640a708cca0311b204: Review Can not approve your own pull request."
+}

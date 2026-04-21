@@ -1,0 +1,90 @@
+{
+  "checked_at": "2026-04-21T20:20:30Z",
+  "repo": "soulomoon/mlf2",
+  "pr_number": 6,
+  "branch": "codex/fix-remaining-mlfp-vs-emlf-gap",
+  "completion_status": "complete",
+  "published_commit_sha": "ba1faf7645ca86c48104cd640a708cca0311b204",
+  "resolved_thread_ids": [
+    "PRRT_kwDOQhPzu858nL9h",
+    "PRRT_kwDOQhPzu858nOCc"
+  ],
+  "remaining_unresolved_thread_ids": [],
+  "resolve_blockers": [],
+  "blocked_reason": null,
+  "checker_state_read": {
+    "path": "/workspace/artifacts/pr-review-watchers/soulomoon__mlf2__pr6/checker-state.json",
+    "checked_at": "2026-04-21T20:15:37.327Z",
+    "unresolved_thread_ids": [
+      "PRRT_kwDOQhPzu858nL9h",
+      "PRRT_kwDOQhPzu858nOCc"
+    ]
+  },
+  "threads_addressed": [
+    {
+      "id": "PRRT_kwDOQhPzu858nL9h",
+      "path": "src/MLF/Frontend/Program/Check.hs",
+      "line": 1215,
+      "start_line": 1215,
+      "latest_comment_id": "PRRC_kwDOQhPzu865-FMV",
+      "latest_comment_created_at": "2026-04-21T20:12:22Z",
+      "summary": "Duplicate and overlap checks now compare instance classes by resolved class identity, so alias-equivalent heads are rejected at declaration time."
+    },
+    {
+      "id": "PRRT_kwDOQhPzu858nOCc",
+      "path": "src/MLF/Frontend/Program/Check.hs",
+      "line": 1284,
+      "start_line": 1284,
+      "latest_comment_id": "PRRC_kwDOQhPzu865-H-Z",
+      "latest_comment_created_at": "2026-04-21T20:14:46Z",
+      "summary": "Local-vs-imported duplicate and overlap checks now respect class identity, so hidden imported same-named class instances can coexist with a local class instance."
+    }
+  ],
+  "changes": [
+    "Changed local duplicate instance detection to use sameInstanceHead, which includes class identity and head type.",
+    "Changed overlap, imported duplicate, and imported overlap guards to compare instanceClassIdentity rather than raw instanceClassName.",
+    "Changed instance method lookup to match the current declaration's resolved class identity before selecting the instance head.",
+    "Added regressions for alias-equivalent duplicate heads and local same-named class instances beside hidden method-only imports."
+  ],
+  "validation": [
+    {
+      "command": "PATH=/root/.ghcup/bin:$PATH cabal test mlf2-test --test-show-details=direct --test-options='--match \"rejects alias-equivalent duplicate class instance heads\" --match \"runs local same-named class instance beside hidden method-only imports\"'",
+      "result": "failed before the fix as expected: alias-equivalent duplicates were accepted and the hidden-import/local-class case raised ProgramDuplicateInstance"
+    },
+    {
+      "command": "PATH=/root/.ghcup/bin:$PATH cabal test mlf2-test --test-show-details=direct --test-options='--match \"rejects alias-equivalent duplicate class instance heads\" --match \"runs local same-named class instance beside hidden method-only imports\"'",
+      "result": "passed after the fix, 2 examples, 0 failures"
+    },
+    {
+      "command": "PATH=/root/.ghcup/bin:$PATH cabal test mlf2-test --test-show-details=direct --test-options='--match \"rejects alias-equivalent duplicate class instance heads\" --match \"runs local same-named class instance beside hidden method-only imports\" --match \"rejects alias-equivalent overlapping instance heads\" --match \"runs aliased import with exposed method and qualified constructors\" --match \"runs aliased import exposing a closed-type instance without duplicate matches\" --match \"runs aliased import exposing a type without duplicate alias-head instance matches\" --match \"deduplicates equivalent instances from mixed unqualified and aliased imports\" --match \"keeps hidden same-named class instances across method-only imports\" --match \"resolves method-only import by selected hidden class identity\" --match \"runs alias-only qualified deriving Eq\" --match \"runs qualified zero-method class instance through aliased import\" --match \"runs aliased instance head when class is imported from another module\" --match \"rejects alias-head instance for same-named private class\" --match \"rejects unimported prior private instance for same-named local class\"'",
+      "result": "passed, 14 examples, 0 failures"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "PATH=/root/.ghcup/bin:$PATH cabal build all && PATH=/root/.ghcup/bin:$PATH cabal test",
+      "result": "passed; cabal test reported 1810 examples, 0 failures"
+    }
+  ],
+  "publish": {
+    "gh_auth_status": "passed",
+    "gh_auth_setup_git": "passed",
+    "commit": {
+      "sha": "ba1faf7645ca86c48104cd640a708cca0311b204",
+      "message": "Compare instance declarations by class identity"
+    },
+    "fetch": "git fetch origin codex/fix-remaining-mlfp-vs-emlf-gap passed",
+    "remote_before": "6ecb24088067b9d655366a9e17997cc785b13cdd",
+    "non_fast_forward_guard": "origin/codex/fix-remaining-mlfp-vs-emlf-gap is an ancestor of HEAD",
+    "push": "git push origin HEAD:codex/fix-remaining-mlfp-vs-emlf-gap passed",
+    "verified_remote": "ba1faf7645ca86c48104cd640a708cca0311b204",
+    "local_head": "ba1faf7645ca86c48104cd640a708cca0311b204"
+  },
+  "post_resolution_recheck": {
+    "github_review_threads": "MCP list_pull_request_review_threads showed PRRT_kwDOQhPzu858nL9h and PRRT_kwDOQhPzu858nOCc resolved",
+    "command": "gh api graphql -f owner=soulomoon -f name=mlf2 -F number=6 -f query='query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ pullRequest(number:$number){ reviewThreads(first:100){ nodes{ id isResolved } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes | map(select(.isResolved == false) | .id)'",
+    "unresolved_thread_ids": []
+  }
+}

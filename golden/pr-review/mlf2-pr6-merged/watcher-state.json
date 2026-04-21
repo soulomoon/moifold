@@ -1,0 +1,40 @@
+{
+  "createdAt": "2026-04-21T13:23:25.472Z",
+  "threadId": "019db077-8b05-7151-8490-bd67b2dd6b91",
+  "lastCheckerStartedAt": "2026-04-21T20:26:24.871Z",
+  "lastCheckerCompletedAt": "2026-04-21T20:26:27.624Z",
+  "lastCheckerTurnStatus": "script",
+  "lastCheckerResult": {
+    "checked_at": "2026-04-21T20:26:27.617Z",
+    "has_unresolved": false,
+    "unresolved_count": 0,
+    "unresolved_thread_ids": []
+  },
+  "lastWorkerStartedAt": "2026-04-21T20:15:37.332Z",
+  "lastWorkerCompletedAt": "2026-04-21T20:21:24.762Z",
+  "lastWorkerTurnStatus": "completed",
+  "lastTurnStatus": "merged",
+  "lastWorkerCompletion": {
+    "checkedAt": "2026-04-21T20:21:24.763Z",
+    "status": "complete",
+    "complete": true,
+    "reason": "complete"
+  },
+  "lastNoopAt": "2026-04-21T20:26:27.625Z",
+  "lastReviewTargetSha": "ba1faf7645ca86c48104cd640a708cca0311b204",
+  "lastReviewerStartedAt": "2026-04-21T20:26:30.240Z",
+  "lastReviewerTargetSha": "ba1faf7645ca86c48104cd640a708cca0311b204",
+  "lastReviewerCompletedAt": "2026-04-21T20:30:46.687Z",
+  "lastReviewerTurnStatus": "completed",
+  "lastReviewerCompletion": {
+    "checkedAt": "2026-04-21T20:30:46.687Z",
+    "status": "blocked",
+    "complete": false,
+    "reason": "GitHub rejected the approval review for ba1faf7645ca86c48104cd640a708cca0311b204: Review Can not approve your own pull request."
+  },
+  "lastReviewerPromptVersion": "haskell-pro-style-v1",
+  "cleanup": {
+    "cleanedAt": "2026-04-21T21:18:38.054Z",
+    "reason": "PR is merged; removed stale blocked state left by same-account approval rejection."
+  }
+}
