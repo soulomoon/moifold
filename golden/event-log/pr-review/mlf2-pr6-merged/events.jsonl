@@ -1,0 +1,6 @@
+{"type":"pr_review_initialized","repoFullName":"soulomoon/mlf2","prNumber":6,"branch":"codex/fix-remaining-mlfp-vs-emlf-gap","workerThreadId":"019db077-8b05-7151-8490-bd67b2dd6b91","reviewerThreadId":"019db195-4844-71f0-9b11-2d523de03098"}
+{"type":"pr_review_unresolved_found","reviewThreadIds":["PRRT_kwDOQhPzu858nL9h","PRRT_kwDOQhPzu858nOCc"],"commitSha":"6ecb24088067b9d655366a9e17997cc785b13cdd","workerTurnId":"turn-fix-reviews"}
+{"type":"pr_review_fix_completed"}
+{"type":"pr_review_no_unresolved_found","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204","reviewerTurnId":"turn-clean-review"}
+{"type":"pr_review_clean_found","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204","comment":"LGTM"}
+{"type":"pr_review_merge_completed","mergeCommitSha":"ba1faf7645ca86c48104cd640a708cca0311b204"}

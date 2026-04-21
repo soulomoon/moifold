@@ -8,6 +8,7 @@
 module Main (main) where
 
 import CodexWatcher.Effects
+import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
@@ -167,6 +168,63 @@ prop_terminalStateHasNoImplicitEffects mergeCommit blockedReason stopReason =
     , effectsForTerminalState (StoppedState stopReason :: WatcherState 'PrReview 'Stopped)
     ]
 
+prop_eventLogFullPrReviewPathCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> CleanReviewEvidence -> MergeCommit -> Bool
+prop_eventLogFullPrReviewPathCompletes config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reviewerTurn cleanEvidence mergeCommit =
+  case replayEventLog
+    [ PrReviewInitialized config workerThread reviewerThread
+    , PrReviewUnresolvedFound reviewThreadIds reviewedCommit workerTurn
+    , PrReviewFixCompleted
+    , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) reviewerTurn
+    , PrReviewCleanFound cleanEvidence
+    , PrReviewMergeCompleted mergeCommit
+    ] of
+    Right replay ->
+      someDomain replay.replayState == PrReview
+        && somePhase replay.replayState == Complete
+    Left _ -> False
+
+prop_eventLogCannotReviewCleanWhileFixing :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> Bool
+prop_eventLogCannotReviewCleanWhileFixing config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reviewerTurn =
+  case replayEventLog
+    [ PrReviewInitialized config workerThread reviewerThread
+    , PrReviewUnresolvedFound reviewThreadIds reviewedCommit workerTurn
+    , PrReviewNoUnresolvedFound reviewedCommit reviewerTurn
+    ] of
+    Left _ -> True
+    Right _ -> False
+
+prop_eventLogCannotMergeBeforeCleanReview :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> MergeCommit -> Bool
+prop_eventLogCannotMergeBeforeCleanReview config workerThread reviewerThread commit reviewerTurn mergeCommit =
+  case replayEventLog
+    [ PrReviewInitialized config workerThread reviewerThread
+    , PrReviewNoUnresolvedFound commit reviewerTurn
+    , PrReviewMergeCompleted mergeCommit
+    ] of
+    Left _ -> True
+    Right _ -> False
+
+prop_eventLogFullIssueImplementationPathCompletes :: IssueConfig -> ThreadId -> TurnId -> TurnId -> PrNumber -> Bool
+prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn implementationTurn prNumber =
+  case replayEventLog
+    [ IssueImplementInitialized config workerThread
+    , IssueStartPlanMode planTurn
+    , IssuePlanCompletedEvent implementationTurn
+    , IssueImplementationCompletedEvent prNumber
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssueImplement
+        && somePhase replay.replayState == Complete
+    Left _ -> False
+
+prop_eventLogCannotCompleteIssueBeforePlanning :: IssueConfig -> ThreadId -> PrNumber -> Bool
+prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
+  case replayEventLog
+    [ IssueImplementInitialized config workerThread
+    , IssueImplementationCompletedEvent prNumber
+    ] of
+    Left _ -> True
+    Right _ -> False
+
 assert :: String -> Bool -> IO Bool
 assert assertionName condition = do
   if condition
@@ -215,6 +273,35 @@ goldenReplayCases = do
       ]
   pure (and results)
 
+goldenEventLogCase :: FilePath -> Domain -> Phase -> IO Bool
+goldenEventLogCase path expectedDomain expectedPhase = do
+  loaded <- loadEventLogFile path
+  case loaded of
+    Left err -> do
+      putStrLn ("FAIL event log decode " <> path <> ": " <> err)
+      pure False
+    Right events ->
+      case replayEventLog events of
+        Left err -> do
+          putStrLn ("FAIL event log replay " <> path <> ": " <> show err)
+          pure False
+        Right replay -> do
+          results <-
+            sequence
+              [ assert (path <> " domain") (someDomain replay.replayState == expectedDomain)
+              , assert (path <> " phase") (somePhase replay.replayState == expectedPhase)
+              ]
+          pure (and results)
+
+goldenEventLogCases :: IO Bool
+goldenEventLogCases = do
+  results <-
+    sequence
+      [ goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-merged/events.jsonl" PrReview Complete
+      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-complete/events.jsonl" IssueImplement Complete
+      ]
+  pure (and results)
+
 main :: IO ()
 main = do
   results <-
@@ -228,6 +315,12 @@ main = do
       , quickCheckResult prop_issuePlanCompletionCreatesPrBeforeImplementation
       , quickCheckResult prop_plannerCompletionReturnsToReady
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
+      , quickCheckResult prop_eventLogFullPrReviewPathCompletes
+      , quickCheckResult prop_eventLogCannotReviewCleanWhileFixing
+      , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
+      , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
+      , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
       ]
   goldenOk <- goldenReplayCases
-  if all isSuccess results && goldenOk then pure () else exitFailure
+  eventLogOk <- goldenEventLogCases
+  if all isSuccess results && goldenOk && eventLogOk then pure () else exitFailure

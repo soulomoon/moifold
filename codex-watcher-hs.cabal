@@ -29,6 +29,7 @@ library
   hs-source-dirs:   src
   exposed-modules:
     CodexWatcher.Effects
+    CodexWatcher.EventLog
     CodexWatcher.GoldenReplay
     CodexWatcher.Json
     CodexWatcher.Snapshot

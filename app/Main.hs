@@ -4,6 +4,7 @@
 
 module Main (main) where
 
+import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
@@ -17,15 +18,17 @@ main =
     ["replay", dir] -> replayAny dir
     ["replay-pr-review", dir] -> replayPrReview dir
     ["replay-issue-implement", dir] -> replayIssueImplement dir
+    ["replay-events", path] -> replayEvents path
     [] -> do
       putStrLn "codex-watcher-hs"
       putStrLn "usage: codex-watcher-hs replay <node-watcher-state-dir>"
       putStrLn "       codex-watcher-hs replay-pr-review <node-pr-review-state-dir>"
       putStrLn "       codex-watcher-hs replay-issue-implement <node-issue-implement-state-dir>"
+      putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
       putStrLn "type-level domains:"
       print [IssuePlanning, IssueImplement, PrReview]
       putStrLn ("example repo newtype is available: " <> Text.unpack (unRepoName (RepoName "soulomoon/mlf2")))
-    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir>"
+    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl>"
 
 replayAny :: FilePath -> IO ()
 replayAny dir = do
@@ -53,3 +56,22 @@ printReplay replay = do
   putStrLn ("domain: " <> show (someDomain replay.replayState))
   putStrLn ("phase: " <> show (somePhase replay.replayState))
   mapM_ (putStrLn . ("warning: " <>) . Text.unpack) replay.replayWarnings
+
+replayEvents :: FilePath -> IO ()
+replayEvents path = do
+  loaded <- loadEventLogFile path
+  events <- either die pure loaded
+  replay <- either (die . formatReplayFailure) pure (replayEventLog events)
+  putStrLn ("domain: " <> show (someDomain replay.replayState))
+  putStrLn ("phase: " <> show (somePhase replay.replayState))
+  putStrLn ("events: " <> show (length events))
+  putStrLn ("effect batches: " <> show (length replay.replayEffects))
+
+formatReplayFailure :: ReplayFailure -> String
+formatReplayFailure failure =
+  "event replay failed at event "
+    <> show failure.eventIndex
+    <> " ("
+    <> show failure.event
+    <> "): "
+    <> Text.unpack failure.reason
