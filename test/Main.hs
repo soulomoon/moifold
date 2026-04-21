@@ -257,6 +257,51 @@ prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent config workerThread revie
             && emittedTurn == workerTurn
         _ -> False
 
+prop_protocolPrReviewReviewerCleanMovesToMerging :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> CleanReviewEvidence -> Bool
+prop_protocolPrReviewReviewerCleanMovesToMerging config workerThread reviewerThread reviewTarget reviewerTurn cleanEvidence =
+  let session = newPrReviewReviewerSession config reviewerThread reviewTarget
+      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerClean cleanEvidence) session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == Merging
+        Left _ -> False
+
+prop_protocolPrReviewReviewerBlockedStopsInBlocked :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
+prop_protocolPrReviewReviewerBlockedStopsInBlocked config workerThread reviewerThread reviewTarget reviewerTurn reason =
+  let session = newPrReviewReviewerSession config reviewerThread reviewTarget
+      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerBlocked reason) session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == Blocked
+        Left _ -> False
+
+prop_protocolPrReviewReviewerEmitsStartThenCleanEvent :: PrConfig -> ThreadId -> CommitSha -> TurnId -> CleanReviewEvidence -> Bool
+prop_protocolPrReviewReviewerEmitsStartThenCleanEvent config reviewerThread reviewTarget reviewerTurn cleanEvidence =
+  let session = newPrReviewReviewerSession config reviewerThread reviewTarget
+      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerClean cleanEvidence) session
+   in case events of
+        [PrReviewNoUnresolvedFound emittedCommit emittedTurn, PrReviewCleanFound emittedEvidence] ->
+          emittedCommit == reviewTarget
+            && emittedTurn == reviewerTurn
+            && emittedEvidence == cleanEvidence
+        _ -> False
+
+prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> MergeCommit -> Bool
+prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread reviewerThread reviewThreadIds commit workerTurn reviewerTurn mergeCommit =
+  let workerSession = newPrReviewWorkerSession config workerThread reviewThreadIds commit
+      (_workerFinished, workerEvents) = runPrReviewWorkerProtocol workerTurn WorkerCompleted workerSession
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      reviewerSession = newPrReviewReviewerSession config reviewerThread commit
+      (_reviewerFinished, reviewerEvents) = runPrReviewReviewerProtocol reviewerTurn (ReviewerClean cleanEvidence) reviewerSession
+      events = PrReviewInitialized config workerThread reviewerThread : workerEvents <> reviewerEvents <> [PrReviewMergeCompleted mergeCommit]
+   in case replayEventLog events of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == Complete
+        Left _ -> False
+
 assert :: String -> Bool -> IO Bool
 assert assertionName condition = do
   if condition
@@ -355,6 +400,10 @@ main = do
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked
       , quickCheckResult prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent
+      , quickCheckResult prop_protocolPrReviewReviewerCleanMovesToMerging
+      , quickCheckResult prop_protocolPrReviewReviewerBlockedStopsInBlocked
+      , quickCheckResult prop_protocolPrReviewReviewerEmitsStartThenCleanEvent
+      , quickCheckResult prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases

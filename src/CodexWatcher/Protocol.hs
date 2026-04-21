@@ -10,12 +10,20 @@ module CodexWatcher.Protocol
   , WorkerPurpose (..)
   , WorkerSession
   , WorkerOutcome (..)
+  , ReviewerSession
+  , ReviewerOutcome (..)
   , newPrReviewWorkerSession
+  , newPrReviewReviewerSession
   , startWorkerTurn
   , startWorkerTurnEvent
   , waitWorkerTurn
   , emitWorkerEvent
   , runPrReviewWorkerProtocol
+  , startReviewerTurn
+  , startReviewerTurnEvent
+  , waitReviewerTurn
+  , emitReviewerEvent
+  , runPrReviewReviewerProtocol
   ) where
 
 import CodexWatcher.EventLog
@@ -61,13 +69,48 @@ data WorkerSession (phase :: SessionPhase) where
 
 deriving stock instance Show (WorkerSession phase)
 
+data ReviewerSession (phase :: SessionPhase) where
+  PrReviewReviewerIdle
+    :: PrConfig
+    -> ThreadId
+    -> CommitSha
+    -> ReviewerSession 'SessionIdle
+
+  PrReviewReviewerActive
+    :: PrConfig
+    -> ActiveTurn
+    -> CommitSha
+    -> ReviewerSession 'SessionActive
+
+  PrReviewReviewerObserved
+    :: PrConfig
+    -> ActiveTurn
+    -> ReviewerOutcome
+    -> ReviewerSession 'SessionObserved
+
+  PrReviewReviewerFinished
+    :: PrConfig
+    -> ReviewerOutcome
+    -> WatcherEvent
+    -> ReviewerSession 'SessionFinished
+
+deriving stock instance Show (ReviewerSession phase)
+
 data WorkerOutcome
   = WorkerCompleted
   | WorkerBlocked BlockedReason
   deriving stock (Eq, Show)
 
+data ReviewerOutcome
+  = ReviewerClean CleanReviewEvidence
+  | ReviewerBlocked BlockedReason
+  deriving stock (Eq, Show)
+
 newPrReviewWorkerSession :: PrConfig -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> WorkerSession 'SessionIdle
 newPrReviewWorkerSession = PrReviewWorkerIdle
+
+newPrReviewReviewerSession :: PrConfig -> ThreadId -> CommitSha -> ReviewerSession 'SessionIdle
+newPrReviewReviewerSession = PrReviewReviewerIdle
 
 startWorkerTurn :: TurnId -> WorkerSession 'SessionIdle -> WorkerSession 'SessionActive
 startWorkerTurn turnId (PrReviewWorkerIdle config threadId unresolved commit) =
@@ -84,7 +127,7 @@ waitWorkerTurn outcome (PrReviewWorkerActive config activeTurn _unresolved _comm
 
 emitWorkerEvent :: WorkerSession 'SessionObserved -> WorkerSession 'SessionFinished
 emitWorkerEvent (PrReviewWorkerObserved config _activeTurn outcome) =
-  PrReviewWorkerFinished config outcome (eventForOutcome outcome)
+  PrReviewWorkerFinished config outcome (workerEventForOutcome outcome)
 
 runPrReviewWorkerProtocol :: TurnId -> WorkerOutcome -> WorkerSession 'SessionIdle -> (WorkerSession 'SessionFinished, [WatcherEvent])
 runPrReviewWorkerProtocol turnId outcome session =
@@ -93,6 +136,34 @@ runPrReviewWorkerProtocol turnId outcome session =
       finished@(PrReviewWorkerFinished _ _ event) = emitWorkerEvent observed
    in (finished, [startEvent, event])
 
-eventForOutcome :: WorkerOutcome -> WatcherEvent
-eventForOutcome WorkerCompleted = PrReviewFixCompleted
-eventForOutcome (WorkerBlocked reason) = WatcherBlocked reason
+startReviewerTurn :: TurnId -> ReviewerSession 'SessionIdle -> ReviewerSession 'SessionActive
+startReviewerTurn turnId (PrReviewReviewerIdle config threadId commit) =
+  PrReviewReviewerActive config (ActiveTurn threadId turnId) commit
+
+startReviewerTurnEvent :: TurnId -> ReviewerSession 'SessionIdle -> (ReviewerSession 'SessionActive, WatcherEvent)
+startReviewerTurnEvent turnId session@(PrReviewReviewerIdle _config _threadId commit) =
+  let active = startReviewerTurn turnId session
+   in (active, PrReviewNoUnresolvedFound commit turnId)
+
+waitReviewerTurn :: ReviewerOutcome -> ReviewerSession 'SessionActive -> ReviewerSession 'SessionObserved
+waitReviewerTurn outcome (PrReviewReviewerActive config activeTurn _commit) =
+  PrReviewReviewerObserved config activeTurn outcome
+
+emitReviewerEvent :: ReviewerSession 'SessionObserved -> ReviewerSession 'SessionFinished
+emitReviewerEvent (PrReviewReviewerObserved config _activeTurn outcome) =
+  PrReviewReviewerFinished config outcome (reviewerEventForOutcome outcome)
+
+runPrReviewReviewerProtocol :: TurnId -> ReviewerOutcome -> ReviewerSession 'SessionIdle -> (ReviewerSession 'SessionFinished, [WatcherEvent])
+runPrReviewReviewerProtocol turnId outcome session =
+  let (active, startEvent) = startReviewerTurnEvent turnId session
+      observed = waitReviewerTurn outcome active
+      finished@(PrReviewReviewerFinished _ _ event) = emitReviewerEvent observed
+   in (finished, [startEvent, event])
+
+workerEventForOutcome :: WorkerOutcome -> WatcherEvent
+workerEventForOutcome WorkerCompleted = PrReviewFixCompleted
+workerEventForOutcome (WorkerBlocked reason) = WatcherBlocked reason
+
+reviewerEventForOutcome :: ReviewerOutcome -> WatcherEvent
+reviewerEventForOutcome (ReviewerClean evidence) = PrReviewCleanFound evidence
+reviewerEventForOutcome (ReviewerBlocked reason) = WatcherBlocked reason
