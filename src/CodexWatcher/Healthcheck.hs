@@ -13,7 +13,8 @@ module CodexWatcher.Healthcheck
   ) where
 
 import CodexWatcher.EventLog
-import CodexWatcher.Types (someDomain, somePhase)
+import CodexWatcher.Runtime
+import CodexWatcher.Types (BranchName (..), PrNumber (..), RepoName (..), someDomain, somePhase)
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad (filterM)
@@ -44,14 +45,8 @@ import System.Directory
   , doesFileExist
   , listDirectory
   )
-import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO.Error (isDoesNotExistError)
-import System.Process
-  ( CreateProcess (cwd)
-  , proc
-  , readCreateProcessWithExitCode
-  )
 
 data HealthcheckOptions = HealthcheckOptions
   { stateRoot :: FilePath
@@ -112,16 +107,6 @@ data ConfigItem = ConfigItem
   , config :: Either Text GenericConfig
   }
   deriving stock (Eq, Show, Generic)
-
-data CommandReport = CommandReport
-  { ok :: Bool
-  , status :: Maybe Int
-  , stdout :: Text
-  , stderr :: Text
-  , errorMessage :: Maybe Text
-  }
-  deriving stock (Eq, Show, Generic)
-  deriving anyclass (ToJSON)
 
 data WorkdirReport = WorkdirReport
   { skipped :: Bool
@@ -211,7 +196,7 @@ runHealthcheck options = do
   inventory <- loadInventory options
   summaries <- traverse summarizeItem inventory
   commands <- environmentCommands
-  ghAuth <- commandSummary "gh" ["auth", "status"] Nothing
+  ghAuth <- runRuntimeCommand GhAuthStatus
   ghUser <- githubUserReport
   checkedAt <- Text.pack . show <$> getCurrentTime
   let problems =
@@ -396,11 +381,7 @@ readOptionalValueFile path = do
   exists <- doesFileExist path
   if not exists
     then pure Nothing
-    else do
-      bytesResult <- try (ByteString.readFile path) :: IO (Either IOException ByteString.ByteString)
-      pure case bytesResult of
-        Left _ -> Nothing
-        Right bytes -> either (const Nothing) Just (eitherDecodeStrict' bytes)
+    else either (const Nothing) Just <$> readJsonValue path
 
 fallbackPidPath :: WatcherKind -> FilePath -> Maybe FilePath -> FilePath
 fallbackPidPath kind stateDir' configured =
@@ -420,7 +401,7 @@ readPid pidPath = do
 
 isProcessAlive :: Text -> IO Bool
 isProcessAlive pid' = do
-  result <- commandSummary "kill" ["-0", Text.unpack pid'] Nothing
+  result <- runRuntimeCommand (KillZero pid')
   pure result.ok
 
 checkWorkdir :: GenericConfig -> IO WorkdirReport
@@ -432,12 +413,12 @@ checkWorkdir config =
       gitDir <- doesDirectoryExist (path' </> ".git")
       gitFile <- doesFileExist (path' </> ".git")
       let isGit = gitDir || gitFile
-      branchReport <- if isGit then commandSummary "git" ["branch", "--show-current"] (Just path') else pure (skippedCommand "not a git checkout")
-      headReport <- if isGit then commandSummary "git" ["rev-parse", "HEAD"] (Just path') else pure (skippedCommand "not a git checkout")
-      dirtyReport <- if isGit then commandSummary "git" ["status", "--porcelain"] (Just path') else pure (skippedCommand "not a git checkout")
+      branchReport <- if isGit then runRuntimeCommand (GitBranchCurrent path') else pure (skippedCommand "not a git checkout")
+      headReport <- if isGit then runRuntimeCommand (GitRevParseHead path') else pure (skippedCommand "not a git checkout")
+      dirtyReport <- if isGit then runRuntimeCommand (GitStatusPorcelain path') else pure (skippedCommand "not a git checkout")
       remoteReport <-
         case (isGit, config.branch) of
-          (True, Just branchName) -> commandSummary "git" ["ls-remote", "origin", "refs/heads/" <> Text.unpack branchName] (Just path')
+          (True, Just branchName) -> runRuntimeCommand (GitLsRemoteBranch path' (BranchName branchName))
           _ -> pure (skippedCommand "missing branch or git checkout")
       let headSha' = emptyToNothing headReport.stdout
           remoteSha = parseRemoteSha remoteReport.stdout
@@ -460,7 +441,7 @@ checkGitPushDryRun :: GenericConfig -> WorkdirReport -> IO CommandReport
 checkGitPushDryRun config workdirReport =
   case (config.workdir, config.branch, workdirReport.isGitCheckout) of
     (Just path', Just branchName, True) ->
-      commandSummary "git" ["push", "--dry-run", "origin", Text.unpack branchName] (Just path')
+      runRuntimeCommand (GitPushDryRun path' (BranchName branchName))
     _ -> pure (skippedCommand "missing branch or git checkout")
 
 checkRemotePr :: GenericConfig -> IO RemotePrReport
@@ -468,17 +449,12 @@ checkRemotePr config =
   case (config.repoFullName, config.prNumber) of
     (Just repo, Just prNumber') -> do
       report <-
-        commandSummary
-          "gh"
-          [ "pr"
-          , "view"
-          , show prNumber'
-          , "--repo"
-          , Text.unpack repo
-          , "--json"
-          , "state,mergedAt,mergeCommit,url,headRefOid"
-          ]
-          Nothing
+        runRuntimeCommand
+          ( GhPrView
+              (RepoName repo)
+              (PrNumber prNumber')
+              ["state", "mergedAt", "mergeCommit", "url", "headRefOid"]
+          )
       if not report.ok
         then pure RemotePrReport {skipped = False, ok = False, errorMessage = Just (commandText report), raw = Null, merged = False}
         else do
@@ -546,11 +522,11 @@ environmentCommands = do
   pure (object (fmap (\(key, report) -> key .= report) reports))
 
 checkCommand :: String -> IO CommandReport
-checkCommand command = commandSummary command ["--version"] Nothing
+checkCommand command = runRuntimeCommand (CommandVersion command)
 
 githubUserReport :: IO Value
 githubUserReport = do
-  report <- commandSummary "gh" ["api", "user"] Nothing
+  report <- runRuntimeCommand GhApiUser
   if not report.ok
     then pure (object ["ok" .= False, "error" .= commandText report])
     else
@@ -564,47 +540,6 @@ githubUserReport = do
             , "name" .= KeyMap.lookup "name" object'
             ]
         Right value -> object ["ok" .= True, "raw" .= value]
-
-commandSummary :: String -> [String] -> Maybe FilePath -> IO CommandReport
-commandSummary command args cwd' = do
-  result <- try (readCreateProcessWithExitCode (proc command args) {cwd = cwd'} "") :: IO (Either IOException (ExitCode, String, String))
-  pure case result of
-    Left error' ->
-      CommandReport
-        { ok = False
-        , status = Nothing
-        , stdout = ""
-        , stderr = ""
-        , errorMessage = Just (Text.pack (show error'))
-        }
-    Right (exitCode, stdout', stderr') ->
-      CommandReport
-        { ok = exitCode == ExitSuccess
-        , status = exitStatus exitCode
-        , stdout = redact (Text.strip (Text.pack stdout'))
-        , stderr = redact (Text.strip (Text.pack stderr'))
-        , errorMessage = Nothing
-        }
-
-skippedCommand :: Text -> CommandReport
-skippedCommand reason' =
-  CommandReport {ok = False, status = Nothing, stdout = "", stderr = "", errorMessage = Just reason'}
-
-exitStatus :: ExitCode -> Maybe Int
-exitStatus ExitSuccess = Just 0
-exitStatus (ExitFailure code) = Just code
-
-commandText :: CommandReport -> Text
-commandText report =
-  Text.intercalate " " (filter (not . Text.null) [report.stderr, report.stdout, fromMaybe "" report.errorMessage])
-
-redact :: Text -> Text
-redact =
-  Text.unwords . fmap redactWord . Text.words
- where
-  redactWord word
-    | any (`Text.isPrefixOf` word) ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_", "ghr_"] = "<redacted-token>"
-    | otherwise = word
 
 analyzeItem :: WatcherSummary -> [Problem]
 analyzeItem summary =

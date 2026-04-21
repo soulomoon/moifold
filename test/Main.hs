@@ -11,6 +11,7 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Protocol
+import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
@@ -353,6 +354,56 @@ prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread re
             && somePhase replay.replayState == Complete
         Left _ -> False
 
+runtimeCommandExamples :: [RuntimeCommand]
+runtimeCommandExamples =
+  [ CommandVersion "git"
+  , GhAuthStatus
+  , GhApiUser
+  , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
+  , GitBranchCurrent "/tmp/work"
+  , GitRevParseHead "/tmp/work"
+  , GitStatusPorcelain "/tmp/work"
+  , GitLsRemoteBranch "/tmp/work" (BranchName "codex/example")
+  , GitPushDryRun "/tmp/work" (BranchName "codex/example")
+  , KillZero "123"
+  , RawCommand "node" ["--version"] Nothing
+  ]
+
+prop_runtimeCommandSpecsHaveExecutable :: Bool
+prop_runtimeCommandSpecsHaveExecutable =
+  all (not . null . (.command) . renderRuntimeCommand) runtimeCommandExamples
+
+prop_runtimeGitPushDryRunNeverForces :: BranchName -> Bool
+prop_runtimeGitPushDryRunNeverForces branch =
+  let spec = renderRuntimeCommand (GitPushDryRun "/tmp/work" branch)
+   in spec.command == "git"
+        && spec.cwd == Just "/tmp/work"
+        && "--dry-run" `elem` spec.args
+        && "--force" `notElem` spec.args
+        && "--force-with-lease" `notElem` spec.args
+
+prop_runtimeGhPrViewUsesStructuredFields :: RepoName -> PrNumber -> Bool
+prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
+  let spec = renderRuntimeCommand (GhPrView repo prNumber ["state", "url", "headRefOid"])
+   in spec.command == "gh"
+        && spec.args
+          == [ "pr"
+             , "view"
+             , show (unPrNumber prNumber)
+             , "--repo"
+             , Text.unpack (unRepoName repo)
+             , "--json"
+             , "state,url,headRefOid"
+             ]
+
+prop_runtimeKillZeroOnlyChecksPid :: ThreadId -> Bool
+prop_runtimeKillZeroOnlyChecksPid threadId =
+  let pidText = unThreadId threadId
+      spec = renderRuntimeCommand (KillZero pidText)
+   in spec.command == "kill"
+        && spec.args == ["-0", Text.unpack pidText]
+        && spec.cwd == Nothing
+
 assert :: String -> Bool -> IO Bool
 assert assertionName condition = do
   if condition
@@ -464,6 +515,10 @@ main = do
       , quickCheckResult prop_protocolPrReviewReviewerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewReviewerEmitsStartThenCleanEvent
       , quickCheckResult prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes
+      , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
+      , quickCheckResult prop_runtimeGitPushDryRunNeverForces
+      , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
+      , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases

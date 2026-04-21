@@ -9,6 +9,7 @@ This repository starts with the correctness core instead of runtime glue:
 - Typed effects, including mutation permissions.
 - Pure transitions from typed state plus event to next typed state and effect plan.
 - JSON event-log replay for Node watcher `events.jsonl` files.
+- A small runtime boundary for `gh`, `git`, process checks, and JSON file IO.
 - QuickCheck properties for global invariants.
 
 The existing Node watcher remains the runtime reference while this model matures.
@@ -48,6 +49,6 @@ The runtime event format is documented in `docs/event-log-schema.md`.
 
 ## Design Rule
 
-The type-level model owns lifecycle correctness. Runtime policy and external IO stay outside the core until the model is stable.
+The type-level model owns lifecycle correctness. Runtime policy and external IO stay behind `CodexWatcher.Runtime` until they are driven by typed effects.
 
 Illegal lifecycle transitions should fail at compile time where practical and fail property tests otherwise.

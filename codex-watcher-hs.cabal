@@ -34,6 +34,7 @@ library
     CodexWatcher.Healthcheck
     CodexWatcher.Json
     CodexWatcher.Protocol
+    CodexWatcher.Runtime
     CodexWatcher.Snapshot
     CodexWatcher.StateMachine
     CodexWatcher.Types
