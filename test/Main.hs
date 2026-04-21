@@ -236,6 +236,16 @@ prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread review
             && somePhase replay.replayState == CheckingReviews
         Left _ -> False
 
+prop_protocolPrReviewWorkerIncompleteReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
+prop_protocolPrReviewWorkerIncompleteReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reason =
+  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+      (_finished, events) = runPrReviewWorkerProtocol workerTurn (WorkerIncomplete (unBlockedReason reason)) session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == CheckingReviews
+        Left _ -> False
+
 prop_protocolPrReviewWorkerBlockedStopsInBlocked :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
 prop_protocolPrReviewWorkerBlockedStopsInBlocked config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reason =
   let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
@@ -275,6 +285,26 @@ prop_protocolPrReviewReviewerBlockedStopsInBlocked config workerThread reviewerT
         Right replay ->
           someDomain replay.replayState == PrReview
             && somePhase replay.replayState == Blocked
+        Left _ -> False
+
+prop_protocolPrReviewReviewerProblemsReturnToChecking :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> Bool
+prop_protocolPrReviewReviewerProblemsReturnToChecking config workerThread reviewerThread reviewTarget reviewerTurn =
+  let session = newPrReviewReviewerSession config reviewerThread reviewTarget
+      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerProblemsAdded reviewTarget) session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == CheckingReviews
+        Left _ -> False
+
+prop_protocolPrReviewReviewerIncompleteReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
+prop_protocolPrReviewReviewerIncompleteReturnsToChecking config workerThread reviewerThread reviewTarget reviewerTurn reason =
+  let session = newPrReviewReviewerSession config reviewerThread reviewTarget
+      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerIncomplete (unBlockedReason reason)) session
+   in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
+        Right replay ->
+          someDomain replay.replayState == PrReview
+            && somePhase replay.replayState == CheckingReviews
         Left _ -> False
 
 prop_protocolPrReviewReviewerEmitsStartThenCleanEvent :: PrConfig -> ThreadId -> CommitSha -> TurnId -> CleanReviewEvidence -> Bool
@@ -375,6 +405,9 @@ goldenEventLogCases = do
   results <-
     sequence
       [ goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-merged/events.jsonl" PrReview Complete
+      , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-reviewer-comments/events.jsonl" PrReview CheckingReviews
+      , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-worker-incomplete/events.jsonl" PrReview CheckingReviews
+      , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-reviewer-incomplete/events.jsonl" PrReview CheckingReviews
       , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-complete/events.jsonl" IssueImplement Complete
       ]
   pure (and results)
@@ -398,10 +431,13 @@ main = do
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
+      , quickCheckResult prop_protocolPrReviewWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked
       , quickCheckResult prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent
       , quickCheckResult prop_protocolPrReviewReviewerCleanMovesToMerging
       , quickCheckResult prop_protocolPrReviewReviewerBlockedStopsInBlocked
+      , quickCheckResult prop_protocolPrReviewReviewerProblemsReturnToChecking
+      , quickCheckResult prop_protocolPrReviewReviewerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewReviewerEmitsStartThenCleanEvent
       , quickCheckResult prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes
       ]

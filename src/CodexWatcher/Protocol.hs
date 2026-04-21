@@ -29,6 +29,7 @@ module CodexWatcher.Protocol
 import CodexWatcher.EventLog
 import CodexWatcher.Types
 import Data.List.NonEmpty (NonEmpty)
+import Data.Text (Text)
 
 data SessionPhase
   = SessionIdle
@@ -98,11 +99,14 @@ deriving stock instance Show (ReviewerSession phase)
 
 data WorkerOutcome
   = WorkerCompleted
+  | WorkerIncomplete Text
   | WorkerBlocked BlockedReason
   deriving stock (Eq, Show)
 
 data ReviewerOutcome
   = ReviewerClean CleanReviewEvidence
+  | ReviewerProblemsAdded CommitSha
+  | ReviewerIncomplete Text
   | ReviewerBlocked BlockedReason
   deriving stock (Eq, Show)
 
@@ -162,8 +166,11 @@ runPrReviewReviewerProtocol turnId outcome session =
 
 workerEventForOutcome :: WorkerOutcome -> WatcherEvent
 workerEventForOutcome WorkerCompleted = PrReviewFixCompleted
+workerEventForOutcome (WorkerIncomplete reason) = PrReviewFixIncomplete reason
 workerEventForOutcome (WorkerBlocked reason) = WatcherBlocked reason
 
 reviewerEventForOutcome :: ReviewerOutcome -> WatcherEvent
 reviewerEventForOutcome (ReviewerClean evidence) = PrReviewCleanFound evidence
+reviewerEventForOutcome (ReviewerProblemsAdded commit) = PrReviewProblemsAdded commit
+reviewerEventForOutcome (ReviewerIncomplete reason) = PrReviewReviewIncomplete reason
 reviewerEventForOutcome (ReviewerBlocked reason) = WatcherBlocked reason

@@ -8,6 +8,7 @@ This repository starts with the correctness core instead of runtime glue:
 - GADT states that prevent impossible state combinations.
 - Typed effects, including mutation permissions.
 - Pure transitions from typed state plus event to next typed state and effect plan.
+- JSON event-log replay for Node watcher `events.jsonl` files.
 - QuickCheck properties for global invariants.
 
 The existing Node watcher remains the runtime reference while this model matures.
@@ -26,6 +27,12 @@ The core explicitly tracks phases such as triage, plan mode, implementation, rev
 
 ```bash
 cabal test all
+```
+
+Replay a Node watcher event log:
+
+```bash
+cabal run codex-watcher-hs -- replay-events /path/to/events.jsonl
 ```
 
 ## Design Rule

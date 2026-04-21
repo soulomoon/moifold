@@ -33,7 +33,10 @@ data WatcherEvent
   | PrReviewUnresolvedFound (NonEmpty ReviewThreadId) CommitSha TurnId
   | PrReviewNoUnresolvedFound CommitSha TurnId
   | PrReviewFixCompleted
+  | PrReviewFixIncomplete Text
   | PrReviewCleanFound CleanReviewEvidence
+  | PrReviewProblemsAdded CommitSha
+  | PrReviewReviewIncomplete Text
   | PrReviewMergeCompleted MergeCommit
   | IssueImplementInitialized IssueConfig ThreadId
   | IssueStartPlanMode TurnId
@@ -76,9 +79,18 @@ instance FromJSON WatcherEvent where
           <*> (TurnId <$> object .: "reviewerTurnId")
       "pr_review_fix_completed" ->
         pure PrReviewFixCompleted
+      "pr_review_fix_incomplete" ->
+        PrReviewFixIncomplete
+          <$> (object .:? "reason" .!= "incomplete")
       "pr_review_clean_found" ->
         PrReviewCleanFound
           <$> (CleanReviewEvidence <$> (CommitSha <$> object .: "commitSha") <*> (object .:? "comment" .!= "LGTM"))
+      "pr_review_problems_added" ->
+        PrReviewProblemsAdded
+          <$> (CommitSha <$> object .: "commitSha")
+      "pr_review_review_incomplete" ->
+        PrReviewReviewIncomplete
+          <$> (object .:? "reason" .!= "incomplete")
       "pr_review_merge_completed" ->
         PrReviewMergeCompleted
           <$> (MergeCommit . CommitSha <$> object .: "mergeCommitSha")
@@ -154,8 +166,14 @@ applyEvent (SomeWatcherState state@(PrCheckingReviews _config _worker (ReviewerI
   fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
 applyEvent (SomeWatcherState state@PrFixingReviews {}) PrReviewFixCompleted =
   fromDecision (step state ReviewFixCompleted)
+applyEvent (SomeWatcherState state@PrFixingReviews {}) (PrReviewFixIncomplete _reason) =
+  fromDecision (step state ReviewFixIncomplete)
 applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewCleanFound evidence) =
   fromDecision (step state (ReviewerFoundClean evidence))
+applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewProblemsAdded _commit) =
+  fromDecision (step state ReviewerFoundProblems)
+applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewReviewIncomplete _reason) =
+  fromDecision (step state ReviewerTurnIncomplete)
 applyEvent (SomeWatcherState state@PrMerging {}) (PrReviewMergeCompleted mergeCommit) =
   fromDecision (step state (MergeCompleted mergeCommit))
 applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssueStartPlanMode turnId) =
@@ -227,7 +245,10 @@ eventName = \case
   PrReviewUnresolvedFound {} -> "pr_review_unresolved_found"
   PrReviewNoUnresolvedFound {} -> "pr_review_no_unresolved_found"
   PrReviewFixCompleted -> "pr_review_fix_completed"
+  PrReviewFixIncomplete {} -> "pr_review_fix_incomplete"
   PrReviewCleanFound {} -> "pr_review_clean_found"
+  PrReviewProblemsAdded {} -> "pr_review_problems_added"
+  PrReviewReviewIncomplete {} -> "pr_review_review_incomplete"
   PrReviewMergeCompleted {} -> "pr_review_merge_completed"
   IssueImplementInitialized {} -> "issue_implement_initialized"
   IssueStartPlanMode {} -> "issue_start_plan_mode"

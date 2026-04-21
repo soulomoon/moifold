@@ -40,7 +40,10 @@ data Event (domain :: Domain) (phase :: Phase) where
   ReviewThreadsFound :: ReviewEvidence -> ActiveTurn -> Event 'PrReview 'CheckingReviews
   NoReviewThreadsFound :: CommitSha -> ActiveTurn -> Event 'PrReview 'CheckingReviews
   ReviewFixCompleted :: Event 'PrReview 'FixingReviews
+  ReviewFixIncomplete :: Event 'PrReview 'FixingReviews
   ReviewerFoundClean :: CleanReviewEvidence -> Event 'PrReview 'ReviewingClean
+  ReviewerFoundProblems :: Event 'PrReview 'ReviewingClean
+  ReviewerTurnIncomplete :: Event 'PrReview 'ReviewingClean
   MergeCompleted :: MergeCommit -> Event 'PrReview 'Merging
 
   MarkBlocked :: CanBlock phase => BlockedReason -> Event domain phase
@@ -108,10 +111,22 @@ step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle r
   Decision
     (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
     [SomeEffect (ReadReviewThreads config)]
+step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixIncomplete =
+  Decision
+    (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
+    [SomeEffect (ReadReviewThreads config)]
 step (PrReviewingClean config _commit _worker _reviewer) (ReviewerFoundClean evidence) =
   Decision
     (PrMerging config evidence)
     [SomeEffect (MergePullRequest (prNumber config) evidence)]
+step (PrReviewingClean config _commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerFoundProblems =
+  Decision
+    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+    [SomeEffect (ReadReviewThreads config)]
+step (PrReviewingClean config _commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
+  Decision
+    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+    [SomeEffect (ReadReviewThreads config)]
 step (PrMerging _config _evidence) (MergeCompleted mergeCommit) =
   Decision
     (CompleteState (PrMerged mergeCommit))
