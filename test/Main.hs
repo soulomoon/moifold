@@ -175,28 +175,45 @@ assert assertionName condition = do
   pure condition
 
 goldenReplayPr6Merged :: IO Bool
-goldenReplayPr6Merged = do
-  loaded <- loadNodePrReviewSnapshot "golden/pr-review/mlf2-pr6-merged"
+goldenReplayPr6Merged =
+  goldenReplayCase "golden/pr-review/mlf2-pr6-merged" PrReview Complete True
+
+goldenReplayCase :: FilePath -> Domain -> Phase -> Bool -> IO Bool
+goldenReplayCase fixture expectedDomain expectedPhase expectWarnings = do
+  loaded <- loadNodeSnapshot fixture
   case loaded of
     Left err -> do
-      putStrLn ("FAIL golden decode: " <> err)
+      putStrLn ("FAIL golden decode " <> fixture <> ": " <> err)
       pure False
     Right snapshot -> do
-      let replayed = replayNodePrReviewSnapshot snapshot
+      let replayed = replayNodeSnapshot snapshot
       case replayed of
         Left err -> do
-          putStrLn ("FAIL golden replay: " <> Text.unpack err)
+          putStrLn ("FAIL golden replay " <> fixture <> ": " <> Text.unpack err)
           pure False
         Right replay -> do
           results <-
             sequence
-              [ assert "golden repo parsed" (snapshot.config.repoFullName == "soulomoon/mlf2")
-              , assert "golden PR parsed" (snapshot.config.prNumber == 6)
-              , assert "golden replay domain" (someDomain replay.replayState == PrReview)
-              , assert "golden replay phase" (somePhase replay.replayState == Complete)
-              , assert "golden replay carries stale reviewer warning" (not (null replay.replayWarnings))
+              [ assert (fixture <> " domain") (someDomain replay.replayState == expectedDomain)
+              , assert (fixture <> " phase") (somePhase replay.replayState == expectedPhase)
+              , assert (fixture <> " warning expectation") (not (null replay.replayWarnings) == expectWarnings)
               ]
           pure (and results)
+
+goldenReplayCases :: IO Bool
+goldenReplayCases = do
+  results <-
+    sequence
+      [ goldenReplayPr6Merged
+      , goldenReplayCase "golden/pr-review/mlf2-pr6-unresolved" PrReview CheckingReviews True
+      , goldenReplayCase "golden/pr-review/mlf2-pr6-blocked" PrReview Blocked False
+      , goldenReplayCase "golden/pr-review/mlf2-pr6-clean-ready" PrReview Merging False
+      , goldenReplayCase "golden/issue-implement/mlf2-issue42-already-resolved" IssueImplement Complete False
+      , goldenReplayCase "golden/issue-implement/mlf2-issue42-plan-ready" IssueImplement PlanMode True
+      , goldenReplayCase "golden/issue-implement/mlf2-issue42-incomplete" IssueImplement Implementing True
+      , goldenReplayCase "golden/issue-implement/mlf2-issue42-blocked" IssueImplement Blocked False
+      ]
+  pure (and results)
 
 main :: IO ()
 main = do
@@ -212,5 +229,5 @@ main = do
       , quickCheckResult prop_plannerCompletionReturnsToReady
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       ]
-  goldenOk <- goldenReplayPr6Merged
+  goldenOk <- goldenReplayCases
   if all isSuccess results && goldenOk then pure () else exitFailure

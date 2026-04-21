@@ -179,6 +179,7 @@ data CleanReviewEvidence = CleanReviewEvidence
 
 data CompletionEvidence (domain :: Domain) where
   PlanningComplete :: CompletionEvidence 'IssuePlanning
+  IssueAlreadyResolved :: IssueNumber -> CompletionEvidence 'IssueImplement
   IssueComplete :: PrNumber -> CompletionEvidence 'IssueImplement
   PrMerged :: MergeCommit -> CompletionEvidence 'PrReview
 
@@ -200,10 +201,26 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> WorkerThread 'Idle
     -> WatcherState 'IssueImplement 'Triage
 
+  IssueTriageActive
+    :: IssueConfig
+    -> WorkerThread 'Active
+    -> WatcherState 'IssueImplement 'Triage
+
+  IssuePlanReady
+    :: IssueConfig
+    -> WorkerThread 'Idle
+    -> WatcherState 'IssueImplement 'PlanMode
+
   IssueInPlanMode
     :: IssueConfig
     -> WorkerThread 'Active
     -> WatcherState 'IssueImplement 'PlanMode
+
+  IssueImplementationReady
+    :: IssueConfig
+    -> Maybe PrNumber
+    -> WorkerThread 'Idle
+    -> WatcherState 'IssueImplement 'Implementing
 
   IssueImplementing
     :: IssueConfig
@@ -262,7 +279,10 @@ phaseOf :: WatcherState domain phase -> Phase
 phaseOf PlanningReady {} = Initialized
 phaseOf PlanningTurnActive {} = PlanMode
 phaseOf IssueNeedsTriage {} = Triage
+phaseOf IssueTriageActive {} = Triage
+phaseOf IssuePlanReady {} = PlanMode
 phaseOf IssueInPlanMode {} = PlanMode
+phaseOf IssueImplementationReady {} = Implementing
 phaseOf IssueImplementing {} = Implementing
 phaseOf PrCheckingReviews {} = CheckingReviews
 phaseOf PrFixingReviews {} = FixingReviews

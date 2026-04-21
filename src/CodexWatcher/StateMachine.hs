@@ -72,6 +72,8 @@ step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssuePlanMode activeT
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
     [SomeEffect (StartWorkerTurn threadId)]
+step state@IssueTriageActive {} (StartIssuePlanMode _activeTurn) =
+  Decision state []
 step (IssueInPlanMode config (WorkerActive _activeTurn)) (IssuePlanCompleted nextTurn) =
   Decision
     (IssueImplementing config (WorkerActive nextTurn))
@@ -79,7 +81,18 @@ step (IssueInPlanMode config (WorkerActive _activeTurn)) (IssuePlanCompleted nex
     , SomeEffect (CreatePullRequest config)
     , SomeEffect (StartWorkerTurn (activeThreadId nextTurn))
     ]
+step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted nextTurn) =
+  Decision
+    (IssueImplementing config (WorkerActive nextTurn))
+    [ SomeEffect (PushBranch (issueBranch config))
+    , SomeEffect (CreatePullRequest config)
+    , SomeEffect (StartWorkerTurn (activeThreadId nextTurn))
+    ]
 step (IssueImplementing _config _thread) (IssueImplementationCompleted prNumber) =
+  Decision
+    (CompleteState (IssueComplete prNumber))
+    [SomeEffect SleepUntilNextPoll]
+step (IssueImplementationReady _config _maybePr _thread) (IssueImplementationCompleted prNumber) =
   Decision
     (CompleteState (IssueComplete prNumber))
     [SomeEffect SleepUntilNextPoll]
