@@ -44,6 +44,8 @@ bin=$(cabal list-bin codex-watcher-hs)
 
 The command emits JSON and checks command availability, `gh auth`, watcher state files, workdir/git health, PR review event-log replay, duplicate ownership, and planner `maxParallel` invariants. It intentionally does not mutate GitHub, app-server threads, or local checkouts.
 
+The runtime event format is documented in `docs/event-log-schema.md`.
+
 ## Design Rule
 
 The type-level model owns lifecycle correctness. Runtime policy and external IO stay outside the core until the model is stable.
