@@ -7,6 +7,7 @@
 
 module Main (main) where
 
+import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
@@ -15,7 +16,16 @@ import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
+import Data.Aeson
+  ( Value (..)
+  , object
+  , toJSON
+  , (.=)
+  )
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Text (Text)
 import Data.Text qualified as Text
 import System.Exit (exitFailure)
 import Test.QuickCheck
@@ -404,6 +414,76 @@ prop_runtimeKillZeroOnlyChecksPid threadId =
         && spec.args == ["-0", Text.unpack pidText]
         && spec.cwd == Nothing
 
+prop_appServerInitializeRequestMatchesJsonRpc :: Bool
+prop_appServerInitializeRequestMatchesJsonRpc =
+  toJSON (initializeRequest 1 "codex-script" "0.1.0")
+    == object
+      [ "jsonrpc" .= ("2.0" :: Text)
+      , "id" .= (1 :: Int)
+      , "method" .= ("initialize" :: Text)
+      , "params" .= object
+          [ "clientInfo" .= object ["name" .= ("codex-script" :: Text), "version" .= ("0.1.0" :: Text)]
+          , "capabilities" .= object ["experimentalApi" .= True]
+          ]
+      ]
+
+prop_appServerThreadStartKeepsNodeNullFields :: Bool
+prop_appServerThreadStartKeepsNodeNullFields =
+  let request =
+        threadStartRequest
+          2
+          ThreadStartOptions
+            { threadCwd = "/workspace/repo"
+            , threadApprovalPolicy = "never"
+            , threadSandbox = "danger-full-access"
+            , threadModel = "gpt-5.4"
+            , threadDeveloperInstructions = "developer"
+            }
+   in request.requestMethod == "thread/start"
+        && all
+          (\key -> lookupValue key request.requestParams == Just Null)
+          ["modelProvider", "baseInstructions", "config", "personality", "serviceTier", "serviceName"]
+        && lookupValue "ephemeral" request.requestParams == Just (Bool False)
+
+prop_appServerTurnStartPlanModeEncodesCollaborationMode :: ThreadId -> Bool
+prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
+  let collaborationMode = planCollaborationMode "plan only" "gpt-5.4" "xhigh"
+      request =
+        turnStartRequest
+          3
+          TurnStartOptions
+            { turnThreadId = threadId
+            , turnCwd = "/workspace/repo"
+            , turnEffort = "xhigh"
+            , turnModel = "gpt-5.4"
+            , turnApprovalPolicy = "never"
+            , turnSandboxPolicy = "danger-full-access"
+            , turnInput = "write the plan"
+            , turnCollaborationMode = Just collaborationMode
+            }
+   in request.requestMethod == "turn/start"
+        && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
+        && lookupValue "collaborationMode" request.requestParams == Just collaborationMode
+        && lookupValue "summary" request.requestParams == Just Null
+        && lookupValue "outputSchema" request.requestParams == Just Null
+
+prop_appServerThreadReadAndInterruptUseThreadIds :: ThreadId -> TurnId -> Bool
+prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
+  let readRequest = threadReadRequest 4 threadId True
+      interruptRequest = turnInterruptRequest 5 threadId turnId
+   in readRequest.requestMethod == "thread/read"
+        && lookupValue "threadId" readRequest.requestParams == Just (String (unThreadId threadId))
+        && lookupValue "includeTurns" readRequest.requestParams == Just (Bool True)
+        && interruptRequest.requestMethod == "turn/interrupt"
+        && lookupValue "threadId" interruptRequest.requestParams == Just (String (unThreadId threadId))
+        && lookupValue "turnId" interruptRequest.requestParams == Just (String (unTurnId turnId))
+
+lookupValue :: Text -> Value -> Maybe Value
+lookupValue key (Object object') =
+  KeyMap.lookup (Key.fromText key) object'
+lookupValue _ _ =
+  Nothing
+
 assert :: String -> Bool -> IO Bool
 assert assertionName condition = do
   if condition
@@ -519,6 +599,10 @@ main = do
       , quickCheckResult prop_runtimeGitPushDryRunNeverForces
       , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
+      , quickCheckResult prop_appServerInitializeRequestMatchesJsonRpc
+      , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
+      , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
+      , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases
