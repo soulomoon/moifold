@@ -29,6 +29,7 @@ library
   hs-source-dirs:   src
   exposed-modules:
     CodexWatcher.AppServerProtocol
+    CodexWatcher.EffectInterpreter
     CodexWatcher.Effects
     CodexWatcher.EventLog
     CodexWatcher.GoldenReplay
@@ -70,6 +71,7 @@ test-suite watcher-core-test
     aeson >=2.2 && <3,
     base >=4.18 && <5,
     codex-watcher-hs,
+    filepath >=1.4 && <1.6,
     QuickCheck >=2.14 && <3,
     text >=2.0 && <3
   default-language: GHC2021

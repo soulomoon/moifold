@@ -11,6 +11,7 @@ This repository starts with the correctness core instead of runtime glue:
 - JSON event-log replay for Node watcher `events.jsonl` files.
 - A small runtime boundary for `gh`, `git`, process checks, and JSON file IO.
 - Pure JSON-RPC request builders for the Codex app-server thread/turn protocol.
+- A pure effect interpreter that compiles typed effects into ordered runtime/app-server actions.
 - QuickCheck properties for global invariants.
 
 The existing Node watcher remains the runtime reference while this model matures.

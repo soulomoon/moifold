@@ -8,6 +8,7 @@
 module Main (main) where
 
 import CodexWatcher.AppServerProtocol
+import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
@@ -27,6 +28,7 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
+import System.FilePath ((</>))
 import System.Exit (exitFailure)
 import Test.QuickCheck
 
@@ -369,12 +371,19 @@ runtimeCommandExamples =
   [ CommandVersion "git"
   , GhAuthStatus
   , GhApiUser
+  , GhIssueListOpen (RepoName "soulomoon/mlf2")
+  , GhPrListOpen (RepoName "soulomoon/mlf2")
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
+  , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
+  , GhCreatePullRequest (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
+  , GhResolveReviewThread (ReviewThreadId "PRRT_test")
+  , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
   , GitBranchCurrent "/tmp/work"
   , GitRevParseHead "/tmp/work"
   , GitStatusPorcelain "/tmp/work"
   , GitLsRemoteBranch "/tmp/work" (BranchName "codex/example")
   , GitPushDryRun "/tmp/work" (BranchName "codex/example")
+  , GitPush "/tmp/work" (BranchName "codex/example")
   , KillZero "123"
   , RawCommand "node" ["--version"] Nothing
   ]
@@ -389,6 +398,15 @@ prop_runtimeGitPushDryRunNeverForces branch =
    in spec.command == "git"
         && spec.cwd == Just "/tmp/work"
         && "--dry-run" `elem` spec.args
+        && "--force" `notElem` spec.args
+        && "--force-with-lease" `notElem` spec.args
+
+prop_runtimeGitPushNeverForces :: BranchName -> Bool
+prop_runtimeGitPushNeverForces branch =
+  let spec = renderRuntimeCommand (GitPush "/tmp/work" branch)
+   in spec.command == "git"
+        && spec.cwd == Just "/tmp/work"
+        && spec.args == ["push", "origin", Text.unpack (unBranchName branch)]
         && "--force" `notElem` spec.args
         && "--force-with-lease" `notElem` spec.args
 
@@ -477,6 +495,89 @@ prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
         && interruptRequest.requestMethod == "turn/interrupt"
         && lookupValue "threadId" interruptRequest.requestParams == Just (String (unThreadId threadId))
         && lookupValue "turnId" interruptRequest.requestParams == Just (String (unTurnId turnId))
+
+effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
+effectRuntimeConfig repo workdir requestId =
+  EffectRuntimeConfig
+    { effectRuntimeRepo = repo
+    , effectRuntimeWorkdir = workdir
+    , effectRuntimeStateDir = workdir </> ".watcher"
+    , effectRuntimeMergeMethod = "merge"
+    , effectRuntimeNextRequestId = requestId
+    , effectRuntimePlannerTurn = turnRuntime "planner prompt" Nothing
+    , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
+    , effectRuntimeReviewerTurn = turnRuntime "reviewer prompt" Nothing
+    }
+ where
+  turnRuntime input collaborationMode =
+    TurnRuntimeConfig
+      { turnRuntimeCwd = workdir
+      , turnRuntimeModel = "gpt-5.4"
+      , turnRuntimeEffort = "xhigh"
+      , turnRuntimeApprovalPolicy = "never"
+      , turnRuntimeSandboxPolicy = "danger-full-access"
+      , turnRuntimeInput = input
+      , turnRuntimeCollaborationMode = collaborationMode
+      }
+
+actionIsCommand :: (RuntimeCommand -> Bool) -> PlannedAction -> Bool
+actionIsCommand predicate = \case
+  PlannedCommand command -> predicate command
+  _ -> False
+
+actionIsTurnStartFor :: ThreadId -> PlannedAction -> Bool
+actionIsTurnStartFor threadId = \case
+  PlannedAppServerRequest request ->
+    request.requestMethod == "turn/start"
+      && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
+  _ -> False
+
+prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker :: IssueConfig -> ActiveTurn -> ActiveTurn -> Bool
+prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planningTurn implementationTurn =
+  case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted implementationTurn) of
+    Decision _state effects ->
+      let compiled =
+            compileEffectPlan
+              (effectRuntimeConfig (issueRepo config) "/tmp/work" 10)
+              effects
+          actions = compiled.compiledActions
+       in length actions == 3
+            && actionIsCommand (== GitPush "/tmp/work" (issueBranch config)) (actions !! 0)
+            && actionIsCommand (== GhCreatePullRequest config) (actions !! 1)
+            && actionIsTurnStartFor (activeThreadId implementationTurn) (actions !! 2)
+            && compiled.compiledNextRequestId == 11
+
+prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds :: ThreadId -> ThreadId -> Bool
+prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerThread =
+  let compiled =
+        compileEffectPlan
+          (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 20)
+          [ SomeEffect (StartWorkerTurn workerThread)
+          , SomeEffect (StartReviewerTurn reviewerThread)
+          ]
+   in fmap appServerRequestId compiled.compiledActions == [Just 20, Just 21]
+        && compiled.compiledNextRequestId == 22
+
+prop_effectInterpreterRecordBlockedWritesBlockState :: BlockedReason -> Bool
+prop_effectInterpreterRecordBlockedWritesBlockState reason =
+  let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 30
+      compiled = compileEffectPlan config [SomeEffect (RecordBlocked reason)]
+      expectedPath = config.effectRuntimeStateDir </> "block-state.json"
+      expectedJson = object ["blocked" .= True, "reason" .= unBlockedReason reason]
+   in compiled.compiledActions == [PlannedWriteJson expectedPath expectedJson]
+        && compiled.compiledNextRequestId == 30
+
+prop_effectInterpreterMergeUsesConfiguredRepoAndMethod :: PrNumber -> CleanReviewEvidence -> Bool
+prop_effectInterpreterMergeUsesConfiguredRepoAndMethod prNumber cleanEvidence =
+  let repo = RepoName "soulomoon/mlf2"
+      config = (effectRuntimeConfig repo "/tmp/work" 40) {effectRuntimeMergeMethod = "squash"}
+      compiled = compileEffectPlan config [SomeEffect (MergePullRequest prNumber cleanEvidence)]
+   in compiled.compiledActions == [PlannedCommand (GhPrMerge repo prNumber "squash")]
+
+appServerRequestId :: PlannedAction -> Maybe Int
+appServerRequestId = \case
+  PlannedAppServerRequest request -> Just request.requestId
+  _ -> Nothing
 
 lookupValue :: Text -> Value -> Maybe Value
 lookupValue key (Object object') =
@@ -597,12 +698,17 @@ main = do
       , quickCheckResult prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
       , quickCheckResult prop_runtimeGitPushDryRunNeverForces
+      , quickCheckResult prop_runtimeGitPushNeverForces
       , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_appServerInitializeRequestMatchesJsonRpc
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
       , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
       , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds
+      , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
+      , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
+      , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
+      , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases

@@ -25,8 +25,11 @@ module CodexWatcher.Runtime
 
 import CodexWatcher.Types
   ( BranchName (..)
+  , IssueConfig (..)
   , PrNumber (..)
+  , PrConfig (..)
   , RepoName (..)
+  , ReviewThreadId (..)
   )
 import Control.Exception (IOException, try)
 import Data.Aeson
@@ -47,12 +50,19 @@ data RuntimeCommand
   = CommandVersion String
   | GhAuthStatus
   | GhApiUser
+  | GhIssueListOpen RepoName
+  | GhPrListOpen RepoName
   | GhPrView RepoName PrNumber [Text]
+  | GhReviewThreads PrConfig
+  | GhCreatePullRequest IssueConfig
+  | GhResolveReviewThread ReviewThreadId
+  | GhPrMerge RepoName PrNumber Text
   | GitBranchCurrent FilePath
   | GitRevParseHead FilePath
   | GitStatusPorcelain FilePath
   | GitLsRemoteBranch FilePath BranchName
   | GitPushDryRun FilePath BranchName
+  | GitPush FilePath BranchName
   | KillZero Text
   | RawCommand String [String] (Maybe FilePath)
   deriving stock (Eq, Show, Generic)
@@ -98,6 +108,18 @@ renderRuntimeCommand GhAuthStatus =
   RuntimeCommandSpec "gh" ["auth", "status"] Nothing ""
 renderRuntimeCommand GhApiUser =
   RuntimeCommandSpec "gh" ["api", "user"] Nothing ""
+renderRuntimeCommand (GhIssueListOpen repo) =
+  RuntimeCommandSpec
+    "gh"
+    ["issue", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,labels,assignees"]
+    Nothing
+    ""
+renderRuntimeCommand (GhPrListOpen repo) =
+  RuntimeCommandSpec
+    "gh"
+    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid"]
+    Nothing
+    ""
 renderRuntimeCommand (GhPrView repo prNumber fields) =
   RuntimeCommandSpec
     "gh"
@@ -111,6 +133,60 @@ renderRuntimeCommand (GhPrView repo prNumber fields) =
     ]
     Nothing
     ""
+renderRuntimeCommand (GhReviewThreads config) =
+  let (owner, name) = repoOwnerName (prRepo config)
+   in RuntimeCommandSpec
+        "gh"
+        [ "api"
+        , "graphql"
+        , "-f"
+        , "query=" <> reviewThreadsQuery
+        , "-f"
+        , "owner=" <> Text.unpack owner
+        , "-f"
+        , "name=" <> Text.unpack name
+        , "-F"
+        , "number=" <> show (unPrNumber (prNumber config))
+        ]
+        Nothing
+        ""
+renderRuntimeCommand (GhCreatePullRequest config) =
+  RuntimeCommandSpec
+    "gh"
+    [ "pr"
+    , "create"
+    , "--repo"
+    , Text.unpack (unRepoName (issueRepo config))
+    , "--head"
+    , Text.unpack (unBranchName (issueBranch config))
+    , "--fill"
+    ]
+    Nothing
+    ""
+renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
+  RuntimeCommandSpec
+    "gh"
+    [ "api"
+    , "graphql"
+    , "-f"
+    , "query=mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id,isResolved}}}"
+    , "-f"
+    , "threadId=" <> Text.unpack (unReviewThreadId reviewThreadId)
+    ]
+    Nothing
+    ""
+renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
+  RuntimeCommandSpec
+    "gh"
+    [ "pr"
+    , "merge"
+    , show (unPrNumber prNumber)
+    , "--repo"
+    , Text.unpack (unRepoName repo)
+    , mergeFlag mergeMethod
+    ]
+    Nothing
+    ""
 renderRuntimeCommand (GitBranchCurrent workdir) =
   RuntimeCommandSpec "git" ["branch", "--show-current"] (Just workdir) ""
 renderRuntimeCommand (GitRevParseHead workdir) =
@@ -121,10 +197,28 @@ renderRuntimeCommand (GitLsRemoteBranch workdir branch) =
   RuntimeCommandSpec "git" ["ls-remote", "origin", "refs/heads/" <> Text.unpack (unBranchName branch)] (Just workdir) ""
 renderRuntimeCommand (GitPushDryRun workdir branch) =
   RuntimeCommandSpec "git" ["push", "--dry-run", "origin", Text.unpack (unBranchName branch)] (Just workdir) ""
+renderRuntimeCommand (GitPush workdir branch) =
+  RuntimeCommandSpec "git" ["push", "origin", Text.unpack (unBranchName branch)] (Just workdir) ""
 renderRuntimeCommand (KillZero pid) =
   RuntimeCommandSpec "kill" ["-0", Text.unpack pid] Nothing ""
 renderRuntimeCommand (RawCommand command' args' cwd') =
   RuntimeCommandSpec command' args' cwd' ""
+
+repoOwnerName :: RepoName -> (Text, Text)
+repoOwnerName repo =
+  case Text.breakOn "/" (unRepoName repo) of
+    (owner, rest)
+      | Text.null rest -> (owner, "")
+      | otherwise -> (owner, Text.drop 1 rest)
+
+mergeFlag :: Text -> String
+mergeFlag "squash" = "--squash"
+mergeFlag "rebase" = "--rebase"
+mergeFlag _ = "--merge"
+
+reviewThreadsQuery :: String
+reviewThreadsQuery =
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,body,path,line,author{login}}}}}}}}"
 
 runRuntimeCommand :: RuntimeCommand -> IO CommandReport
 runRuntimeCommand = runProcessSpec . renderRuntimeCommand
