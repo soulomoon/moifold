@@ -31,6 +31,7 @@ library
     CodexWatcher.ActionExecutor
     CodexWatcher.AppServerClient
     CodexWatcher.AppServerProtocol
+    CodexWatcher.Cli
     CodexWatcher.CompatibilityState
     CodexWatcher.Daemon
     CodexWatcher.DaemonLoop
@@ -43,6 +44,7 @@ library
     CodexWatcher.IssuePlanningFanout
     CodexWatcher.IssueImplementWatcher
     CodexWatcher.IssuePlanningWatcher
+    CodexWatcher.MigrationRehearsal
     CodexWatcher.Json
     CodexWatcher.Migration
     CodexWatcher.Protocol
@@ -62,6 +64,7 @@ library
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
     network >=3.2 && <3.3,
+    optparse-applicative >=0.18 && <0.20,
     process >=1.6 && <1.7,
     time >=1.12 && <1.15,
     text >=2.0 && <3

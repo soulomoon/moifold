@@ -89,6 +89,8 @@ The marker is surfaced by healthcheck and gives a simple backout handle without 
 
 Use `render-service` with the same watcher loop flags to print a systemd unit and matching logrotate snippet. The command is render-only; it does not install or enable host services.
 
+Use `rehearse-migration` to prepare a side-by-side Haskell watcher rehearsal without touching the Node-owned source state. By default it renders the target path, event replay result, service definition, logrotate snippet, and rollback commands. Add `--execute` to copy the source watcher directory into `--target-state-dir` or `--rehearsal-root`, skip runtime files such as pid/log/owner markers, and mark the copy as Haskell-owned.
+
 Prepare issue implementer child state from a planner selection:
 
 ```bash

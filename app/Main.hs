@@ -9,6 +9,7 @@ module Main (main) where
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
+import CodexWatcher.Cli
 import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
@@ -21,6 +22,7 @@ import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.Migration
+import CodexWatcher.MigrationRehearsal
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
 import CodexWatcher.Runtime
@@ -28,7 +30,6 @@ import CodexWatcher.Snapshot
 import CodexWatcher.Supervisor
 import CodexWatcher.Types
 import CodexWatcher.TurnOutput
-import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
 import Control.Monad (unless, when)
@@ -36,83 +37,49 @@ import Data.Aeson (Value (..))
 import Data.List (nub, sortOn)
 import Data.Maybe (catMaybes)
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
-import System.Environment (getArgs, getExecutablePath)
+import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
+import System.Environment (getExecutablePath)
 import System.Exit (die)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (IOMode (AppendMode), hFlush, withFile)
 import System.Posix.Process (getProcessID)
 import System.Process qualified as Process
-import Text.Read (readMaybe)
 
 main :: IO ()
 main =
-  getArgs >>= \case
-    ["replay", dir] -> replayAny dir
-    ["replay-pr-review", dir] -> replayPrReview dir
-    ["replay-issue-implement", dir] -> replayIssueImplement dir
-    ["replay-events", path] -> replayEvents path
-    "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
-    "mark-runtime-owner" : rest -> markRuntimeOwner rest
-    "stop-daemon" : rest -> stopDaemon rest
-    "render-service" : rest -> renderService rest
-    "issue-fanout" : rest -> issueFanout rest
-    "observe-once" : rest -> observeOnce rest
-    "run-pr-review" : rest -> runAutomaticLoop "pr-review" rest
-    "run-issue-implement" : rest -> runAutomaticLoop "issue-implement" rest
-    "run-issue-planning" : rest -> runAutomaticLoop "issue-planning" rest
-    [] -> do
-      putStrLn "codex-watcher-hs"
-      putStrLn "usage: codex-watcher-hs replay <node-watcher-state-dir>"
-      putStrLn "       codex-watcher-hs replay-pr-review <node-pr-review-state-dir>"
-      putStrLn "       codex-watcher-hs replay-issue-implement <node-issue-implement-state-dir>"
-      putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
-      putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
-      putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
-      putStrLn "       codex-watcher-hs stop-daemon --pid-file <path> | --state-dir <path> --domain pr-review|issue-implement|issue-planning"
-      putStrLn "       codex-watcher-hs render-service --name <name> --domain pr-review|issue-implement|issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port"
-      putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N [--open-issues 1,2] [--active-issues 3] [--execute] [--start-children]"
-      putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
-      putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop] [--implementers-root <path> --start-children]"
-      putStrLn "type-level domains:"
-      print [IssuePlanning, IssueImplement, PrReview]
-      putStrLn ("example repo newtype is available: " <> Text.unpack (unRepoName (RepoName "soulomoon/mlf2")))
-    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl> | healthcheck [--state-root <path>] [--repo owner/name] | mark-runtime-owner --state-dir <path> --owner node|haskell | observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> | run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port"
+  execCliCommandParser >>= runCliCommand
 
-parseHealthcheckOptions :: [String] -> HealthcheckOptions
-parseHealthcheckOptions args =
+runCliCommand :: CliCommand -> IO ()
+runCliCommand = \case
+  CliReplay dir -> replayAny dir
+  CliReplayPrReview dir -> replayPrReview dir
+  CliReplayIssueImplement dir -> replayIssueImplement dir
+  CliReplayEvents path -> replayEvents path
+  CliHealthcheck options -> runHealthcheck (healthcheckOptionsFromCli options)
+  CliMarkRuntimeOwner stateDir owner -> markRuntimeOwner stateDir owner
+  CliStopDaemon options -> stopDaemon options
+  CliRenderService options -> renderService options
+  CliRehearseMigration options -> rehearseMigration options
+  CliIssueFanout options -> issueFanout options
+  CliObserveOnce options -> observeOnce options
+  CliRunLoop options -> runAutomaticLoop options
+
+healthcheckOptionsFromCli :: HealthcheckCli -> HealthcheckOptions
+healthcheckOptionsFromCli options =
   HealthcheckOptions
-    { stateRoot = maybe "/workspace/artifacts" id (lookupFlag "--state-root" args)
-    , repoFilter = Text.pack <$> lookupFlag "--repo" args
-    , appServerEndpoint = healthcheckAppServerEndpoint args
+    { stateRoot = options.healthcheckCliStateRoot
+    , repoFilter = unRepoName <$> options.healthcheckCliRepo
+    , appServerEndpoint = options.healthcheckCliEndpoint
     }
 
-healthcheckAppServerEndpoint :: [String] -> Maybe AppServerEndpoint
-healthcheckAppServerEndpoint args = do
-  host <- lookupFlag "--app-server-host" args
-  portText <- lookupFlag "--app-server-port" args
-  port <- readMaybe portText
-  let path = maybe "/" id (lookupFlag "--app-server-path" args)
-  pure (AppServerEndpoint host port path)
-
-lookupFlag :: String -> [String] -> Maybe String
-lookupFlag _ [] = Nothing
-lookupFlag flag (current : value : rest)
-  | current == flag = Just value
-  | otherwise = lookupFlag flag (value : rest)
-lookupFlag _ [_] = Nothing
-
-markRuntimeOwner :: [String] -> IO ()
-markRuntimeOwner args = do
-  stateDir <- maybe (die "mark-runtime-owner requires --state-dir <path>") pure (lookupFlag "--state-dir" args)
-  ownerText <- maybe (die "mark-runtime-owner requires --owner node|haskell") (pure . Text.pack) (lookupFlag "--owner" args)
-  owner <- either (die . Text.unpack) pure (parseRuntimeOwner ownerText)
+markRuntimeOwner :: FilePath -> RuntimeOwner -> IO ()
+markRuntimeOwner stateDir owner = do
   writeRuntimeOwner ioRuntimeInterpreter stateDir owner
   putStrLn ("wrote runtime owner " <> Text.unpack (runtimeOwnerText owner) <> " to " <> stateDir)
 
-stopDaemon :: [String] -> IO ()
-stopDaemon args = do
-  pidPath <- stopDaemonPidPath args
+stopDaemon :: StopDaemonCli -> IO ()
+stopDaemon options = do
+  pidPath <- stopDaemonPidPath options
   exists <- doesFileExist pidPath
   if not exists
     then putStrLn ("daemon pid file does not exist: " <> pidPath)
@@ -129,67 +96,60 @@ stopDaemon args = do
             then putStrLn ("sent TERM to daemon pid " <> Text.unpack pidText)
             else die ("failed to stop daemon: " <> Text.unpack (commandText report))
 
-stopDaemonPidPath :: [String] -> IO FilePath
-stopDaemonPidPath args =
-  case lookupFlag "--pid-file" args of
+stopDaemonPidPath :: StopDaemonCli -> IO FilePath
+stopDaemonPidPath options =
+  case options.stopDaemonCliPidFile of
     Just pidPath -> pure pidPath
     Nothing -> do
-      stateDir <- requiredFlag "--state-dir" args
-      domain <- requiredFlag "--domain" args
-      unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
-        die ("unsupported daemon domain: " <> domain)
+      stateDir <- maybe (die "stop-daemon requires --pid-file <path> or --state-dir <path> --domain <domain>") pure options.stopDaemonCliStateDir
+      domain <- maybe (die "stop-daemon requires --pid-file <path> or --state-dir <path> --domain <domain>") pure options.stopDaemonCliDomain
       pure (stateDir </> pidFileNameForDomain domain)
 
-renderService :: [String] -> IO ()
-renderService args = do
-  service <- serviceConfigFromArgs args
+renderService :: RenderServiceCli -> IO ()
+renderService options = do
+  service <- serviceConfigFromCli options
   putStrLn "# systemd service"
   putStr (Text.unpack (renderSystemdService service))
   putStrLn "# logrotate"
   putStr (Text.unpack (renderLogrotateConfig service))
 
-serviceConfigFromArgs :: [String] -> IO WatcherServiceConfig
-serviceConfigFromArgs args = do
-  name <- Text.pack <$> requiredFlag "--name" args
-  domain <- requiredFlag "--domain" args
-  unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
-    die ("unsupported daemon domain: " <> domain)
-  eventsPath <- requiredFlag "--events" args
-  stateDir <- requiredFlag "--state-dir" args
-  repo <- requiredFlag "--repo" args
-  workdir <- requiredFlag "--workdir" args
-  host <- requiredFlag "--app-server-host" args
-  port <- requiredFlag "--app-server-port" args
-  executable <- maybe getExecutablePath pure (lookupFlag "--executable" args)
+serviceConfigFromCli :: RenderServiceCli -> IO WatcherServiceConfig
+serviceConfigFromCli options = do
+  executable <- maybe getExecutablePath pure options.renderServiceCliExecutable
   plannerArgs <-
-    case (domain, lookupFlag "--planner-thread-id" args <|> lookupFlag "--thread-id" args) of
-      ("issue-planning", Just threadId) -> pure ["--planner-thread-id", threadId]
-      ("issue-planning", Nothing) -> die "render-service for issue-planning requires --planner-thread-id <thread-id>"
+    case (options.renderServiceCliDomain, options.renderServiceCliPlannerThread) of
+      (CliIssuePlanning, Just threadId) -> pure ["--planner-thread-id", Text.unpack (unThreadId threadId)]
+      (CliIssuePlanning, Nothing) -> die "render-service for issue-planning requires --planner-thread-id <thread-id>"
       _ -> pure []
-  let pollSeconds = maybe "30" id (lookupFlag "--poll-seconds" args)
-      logDir = maybe (stateDir </> "logs") id (lookupFlag "--log-dir" args)
-      restartSeconds = maybe 10 id (lookupFlag "--restart-seconds" args >>= readMaybe)
-      rotateCount = maybe 14 id (lookupFlag "--rotate" args >>= readMaybe)
+  pure (serviceConfigFromCliWithExecutable options executable plannerArgs)
+
+serviceConfigFromCliWithExecutable :: RenderServiceCli -> FilePath -> [String] -> WatcherServiceConfig
+serviceConfigFromCliWithExecutable options executable plannerArgs =
+  let domain = cliDomainName options.renderServiceCliDomain
+      stateDir = options.renderServiceCliStateDir
+      endpoint = options.renderServiceCliEndpoint
+      pollSeconds = show options.renderServiceCliPollSeconds
+      logDir = maybe (stateDir </> "logs") id options.renderServiceCliLogDir
       appServerPathArgs =
-        maybe [] (\path -> ["--app-server-path", path]) (lookupFlag "--app-server-path" args)
+        if endpoint.appServerPath == "/" then [] else ["--app-server-path", endpoint.appServerPath]
       implementerArgs =
-        maybe [] (\root -> ["--implementers-root", root]) (lookupFlag "--implementers-root" args)
+        maybe [] (\root -> ["--implementers-root", root]) options.renderServiceCliImplementersRoot
       childArgs =
-        if hasFlag "--start-children" args then ["--start-children"] else []
+        if options.renderServiceCliStartChildren then ["--start-children"] else []
       commandArgs =
         [ "run-" <> domain
         , "--events"
-        , eventsPath
+        , options.renderServiceCliEventsPath
         , "--state-dir"
         , stateDir
         , "--repo"
-        , repo
+        , Text.unpack (unRepoName options.renderServiceCliRepo)
         , "--workdir"
-        , workdir
+        , options.renderServiceCliWorkdir
         , "--app-server-host"
-        , host
+        , endpoint.appServerHost
         , "--app-server-port"
-        , port
+        , show endpoint.appServerPort
         , "--poll-seconds"
         , pollSeconds
         , "--execute"
@@ -199,35 +159,136 @@ serviceConfigFromArgs args = do
           <> plannerArgs
           <> implementerArgs
           <> childArgs
-  pure
+   in
     WatcherServiceConfig
-      { serviceName = name
-      , serviceDescription = "Codex watcher " <> name
+      { serviceName = options.renderServiceCliName
+      , serviceDescription = "Codex watcher " <> options.renderServiceCliName
       , serviceExecutable = executable
       , serviceArguments = commandArgs
-      , serviceWorkingDirectory = workdir
+      , serviceWorkingDirectory = options.renderServiceCliWorkdir
       , serviceLogDirectory = logDir
-      , serviceRestartSeconds = restartSeconds
-      , serviceLogRotateCount = rotateCount
+      , serviceRestartSeconds = options.renderServiceCliRestartSeconds
+      , serviceLogRotateCount = options.renderServiceCliRotateCount
       }
 
-issueFanout :: [String] -> IO ()
-issueFanout args = do
-  repo <- RepoName . Text.pack <$> requiredFlag "--repo" args
-  implementersRoot <- requiredFlag "--implementers-root" args
-  maxParallel <- requiredIntFlag "--max-parallel" args
-  openIssues <- resolveFanoutOpenIssues args repo
-  activeIssues <- resolveFanoutActiveIssues args repo implementersRoot
-  let executionMode = if hasFlag "--execute" args then ExecuteActions else DryRunActions
-      maybeEndpoint = healthcheckAppServerEndpoint args
-  childLaunch <- issueImplementerChildLaunchMode args executionMode maybeEndpoint
+rehearseMigration :: RehearsalCli -> IO ()
+rehearseMigration options = do
+  plan <- migrationRehearsalPlanFromCli options
+  when options.rehearsalCliExecute $ do
+    copyWatcherStateDir plan.rehearsalSourceStateDir plan.rehearsalTargetStateDir
+    writeRuntimeOwner ioRuntimeInterpreter plan.rehearsalTargetStateDir HaskellRuntime
+  putStrLn ("source: " <> plan.rehearsalSourceStateDir)
+  putStrLn ("target: " <> plan.rehearsalTargetStateDir)
+  putStrLn ("mode: " <> if options.rehearsalCliExecute then "copied" else "dry-run")
+  replayRehearsalEvents plan.rehearsalEventsPath
+  service <- rehearsalServiceConfig options plan
+  putStrLn "# systemd service"
+  putStr (Text.unpack (renderSystemdService service))
+  putStrLn "# logrotate"
+  putStr (Text.unpack (renderLogrotateConfig service))
+  putStrLn "# backout"
+  mapM_ (putStrLn . Text.unpack) (renderBackoutCommands plan.rehearsalTargetStateDir plan.rehearsalDomain)
+
+migrationRehearsalPlanFromCli :: RehearsalCli -> IO MigrationRehearsalPlan
+migrationRehearsalPlanFromCli options = do
+  targetStateDir <-
+    case options.rehearsalCliTargetStateDir of
+      Just target -> pure target
+      Nothing -> do
+        root <- maybe (die "rehearse-migration requires --rehearsal-root <path> or --target-state-dir <path>") pure options.rehearsalCliRehearsalRoot
+        pure (defaultRehearsalTarget root options.rehearsalCliSourceStateDir)
+  let eventsPath = maybe (targetStateDir </> "events.jsonl") id options.rehearsalCliEventsPath
+      serviceName = maybe (Text.pack (takeFileName targetStateDir)) id options.rehearsalCliName
+  pure
+    MigrationRehearsalPlan
+      { rehearsalSourceStateDir = options.rehearsalCliSourceStateDir
+      , rehearsalTargetStateDir = targetStateDir
+      , rehearsalDomain = cliDomainName options.rehearsalCliDomain
+      , rehearsalEventsPath = eventsPath
+      , rehearsalServiceName = serviceName
+      }
+
+rehearsalServiceConfig :: RehearsalCli -> MigrationRehearsalPlan -> IO WatcherServiceConfig
+rehearsalServiceConfig options plan =
+  serviceConfigFromCli
+    RenderServiceCli
+      { renderServiceCliName = plan.rehearsalServiceName
+      , renderServiceCliDomain = options.rehearsalCliDomain
+      , renderServiceCliEventsPath = plan.rehearsalEventsPath
+      , renderServiceCliStateDir = plan.rehearsalTargetStateDir
+      , renderServiceCliRepo = options.rehearsalCliRepo
+      , renderServiceCliWorkdir = options.rehearsalCliWorkdir
+      , renderServiceCliEndpoint = options.rehearsalCliEndpoint
+      , renderServiceCliExecutable = options.rehearsalCliExecutable
+      , renderServiceCliPlannerThread = options.rehearsalCliPlannerThread
+      , renderServiceCliPollSeconds = options.rehearsalCliPollSeconds
+      , renderServiceCliLogDir = options.rehearsalCliLogDir
+      , renderServiceCliRestartSeconds = options.rehearsalCliRestartSeconds
+      , renderServiceCliRotateCount = options.rehearsalCliRotateCount
+      , renderServiceCliImplementersRoot = options.rehearsalCliImplementersRoot
+      , renderServiceCliStartChildren = options.rehearsalCliStartChildren
+      }
+
+copyWatcherStateDir :: FilePath -> FilePath -> IO ()
+copyWatcherStateDir source target = do
+  sourceExists <- doesDirectoryExist source
+  unless sourceExists $
+    die ("source watcher state directory does not exist: " <> source)
+  targetDirectoryExists <- doesDirectoryExist target
+  targetFileExists <- doesFileExist target
+  when (targetDirectoryExists || targetFileExists) $
+    die ("refusing to overwrite existing rehearsal target: " <> target)
+  createDirectoryIfMissing True target
+  copyStateContents source target
+
+copyStateContents :: FilePath -> FilePath -> IO ()
+copyStateContents source target = do
+  entries <- listDirectory source
+  mapM_ copyStateEntry entries
+ where
+  copyStateEntry entry =
+    when (shouldCopyStateEntry entry) $ do
+      let sourcePath = source </> entry
+          targetPath = target </> entry
+      isDirectory <- doesDirectoryExist sourcePath
+      isFile <- doesFileExist sourcePath
+      if isDirectory
+        then createDirectoryIfMissing True targetPath >> copyStateContents sourcePath targetPath
+        else when isFile (copyFile sourcePath targetPath)
+
+replayRehearsalEvents :: FilePath -> IO ()
+replayRehearsalEvents eventsPath = do
+  exists <- doesFileExist eventsPath
+  if not exists
+    then putStrLn ("event replay: skipped, missing " <> eventsPath)
+    else do
+      loaded <- loadEventLogFile eventsPath
+      events <- either die pure loaded
+      replay <- either (die . formatReplayFailure) pure (replayEventLog events)
+      putStrLn ("event replay domain: " <> show (someDomain replay.replayState))
+      putStrLn ("event replay phase: " <> show (somePhase replay.replayState))
+      putStrLn ("event replay events: " <> show (length events))
+
+issueFanout :: IssueFanoutCli -> IO ()
+issueFanout options = do
+  openIssues <- resolveFanoutOpenIssues options.issueFanoutCliOpenIssues options.issueFanoutCliRepo
+  activeIssues <- resolveFanoutActiveIssues options.issueFanoutCliActiveIssues options.issueFanoutCliRepo options.issueFanoutCliImplementersRoot
+  let executionMode = if options.issueFanoutCliExecute then ExecuteActions else DryRunActions
+      maybeEndpoint = options.issueFanoutCliEndpoint
+  childLaunch <-
+    issueImplementerChildLaunchMode
+      options.issueFanoutCliStartChildren
+      options.issueFanoutCliPollSeconds
+      options.issueFanoutCliChildPollSeconds
+      executionMode
+      maybeEndpoint
   let fanoutConfig =
-        (defaultIssuePlanningFanoutConfig implementersRoot)
-          { fanoutWorkdirRoot = lookupFlag "--workdir-root" args
-          , fanoutBranchPrefix = Text.pack (maybe "codex/issue-" id (lookupFlag "--branch-prefix" args))
-          , fanoutThreadPrefix = Text.pack (maybe "issue-worker-" id (lookupFlag "--thread-prefix" args))
+        (defaultIssuePlanningFanoutConfig options.issueFanoutCliImplementersRoot)
+          { fanoutWorkdirRoot = options.issueFanoutCliWorkdirRoot
+          , fanoutBranchPrefix = options.issueFanoutCliBranchPrefix
+          , fanoutThreadPrefix = options.issueFanoutCliThreadPrefix
           }
-      plannerConfig = PlannerConfig repo maxParallel
+      plannerConfig = PlannerConfig options.issueFanoutCliRepo options.issueFanoutCliMaxParallel
       launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
       launchEndpoint =
         case executionMode of
@@ -236,20 +297,20 @@ issueFanout args = do
   runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
   putStrLn ("launches: " <> show (length launches))
 
-resolveFanoutOpenIssues :: [String] -> RepoName -> IO [IssueNumber]
-resolveFanoutOpenIssues args repo =
-  case lookupFlag "--open-issues" args of
-    Just value -> parseIssueNumbers "--open-issues" value
+resolveFanoutOpenIssues :: Maybe [IssueNumber] -> RepoName -> IO [IssueNumber]
+resolveFanoutOpenIssues maybeIssues repo =
+  case maybeIssues of
+    Just issues -> pure issues
     Nothing -> do
       issueResult <- runGhIssueListOpen ioRuntimeInterpreter repo
       case issueResult of
         Left errorMessage -> die ("failed to discover open issues: " <> Text.unpack errorMessage)
         Right issues -> pure (fmap ghIssueNumber issues)
 
-resolveFanoutActiveIssues :: [String] -> RepoName -> FilePath -> IO [IssueNumber]
-resolveFanoutActiveIssues args repo implementersRoot =
-  case lookupFlag "--active-issues" args of
-    Just value -> parseIssueNumbers "--active-issues" value
+resolveFanoutActiveIssues :: Maybe [IssueNumber] -> RepoName -> FilePath -> IO [IssueNumber]
+resolveFanoutActiveIssues maybeIssues repo implementersRoot =
+  case maybeIssues of
+    Just issues -> pure issues
     Nothing -> discoverActiveIssueImplementers repo implementersRoot
 
 discoverActiveIssueImplementers :: RepoName -> FilePath -> IO [IssueNumber]
@@ -281,12 +342,12 @@ data IssueImplementerChildLaunch
   | PrintChildLaunchCommands AppServerEndpoint Int
   | StartChildLaunches AppServerEndpoint Int
 
-issueImplementerChildLaunchMode :: [String] -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
-issueImplementerChildLaunchMode args executionMode maybeEndpoint
-  | not (hasFlag "--start-children" args) = pure DoNotLaunchChildren
+issueImplementerChildLaunchMode :: Bool -> Maybe Int -> Maybe Int -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
+issueImplementerChildLaunchMode startChildren maybePollSeconds maybeChildPollSeconds executionMode maybeEndpoint
+  | not startChildren = pure DoNotLaunchChildren
   | otherwise = do
       endpoint <- maybe (die "--start-children requires --app-server-host and --app-server-port") pure maybeEndpoint
-      let pollSeconds = maybe 30 id (lookupFlag "--child-poll-seconds" args <|> lookupFlag "--poll-seconds" args >>= readMaybe)
+      let pollSeconds = maybe 30 id (firstJust maybeChildPollSeconds maybePollSeconds)
       pure case executionMode of
         DryRunActions -> PrintChildLaunchCommands endpoint pollSeconds
         ExecuteActions -> StartChildLaunches endpoint pollSeconds
@@ -425,21 +486,18 @@ launchIssueNumber launch =
   case launch.launchIssueConfig of
     IssueConfig _ issue _ -> issue
 
-observeOnce :: [String] -> IO ()
-observeOnce args = do
-  eventsPath <- requiredFlag "--events" args
-  stateDir <- requiredFlag "--state-dir" args
-  repo <- RepoName . Text.pack <$> requiredFlag "--repo" args
-  observation <- parseDaemonObservation args
-  executor <- observeOnceExecutor args
-  let workdir = maybe "." id (lookupFlag "--workdir" args)
+observeOnce :: ObserveOnceCli -> IO ()
+observeOnce cli = do
+  observation <- parseDaemonObservation cli
+  executor <- observeOnceExecutor cli
+  let executionMode = if cli.observeCliExecute then ExecuteActions else DryRunActions
       options =
         DaemonOptions
-          { daemonEventLogPath = eventsPath
-          , daemonRuntimeConfig = defaultEffectRuntimeConfig repo workdir stateDir
-          , daemonExecutionMode = if hasFlag "--execute" args then ExecuteActions else DryRunActions
+          { daemonEventLogPath = cli.observeCliEventsPath
+          , daemonRuntimeConfig = defaultEffectRuntimeConfig cli.observeCliRepo cli.observeCliWorkdir cli.observeCliStateDir
+          , daemonExecutionMode = executionMode
           }
-  validateRuntimeOwnerForExecution stateDir options.daemonExecutionMode
+  validateRuntimeOwnerForExecution cli.observeCliStateDir options.daemonExecutionMode
   result <- runObservedDaemonTickFromFile executor options observation
   case result of
     Left failure -> die (Text.unpack (formatDaemonFailure failure))
@@ -450,60 +508,49 @@ observeOnce args = do
       putStrLn ("actions: " <> show (length tick.daemonObservedActionReports))
       putStrLn ("mode: " <> show options.daemonExecutionMode)
 
-observeOnceExecutor :: [String] -> IO (ActionExecutor IO)
-observeOnceExecutor args
-  | hasFlag "--execute" args = do
-      host <- requiredFlag "--app-server-host" args
-      port <- requiredIntFlag "--app-server-port" args
-      let path = maybe "/" id (lookupFlag "--app-server-path" args)
-          endpoint = AppServerEndpoint host port path
+observeOnceExecutor :: ObserveOnceCli -> IO (ActionExecutor IO)
+observeOnceExecutor cli
+  | cli.observeCliExecute = do
+      endpoint <- maybe (die "--execute requires --app-server-host and --app-server-port") pure cli.observeCliEndpoint
       pure (ioActionExecutor (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions) (pure ()) (pure ()))
   | otherwise =
       pure (ioActionExecutor (AppServerInterpreter (\_ -> pure Null)) (pure ()) (pure ()))
 
-runAutomaticLoop :: String -> [String] -> IO ()
-runAutomaticLoop domain args = do
-  eventsPath <- requiredFlag "--events" args
-  stateDir <- requiredFlag "--state-dir" args
-  repo <- RepoName . Text.pack <$> requiredFlag "--repo" args
-  host <- requiredFlag "--app-server-host" args
-  port <- requiredIntFlag "--app-server-port" args
-  let workdir = maybe "." id (lookupFlag "--workdir" args)
-      path = maybe "/" id (lookupFlag "--app-server-path" args)
-      endpoint = AppServerEndpoint host port path
-      pollSeconds = maybe 30 id (lookupFlag "--poll-seconds" args >>= readMaybe)
-      executionMode = if hasFlag "--execute" args then ExecuteActions else DryRunActions
+runAutomaticLoop :: LoopCli -> IO ()
+runAutomaticLoop cli = do
+  let domain = cliDomainName cli.loopCliDomain
+      endpoint = cli.loopCliEndpoint
+      executionMode = if cli.loopCliExecute then ExecuteActions else DryRunActions
       options =
         DaemonOptions
-          { daemonEventLogPath = eventsPath
-          , daemonRuntimeConfig = defaultEffectRuntimeConfig repo workdir stateDir
+          { daemonEventLogPath = cli.loopCliEventsPath
+          , daemonRuntimeConfig = defaultEffectRuntimeConfig cli.loopCliRepo cli.loopCliWorkdir cli.loopCliStateDir
           , daemonExecutionMode = executionMode
           }
-      plannerThread =
-        case lookupFlag "--planner-thread-id" args <|> lookupFlag "--thread-id" args of
-          Nothing -> Nothing
-          Just value -> Just (ThreadId (Text.pack value))
       loopConfig =
         DaemonLoopConfig
           { loopDaemonOptions = options
-          , loopPlannerThreadId = plannerThread
+          , loopPlannerThreadId = cli.loopCliPlannerThread
           }
       executor =
         ioActionExecutor
           (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions)
-          (threadDelay (pollSeconds * 1000000))
+          (threadDelay (cli.loopCliPollSeconds * 1000000))
           (pure ())
-      shouldLoop = hasFlag "--loop" args
+      shouldLoop = cli.loopCliLoop
       maxIterations =
         if shouldLoop
-          then maybe maxBound id (lookupFlag "--iterations" args >>= readMaybe)
+          then maybe maxBound id cli.loopCliIterations
           else 1
       maybePidFile =
-        lookupFlag "--pid-file" args
-          <|> if shouldLoop then Just (stateDir </> pidFileNameForDomain domain) else Nothing
-      postTick = issuePlanningFanoutAfterTick args endpoint executionMode domain
-  validateLoopDomain domain plannerThread
-  validateRuntimeOwnerForExecution stateDir executionMode
+        case cli.loopCliPidFile of
+          Just pidFile -> Just pidFile
+          Nothing
+            | shouldLoop -> Just (cli.loopCliStateDir </> pidFileNameForDomain cli.loopCliDomain)
+            | otherwise -> Nothing
+      postTick = issuePlanningFanoutAfterTick cli endpoint executionMode
+  validateLoopDomain cli.loopCliDomain cli.loopCliPlannerThread
+  validateRuntimeOwnerForExecution cli.loopCliStateDir executionMode
   runWithOptionalPidFile maybePidFile (runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations 1)
 
 runLoopIterations :: ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO ()) -> Bool -> Int -> Int -> IO ()
@@ -518,26 +565,32 @@ runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations i
   when (shouldLoop && iteration < maxIterations) $
     runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
 
-issuePlanningFanoutAfterTick :: [String] -> AppServerEndpoint -> ActionExecutionMode -> String -> DaemonLoopTickResult -> IO ()
-issuePlanningFanoutAfterTick args endpoint executionMode domain tick =
-  case (domain, lookupFlag "--implementers-root" args, tick.loopObservedTick) of
-    ("issue-planning", Just implementersRoot, Just observedTick)
+issuePlanningFanoutAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
+issuePlanningFanoutAfterTick cli endpoint executionMode tick =
+  case (cli.loopCliDomain, cli.loopCliImplementersRoot, tick.loopObservedTick) of
+    (CliIssuePlanning, Just implementersRoot, Just observedTick)
       | issuePlanningCompletionEvent observedTick.daemonObservedEvent -> do
           plannerConfig <- maybe (die "issue planning fanout requires a planner config in the replay state") pure (plannerConfigFromState tick.loopReplayResult.replayState)
-          openIssues <- resolveFanoutOpenIssues args plannerConfig.plannerRepo
-          activeIssues <- resolveFanoutActiveIssues args plannerConfig.plannerRepo implementersRoot
+          openIssues <- resolveFanoutOpenIssues cli.loopCliOpenIssues plannerConfig.plannerRepo
+          activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
           let fanoutConfig =
                 (defaultIssuePlanningFanoutConfig implementersRoot)
-                  { fanoutWorkdirRoot = lookupFlag "--implementer-workdir-root" args <|> lookupFlag "--workdir-root" args
-                  , fanoutBranchPrefix = Text.pack (maybe "codex/issue-" id (lookupFlag "--branch-prefix" args))
-                  , fanoutThreadPrefix = Text.pack (maybe "issue-worker-" id (lookupFlag "--thread-prefix" args))
+                  { fanoutWorkdirRoot = firstJust cli.loopCliImplementerWorkdirRoot cli.loopCliWorkdirRoot
+                  , fanoutBranchPrefix = cli.loopCliBranchPrefix
+                  , fanoutThreadPrefix = cli.loopCliThreadPrefix
                   }
               launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
               launchEndpoint =
                 case executionMode of
                   ExecuteActions -> Just endpoint
                   DryRunActions -> Nothing
-          childLaunch <- issueImplementerChildLaunchMode args executionMode (Just endpoint)
+          childLaunch <-
+            issueImplementerChildLaunchMode
+              cli.loopCliStartChildren
+              (Just cli.loopCliPollSeconds)
+              cli.loopCliChildPollSeconds
+              executionMode
+              (Just endpoint)
           runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
           putStrLn ("planner fanout launches: " <> show (length launches))
     _ -> pure ()
@@ -560,11 +613,9 @@ printLoopTick domain iteration tick = do
       putStrLn ("compatibility writes: " <> show (length observed.daemonObservedCompatibilityWrites))
   putStrLn ("actions: " <> show (length tick.loopActionReports))
 
-validateLoopDomain :: String -> Maybe ThreadId -> IO ()
+validateLoopDomain :: CliDomain -> Maybe ThreadId -> IO ()
 validateLoopDomain domain plannerThread = do
-  unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
-    die ("unsupported automatic loop domain: " <> domain)
-  when (domain == "issue-planning" && plannerThread == Nothing) $
+  when (domain == CliIssuePlanning && plannerThread == Nothing) $
     die "run-issue-planning requires --planner-thread-id <thread-id>"
 
 validateLoopResultDomain :: String -> DaemonLoopTickResult -> IO ()
@@ -582,10 +633,10 @@ expectedLoopDomain "pr-review" = PrReview
 expectedLoopDomain "issue-implement" = IssueImplement
 expectedLoopDomain _ = IssuePlanning
 
-pidFileNameForDomain :: String -> FilePath
-pidFileNameForDomain "pr-review" = "watcher.pid"
-pidFileNameForDomain "issue-implement" = "issue-watcher.pid"
-pidFileNameForDomain _ = "issue-planning-watcher.pid"
+pidFileNameForDomain :: CliDomain -> FilePath
+pidFileNameForDomain CliPrReview = "watcher.pid"
+pidFileNameForDomain CliIssueImplement = "issue-watcher.pid"
+pidFileNameForDomain CliIssuePlanning = "issue-planning-watcher.pid"
 
 runWithOptionalPidFile :: Maybe FilePath -> IO () -> IO ()
 runWithOptionalPidFile Nothing action = action
@@ -635,67 +686,65 @@ validateRuntimeOwnerForExecution stateDir executionMode =
         Right Nothing ->
           die "refusing to execute because runtime-owner.json is missing; mark owner haskell before migration"
 
-parseDaemonObservation :: [String] -> IO DaemonObservation
-parseDaemonObservation args = do
-  domain <- requiredFlag "--domain" args
-  observation <- requiredFlag "--observation" args
-  case (domain, observation) of
-    ("issue-planning", "turn-started") ->
+parseDaemonObservation :: ObserveOnceCli -> IO DaemonObservation
+parseDaemonObservation cli =
+  case (cli.observeCliDomain, cli.observeCliObservation) of
+    (CliIssuePlanning, "turn-started") ->
       DaemonIssuePlanningObservation
-        <$> (ObservedPlanningTurnStarted <$> requiredThreadId "--thread-id" args <*> requiredTurnId "--turn-id" args)
-    ("issue-planning", "turn-completed") ->
+        <$> (ObservedPlanningTurnStarted <$> requiredValue "--thread-id" cli.observeCliThreadId <*> requiredValue "--turn-id" cli.observeCliTurnId)
+    (CliIssuePlanning, "turn-completed") ->
       pure (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
-    ("issue-implement", "triage-turn-started") ->
-      DaemonIssueImplementObservation . ObservedTriageTurnStarted <$> requiredTurnId "--turn-id" args
-    ("issue-implement", "triage-already-fixed") ->
+    (CliIssueImplement, "triage-turn-started") ->
+      DaemonIssueImplementObservation . ObservedTriageTurnStarted <$> requiredValue "--turn-id" cli.observeCliTurnId
+    (CliIssueImplement, "triage-already-fixed") ->
       pure (DaemonIssueImplementObservation ObservedTriageAlreadyFixed)
-    ("issue-implement", "triage-needs-implementation") ->
+    (CliIssueImplement, "triage-needs-implementation") ->
       pure (DaemonIssueImplementObservation ObservedTriageNeedsImplementation)
-    ("issue-implement", "triage-blocked") ->
-      DaemonIssueImplementObservation . ObservedTriageBlocked <$> requiredBlockedReason args
-    ("issue-implement", "plan-turn-started") ->
-      DaemonIssueImplementObservation . ObservedPlanTurnStarted <$> requiredTurnId "--turn-id" args
-    ("issue-implement", "plan-completed") ->
-      pure (DaemonIssueImplementObservation (ObservedPlanCompleted (TurnId . Text.pack <$> lookupFlag "--implementation-turn-id" args)))
-    ("issue-implement", "pr-created") ->
-      DaemonIssueImplementObservation . ObservedPullRequestCreated <$> requiredPrNumber args
-    ("issue-implement", "pr-reused") ->
-      DaemonIssueImplementObservation . ObservedPullRequestReused <$> requiredPrNumber args
-    ("issue-implement", "implementation-turn-started") ->
-      DaemonIssueImplementObservation . ObservedImplementationTurnStarted <$> requiredTurnId "--turn-id" args
-    ("issue-implement", "implementation-incomplete") ->
-      pure (DaemonIssueImplementObservation (ObservedImplementationIncomplete (Text.pack (maybe "incomplete" id (lookupFlag "--reason" args)))))
-    ("issue-implement", "implementation-blocked") ->
-      DaemonIssueImplementObservation . ObservedImplementationBlocked <$> requiredBlockedReason args
-    ("issue-implement", "review-handoff-initialized") ->
-      DaemonIssueImplementObservation . ObservedReviewHandoffInitialized <$> requiredPrNumber args
-    ("issue-implement", "review-handoff-started") ->
-      DaemonIssueImplementObservation . ObservedReviewHandoffStarted <$> requiredPrNumber args
-    ("issue-implement", "implementation-completed") ->
-      DaemonIssueImplementObservation . ObservedImplementationCompleted <$> requiredPrNumber args
-    ("pr-review", "review-threads") ->
+    (CliIssueImplement, "triage-blocked") ->
+      DaemonIssueImplementObservation . ObservedTriageBlocked <$> requiredBlockedReason cli
+    (CliIssueImplement, "plan-turn-started") ->
+      DaemonIssueImplementObservation . ObservedPlanTurnStarted <$> requiredValue "--turn-id" cli.observeCliTurnId
+    (CliIssueImplement, "plan-completed") ->
+      pure (DaemonIssueImplementObservation (ObservedPlanCompleted cli.observeCliImplementationTurnId))
+    (CliIssueImplement, "pr-created") ->
+      DaemonIssueImplementObservation . ObservedPullRequestCreated <$> requiredValue "--pr-number" cli.observeCliPrNumber
+    (CliIssueImplement, "pr-reused") ->
+      DaemonIssueImplementObservation . ObservedPullRequestReused <$> requiredValue "--pr-number" cli.observeCliPrNumber
+    (CliIssueImplement, "implementation-turn-started") ->
+      DaemonIssueImplementObservation . ObservedImplementationTurnStarted <$> requiredValue "--turn-id" cli.observeCliTurnId
+    (CliIssueImplement, "implementation-incomplete") ->
+      pure (DaemonIssueImplementObservation (ObservedImplementationIncomplete (maybe "incomplete" id cli.observeCliReason)))
+    (CliIssueImplement, "implementation-blocked") ->
+      DaemonIssueImplementObservation . ObservedImplementationBlocked <$> requiredBlockedReason cli
+    (CliIssueImplement, "review-handoff-initialized") ->
+      DaemonIssueImplementObservation . ObservedReviewHandoffInitialized <$> requiredValue "--pr-number" cli.observeCliPrNumber
+    (CliIssueImplement, "review-handoff-started") ->
+      DaemonIssueImplementObservation . ObservedReviewHandoffStarted <$> requiredValue "--pr-number" cli.observeCliPrNumber
+    (CliIssueImplement, "implementation-completed") ->
+      DaemonIssueImplementObservation . ObservedImplementationCompleted <$> requiredValue "--pr-number" cli.observeCliPrNumber
+    (CliPrReview, "review-threads") ->
       DaemonPrReviewObservation
-        <$> (ObservedReviewThreads <$> reviewThreadsReportFromArgs args <*> requiredCommitSha "--commit-sha" args <*> requiredTurnId "--turn-id" args)
-    ("pr-review", "worker-completed") ->
+        <$> (ObservedReviewThreads <$> reviewThreadsReportFromCli cli <*> requiredValue "--commit-sha" cli.observeCliCommitSha <*> requiredValue "--turn-id" cli.observeCliTurnId)
+    (CliPrReview, "worker-completed") ->
       pure (DaemonPrReviewObservation (ObservedWorkerOutcome WorkerCompleted))
-    ("pr-review", "worker-incomplete") ->
-      pure (DaemonPrReviewObservation (ObservedWorkerOutcome (WorkerIncomplete (Text.pack (maybe "incomplete" id (lookupFlag "--reason" args))))))
-    ("pr-review", "worker-blocked") ->
-      DaemonPrReviewObservation . ObservedWorkerOutcome . WorkerBlocked <$> requiredBlockedReason args
-    ("pr-review", "reviewer-clean") ->
-      DaemonPrReviewObservation . ObservedReviewerOutcome . ReviewerClean <$> requiredCleanReviewEvidence args
-    ("pr-review", "reviewer-problems") ->
-      DaemonPrReviewObservation . ObservedReviewerOutcome . ReviewerProblemsAdded <$> requiredCommitSha "--commit-sha" args
-    ("pr-review", "reviewer-incomplete") ->
-      pure (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerIncomplete (Text.pack (maybe "incomplete" id (lookupFlag "--reason" args))))))
-    ("pr-review", "reviewer-blocked") ->
-      DaemonPrReviewObservation . ObservedReviewerOutcome . ReviewerBlocked <$> requiredBlockedReason args
-    ("pr-review", "merge-completed") ->
-      DaemonPrReviewObservation . ObservedMergeCompleted . MergeCommit <$> requiredCommitSha "--merge-commit-sha" args
-    ("pr-review", "blocked") ->
-      DaemonPrReviewObservation . ObservedPrReviewBlocked <$> requiredBlockedReason args
+    (CliPrReview, "worker-incomplete") ->
+      pure (DaemonPrReviewObservation (ObservedWorkerOutcome (WorkerIncomplete (maybe "incomplete" id cli.observeCliReason))))
+    (CliPrReview, "worker-blocked") ->
+      DaemonPrReviewObservation . ObservedWorkerOutcome . WorkerBlocked <$> requiredBlockedReason cli
+    (CliPrReview, "reviewer-clean") ->
+      DaemonPrReviewObservation . ObservedReviewerOutcome . ReviewerClean <$> requiredCleanReviewEvidence cli
+    (CliPrReview, "reviewer-problems") ->
+      DaemonPrReviewObservation . ObservedReviewerOutcome . ReviewerProblemsAdded <$> requiredValue "--commit-sha" cli.observeCliCommitSha
+    (CliPrReview, "reviewer-incomplete") ->
+      pure (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerIncomplete (maybe "incomplete" id cli.observeCliReason))))
+    (CliPrReview, "reviewer-blocked") ->
+      DaemonPrReviewObservation . ObservedReviewerOutcome . ReviewerBlocked <$> requiredBlockedReason cli
+    (CliPrReview, "merge-completed") ->
+      DaemonPrReviewObservation . ObservedMergeCompleted . MergeCommit <$> requiredValue "--merge-commit-sha" cli.observeCliMergeCommitSha
+    (CliPrReview, "blocked") ->
+      DaemonPrReviewObservation . ObservedPrReviewBlocked <$> requiredBlockedReason cli
     _ ->
-      die ("unsupported observe-once domain/observation: " <> domain <> "/" <> observation)
+      die ("unsupported observe-once domain/observation: " <> cliDomainName cli.observeCliDomain <> "/" <> cli.observeCliObservation)
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
 defaultEffectRuntimeConfig repo workdir stateDir =
@@ -722,8 +771,8 @@ defaultEffectRuntimeConfig repo workdir stateDir =
       , turnRuntimeCollaborationMode = Nothing
       }
 
-reviewThreadsReportFromArgs :: [String] -> IO ReviewThreadsReport
-reviewThreadsReportFromArgs args =
+reviewThreadsReportFromCli :: ObserveOnceCli -> IO ReviewThreadsReport
+reviewThreadsReportFromCli cli =
   pure
     ReviewThreadsReport
       { reviewThreads = unresolvedThreads
@@ -733,68 +782,25 @@ reviewThreadsReportFromArgs args =
   unresolvedThreads =
     fmap
       (\threadId -> ReviewThread threadId False False Nothing Nothing Nothing [])
-      (reviewThreadIdsFromArgs args)
+      cli.observeCliReviewThreadIds
 
-reviewThreadIdsFromArgs :: [String] -> [ReviewThreadId]
-reviewThreadIdsFromArgs args =
-  case lookupFlag "--review-thread-ids" args of
-    Nothing -> []
-    Just value ->
-      fmap (ReviewThreadId . Text.strip . Text.pack) (filter (not . null) (splitComma value))
-
-splitComma :: String -> [String]
-splitComma [] = []
-splitComma text =
-  case break (== ',') text of
-    (part, []) -> [part]
-    (part, _comma : rest) -> part : splitComma rest
-
-parseIssueNumbers :: String -> String -> IO [IssueNumber]
-parseIssueNumbers flag value =
-  either (die . Text.unpack) pure (parseIssueNumbersText flag (Text.pack value))
-
-parseIssueNumbersText :: String -> Text.Text -> Either Text.Text [IssueNumber]
-parseIssueNumbersText flag text =
-  traverse parsePart (filter (not . Text.null) (Text.strip <$> Text.splitOn "," text))
- where
-  parsePart part =
-    case readMaybe (Text.unpack part) of
-      Just value | value > 0 -> Right (IssueNumber value)
-      _ -> Left ("invalid issue number for " <> Text.pack flag <> ": " <> part)
-
-requiredCleanReviewEvidence :: [String] -> IO CleanReviewEvidence
-requiredCleanReviewEvidence args =
+requiredCleanReviewEvidence :: ObserveOnceCli -> IO CleanReviewEvidence
+requiredCleanReviewEvidence cli =
   CleanReviewEvidence
-    <$> requiredCommitSha "--commit-sha" args
-    <*> pure (Text.pack (maybe "LGTM" id (lookupFlag "--comment" args)))
+    <$> requiredValue "--commit-sha" cli.observeCliCommitSha
+    <*> pure (maybe "LGTM" id cli.observeCliComment)
 
-requiredBlockedReason :: [String] -> IO BlockedReason
-requiredBlockedReason args =
-  BlockedReason . Text.pack <$> requiredFlag "--reason" args
+requiredBlockedReason :: ObserveOnceCli -> IO BlockedReason
+requiredBlockedReason cli =
+  BlockedReason <$> requiredValue "--reason" cli.observeCliReason
 
-requiredThreadId :: String -> [String] -> IO ThreadId
-requiredThreadId flag args = ThreadId . Text.pack <$> requiredFlag flag args
+requiredValue :: String -> Maybe a -> IO a
+requiredValue flag =
+  maybe (die ("missing required flag " <> flag)) pure
 
-requiredTurnId :: String -> [String] -> IO TurnId
-requiredTurnId flag args = TurnId . Text.pack <$> requiredFlag flag args
-
-requiredCommitSha :: String -> [String] -> IO CommitSha
-requiredCommitSha flag args = CommitSha . Text.pack <$> requiredFlag flag args
-
-requiredPrNumber :: [String] -> IO PrNumber
-requiredPrNumber args = PrNumber <$> requiredIntFlag "--pr-number" args
-
-requiredIntFlag :: String -> [String] -> IO Int
-requiredIntFlag flag args = do
-  value <- requiredFlag flag args
-  maybe (die ("invalid integer for " <> flag <> ": " <> value)) pure (readMaybe value)
-
-requiredFlag :: String -> [String] -> IO String
-requiredFlag flag args =
-  maybe (die ("missing required flag " <> flag)) pure (lookupFlag flag args)
-
-hasFlag :: String -> [String] -> Bool
-hasFlag flag = elem flag
+firstJust :: Maybe a -> Maybe a -> Maybe a
+firstJust (Just value) _ = Just value
+firstJust Nothing fallback = fallback
 
 replayAny :: FilePath -> IO ()
 replayAny dir = do

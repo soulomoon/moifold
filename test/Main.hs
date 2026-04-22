@@ -11,6 +11,7 @@ module Main (main) where
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
+import CodexWatcher.Cli
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
@@ -22,6 +23,7 @@ import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.Migration
+import CodexWatcher.MigrationRehearsal
 import CodexWatcher.Protocol
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
@@ -1207,6 +1209,80 @@ prop_migrationRuntimeOwnerJsonAndParsing =
     && parseRuntimeOwner "unknown" /= Right NodeRuntime
     && runtimeOwnerJson HaskellRuntime == object ["owner" .= ("haskell" :: Text)]
 
+prop_cliParsesHealthcheckAndRunLoop :: Bool
+prop_cliParsesHealthcheckAndRunLoop =
+  parseCliCommand ["healthcheck", "--state-root", "/tmp/state", "--repo", "owner/name"]
+    == Right
+      ( CliHealthcheck
+          HealthcheckCli
+            { healthcheckCliStateRoot = "/tmp/state"
+            , healthcheckCliRepo = Just (RepoName "owner/name")
+            , healthcheckCliEndpoint = Nothing
+            }
+      )
+    && parseCliCommand
+      [ "run-issue-planning"
+      , "--events"
+      , "/tmp/events.jsonl"
+      , "--state-dir"
+      , "/tmp/state"
+      , "--repo"
+      , "owner/name"
+      , "--app-server-host"
+      , "127.0.0.1"
+      , "--app-server-port"
+      , "3000"
+      , "--thread-id"
+      , "planner-thread"
+      , "--loop"
+      , "--iterations"
+      , "2"
+      ]
+      == Right
+        ( CliRunLoop
+            LoopCli
+              { loopCliDomain = CliIssuePlanning
+              , loopCliEventsPath = "/tmp/events.jsonl"
+              , loopCliStateDir = "/tmp/state"
+              , loopCliRepo = RepoName "owner/name"
+              , loopCliWorkdir = "."
+              , loopCliEndpoint = AppServerEndpoint "127.0.0.1" 3000 "/"
+              , loopCliPollSeconds = 30
+              , loopCliExecute = False
+              , loopCliLoop = True
+              , loopCliIterations = Just 2
+              , loopCliPidFile = Nothing
+              , loopCliPlannerThread = Just (ThreadId "planner-thread")
+              , loopCliImplementersRoot = Nothing
+              , loopCliOpenIssues = Nothing
+              , loopCliActiveIssues = Nothing
+              , loopCliImplementerWorkdirRoot = Nothing
+              , loopCliWorkdirRoot = Nothing
+              , loopCliBranchPrefix = "codex/issue-"
+              , loopCliThreadPrefix = "issue-worker-"
+              , loopCliStartChildren = False
+              , loopCliChildPollSeconds = Nothing
+              }
+        )
+
+prop_cliRejectsBadDomain :: Bool
+prop_cliRejectsBadDomain =
+  case parseCliCommand ["stop-daemon", "--state-dir", "/tmp/state", "--domain", "unknown"] of
+    Left _ -> True
+    Right _ -> False
+
+prop_migrationRehearsalPlanSkipsRuntimeFiles :: Bool
+prop_migrationRehearsalPlanSkipsRuntimeFiles =
+  defaultRehearsalTarget "/tmp/rehearsal" "/workspace/artifacts/source-state" == "/tmp/rehearsal/source-state"
+    && not (shouldCopyStateEntry "runtime-owner.json")
+    && not (shouldCopyStateEntry "watcher.pid")
+    && not (shouldCopyStateEntry "issue-watcher.pid")
+    && shouldCopyStateEntry "events.jsonl"
+    && renderBackoutCommands "/tmp/rehearsal/source-state" "pr-review"
+      == [ "codex-watcher-hs stop-daemon --state-dir \"/tmp/rehearsal/source-state\" --domain pr-review"
+         , "codex-watcher-hs mark-runtime-owner --state-dir \"/tmp/rehearsal/source-state\" --owner node"
+         ]
+
 prop_supervisorRendersRestartAndLogrotate :: Bool
 prop_supervisorRendersRestartAndLogrotate =
   let config =
@@ -1781,6 +1857,9 @@ main = do
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
       , quickCheckResult prop_migrationRuntimeOwnerJsonAndParsing
+      , quickCheckResult prop_cliParsesHealthcheckAndRunLoop
+      , quickCheckResult prop_cliRejectsBadDomain
+      , quickCheckResult prop_migrationRehearsalPlanSkipsRuntimeFiles
       , quickCheckResult prop_supervisorRendersRestartAndLogrotate
       ]
   goldenOk <- goldenReplayCases
