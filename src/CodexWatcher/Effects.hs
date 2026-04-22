@@ -27,6 +27,7 @@ data Effect (mutability :: Mutability) where
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
+  RecordPlanningGraph :: PlanningGraph -> Effect 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal
   MergePullRequest :: PrNumber -> CleanReviewEvidence -> Effect 'CanMerge
   StopDaemon :: Effect 'ReadOnly
@@ -56,6 +57,7 @@ effectMutability PushBranch {} = CanMutateLocal
 effectMutability CreateIssue {} = CanMutateGitHub
 effectMutability CreatePullRequest {} = CanMutateGitHub
 effectMutability ResolveReviewThread {} = CanMutateGitHub
+effectMutability RecordPlanningGraph {} = CanMutateLocal
 effectMutability RecordBlocked {} = CanMutateLocal
 effectMutability MergePullRequest {} = CanMerge
 effectMutability StopDaemon = ReadOnly

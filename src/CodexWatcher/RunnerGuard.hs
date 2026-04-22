@@ -106,9 +106,13 @@ instance ToJSON RunnerGuardRepair where
 
 checkRunnerGuard :: RunnerGuardConfig -> IO (Maybe RunnerGuardProblem)
 checkRunnerGuard config = do
-  pidProblem <- checkWatcherPid config.guardWatcherPidFile
-  eventProblem <- checkEventLogAndActiveTurn config
-  pure (combineProblems (catMaybes [pidProblem, eventProblem]))
+  complete <- issuePlanningEventLogComplete config.guardEventsPath
+  if complete
+    then pure Nothing
+    else do
+      pidProblem <- checkWatcherPid config.guardWatcherPidFile
+      eventProblem <- checkEventLogAndActiveTurn config
+      pure (combineProblems (catMaybes [pidProblem, eventProblem]))
 
 startRunnerGuardRepairThread :: RunnerGuardConfig -> RunnerGuardProblem -> IO RunnerGuardRepair
 startRunnerGuardRepairThread config problem' = do
@@ -221,6 +225,21 @@ checkEventLogAndActiveTurn config = do
               pure (Just (eventReplayProblem failure))
             Right replay ->
               checkReplayState config events replay.replayState
+
+issuePlanningEventLogComplete :: FilePath -> IO Bool
+issuePlanningEventLogComplete eventsPath = do
+  exists <- doesFileExist eventsPath
+  if not exists
+    then pure False
+    else do
+      loaded <- loadEventLogFile eventsPath
+      case loaded of
+        Left _ -> pure False
+        Right events ->
+          case replayEventLog events of
+            Left _ -> pure False
+            Right replay ->
+              pure (someDomain replay.replayState == IssuePlanning && somePhase replay.replayState == Complete)
 
 checkReplayState :: RunnerGuardConfig -> [WatcherEvent] -> SomeWatcherState -> IO (Maybe RunnerGuardProblem)
 checkReplayState config events = \case

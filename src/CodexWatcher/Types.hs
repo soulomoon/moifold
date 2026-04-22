@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -28,6 +29,9 @@ module CodexWatcher.Types
   , StopReason (..)
   , PlannerConfig (..)
   , IssueCreationRequest (..)
+  , IssueDependency (..)
+  , BlockedPlanningIssue (..)
+  , PlanningGraph (..)
   , IssueConfig (..)
   , PrConfig (..)
   , WorkerThread (..)
@@ -168,6 +172,75 @@ parseParentIssueNumber :: Int -> Parser IssueNumber
 parseParentIssueNumber number
   | number > 0 = pure (IssueNumber number)
   | otherwise = fail "parentIssueNumber must be positive"
+
+data IssueDependency = IssueDependency
+  { dependencyIssue :: IssueNumber
+  , dependencyDependsOn :: [IssueNumber]
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON IssueDependency where
+  toJSON dependency =
+    object
+      [ "issueNumber" .= unIssueNumber dependency.dependencyIssue
+      , "dependsOn" .= fmap unIssueNumber dependency.dependencyDependsOn
+      ]
+
+instance FromJSON IssueDependency where
+  parseJSON = withObject "IssueDependency" $ \objectValue ->
+    IssueDependency
+      <$> (parsePositiveIssueNumber =<< objectValue .: "issueNumber")
+      <*> (traverse parsePositiveIssueNumber =<< objectValue .:? "dependsOn" .!= [])
+
+data BlockedPlanningIssue = BlockedPlanningIssue
+  { blockedPlanningIssue :: IssueNumber
+  , blockedPlanningDependsOn :: [IssueNumber]
+  , blockedPlanningReason :: Text
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON BlockedPlanningIssue where
+  toJSON blocked =
+    object
+      [ "issueNumber" .= unIssueNumber blocked.blockedPlanningIssue
+      , "blockedBy" .= fmap unIssueNumber blocked.blockedPlanningDependsOn
+      , "reason" .= blocked.blockedPlanningReason
+      ]
+
+instance FromJSON BlockedPlanningIssue where
+  parseJSON = withObject "BlockedPlanningIssue" $ \objectValue -> do
+    reason <- objectValue .:? "reason" .!= ""
+    BlockedPlanningIssue
+      <$> (parsePositiveIssueNumber =<< objectValue .: "issueNumber")
+      <*> (traverse parsePositiveIssueNumber =<< objectValue .:? "blockedBy" .!= [])
+      <*> pure reason
+
+data PlanningGraph = PlanningGraph
+  { planningReadyIssues :: [IssueNumber]
+  , planningBlockedIssues :: [BlockedPlanningIssue]
+  , planningDependencies :: [IssueDependency]
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON PlanningGraph where
+  toJSON graph =
+    object
+      [ "ready_issues" .= fmap unIssueNumber graph.planningReadyIssues
+      , "blocked_issues" .= graph.planningBlockedIssues
+      , "dependencies" .= graph.planningDependencies
+      ]
+
+instance FromJSON PlanningGraph where
+  parseJSON = withObject "PlanningGraph" $ \objectValue ->
+    PlanningGraph
+      <$> (traverse parsePositiveIssueNumber =<< objectValue .:? "ready_issues" .!= [])
+      <*> objectValue .:? "blocked_issues" .!= []
+      <*> objectValue .:? "dependencies" .!= []
+
+parsePositiveIssueNumber :: Int -> Parser IssueNumber
+parsePositiveIssueNumber number
+  | number > 0 = pure (IssueNumber number)
+  | otherwise = fail "issue number must be positive"
 
 data IssueConfig = IssueConfig
   { issueRepo :: RepoName

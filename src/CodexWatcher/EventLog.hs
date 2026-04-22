@@ -34,6 +34,7 @@ data WatcherEvent
   = IssuePlanningInitialized PlannerConfig
   | IssuePlanningTurnStarted ThreadId TurnId
   | IssuePlanningIssuesRequested [IssueCreationRequest]
+  | IssuePlanningGraphUpdated PlanningGraph
   | IssuePlanningTurnCompleted
   | PrReviewInitialized PrConfig ThreadId ThreadId
   | PrReviewUnresolvedFound (NonEmpty ReviewThreadId) CommitSha TurnId
@@ -88,6 +89,8 @@ instance ToJSON WatcherEvent where
              ]
       IssuePlanningIssuesRequested requests ->
         eventType event <> ["issues" .= requests]
+      IssuePlanningGraphUpdated graph ->
+        eventType event <> ["planningGraph" .= graph]
       IssuePlanningTurnCompleted ->
         eventType event
       PrReviewInitialized config workerThreadId reviewerThreadId ->
@@ -173,6 +176,9 @@ instance FromJSON WatcherEvent where
       "issue_planning_issues_requested" ->
         IssuePlanningIssuesRequested
           <$> (nonEmptyIssueCreationRequests =<< objectValue .: "issues")
+      "issue_planning_graph_updated" ->
+        IssuePlanningGraphUpdated
+          <$> objectValue .: "planningGraph"
       "issue_planning_turn_completed" ->
         pure IssuePlanningTurnCompleted
       "pr_review_initialized" ->
@@ -314,6 +320,8 @@ applyEvent (SomeWatcherState state@PlanningReady {}) (IssuePlanningTurnStarted p
   fromDecision (step state (StartPlanningTurn (ActiveTurn plannerThread turnId)))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningIssuesRequested requests) =
   fromDecision (step state (PlannerRequestedIssueCreation requests))
+applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningGraphUpdated graph) =
+  fromDecision (step state (PlannerUpdatedGraph graph))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
   fromDecision (step state PlannerTurnCompleted)
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
@@ -489,6 +497,7 @@ eventName = \case
   IssuePlanningInitialized {} -> "issue_planning_initialized"
   IssuePlanningTurnStarted {} -> "issue_planning_turn_started"
   IssuePlanningIssuesRequested {} -> "issue_planning_issues_requested"
+  IssuePlanningGraphUpdated {} -> "issue_planning_graph_updated"
   IssuePlanningTurnCompleted -> "issue_planning_turn_completed"
   PrReviewInitialized {} -> "pr_review_initialized"
   PrReviewUnresolvedFound {} -> "pr_review_unresolved_found"

@@ -40,6 +40,9 @@ structuredTurnOutputSchema =
           , "evidence" .= stringField
           , "issues_to_create" .= issueArrayField ["title"]
           , "subissues_to_create" .= issueArrayField ["title", "body", "parentIssueNumber"]
+          , "ready_issues" .= issueNumberArrayField
+          , "blocked_issues" .= blockedIssueArrayField
+          , "dependencies" .= dependencyArrayField
           ]
     ]
 
@@ -50,7 +53,7 @@ structuredTurnOutcomeInstructions =
 plannerTurnInput :: Text
 plannerTurnInput =
   structuredTurnOutcomeInstructions
-    <> " For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work. Use issues_to_create only for independent top-level issues. Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include title, a concrete body, and parentIssueNumber. A sub-issue body must describe scope, acceptance criteria, dependencies/blockers, and how it stays compatible with sibling sub-issues. When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings. After issue creation the watcher will re-enter planning, so only use outcome=complete when the issue graph is stable and ready for implementer fanout."
+    <> " For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work. Use issues_to_create only for independent top-level issues. Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include title, a concrete body, and parentIssueNumber. A sub-issue body must describe scope, acceptance criteria, dependencies/blockers, and how it stays compatible with sibling sub-issues. When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings. After issue creation the watcher will re-enter planning. When no more issues need to be created, return ready_issues for issues safe to implement now, blocked_issues for issues that must wait, and dependencies for issue ordering. Only issues listed in ready_issues can be started by fanout; do not list an issue as ready if another open issue must be completed first. Use outcome=complete only when the issue graph is stable and ready for dependency-aware implementer fanout."
 
 issueWorkerTurnInput :: Text
 issueWorkerTurnInput =
@@ -80,6 +83,48 @@ issueArrayField requiredFields =
                 [ "title" .= stringField
                 , "body" .= stringField
                 , "parentIssueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
+                ]
+          ]
+    ]
+
+issueNumberArrayField :: Value
+issueNumberArrayField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
+    ]
+
+blockedIssueArrayField :: Value
+blockedIssueArrayField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items"
+        .= object
+          [ "type" .= ("object" :: Text)
+          , "additionalProperties" .= False
+          , "required" .= (["issueNumber", "blockedBy"] :: [Text])
+          , "properties"
+              .= object
+                [ "issueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
+                , "blockedBy" .= issueNumberArrayField
+                , "reason" .= stringField
+                ]
+          ]
+    ]
+
+dependencyArrayField :: Value
+dependencyArrayField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items"
+        .= object
+          [ "type" .= ("object" :: Text)
+          , "additionalProperties" .= False
+          , "required" .= (["issueNumber", "dependsOn"] :: [Text])
+          , "properties"
+              .= object
+                [ "issueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
+                , "dependsOn" .= issueNumberArrayField
                 ]
           ]
     ]

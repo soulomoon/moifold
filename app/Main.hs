@@ -768,7 +768,7 @@ issuePlanningFanoutAfterTick cli endpoint executionMode tick =
     (CliIssuePlanning, Just implementersRoot, Just observedTick)
       | issuePlanningCompletionEvent observedTick.daemonObservedEvent -> do
           plannerConfig <- maybe (die "issue planning fanout requires a planner config in the replay state") pure (plannerConfigFromState tick.loopReplayResult.replayState)
-          openIssues <- resolveFanoutOpenIssues cli.loopCliOpenIssues plannerConfig.plannerRepo
+          readyIssues <- resolveFanoutReadyIssues observedTick.daemonObservedEvent
           activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
           let fanoutConfig =
                 (defaultIssuePlanningFanoutConfig implementersRoot)
@@ -776,7 +776,7 @@ issuePlanningFanoutAfterTick cli endpoint executionMode tick =
                   , fanoutBranchPrefix = cli.loopCliBranchPrefix
                   , fanoutThreadPrefix = cli.loopCliThreadPrefix
                   }
-              launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
+              launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues
               launchEndpoint =
                 case executionMode of
                   ExecuteActions -> Just endpoint
@@ -791,6 +791,12 @@ issuePlanningFanoutAfterTick cli endpoint executionMode tick =
           runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
           putStrLn ("planner fanout launches: " <> show (length launches))
     _ -> pure ()
+
+resolveFanoutReadyIssues :: WatcherEvent -> IO [IssueNumber]
+resolveFanoutReadyIssues = \case
+  IssuePlanningGraphUpdated graph -> pure graph.planningReadyIssues
+  IssuePlanningTurnCompleted -> pure []
+  _ -> pure []
 
 printLoopTick :: String -> Int -> DaemonLoopTickResult -> IO ()
 printLoopTick domain iteration tick = do

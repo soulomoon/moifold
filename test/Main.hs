@@ -27,12 +27,14 @@ import CodexWatcher.MigrationRehearsal
 import CodexWatcher.Protocol
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
+import CodexWatcher.RunnerGuard
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Supervisor
 import CodexWatcher.TurnClassifier
 import CodexWatcher.TurnOutput
 import CodexWatcher.Types
+import Control.Monad (when)
 import Data.Aeson
   ( Value (..)
   , eitherDecodeStrict'
@@ -50,6 +52,7 @@ import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
 import System.FilePath ((</>))
 import System.Exit (exitFailure)
 import Test.QuickCheck
@@ -101,6 +104,19 @@ instance Arbitrary IssueCreationRequest where
           Nothing -> listOf (elements (['a' .. 'z'] <> [' ', '-']))
     pure (IssueCreationRequest title body parent)
 
+instance Arbitrary IssueDependency where
+  arbitrary = IssueDependency <$> arbitrary <*> listOf arbitrary
+
+instance Arbitrary BlockedPlanningIssue where
+  arbitrary =
+    BlockedPlanningIssue
+      <$> arbitrary
+      <*> listOf arbitrary
+      <*> (Text.pack <$> listOf (elements (['a' .. 'z'] <> [' ', '-'])))
+
+instance Arbitrary PlanningGraph where
+  arbitrary = PlanningGraph <$> listOf arbitrary <*> listOf arbitrary <*> listOf arbitrary
+
 instance Arbitrary IssueConfig where
   arbitrary = IssueConfig <$> arbitrary <*> arbitrary <*> arbitrary
 
@@ -144,6 +160,11 @@ effectIsCreatePr = \case
 effectIsCreateIssue :: SomeEffect -> Bool
 effectIsCreateIssue = \case
   SomeEffect CreateIssue {} -> True
+  _ -> False
+
+effectIsRecordPlanningGraph :: SomeEffect -> Bool
+effectIsRecordPlanningGraph = \case
+  SomeEffect RecordPlanningGraph {} -> True
   _ -> False
 
 effectIsPush :: SomeEffect -> Bool
@@ -255,6 +276,14 @@ prop_plannerCompletionReturnsToReady config activeTurn =
   case step (PlanningTurnActive config activeTurn) PlannerTurnCompleted of
     Decision state effects ->
       phaseOf state == Complete
+        && SomeEffect StopDaemon `elem` effects
+
+prop_plannerGraphUpdateCompletesAndRecords :: PlannerConfig -> ActiveTurn -> PlanningGraph -> Bool
+prop_plannerGraphUpdateCompletesAndRecords config activeTurn graph =
+  case step (PlanningTurnActive config activeTurn) (PlannerUpdatedGraph graph) of
+    Decision state effects ->
+      phaseOf state == Complete
+        && any effectIsRecordPlanningGraph effects
         && SomeEffect StopDaemon `elem` effects
 
 prop_plannerIssueCreationReturnsToPlanning :: PlannerConfig -> ActiveTurn -> IssueCreationRequest -> Bool
@@ -435,6 +464,23 @@ prop_eventLogIssuePlanningIssueCreationReturnsReady config plannerThread planner
           _ -> False
     Left _ -> False
 
+prop_eventLogIssuePlanningGraphCompletes :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
+prop_eventLogIssuePlanningGraphCompletes config plannerThread plannerTurn graph =
+  case replayEventLog
+    [ IssuePlanningInitialized config
+    , IssuePlanningTurnStarted plannerThread plannerTurn
+    , IssuePlanningGraphUpdated graph
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssuePlanning
+        && somePhase replay.replayState == Complete
+        && case replay.replayEffects of
+          _initialEffects : _startEffects : graphEffects : _ ->
+            any effectIsRecordPlanningGraph graphEffects
+              && SomeEffect StopDaemon `elem` graphEffects
+          _ -> False
+    Left _ -> False
+
 prop_eventLogCannotCompletePlanningBeforeStart :: PlannerConfig -> Bool
 prop_eventLogCannotCompletePlanningBeforeStart config =
   case replayEventLog
@@ -470,6 +516,20 @@ prop_issuePlanningWatcherCreatesIssuesBeforeReplanning config threadId turnId re
                 && somePhase requested.issuePlanningTickState == Initialized
                 && any effectIsCreateIssue requested.issuePlanningTickEffects
                 && issuePlanningTickEffects requested == [SomeEffect (CreateIssue (plannerRepo config) request), SomeEffect SleepUntilNextPoll]
+            Left _ -> False
+        Left _ -> False
+
+prop_issuePlanningWatcherRecordsGraphBeforeFanout :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
+prop_issuePlanningWatcherRecordsGraphBeforeFanout config threadId turnId graph =
+  let ready = SomeWatcherState (PlanningReady config)
+   in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
+        Right started ->
+          case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningGraphUpdated graph) of
+            Right graphed ->
+              issuePlanningTickEvent graphed == IssuePlanningGraphUpdated graph
+                && somePhase graphed.issuePlanningTickState == Complete
+                && any effectIsRecordPlanningGraph graphed.issuePlanningTickEffects
+                && SomeEffect StopDaemon `elem` graphed.issuePlanningTickEffects
             Left _ -> False
         Left _ -> False
 
@@ -524,18 +584,32 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
       planningReady = SomeWatcherState (PlanningReady config)
       planningActive = SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn")))
       issueState = SomeWatcherState (IssueNeedsTriage (IssueConfig (RepoName "owner/name") (IssueNumber 42) (BranchName "codex/issue-42")) (WorkerIdle (ThreadId "worker-thread")))
+      graph = PlanningGraph [IssueNumber 1] [BlockedPlanningIssue (IssueNumber 2) [IssueNumber 1] "wait"] [IssueDependency (IssueNumber 2) [IssueNumber 1]]
    in plannerConfigFromState planningReady == Just config
         && plannerConfigFromState planningActive == Just config
         && plannerConfigFromState issueState == Nothing
+        && issuePlanningCompletionEvent (IssuePlanningGraphUpdated graph)
         && issuePlanningCompletionEvent IssuePlanningTurnCompleted
         && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested [IssueCreationRequest "subissue" "details" Nothing]))
         && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
+
+prop_issuePlanningFanoutUsesOnlyReadyIssues :: Bool
+prop_issuePlanningFanoutUsesOnlyReadyIssues =
+  let plannerConfig = PlannerConfig (RepoName "owner/name") 8
+      fanoutConfig = defaultIssuePlanningFanoutConfig "/tmp/implementers"
+      ready = [IssueNumber 10, IssueNumber 12]
+      active = [IssueNumber 12]
+      launchIssues = fmap (issueNumberOfConfig . launchIssueConfig) (planIssueImplementerLaunches fanoutConfig plannerConfig active ready)
+   in launchIssues == [IssueNumber 10]
+ where
+  issueNumberOfConfig (IssueConfig _ issue _) = issue
 
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
   , IssuePlanningTurnStarted plannerThread plannerTurn
   , IssuePlanningIssuesRequested [IssueCreationRequest "Subissue title" "Subissue body" Nothing]
+  , IssuePlanningGraphUpdated planningGraph
   , IssuePlanningTurnCompleted
   , PrReviewInitialized prConfig workerThread reviewerThread
   , PrReviewUnresolvedFound (ReviewThreadId "review-thread-1" :| [ReviewThreadId "review-thread-2"]) commit workerTurn
@@ -584,6 +658,11 @@ canonicalEventExamples =
   mergeCommit = MergeCommit (CommitSha "fedcba9876543210")
   blockedReason = BlockedReason "blocked for test"
   stopReason = StopReason "stopped for test"
+  planningGraph =
+    PlanningGraph
+      [IssueNumber 42]
+      [BlockedPlanningIssue (IssueNumber 43) [IssueNumber 42] "wait for dependency"]
+      [IssueDependency (IssueNumber 43) [IssueNumber 42]]
 
 prop_eventLogCanonicalJsonRoundTrips :: Bool
 prop_eventLogCanonicalJsonRoundTrips =
@@ -1232,10 +1311,16 @@ prop_turnClassifierPrefersStructuredOutputs :: Bool
 prop_turnClassifierPrefersStructuredOutputs =
   let issueRequest = IssueCreationRequest "Subissue A" "Split from parent" Nothing
       subissueRequest = IssueCreationRequest "Subissue B" "Split from existing parent" (Just (IssueNumber 8))
+      planningGraph =
+        PlanningGraph
+          [IssueNumber 15]
+          [BlockedPlanningIssue (IssueNumber 16) [IssueNumber 15] "wait"]
+          [IssueDependency (IssueNumber 16) [IssueNumber 15]]
    in parseStructuredTurnOutcome "{\"outcome\":\"blocked\",\"reason\":\"schema blocker\"}" == Just (StructuredBlocked "schema blocker")
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "{\"outcome\":\"complete\",\"issues_to_create\":[{\"title\":\"Subissue A\",\"body\":\"Split from parent\"}]}")) == Just (ObservedPlanningIssuesRequested [issueRequest])
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"body\":\"Split from existing parent\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningIssuesRequested [subissueRequest])
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-invalid-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
+    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-graph") "completed" (Just "{\"outcome\":\"complete\",\"ready_issues\":[15],\"blocked_issues\":[{\"issueNumber\":16,\"blockedBy\":[15],\"reason\":\"wait\"}],\"dependencies\":[{\"issueNumber\":16,\"dependsOn\":[15]}]}")) == Just (ObservedPlanningGraphUpdated planningGraph)
     && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "{\"outcome\":\"already_fixed\",\"reason\":\"schema fixed\"}")) == Just ObservedTriageAlreadyFixed
     && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"ready\"}")) == Just (ObservedImplementationCompleted (PrNumber 7))
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
@@ -1321,6 +1406,14 @@ prop_effectInterpreterRecordBlockedWritesBlockState reason =
       expectedJson = object ["blocked" .= True, "reason" .= unBlockedReason reason]
    in compiled.compiledActions == [PlannedWriteJson expectedPath expectedJson]
         && compiled.compiledNextRequestId == 30
+
+prop_effectInterpreterRecordPlanningGraphWritesState :: PlanningGraph -> Bool
+prop_effectInterpreterRecordPlanningGraphWritesState graph =
+  let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 32
+      compiled = compileEffectPlan config [SomeEffect (RecordPlanningGraph graph)]
+      expectedPath = config.effectRuntimeStateDir </> "planning-state.json"
+   in compiled.compiledActions == [PlannedWriteJson expectedPath (toJSON graph)]
+        && compiled.compiledNextRequestId == 32
 
 prop_effectInterpreterCreateIssueUsesConfiguredEffect :: RepoName -> IssueCreationRequest -> Bool
 prop_effectInterpreterCreateIssueUsesConfiguredEffect repo request =
@@ -1576,6 +1669,36 @@ prop_supervisorRendersRestartAndLogrotate =
         && "StandardOutput=append:/tmp/logs/watcher-one.log" `Text.isInfixOf` service
         && "\"/tmp/codex watcher\"" `Text.isInfixOf` service
         && "rotate 7" `Text.isInfixOf` logrotate
+
+runnerGuardIgnoresMissingPidForCompletePlanning :: IO Bool
+runnerGuardIgnoresMissingPidForCompletePlanning = do
+  let stateDir = "/tmp/codex-watcher-hs-runner-guard-complete"
+      eventsPath = stateDir </> "events.jsonl"
+      pidPath = stateDir </> "watcher.pid"
+      events =
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8)
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
+        , IssuePlanningGraphUpdated (PlanningGraph [IssueNumber 42] [] [])
+        ]
+      config =
+        RunnerGuardConfig
+          { guardRepo = RepoName "owner/name"
+          , guardEventsPath = eventsPath
+          , guardStateDir = stateDir
+          , guardWatcherPidFile = pidPath
+          , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
+          , guardStaleSeconds = 1
+          , guardRepairCwd = stateDir
+          , guardRestartWatcherCommand = ""
+          , guardRestartGuardCommand = ""
+          }
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  writeFile eventsPath (unlines (fmap (Text.unpack . Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode) events))
+  guardProblem <- checkRunnerGuard config
+  removePathForcibly stateDir
+  assert "runner guard ignores missing pid after planning complete" (guardProblem == Nothing)
 
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
@@ -2021,6 +2144,62 @@ automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
       putStrLn ("FAIL automatic planning issue creation: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+automaticDaemonLoopPlanningGraphCompletesAndRecords :: IO Bool
+automaticDaemonLoopPlanningGraphCompletesAndRecords = do
+  let repo = RepoName "soulomoon/mlf2"
+      graph =
+        PlanningGraph
+          [IssueNumber 15]
+          [BlockedPlanningIssue (IssueNumber 16) [IssueNumber 15] "wait"]
+          [IssueDependency (IssueNumber 16) [IssueNumber 15]]
+      plannerOutput = jsonText (toJSON graph)
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-plan" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= plannerOutput
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 126
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
+      events =
+        [ IssuePlanningInitialized (PlannerConfig repo 8)
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          expectedPath = runtimeConfig.effectRuntimeStateDir </> "planning-state.json"
+      results <-
+        sequence
+          [ assert "planning graph emits graph update event" (observedEvent == Just (IssuePlanningGraphUpdated graph))
+          , assert "planning graph reaches complete" (maybe False ((== Complete) . somePhase . daemonObservedState) tick.loopObservedTick)
+          , assert "planning graph writes graph state" (FakeWriteJson expectedPath (toJSON graph) `elem` calls)
+          , assert "planning graph stops daemon after recording" (FakeStop `elem` calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic planning graph: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
 automaticDaemonLoopExecutePrestartsTurnOnce :: IO Bool
 automaticDaemonLoopExecutePrestartsTurnOnce = do
   (executor, getCalls) <- fakeActionExecutor
@@ -2167,6 +2346,7 @@ main = do
       , quickCheckResult prop_issueImplementationIncompleteRestartsWorker
       , quickCheckResult prop_issueImplementationBlockedStops
       , quickCheckResult prop_plannerCompletionReturnsToReady
+      , quickCheckResult prop_plannerGraphUpdateCompletesAndRecords
       , quickCheckResult prop_plannerIssueCreationReturnsToPlanning
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       , quickCheckResult prop_eventLogFullPrReviewPathCompletes
@@ -2182,13 +2362,16 @@ main = do
       , quickCheckResult prop_issueImplementWatcherBlockedStops
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
+      , quickCheckResult prop_eventLogIssuePlanningGraphCompletes
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
       , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
       , quickCheckResult prop_issuePlanningWatcherCreatesIssuesBeforeReplanning
+      , quickCheckResult prop_issuePlanningWatcherRecordsGraphBeforeFanout
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
       , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
       , quickCheckResult prop_issuePlanningFanoutDetectsCompletionBoundary
+      , quickCheckResult prop_issuePlanningFanoutUsesOnlyReadyIssues
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
@@ -2239,6 +2422,7 @@ main = do
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
+      , quickCheckResult prop_effectInterpreterRecordPlanningGraphWritesState
       , quickCheckResult prop_effectInterpreterCreateIssueUsesConfiguredEffect
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
@@ -2259,9 +2443,11 @@ main = do
   observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningIssueCreationOk <- automaticDaemonLoopPlanningIssueCreationRequestsReplanning
+  automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphCompletesAndRecords
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
+  runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   if
     all isSuccess results
       && goldenOk
@@ -2274,8 +2460,10 @@ main = do
       && observedDaemonExecuteOk
       && automaticPlanningDryRunOk
       && automaticPlanningIssueCreationOk
+      && automaticPlanningGraphOk
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
       && automaticImplementationHandoffOk
+      && runnerGuardOk
     then pure ()
     else exitFailure

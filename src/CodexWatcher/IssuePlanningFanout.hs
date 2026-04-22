@@ -59,10 +59,10 @@ defaultIssuePlanningFanoutConfig implementersRoot =
     }
 
 planIssueImplementerLaunches :: IssuePlanningFanoutConfig -> PlannerConfig -> [IssueNumber] -> [IssueNumber] -> [IssueImplementerLaunchPlan]
-planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues =
+planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues =
   fmap (issueImplementerLaunchPlan fanoutConfig plannerConfig) selectedIssues
  where
-  selectedIssues = selectIssueImplementationStarts plannerConfig activeIssues openIssues
+  selectedIssues = selectIssueImplementationStarts plannerConfig activeIssues readyIssues
 
 plannerConfigFromState :: SomeWatcherState -> Maybe PlannerConfig
 plannerConfigFromState (SomeWatcherState (PlanningReady config)) = Just config
@@ -70,6 +70,7 @@ plannerConfigFromState (SomeWatcherState (PlanningTurnActive config _activeTurn)
 plannerConfigFromState _ = Nothing
 
 issuePlanningCompletionEvent :: WatcherEvent -> Bool
+issuePlanningCompletionEvent IssuePlanningGraphUpdated {} = True
 issuePlanningCompletionEvent IssuePlanningTurnCompleted = True
 issuePlanningCompletionEvent _ = False
 

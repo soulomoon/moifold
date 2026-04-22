@@ -21,6 +21,7 @@ import CodexWatcher.Types
 import Data.Aeson
   ( Value
   , object
+  , toJSON
   , (.=)
   )
 import Data.Text (Text)
@@ -99,6 +100,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhCreatePullRequest issueConfig)]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
+    RecordPlanningGraph graph ->
+      unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "planning-state.json") (toJSON graph)]
     RecordBlocked reason ->
       unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "block-state.json") (blockedStateJson reason)]
     MergePullRequest prNumber _evidence ->

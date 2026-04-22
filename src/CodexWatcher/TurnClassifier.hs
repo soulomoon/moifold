@@ -49,11 +49,20 @@ data StructuredTurnOutcome
 newtype StructuredPlanningIssueRequests = StructuredPlanningIssueRequests [IssueCreationRequest]
   deriving stock (Eq, Show)
 
+newtype StructuredPlanningGraph = StructuredPlanningGraph PlanningGraph
+  deriving stock (Eq, Show)
+
 instance FromJSON StructuredPlanningIssueRequests where
   parseJSON = withObject "StructuredPlanningIssueRequests" \objectValue -> do
     issues <- objectValue .:? "issues_to_create" .!= []
     subissues <- objectValue .:? "subissues_to_create" .!= []
     pure (StructuredPlanningIssueRequests (issues <> subissues))
+
+instance FromJSON StructuredPlanningGraph where
+  parseJSON = withObject "StructuredPlanningGraph" \objectValue ->
+    if hasPlanningGraphFields objectValue
+      then StructuredPlanningGraph <$> parseJSON (Object objectValue)
+      else fail "missing planning graph fields"
 
 instance FromJSON StructuredTurnOutcome where
   parseJSON = withObject "StructuredTurnOutcome" \objectValue -> do
@@ -147,6 +156,8 @@ classifyIssuePlanningTurn turn =
       | Just outputText <- output
       , planningIssueRequestPayloadInvalid outputText ->
           Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
+      | Just graph <- output >>= parsePlanningGraph ->
+          Just (ObservedPlanningGraphUpdated graph)
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssuePlanning structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -247,6 +258,12 @@ parsePlanningIssueRequests output =
     Left _ -> Nothing
     Right (StructuredPlanningIssueRequests requests) -> Just requests
 
+parsePlanningGraph :: Text -> Maybe PlanningGraph
+parsePlanningGraph output =
+  case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
+    Left _ -> Nothing
+    Right (StructuredPlanningGraph graph) -> Just graph
+
 planningIssueRequestPayloadInvalid :: Text -> Bool
 planningIssueRequestPayloadInvalid output =
   case eitherDecodeStrict' bytes :: Either String StructuredPlanningIssueRequests of
@@ -262,6 +279,15 @@ planningIssueRequestPayloadInvalid output =
         _ -> False
  where
   bytes = Text.Encoding.encodeUtf8 (Text.strip output)
+
+hasPlanningGraphFields :: KeyMap.KeyMap Value -> Bool
+hasPlanningGraphFields objectValue =
+  any
+    (`KeyMap.member` objectValue)
+    [ Key.fromString "ready_issues"
+    , Key.fromString "blocked_issues"
+    , Key.fromString "dependencies"
+    ]
 
 classifyStructuredIssuePlanning :: StructuredTurnOutcome -> Maybe IssuePlanningObservation
 classifyStructuredIssuePlanning = \case

@@ -22,6 +22,7 @@ import Data.Text qualified as Text
 data IssuePlanningObservation
   = ObservedPlanningTurnStarted ThreadId TurnId
   | ObservedPlanningIssuesRequested [IssueCreationRequest]
+  | ObservedPlanningGraphUpdated PlanningGraph
   | ObservedPlanningTurnCompleted
   | ObservedPlanningBlocked BlockedReason
   deriving stock (Eq, Show)
@@ -41,6 +42,8 @@ issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPla
       Left "issue planning issue creation observation must include at least one issue"
   | otherwise =
       Right (tick (IssuePlanningIssuesRequested requests) (step state (PlannerRequestedIssueCreation requests)))
+issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPlanningGraphUpdated graph) =
+  Right (tick (IssuePlanningGraphUpdated graph) (step state (PlannerUpdatedGraph graph)))
 issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) ObservedPlanningTurnCompleted =
   Right (tick IssuePlanningTurnCompleted (step state PlannerTurnCompleted))
 issuePlanningObserve (SomeWatcherState state@PlanningReady {}) (ObservedPlanningBlocked reason) =
