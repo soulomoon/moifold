@@ -1050,12 +1050,20 @@ prop_appServerClientParsesThreadReadTurns =
                     , "status" .= ("completed" :: Text)
                     , "result" .= object ["text" .= ("latest output" :: Text)]
                     ]
+                 , object
+                    [ "turnId" .= ("turn-structured" :: Text)
+                    , "status" .= ("completed" :: Text)
+                    , "output" .= object ["outcome" .= ("blocked" :: Text), "reason" .= ("schema blocker" :: Text)]
+                    ]
                  ]
           ]
    in case parseThreadReadTurns response of
         Right turns ->
           latestTurnById (TurnId "turn-target") turns
             == Just (AppServerTurn (TurnId "turn-target") "completed" (Just "latest output"))
+            && ( (parseStructuredTurnOutcome =<< (appServerTurnOutput =<< latestTurnById (TurnId "turn-structured") turns))
+                   == Just (StructuredBlocked "schema blocker")
+               )
         Left _ -> False
 
 prop_appServerClientParsesTurnStartTurnId :: Bool

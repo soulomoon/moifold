@@ -54,6 +54,7 @@ import Data.ByteString.Char8 qualified as ByteString.Char8
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Generics (Generic)
 import Data.Word (Word64, Word8)
 import Network.Socket
@@ -302,17 +303,26 @@ turnIdField objectValue =
 
 optionalTurnOutput :: Object -> Parser (Maybe Text)
 optionalTurnOutput objectValue = do
-  output <- objectValue .:? "output"
-  text <- objectValue .:? "text"
-  resultOutput <- nestedText ["result", "output"] objectValue
-  resultText <- nestedText ["result", "text"] objectValue
-  pure (output <|> text <|> resultOutput <|> resultText)
+  let output = fieldOutput "output" objectValue
+      text = fieldOutput "text" objectValue
+      resultOutput = nestedOutput ["result", "output"] objectValue
+      resultText = nestedOutput ["result", "text"] objectValue
+      result = fieldOutput "result" objectValue
+  pure (output <|> text <|> resultOutput <|> resultText <|> result)
 
-nestedText :: [Text] -> Object -> Parser (Maybe Text)
-nestedText path objectValue =
-  pure case lookupPath path (Object objectValue) of
-    Just (String text) -> Just text
-    _ -> Nothing
+fieldOutput :: Text -> Object -> Maybe Text
+fieldOutput key objectValue =
+  turnOutputText =<< KeyMap.lookup (Key.fromText key) objectValue
+
+nestedOutput :: [Text] -> Object -> Maybe Text
+nestedOutput path objectValue =
+  turnOutputText =<< lookupPath path (Object objectValue)
+
+turnOutputText :: Value -> Maybe Text
+turnOutputText = \case
+  Null -> Nothing
+  String text -> Just text
+  value -> Just (Text.Encoding.decodeUtf8 (LazyByteString.toStrict (encode value)))
 
 nestedRequiredText :: [Text] -> Object -> Parser Text
 nestedRequiredText path objectValue =
