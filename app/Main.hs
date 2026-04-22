@@ -404,8 +404,17 @@ discoverActiveIssueImplementers repo implementersRoot = do
     then pure []
     else do
       children <- listDirectory implementersRoot
-      issues <- traverse (loadIssueImplementerConfigIssue repo . (implementersRoot </>)) children
+      issues <- traverse (loadActiveIssueImplementerIssue repo . (implementersRoot </>)) children
       pure (nub (sortOn unIssueNumber (catMaybes issues)))
+
+loadActiveIssueImplementerIssue :: RepoName -> FilePath -> IO (Maybe IssueNumber)
+loadActiveIssueImplementerIssue repo stateDir = do
+  maybeIssue <- loadIssueImplementerConfigIssue repo stateDir
+  case maybeIssue of
+    Nothing -> pure Nothing
+    Just issue -> do
+      active <- issueImplementerStateIsActive stateDir
+      pure (if active then Just issue else Nothing)
 
 loadIssueImplementerConfigIssue :: RepoName -> FilePath -> IO (Maybe IssueNumber)
 loadIssueImplementerConfigIssue repo stateDir = do
@@ -420,6 +429,22 @@ loadIssueImplementerConfigIssue repo stateDir = do
         Right (configRepo, issue)
           | configRepo == repo -> pure (Just issue)
           | otherwise -> pure Nothing
+
+issueImplementerStateIsActive :: FilePath -> IO Bool
+issueImplementerStateIsActive stateDir = do
+  let eventsPath = stateDir </> "events.jsonl"
+  exists <- doesFileExist eventsPath
+  if not exists
+    then pure True
+    else do
+      loaded <- loadEventLogFile eventsPath
+      case loaded of
+        Left _ -> pure True
+        Right events ->
+          case replayEventLog events of
+            Left _ -> pure True
+            Right replay ->
+              pure (someDomain replay.replayState == IssueImplement && not (isTerminalPhase (somePhase replay.replayState)))
 
 data IssueImplementerChildLaunch
   = DoNotLaunchChildren
