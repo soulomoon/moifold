@@ -28,6 +28,7 @@ module CodexWatcher.AppServerClient
   , parseThreadReadTurns
   , sendAppServerRequest
   , sendOneAppServerRequest
+  , threadReadBeforeMaterializedFallback
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
@@ -42,9 +43,11 @@ import Data.Aeson
   , Value (..)
   , eitherDecode'
   , encode
+  , object
   , withObject
   , (.:)
   , (.:?)
+  , (.=)
   , (.!=)
   )
 import Data.Aeson.Types (Parser, parseEither)
@@ -194,8 +197,27 @@ appServerInterpreterFromEndpoint endpoint options =
         result <- sendOneAppServerRequest endpoint options request
         case result of
           Right value -> pure value
-          Left failure -> fail (Text.unpack (formatAppServerClientFailure failure))
+          Left failure ->
+            case threadReadBeforeMaterializedFallback request failure of
+              Just value -> pure value
+              Nothing -> fail (Text.unpack (formatAppServerClientFailure failure))
     }
+
+threadReadBeforeMaterializedFallback :: AppServerRequest -> AppServerClientFailure -> Maybe Value
+threadReadBeforeMaterializedFallback request = \case
+  AppServerJsonRpcFailure _ errorValue
+    | request.requestMethod == "thread/read"
+    , threadReadIncludesTurns request
+    , Text.isInfixOf "not materialized yet" errorValue.jsonRpcErrorMessage
+    , Text.isInfixOf "includeTurns is unavailable" errorValue.jsonRpcErrorMessage ->
+        Just (object ["turns" .= ([] :: [Value])])
+  _ -> Nothing
+
+threadReadIncludesTurns :: AppServerRequest -> Bool
+threadReadIncludesTurns request =
+  case request.requestParams of
+    Object params -> KeyMap.lookup "includeTurns" params == Just (Bool True)
+    _ -> False
 
 receiveMatchedResponse :: AppServerConnection -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 receiveMatchedResponse connection options request =

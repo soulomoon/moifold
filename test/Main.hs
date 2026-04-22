@@ -1204,6 +1204,21 @@ prop_appServerClientSurfacesJsonRpcErrors =
           jsonRpcErrorCode errorValue == -32000 && jsonRpcErrorMessage errorValue == "boom"
         _ -> False
 
+prop_appServerClientFallsBackForUnmaterializedThreadRead :: ThreadId -> Bool
+prop_appServerClientFallsBackForUnmaterializedThreadRead threadId =
+  let request = threadReadRequest 86 threadId True
+      failure =
+        AppServerJsonRpcFailure
+          86
+          JsonRpcError
+            { jsonRpcErrorCode = -32000
+            , jsonRpcErrorMessage = "thread " <> unThreadId threadId <> " is not materialized yet; includeTurns is unavailable before first user message"
+            , jsonRpcErrorData = Nothing
+            }
+      nonThreadRequest = initializeRequest 86 "codex-watcher-hs" "0.1.0"
+   in threadReadBeforeMaterializedFallback request failure == Just (object ["turns" .= ([] :: [Value])])
+        && threadReadBeforeMaterializedFallback nonThreadRequest failure == Nothing
+
 prop_appServerClientRejectsUnsupportedJsonRpcVersion :: Bool
 prop_appServerClientRejectsUnsupportedJsonRpcVersion =
   let response = object ["jsonrpc" .= ("1.0" :: Text), "id" .= (85 :: Int), "result" .= object []]
@@ -2415,6 +2430,7 @@ main = do
       , quickCheckResult prop_appServerClientSkipsNotifications
       , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds
       , quickCheckResult prop_appServerClientSurfacesJsonRpcErrors
+      , quickCheckResult prop_appServerClientFallsBackForUnmaterializedThreadRead
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_appServerClientParsesThreadReadTurns
       , quickCheckResult prop_appServerClientParsesTurnStartTurnId
