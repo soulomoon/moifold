@@ -6,6 +6,7 @@ module RuntimeSpec
   , prop_runtimeDefaultsCentralizeThreadAndTurnOptions
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
+  , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredStructuredFields
   , prop_runtimeGhPrViewUsesStructuredFields
@@ -145,6 +146,17 @@ prop_runtimeGhIssueCreateWithParentLinksSubIssue repo requestWithoutParent paren
              , Text.unpack (issueCreationBody request)
              , show (unIssueNumber parentIssue)
              ]
+
+prop_runtimeGhPrCreateKeepsStdoutJsonOnly :: IssueConfig -> Bool
+prop_runtimeGhPrCreateKeepsStdoutJsonOnly config =
+  let spec = renderRuntimeCommand (GhCreatePullRequest "/tmp/work" config)
+      script = Text.pack (spec.args !! 1)
+   in spec.command == "bash"
+        && "git checkout -B \"$branch\" >/dev/null" `Text.isInfixOf` script
+        && "git commit --allow-empty -m \"Start issue #$issue implementation\" >/dev/null" `Text.isInfixOf` script
+        && "git push -u origin \"$branch\" >/dev/null" `Text.isInfixOf` script
+        && "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\"" `Text.isInfixOf` script
+        && "printf '{\"status\":\"reused\",\"prNumber\":%s}\\n' \"$existing\"" `Text.isInfixOf` script
 
 prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
 prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge prNumber evidence =

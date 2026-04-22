@@ -18,7 +18,7 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.Runtime
 import CodexWatcher.RuntimeDefaults (defaultPlanCollaborationMode)
-import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput, reviewerTurnOutputSchema)
+import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput)
 import CodexWatcher.Types
 import Data.Aeson
   ( Value
@@ -156,7 +156,7 @@ reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
           (config.effectRuntimeStateDir </> "reviewer-state.json")
           prConfig
           reviewTargetSha
-    , turnRuntimeOutputSchema = Just reviewerTurnOutputSchema
+    , turnRuntimeOutputSchema = Nothing
     }
 
 issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> TurnRuntimeConfig

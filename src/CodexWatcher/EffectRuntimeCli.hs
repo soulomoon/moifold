@@ -27,24 +27,24 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
     , effectRuntimePlannerTurn =
-        (structuredTurnConfig (plannerTurnInputForScope scopeIssues))
+        (liveTurnConfig (plannerTurnInputForScope scopeIssues))
           { turnRuntimeCollaborationMode =
               Just
                 (defaultPlanCollaborationMode (issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues))
           }
-    , effectRuntimeWorkerTurn = structuredTurnConfig prReviewWorkerTurnInput
-    , effectRuntimeIssueTriageTurn = structuredTurnConfig issueTriageTurnInput
+    , effectRuntimeWorkerTurn = liveTurnConfig prReviewWorkerTurnInput
+    , effectRuntimeIssueTriageTurn = liveTurnConfig issueTriageTurnInput
     , effectRuntimeIssuePlanTurn =
-        (structuredTurnConfig issuePlanTurnInput)
+        (liveTurnConfig issuePlanTurnInput)
           { turnRuntimeCollaborationMode =
               Just (defaultPlanCollaborationMode "Issue-specific plan-mode instructions are generated when the plan turn starts.")
           }
-    , effectRuntimeIssueImplementationTurn = structuredTurnConfig issueImplementationTurnInput
+    , effectRuntimeIssueImplementationTurn = liveTurnConfig issueImplementationTurnInput
     , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit." Nothing
     }
  where
-  structuredTurnConfig input =
-    turnConfig input (Just structuredTurnOutputSchema)
+  liveTurnConfig input =
+    turnConfig input Nothing
   turnConfig input outputSchema =
     TurnRuntimeConfig
       { turnRuntimeCwd = workdir

@@ -108,6 +108,7 @@ import RuntimeSpec
   , prop_runtimeDefaultsCentralizeThreadAndTurnOptions
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
+  , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredStructuredFields
   , prop_runtimeGhPrViewUsesStructuredFields
@@ -1382,8 +1383,8 @@ prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
         && actionIsTurnStartWithInput threadId "worker prompt" (actions !! 3)
         && compiled.compiledNextRequestId == 20
 
-prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas :: Bool
-prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas =
+prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas :: Bool
+prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas =
   let repo = RepoName "soulomoon/mlf2"
       issueConfig = IssueConfig repo (IssueNumber 26) (BranchName "codex/issue-26")
       prConfig = PrConfig repo (PrNumber 29) (BranchName "codex/issue-26")
@@ -1402,8 +1403,7 @@ prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas =
           ]
       actions = compiled.compiledActions
    in length actions == 6
-        && all ((== Just structuredTurnOutputSchema) . actionTurnOutputSchema) (take 5 actions)
-        && actionTurnOutputSchema (actions !! 5) == Just reviewerTurnOutputSchema
+        && all ((== Just Null) . actionTurnOutputSchema) actions
 
 prop_threadDeveloperPromptTemplatesPortNodeProtocols :: Bool
 prop_threadDeveloperPromptTemplatesPortNodeProtocols =
@@ -2618,6 +2618,78 @@ automaticDaemonLoopPlanningGraphWaitsAndRecords = do
       putStrLn ("FAIL automatic planning graph: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+automaticDaemonLoopPlanningGraphDropsClosedDependencies :: IO Bool
+automaticDaemonLoopPlanningGraphDropsClosedDependencies = do
+  let repo = RepoName "soulomoon/mlf2"
+      graph =
+        PlanningGraph
+          [IssueNumber 28]
+          [BlockedPlanningIssue (IssueNumber 12) [IssueNumber 26, IssueNumber 27, IssueNumber 28] "wait for remaining sub-issue"]
+          [ IssueDependency (IssueNumber 28) [IssueNumber 26, IssueNumber 27]
+          , IssueDependency (IssueNumber 12) [IssueNumber 26, IssueNumber 27, IssueNumber 28]
+          ]
+      normalizedGraph =
+        PlanningGraph
+          [IssueNumber 28]
+          [BlockedPlanningIssue (IssueNumber 12) [IssueNumber 28] "wait for remaining sub-issue"]
+          [ IssueDependency (IssueNumber 28) []
+          , IssueDependency (IssueNumber 12) [IssueNumber 28]
+          ]
+      plannerOutput = jsonText (toJSON graph)
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhIssueView _ issue _ ->
+            jsonCommandReport (object ["state" .= issueState issue, "closed" .= issueClosed issue])
+          command -> defaultFakeCommand command
+      )
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-plan" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= plannerOutput
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 127
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
+      events =
+        [ IssuePlanningInitialized (PlannerConfig repo 8 [IssueNumber 12, IssueNumber 26, IssueNumber 27, IssueNumber 28])
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+      results <-
+        sequence
+          [ assert "planning graph drops closed dependencies before validation" (observedEvent == Just (IssuePlanningGraphUpdated normalizedGraph))
+          , assert "planning graph queries closed dependency issues" (FakeCommand (GhIssueView repo (IssueNumber 26) ["state", "closed", "url"]) `elem` calls && FakeCommand (GhIssueView repo (IssueNumber 27) ["state", "closed", "url"]) `elem` calls)
+          , assert "planning graph stays non-terminal after closed dependency filtering" (maybe False ((== Initialized) . somePhase . daemonObservedState) tick.loopObservedTick)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic planning graph closed dependency filtering: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  issueClosed issue =
+    issue `elem` [IssueNumber 26, IssueNumber 27]
+  issueState issue =
+    if issueClosed issue then ("CLOSED" :: Text) else "OPEN"
+
 automaticDaemonLoopExecutePrestartsTurnOnce :: IO Bool
 automaticDaemonLoopExecutePrestartsTurnOnce = do
   (executor, getCalls) <- fakeActionExecutor
@@ -3068,8 +3140,9 @@ main = do
         , quickCheckResult prop_runtimeGitPushNeverForces
         , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
         , quickCheckResult prop_runtimeGhPrChecksUsesRequiredStructuredFields
-        , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
+      , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
+      , quickCheckResult prop_runtimeGhPrCreateKeepsStdoutJsonOnly
       , quickCheckResult prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
@@ -3101,7 +3174,7 @@ main = do
       , quickCheckResult prop_turnClassifierBlocksMissingOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
-      , quickCheckResult prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas
+      , quickCheckResult prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas
       , quickCheckResult prop_threadDeveloperPromptTemplatesPortNodeProtocols
       , quickCheckResult prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple
       , quickCheckResult prop_promptPipelineAlignmentContracts
@@ -3136,6 +3209,7 @@ main = do
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningIssueCreationOk <- automaticDaemonLoopPlanningIssueCreationRequestsReplanning
   automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphWaitsAndRecords
+  automaticPlanningClosedDepsOk <- automaticDaemonLoopPlanningGraphDropsClosedDependencies
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
@@ -3169,6 +3243,7 @@ main = do
       && automaticPlanningDryRunOk
       && automaticPlanningIssueCreationOk
       && automaticPlanningGraphOk
+      && automaticPlanningClosedDepsOk
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
       && automaticImplementationHandoffOk

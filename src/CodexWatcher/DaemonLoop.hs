@@ -30,8 +30,9 @@ import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime (CommandReport (..), runtimeReadJsonValue, runtimeWriteJsonValue)
 import CodexWatcher.TurnClassifier
 import CodexWatcher.Types
+import Control.Monad (filterM)
 import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON, object, withObject, (.:), (.=))
-import Data.List (find)
+import Data.List (find, nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Generics (Generic)
@@ -138,9 +139,8 @@ runFromState executor config events replay = do
       case config.loopPlannerThreadId of
         Nothing -> pure (Left DaemonLoopMissingPlannerThread)
         Just plannerThread -> prestartAndObserve executor config events StartPlannerTurnKind plannerThread (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
-    SomeWatcherState (PlanningTurnActive _ activeTurn) ->
-      observeActiveTurn executor config events replay activeTurn \turn ->
-        DaemonIssuePlanningObservation <$> classifyIssuePlanningTurn turn
+    SomeWatcherState (PlanningTurnActive plannerConfig activeTurn) ->
+      observePlanningActiveTurn executor config events replay plannerConfig activeTurn
     SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
       idle executor config replay "issue planning is waiting for ready issues"
     SomeWatcherState (IssueNeedsTriage _ (WorkerIdle workerThread)) ->
@@ -210,6 +210,63 @@ observeActiveTurn executor config events replay activeTurn classify = do
       case classify turn of
         Nothing -> idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
         Just observation -> observeWithExecutor executor config events observation
+
+observePlanningActiveTurn
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> PlannerConfig
+  -> ActiveTurn
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+observePlanningActiveTurn executor config events replay plannerConfig activeTurn = do
+  turnResult <- readActiveTurn executor config activeTurn
+  case turnResult of
+    Left failure -> pure (Left failure)
+    Right Nothing ->
+      handleMissingActiveTurn executor config events replay activeTurn
+    Right (Just turn) -> do
+      clearStaleActiveTurnMarker executor config
+      case classifyIssuePlanningTurn turn of
+        Nothing ->
+          idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
+        Just observation -> do
+          normalized <- normalizePlanningObservation executor plannerConfig observation
+          observeWithExecutor executor config events (DaemonIssuePlanningObservation normalized)
+
+normalizePlanningObservation :: Monad m => ActionExecutor m -> PlannerConfig -> IssuePlanningObservation -> m IssuePlanningObservation
+normalizePlanningObservation executor plannerConfig = \case
+  ObservedPlanningGraphUpdated graph ->
+    ObservedPlanningGraphUpdated <$> filterClosedPlanningDependencies executor plannerConfig graph
+  observation ->
+    pure observation
+
+filterClosedPlanningDependencies :: Monad m => ActionExecutor m -> PlannerConfig -> PlanningGraph -> m PlanningGraph
+filterClosedPlanningDependencies executor plannerConfig graph = do
+  closedIssues <- filterM isClosedIssue dependencyIssues
+  let unresolved issue = issue `notElem` closedIssues
+      filterUnresolved = filter unresolved
+      filterBlocked blocked =
+        blocked {blockedPlanningDependsOn = filterUnresolved blocked.blockedPlanningDependsOn}
+      filterDependency dependency =
+        dependency {dependencyDependsOn = filterUnresolved dependency.dependencyDependsOn}
+  pure
+    graph
+      { planningBlockedIssues = fmap filterBlocked graph.planningBlockedIssues
+      , planningDependencies = fmap filterDependency graph.planningDependencies
+      }
+ where
+  dependencyIssues =
+    nub
+      ( concatMap blockedPlanningDependsOn graph.planningBlockedIssues
+          <> concatMap dependencyDependsOn graph.planningDependencies
+      )
+  isClosedIssue issue = do
+    result <- runGhIssueView executor.actionRuntime plannerConfig.plannerRepo issue
+    pure case result of
+      Right remote -> remote.remoteIssueClosed || Text.toUpper remote.remoteIssueState == "CLOSED"
+      Left _reason -> False
 
 handleMissingActiveTurn
   :: Monad m
