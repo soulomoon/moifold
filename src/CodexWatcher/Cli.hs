@@ -179,6 +179,7 @@ data LoopCli = LoopCli
   , loopCliIterations :: Maybe Int
   , loopCliPidFile :: Maybe FilePath
   , loopCliPlannerThread :: Maybe ThreadId
+  , loopCliScopeIssue :: Maybe IssueNumber
   , loopCliImplementersRoot :: Maybe FilePath
   , loopCliOpenIssues :: Maybe [IssueNumber]
   , loopCliActiveIssues :: Maybe [IssueNumber]
@@ -373,6 +374,7 @@ loopParser domain =
     <*> optional (intOption "iterations" "N" "Maximum loop iterations")
     <*> optional (strOption (long "pid-file" <> metavar "PATH" <> help "Override daemon pid file"))
     <*> optional plannerThreadOption
+    <*> optional (IssueNumber <$> intOption "scope-issue" "NUMBER" "Restrict issue planning to this issue and its sub-issues")
     <*> optional (strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root"))
     <*> optional (option (issueNumbersReader "--open-issues") (long "open-issues" <> metavar "1,2" <> help "Open issue numbers to consider during planning fanout"))
     <*> optional (option (issueNumbersReader "--active-issues") (long "active-issues" <> metavar "1,2" <> help "Issue numbers already active during planning fanout"))

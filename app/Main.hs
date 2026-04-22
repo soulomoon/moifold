@@ -372,7 +372,7 @@ issueFanout options = do
           , fanoutBranchPrefix = options.issueFanoutCliBranchPrefix
           , fanoutThreadPrefix = options.issueFanoutCliThreadPrefix
           }
-      plannerConfig = PlannerConfig options.issueFanoutCliRepo options.issueFanoutCliMaxParallel
+      plannerConfig = PlannerConfig options.issueFanoutCliRepo options.issueFanoutCliMaxParallel Nothing
       launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
       launchEndpoint =
         case executionMode of
@@ -609,7 +609,7 @@ runAutomaticLoop cli = do
       options =
         DaemonOptions
           { daemonEventLogPath = cli.loopCliEventsPath
-          , daemonRuntimeConfig = defaultEffectRuntimeConfig cli.loopCliRepo cli.loopCliWorkdir cli.loopCliStateDir
+          , daemonRuntimeConfig = defaultEffectRuntimeConfigWithPlannerScope cli.loopCliScopeIssue cli.loopCliRepo cli.loopCliWorkdir cli.loopCliStateDir
           , daemonExecutionMode = executionMode
           }
       loopConfig =
@@ -724,6 +724,7 @@ loopCliCommandArgs watcherPidFile cli =
     <> boolSwitch cli.loopCliLoop "--loop"
     <> maybe [] (\iterations -> ["--iterations", Text.pack (show iterations)]) cli.loopCliIterations
     <> maybe [] (\threadId -> ["--thread-id", unThreadId threadId]) cli.loopCliPlannerThread
+    <> maybe [] (\issueNumber' -> ["--scope-issue", Text.pack (show (unIssueNumber issueNumber'))]) cli.loopCliScopeIssue
     <> maybe [] (\root -> ["--implementers-root", Text.pack root]) cli.loopCliImplementersRoot
     <> maybe [] (\issues -> ["--open-issues", issueNumbersText issues]) cli.loopCliOpenIssues
     <> maybe [] (\issues -> ["--active-issues", issueNumbersText issues]) cli.loopCliActiveIssues
@@ -950,7 +951,11 @@ parseDaemonObservation cli =
       die ("unsupported observe-once domain/observation: " <> cliDomainName cli.observeCliDomain <> "/" <> cli.observeCliObservation)
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
-defaultEffectRuntimeConfig repo workdir stateDir =
+defaultEffectRuntimeConfig =
+  defaultEffectRuntimeConfigWithPlannerScope Nothing
+
+defaultEffectRuntimeConfigWithPlannerScope :: Maybe IssueNumber -> RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
+defaultEffectRuntimeConfigWithPlannerScope maybeScopeIssue repo workdir stateDir =
   EffectRuntimeConfig
     { effectRuntimeRepo = repo
     , effectRuntimeWorkdir = workdir
@@ -958,11 +963,11 @@ defaultEffectRuntimeConfig repo workdir stateDir =
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
     , effectRuntimePlannerTurn =
-        (turnConfig plannerTurnInput)
+        (turnConfig (plannerTurnInputForScope maybeScopeIssue))
           { turnRuntimeCollaborationMode =
               Just
                 ( planCollaborationMode
-                    "Plan issue decomposition, dependencies, subissue creation, and implementer fanout. Do not edit files in this turn."
+                    (plannerPlanModeSummary maybeScopeIssue)
                     "gpt-5.4"
                     "xhigh"
                 )
@@ -982,6 +987,23 @@ defaultEffectRuntimeConfig repo workdir stateDir =
       , turnRuntimeOutputSchema = Nothing
       , turnRuntimeCollaborationMode = Nothing
       }
+
+plannerTurnInputForScope :: Maybe IssueNumber -> Text.Text
+plannerTurnInputForScope Nothing =
+  plannerTurnInput
+plannerTurnInputForScope (Just scopeIssue) =
+  plannerTurnInput
+    <> " Target scope: only issue #"
+    <> Text.pack (show (unIssueNumber scopeIssue))
+    <> " and its existing or newly created GitHub sub-issues are in scope. Do not create, classify, mark ready, mark blocked, or start work for issues outside this issue tree. If the root issue needs decomposition, create concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only the root issue and descendants that belong to this scoped issue tree."
+
+plannerPlanModeSummary :: Maybe IssueNumber -> Text.Text
+plannerPlanModeSummary Nothing =
+  "Plan issue decomposition, dependencies, subissue creation, and implementer fanout. Do not edit files in this turn."
+plannerPlanModeSummary (Just scopeIssue) =
+  "Plan issue #"
+    <> Text.pack (show (unIssueNumber scopeIssue))
+    <> " and its sub-issues only. Do not edit files in this turn."
 
 reviewThreadsReportFromCli :: ObserveOnceCli -> IO ReviewThreadsReport
 reviewThreadsReportFromCli cli =

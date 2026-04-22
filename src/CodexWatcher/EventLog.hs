@@ -410,6 +410,7 @@ parsePlannerConfig objectValue =
   PlannerConfig
     <$> (RepoName <$> nonEmptyTextField objectValue "repoFullName")
     <*> positiveIntField objectValue "maxParallel"
+    <*> optionalIssueNumberField objectValue "scopeIssueNumber"
 
 parsePrConfig :: Object -> Parser PrConfig
 parsePrConfig objectValue =
@@ -461,7 +462,17 @@ plannerConfigFields :: PlannerConfig -> [Pair]
 plannerConfigFields config =
   [ "repoFullName" .= unRepoName (plannerRepo config)
   , "maxParallel" .= plannerMaxParallel config
+  , "scopeIssueNumber" .= fmap unIssueNumber (plannerScopeIssue config)
   ]
+
+optionalIssueNumberField :: Object -> Key.Key -> Parser (Maybe IssueNumber)
+optionalIssueNumberField objectValue key = do
+  maybeValue <- objectValue .:? key
+  case maybeValue of
+    Nothing -> pure Nothing
+    Just value
+      | value > 0 -> pure (Just (IssueNumber value))
+      | otherwise -> fail (Key.toString key <> " must be positive")
 
 issueConfigFields :: IssueConfig -> [Pair]
 issueConfigFields config =
