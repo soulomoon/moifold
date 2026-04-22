@@ -103,7 +103,7 @@ Without `--open-issues`, fanout discovers open issues with `gh issue list`. With
 
 The runtime event format is documented in `docs/event-log-schema.md`.
 
-Automatic turn classification first accepts structured JSON outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `already_fixed`, `needs_implementation`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
+Automatic turn starts now include an output schema and prompts that ask for structured JSON. Classification first accepts outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `already_fixed`, `needs_implementation`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
 
 ## Design Rule
 

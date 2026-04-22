@@ -62,6 +62,7 @@ data TurnStartOptions = TurnStartOptions
   , turnApprovalPolicy :: Text
   , turnSandboxPolicy :: Text
   , turnInput :: Text
+  , turnOutputSchema :: Maybe Value
   , turnCollaborationMode :: Maybe Value
   }
   deriving stock (Eq, Show, Generic)
@@ -132,7 +133,7 @@ turnStartRequest requestId options =
               , "personality" .= Null
               , "serviceTier" .= Null
               , "summary" .= Null
-              , "outputSchema" .= Null
+              , "outputSchema" .= maybe Null id options.turnOutputSchema
               , "input" .= options.turnInput
               ]
             fields =

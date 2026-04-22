@@ -28,6 +28,7 @@ import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.TurnClassifier
+import CodexWatcher.TurnOutput
 import CodexWatcher.Types
 import Data.Aeson
   ( Value (..)
@@ -960,13 +961,14 @@ prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
             , turnApprovalPolicy = "never"
             , turnSandboxPolicy = "danger-full-access"
             , turnInput = "write the plan"
+            , turnOutputSchema = Just structuredTurnOutputSchema
             , turnCollaborationMode = Just collaborationMode
             }
    in request.requestMethod == "turn/start"
         && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
         && lookupValue "collaborationMode" request.requestParams == Just collaborationMode
         && lookupValue "summary" request.requestParams == Just Null
-        && lookupValue "outputSchema" request.requestParams == Just Null
+        && lookupValue "outputSchema" request.requestParams == Just structuredTurnOutputSchema
 
 prop_appServerThreadReadAndInterruptUseThreadIds :: ThreadId -> TurnId -> Bool
 prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
@@ -1123,6 +1125,7 @@ effectRuntimeConfig repo workdir requestId =
       , turnRuntimeApprovalPolicy = "never"
       , turnRuntimeSandboxPolicy = "danger-full-access"
       , turnRuntimeInput = input
+      , turnRuntimeOutputSchema = Nothing
       , turnRuntimeCollaborationMode = collaborationMode
       }
 
@@ -1420,6 +1423,7 @@ actionExecutorExecuteCallsInjectedInterpreters = do
       , turnApprovalPolicy = "never"
       , turnSandboxPolicy = "danger-full-access"
       , turnInput = "worker prompt"
+      , turnOutputSchema = Nothing
       , turnCollaborationMode = Nothing
       }
 

@@ -34,6 +34,7 @@ data TurnRuntimeConfig = TurnRuntimeConfig
   , turnRuntimeApprovalPolicy :: Text
   , turnRuntimeSandboxPolicy :: Text
   , turnRuntimeInput :: Text
+  , turnRuntimeOutputSchema :: Maybe Value
   , turnRuntimeCollaborationMode :: Maybe Value
   }
   deriving stock (Eq, Show, Generic)
@@ -121,6 +122,7 @@ turnStartOptions config threadId =
     , turnApprovalPolicy = config.turnRuntimeApprovalPolicy
     , turnSandboxPolicy = config.turnRuntimeSandboxPolicy
     , turnInput = config.turnRuntimeInput
+    , turnOutputSchema = config.turnRuntimeOutputSchema
     , turnCollaborationMode = config.turnRuntimeCollaborationMode
     }
 

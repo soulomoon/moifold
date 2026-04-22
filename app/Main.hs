@@ -26,6 +26,7 @@ import CodexWatcher.Protocol
 import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
+import CodexWatcher.TurnOutput
 import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
@@ -630,9 +631,9 @@ defaultEffectRuntimeConfig repo workdir stateDir =
     , effectRuntimeStateDir = stateDir
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
-    , effectRuntimePlannerTurn = turnConfig "planner turn"
-    , effectRuntimeWorkerTurn = turnConfig "worker turn"
-    , effectRuntimeReviewerTurn = turnConfig "reviewer turn"
+    , effectRuntimePlannerTurn = turnConfig plannerTurnInput
+    , effectRuntimeWorkerTurn = turnConfig issueWorkerTurnInput
+    , effectRuntimeReviewerTurn = turnConfig reviewerTurnInput
     }
  where
   turnConfig input =
@@ -643,6 +644,7 @@ defaultEffectRuntimeConfig repo workdir stateDir =
       , turnRuntimeApprovalPolicy = "never"
       , turnRuntimeSandboxPolicy = "danger-full-access"
       , turnRuntimeInput = input
+      , turnRuntimeOutputSchema = Just structuredTurnOutputSchema
       , turnRuntimeCollaborationMode = Nothing
       }
 
