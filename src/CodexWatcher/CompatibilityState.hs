@@ -62,6 +62,10 @@ compatibilityStateWrites stateDir state =
       [ write "issue-state.json" (issueStateJson config "in_progress" maybePr Nothing)
       , write "daemon-state.json" (activeDaemonJson "implement" activeTurn)
       ]
+    SomeWatcherState (IssueWaitingForPrMerge config prNumber) ->
+      [ write "issue-state.json" (issueStateJson config "waiting_pr_merge" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
     SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "checking" Nothing Nothing)
       ]

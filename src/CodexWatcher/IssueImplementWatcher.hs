@@ -33,6 +33,7 @@ data IssueImplementObservation
   | ObservedReviewHandoffInitialized PrNumber
   | ObservedReviewHandoffStarted PrNumber
   | ObservedImplementationCompleted PrNumber
+  | ObservedPullRequestMerged PrNumber
   | ObservedIssueImplementBlocked BlockedReason
   deriving stock (Eq, Show)
 
@@ -80,12 +81,20 @@ issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (Obse
   Right (tick (IssueReviewHandoffInitializedEvent prNumber) (step state (IssueReviewHandoffInitialized prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedReviewHandoffInitialized prNumber) =
   Right (tick (IssueReviewHandoffInitializedEvent prNumber) (step state (IssueReviewHandoffInitialized prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedReviewHandoffInitialized prNumber) =
+  Right (tick (IssueReviewHandoffInitializedEvent prNumber) (step state (IssueReviewHandoffInitialized prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedReviewHandoffStarted prNumber) =
   Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedReviewHandoffStarted prNumber) =
   Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedReviewHandoffStarted prNumber) =
+  Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedImplementationCompleted prNumber) =
   Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedImplementationCompleted prNumber) =
+  Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueNeedsTriage {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssueTriageActive {}) (ObservedIssueImplementBlocked reason) =
@@ -97,6 +106,8 @@ issueImplementObserve (SomeWatcherState state@IssueInPlanMode {}) (ObservedIssue
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve state observation =
   Left

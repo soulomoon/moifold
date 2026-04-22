@@ -165,7 +165,10 @@ bootstrapIdleIssueStatusEvents snapshot initialEvents = \case
     case snapshotPrNumber snapshot of
       Just prNumber ->
         bootstrapImplementationReadyEvents snapshot initialEvents
-          <> [IssueImplementationCompletedEvent prNumber]
+          <> [ IssueReviewHandoffInitializedEvent prNumber
+             , IssueReviewHandoffStartedEvent prNumber
+             , IssuePullRequestMergedEvent prNumber
+             ]
       Nothing ->
         initialEvents <> [WatcherBlocked (BlockedReason "Issue state is complete but pr_number is missing")]
   Just _unknown ->
@@ -263,6 +266,10 @@ replayIdleIssueStatus snapshot status =
         )
     Just "in_progress" ->
       pure (typedIssueImplement (IssueImplementationReady config maybePr worker :: WatcherState 'IssueImplement 'Implementing) [])
+    Just "waiting_pr_merge" ->
+      case maybePr of
+        Just pr -> pure (typedIssueImplement (IssueWaitingForPrMerge config pr :: WatcherState 'IssueImplement 'Implementing) [])
+        Nothing -> pure (typedIssueImplement (BlockedState (BlockedReason "Issue state is waiting_pr_merge but pr_number is missing") :: WatcherState 'IssueImplement 'Blocked) [])
     Just "incomplete" ->
       pure
         ( typedIssueImplement

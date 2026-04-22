@@ -58,7 +58,7 @@ data RuntimeCommand
   | GhPrListOpen RepoName
   | GhPrView RepoName PrNumber [Text]
   | GhReviewThreads PrConfig
-  | GhCreatePullRequest IssueConfig
+  | GhCreatePullRequest FilePath IssueConfig
   | GhResolveReviewThread ReviewThreadId
   | GhPrMerge RepoName PrNumber Text
   | GitBranchCurrent FilePath
@@ -171,18 +171,17 @@ renderRuntimeCommand (GhReviewThreads config) =
         ]
         Nothing
         ""
-renderRuntimeCommand (GhCreatePullRequest config) =
+renderRuntimeCommand (GhCreatePullRequest workdir config) =
   RuntimeCommandSpec
-    "gh"
-    [ "pr"
-    , "create"
-    , "--repo"
+    "bash"
+    [ "-lc"
+    , Text.unpack createPullRequestScript
+    , "codex-watcher-gh-pr-create"
     , Text.unpack (unRepoName (issueRepo config))
-    , "--head"
     , Text.unpack (unBranchName (issueBranch config))
-    , "--fill"
+    , show (unIssueNumber (issueNumber config))
     ]
-    Nothing
+    (Just workdir)
     ""
 renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
   RuntimeCommandSpec
@@ -271,6 +270,35 @@ createAndLinkSubIssueScript =
     , "sub_issue_id=$(gh api \"repos/$repo/issues/$number\" --jq '.id')"
     , "gh api --method POST -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2026-03-10' \"repos/$repo/issues/$parent/sub_issues\" -F \"sub_issue_id=$sub_issue_id\" >/dev/null"
     , "printf '%s\\n' \"$url\""
+    ]
+
+createPullRequestScript :: Text
+createPullRequestScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "repo=\"$1\""
+    , "branch=\"$2\""
+    , "issue=\"$3\""
+    , "existing=$(gh pr list --repo \"$repo\" --head \"$branch\" --state open --json number --jq '.[0].number // empty')"
+    , "if [ -n \"$existing\" ]; then"
+    , "  printf 'PR #%s already exists for %s\\n' \"$existing\" \"$branch\""
+    , "  exit 0"
+    , "fi"
+    , "git fetch origin --prune >/dev/null"
+    , "git checkout -B \"$branch\""
+    , "git config user.email >/dev/null || git config user.email codex-watcher@users.noreply.github.com"
+    , "git config user.name >/dev/null || git config user.name codex-watcher"
+    , "base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || true)"
+    , "if [ -z \"$base\" ]; then base=\"origin/main\"; fi"
+    , "if ! git rev-parse --verify \"$base\" >/dev/null 2>&1; then"
+    , "  base=$(git rev-list --max-parents=0 HEAD | tail -n1)"
+    , "fi"
+    , "if [ -z \"$(git log --oneline \"$base\"..HEAD)\" ]; then"
+    , "  git commit --allow-empty -m \"Start issue #$issue implementation\""
+    , "fi"
+    , "git push -u origin \"$branch\""
+    , "body=$(printf 'Implements #%s.\\n\\nCreated by codex-watcher after the issue planning turn. Implementation commits will be pushed to this PR.' \"$issue\")"
+    , "gh pr create --repo \"$repo\" --head \"$branch\" --title \"Implement #$issue\" --body \"$body\""
     ]
 
 repoOwnerName :: RepoName -> (Text, Text)

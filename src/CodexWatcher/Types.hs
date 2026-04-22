@@ -373,6 +373,11 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> WorkerThread 'Active
     -> WatcherState 'IssueImplement 'Implementing
 
+  IssueWaitingForPrMerge
+    :: IssueConfig
+    -> PrNumber
+    -> WatcherState 'IssueImplement 'Implementing
+
   PrCheckingReviews
     :: PrConfig
     -> WorkerThread 'Idle
@@ -431,6 +436,7 @@ phaseOf IssuePlanReady {} = PlanMode
 phaseOf IssueInPlanMode {} = PlanMode
 phaseOf IssueImplementationReady {} = Implementing
 phaseOf IssueImplementing {} = Implementing
+phaseOf IssueWaitingForPrMerge {} = Implementing
 phaseOf PrCheckingReviews {} = CheckingReviews
 phaseOf PrFixingReviews {} = FixingReviews
 phaseOf PrReviewingClean {} = ReviewingClean

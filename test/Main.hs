@@ -351,7 +351,9 @@ prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn i
     [ IssueImplementInitialized config workerThread
     , IssuePlanTurnStartedEvent planTurn
     , IssuePlanCompletedEvent (Just implementationTurn)
-    , IssueImplementationCompletedEvent prNumber
+    , IssueReviewHandoffInitializedEvent prNumber
+    , IssueReviewHandoffStartedEvent prNumber
+    , IssuePullRequestMergedEvent prNumber
     ] of
     Right replay ->
       someDomain replay.replayState == IssueImplement
@@ -362,7 +364,7 @@ prop_eventLogCannotCompleteIssueBeforePlanning :: IssueConfig -> ThreadId -> PrN
 prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
   case replayEventLog
     [ IssueImplementInitialized config workerThread
-    , IssueImplementationCompletedEvent prNumber
+    , IssuePullRequestMergedEvent prNumber
     ] of
     Left _ -> True
     Right _ -> False
@@ -385,7 +387,7 @@ prop_eventLogCannotCompleteIssueBeforeImplementationTurn config workerThread pla
     , IssuePlanTurnStartedEvent planTurn
     , IssuePlanCompletedEvent Nothing
     , IssuePullRequestCreatedEvent prNumber
-    , IssueImplementationCompletedEvent prNumber
+    , IssuePullRequestMergedEvent prNumber
     ] of
     Left _ -> True
     Right _ -> False
@@ -417,7 +419,7 @@ prop_eventLogIssueIncompleteCanContinueToComplete config workerThread triageTurn
         , IssueImplementationTurnStartedEvent secondImplementationTurn
         , IssueReviewHandoffInitializedEvent prNumber
         , IssueReviewHandoffStartedEvent prNumber
-        , IssueImplementationCompletedEvent prNumber
+        , IssuePullRequestMergedEvent prNumber
         ] of
         Right replay ->
           someDomain replay.replayState == IssueImplement
@@ -614,6 +616,12 @@ prop_issuePlanningFanoutBuildsLaunchPlans =
             && launchStateDir firstLaunch == "/tmp/implementers/owner_name__issue1"
             && launchEventsPath firstLaunch == "/tmp/implementers/owner_name__issue1/events.jsonl"
             && launchWorkdir firstLaunch == Just "/tmp/worktrees/owner_name__issue1"
+            && issueImplementerWorkdirSetupCommands firstLaunch
+              == [ RawCommand "gh" ["repo", "clone", "owner/name", "/tmp/worktrees/owner_name__issue1"] Nothing
+                 , RawCommand "git" ["checkout", "-B", "codex/issue-1"] (Just "/tmp/worktrees/owner_name__issue1")
+                 , RawCommand "git" ["config", "user.email", "codex-watcher@users.noreply.github.com"] (Just "/tmp/worktrees/owner_name__issue1")
+                 , RawCommand "git" ["config", "user.name", "codex-watcher"] (Just "/tmp/worktrees/owner_name__issue1")
+                 ]
             && launchInitialEvent firstLaunch == IssueImplementInitialized (launchIssueConfig firstLaunch) (launchThreadId firstLaunch)
             && length (launchCompatibilityWrites firstLaunch) == 2
             && lookupValue "threadId" (launchConfigJson firstLaunch) == Just (String "issue-worker-1")
@@ -729,6 +737,7 @@ canonicalEventExamples =
   , IssueReviewHandoffInitializedEvent prNumber
   , IssueReviewHandoffStartedEvent prNumber
   , IssueImplementationCompletedEvent prNumber
+  , IssuePullRequestMergedEvent prNumber
   , WatcherRecoveredInvalidState "synthetic recovery marker"
   , WatcherBlocked blockedReason
   , WatcherStopped stopReason
@@ -826,25 +835,21 @@ prop_eventLogRepairIssue26MissingPlanReentersImplementation =
     WatcherRecoveredInvalidState {} -> True
     _ -> False
 
-prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete :: Bool
-prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete =
+prop_eventLogLegacyCompletionWithoutImplementationTurnWaitsForMerge :: Bool
+prop_eventLogLegacyCompletionWithoutImplementationTurnWaitsForMerge =
   let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
       workerThread = ThreadId "worker-thread"
       prNumber' = PrNumber 7
-      invalidEvents =
+      legacyEvents =
         [ IssueImplementInitialized issueConfig workerThread
         , IssuePlanTurnStartedEvent (TurnId "turn-plan")
         , IssuePlanCompletedEvent Nothing
         , IssuePullRequestCreatedEvent prNumber'
         , IssueImplementationCompletedEvent prNumber'
         ]
-   in case repairIssueImplementEventLog invalidEvents of
+   in case replayEventLog legacyEvents of
+        Right replay -> someDomain replay.replayState == IssueImplement && somePhase replay.replayState == Implementing
         Left _ -> False
-        Right plan ->
-          IssueImplementationCompletedEvent prNumber' `elem` plan.repairDroppedEvents
-            && case replayEventLog plan.repairRepairedEvents of
-              Right replay -> somePhase replay.replayState == Implementing
-              Left _ -> False
 
 prop_eventLogRepairDropsStalePlanningReadyIssuesFixed :: Bool
 prop_eventLogRepairDropsStalePlanningReadyIssuesFixed =
@@ -877,7 +882,9 @@ prop_eventLogRepairRejectsValidEventLog config workerThread planTurn implementat
     , IssuePlanCompletedEvent Nothing
     , IssuePullRequestCreatedEvent prNumber'
     , IssueImplementationTurnStartedEvent implementationTurn
-    , IssueImplementationCompletedEvent prNumber'
+    , IssueReviewHandoffInitializedEvent prNumber'
+    , IssueReviewHandoffStartedEvent prNumber'
+    , IssuePullRequestMergedEvent prNumber'
     ] of
     Left _ -> True
     Right _ -> False
@@ -1069,7 +1076,7 @@ runtimeCommandExamples =
   , GhPrListOpen (RepoName "soulomoon/mlf2")
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
   , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
-  , GhCreatePullRequest (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
+  , GhCreatePullRequest "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
   , GhResolveReviewThread (ReviewThreadId "PRRT_test")
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
   , GitBranchCurrent "/tmp/work"
@@ -1610,7 +1617,7 @@ prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planni
           actions = compiled.compiledActions
        in length actions == 3
             && actionIsCommand (== GitPush "/tmp/work" (issueBranch config)) (actions !! 0)
-            && actionIsCommand (== GhCreatePullRequest config) (actions !! 1)
+            && actionIsCommand (== GhCreatePullRequest "/tmp/work" config) (actions !! 1)
             && actionIsTurnStartWithInput (activeThreadId implementationTurn) "issue implementation prompt" (actions !! 2)
             && compiled.compiledNextRequestId == 11
 
@@ -2678,9 +2685,49 @@ automaticDaemonLoopImplementationCompletionSequencesHandoff = do
     sequence
       [ assert "automatic implementation completion initializes handoff first" (firstEvent == Just (IssueReviewHandoffInitializedEvent prNumber))
       , assert "automatic implementation completion starts handoff second" (secondEvent == Just (IssueReviewHandoffStartedEvent prNumber))
-      , assert "automatic implementation completion completes after handoff" (thirdEvent == Just (IssueImplementationCompletedEvent prNumber))
+      , assert "automatic implementation completion waits for PR merge after handoff" (thirdEvent == Nothing)
       ]
   pure (and results)
+
+automaticDaemonLoopRetriesPrCreateWhileWaitingForPr :: IO Bool
+automaticDaemonLoopRetriesPrCreateWhileWaitingForPr = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhPrListOpen {} -> CommandReport {ok = True, status = Just 0, stdout = "[]", stderr = "", errorMessage = Nothing}
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 160
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent Nothing
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "missing PR retry keeps issue implementer non-terminal" (maybe True (const False) tick.loopObservedTick)
+          , assert "missing PR retry checks open PRs" (FakeCommand (GhPrListOpen repo) `elem` calls)
+          , assert "missing PR retry re-runs create PR" (FakeCommand (GhCreatePullRequest "/tmp/work" issueConfig) `elem` calls)
+          , assert "missing PR retry sleeps after create attempt" (FakeSleep `elem` calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic PR retry: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
 
 main :: IO ()
 main = do
@@ -2735,7 +2782,7 @@ main = do
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
       , quickCheckResult prop_eventLogRejectsEmptyReviewThreads
       , quickCheckResult prop_eventLogRepairIssue26MissingPlanReentersImplementation
-      , quickCheckResult prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete
+      , quickCheckResult prop_eventLogLegacyCompletionWithoutImplementationTurnWaitsForMerge
       , quickCheckResult prop_eventLogRepairDropsStalePlanningReadyIssuesFixed
       , quickCheckResult prop_eventLogRepairRejectsValidEventLog
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
@@ -2813,6 +2860,7 @@ main = do
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
+  automaticPrRetryOk <- automaticDaemonLoopRetriesPrCreateWhileWaitingForPr
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
@@ -2833,6 +2881,7 @@ main = do
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
       && automaticImplementationHandoffOk
+      && automaticPrRetryOk
       && runnerGuardOk
       && runnerGuardRestartOk
       && runnerGuardWaitingRestartOk

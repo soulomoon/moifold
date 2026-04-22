@@ -61,6 +61,7 @@ data WatcherEvent
   | IssueReviewHandoffInitializedEvent PrNumber
   | IssueReviewHandoffStartedEvent PrNumber
   | IssueImplementationCompletedEvent PrNumber
+  | IssuePullRequestMergedEvent PrNumber
   | WatcherRecoveredInvalidState Text
   | WatcherBlocked BlockedReason
   | WatcherStopped StopReason
@@ -160,6 +161,8 @@ instance ToJSON WatcherEvent where
       IssueReviewHandoffStartedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssueImplementationCompletedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssuePullRequestMergedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       WatcherRecoveredInvalidState reason ->
         eventType event
@@ -266,6 +269,9 @@ instance FromJSON WatcherEvent where
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_implementation_completed" ->
         IssueImplementationCompletedEvent
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
+      "issue_pr_merged" ->
+        IssuePullRequestMergedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "watcher_recovered_invalid_state" ->
         WatcherRecoveredInvalidState
@@ -388,12 +394,24 @@ applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueReviewHandoffInit
   fromDecision (step state (IssueReviewHandoffInitialized prNumber))
 applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueReviewHandoffStartedEvent prNumber) =
   fromDecision (step state (IssueReviewHandoffStarted prNumber))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueReviewHandoffInitializedEvent prNumber) =
+  fromDecision (step state (IssueReviewHandoffInitialized prNumber))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueReviewHandoffStartedEvent prNumber) =
+  fromDecision (step state (IssueReviewHandoffStarted prNumber))
 applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueImplementationBlockedEvent reason) =
   fromDecision (step state (MarkBlocked reason))
 applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueImplementationBlockedEvent reason) =
   fromDecision (step state (MarkBlocked reason))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationBlockedEvent reason) =
+  fromDecision (step state (MarkBlocked reason))
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueImplementationCompletedEvent prNumber) =
+  fromDecision (step state (IssueImplementationCompleted prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationCompletedEvent prNumber) =
+  fromDecision (step state (IssueImplementationCompleted prNumber))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
 applyEvent (SomeWatcherState state) (WatcherRecoveredInvalidState _reason) =
   Right (SomeWatcherState state, [])
 applyEvent (SomeWatcherState state) (WatcherBlocked reason) =
@@ -563,6 +581,7 @@ eventName = \case
   IssueReviewHandoffInitializedEvent {} -> "issue_review_handoff_initialized"
   IssueReviewHandoffStartedEvent {} -> "issue_review_handoff_started"
   IssueImplementationCompletedEvent {} -> "issue_implementation_completed"
+  IssuePullRequestMergedEvent {} -> "issue_pr_merged"
   WatcherRecoveredInvalidState {} -> "watcher_recovered_invalid_state"
   WatcherBlocked {} -> "watcher_blocked"
   WatcherStopped {} -> "watcher_stopped"

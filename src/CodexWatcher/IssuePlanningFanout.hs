@@ -13,6 +13,7 @@ module CodexWatcher.IssuePlanningFanout
   , issueImplementerConfigJson
   , issueImplementerLaunchPlan
   , issueImplementerStateDir
+  , issueImplementerWorkdirSetupCommands
   , issuePlanningCompletionEvent
   , parseIssueImplementerConfigIssue
   , plannerConfigFromState
@@ -24,6 +25,7 @@ module CodexWatcher.IssuePlanningFanout
 import CodexWatcher.CompatibilityState
 import CodexWatcher.EventLog
 import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Runtime
 import CodexWatcher.Types
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
@@ -164,6 +166,17 @@ issueImplementerConfigJson issueConfig threadId stateDir maybeWorkdir =
     , "eventsPath" .= (stateDir </> "events.jsonl")
     , "workdir" .= maybeWorkdir
     ]
+
+issueImplementerWorkdirSetupCommands :: IssueImplementerLaunchPlan -> [RuntimeCommand]
+issueImplementerWorkdirSetupCommands launch =
+  case launch.launchWorkdir of
+    Nothing -> []
+    Just workdir ->
+      [ RawCommand "gh" ["repo", "clone", Text.unpack (unRepoName launch.launchIssueConfig.issueRepo), workdir] Nothing
+      , RawCommand "git" ["checkout", "-B", Text.unpack (unBranchName launch.launchIssueConfig.issueBranch)] (Just workdir)
+      , RawCommand "git" ["config", "user.email", "codex-watcher@users.noreply.github.com"] (Just workdir)
+      , RawCommand "git" ["config", "user.name", "codex-watcher"] (Just workdir)
+      ]
 
 parseIssueImplementerConfigIssue :: Value -> Either Text (RepoName, IssueNumber)
 parseIssueImplementerConfigIssue value =

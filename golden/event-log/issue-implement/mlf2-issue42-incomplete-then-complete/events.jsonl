@@ -9,4 +9,4 @@
 {"type":"issue_implementation_turn_started","implementationTurnId":"turn-implement-2"}
 {"type":"issue_review_handoff_initialized","prNumber":7}
 {"type":"issue_review_handoff_started","prNumber":7}
-{"type":"issue_implementation_completed","prNumber":7}
+{"type":"issue_pr_merged","prNumber":7}

@@ -667,8 +667,8 @@ analyzePrReview summary
         <> [problem "warn" summary.label ("git push dry-run failed: " <> commandText summary.gitPushDryRun) Nothing | shouldWarnGitPush summary.gitPushDryRun]
         <> [problem "warn" summary.label ("cannot read remote PR state: " <> fromMaybe "unknown" summary.remotePr.errorMessage) Nothing | not summary.remotePr.skipped && not summary.remotePr.ok]
         <> [problem "error" summary.label ("events.jsonl failed Haskell replay: " <> fromMaybe "unknown" summary.eventReplay.reason) Nothing | not summary.eventReplay.skipped && not summary.eventReplay.ok]
-        <> appServerThreadProblems summary.label "worker" summary.workerThreadInspection
-        <> appServerThreadProblems summary.label "reviewer" summary.reviewerThreadInspection
+        <> [problem' | not (prReviewTerminal summary), problem' <- appServerThreadProblems summary.label "worker" summary.workerThreadInspection]
+        <> [problem' | not (prReviewTerminal summary), problem' <- appServerThreadProblems summary.label "reviewer" summary.reviewerThreadInspection]
 
 appServerThreadProblems :: Text -> Text -> AppServerThreadReport -> [Problem]
 appServerThreadProblems label role report =
@@ -676,6 +676,10 @@ appServerThreadProblems label role report =
   | not report.skipped
   , not report.ok
   ]
+
+prReviewTerminal :: WatcherSummary -> Bool
+prReviewTerminal summary =
+  summary.remotePr.merged || summary.eventReplay.phase == Just "Complete"
 
 workdirProblems :: WatcherSummary -> [Problem]
 workdirProblems summary =

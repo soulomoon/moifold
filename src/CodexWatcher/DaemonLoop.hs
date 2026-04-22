@@ -18,6 +18,7 @@ module CodexWatcher.DaemonLoop
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
+import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
@@ -26,6 +27,7 @@ import CodexWatcher.GhGit
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.PrReviewWatcher
+import CodexWatcher.Runtime (runtimeWriteJsonValue)
 import CodexWatcher.TurnClassifier
 import CodexWatcher.Types
 import Data.Aeson (Value)
@@ -116,6 +118,8 @@ runFromState executor config events replay =
       prestartAndObserve executor config events StartIssueImplementationWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
     SomeWatcherState (IssueImplementing _issueConfig maybePr (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueImplementationObservation events maybePr)
+    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber) ->
+      observeIssuePullRequestMerged executor config events replay issueConfig prNumber
     SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       observeReviewThreads executor config events prConfig workerThread reviewerThread
     SomeWatcherState (PrFixingReviews _prConfig _evidence (WorkerActive activeTurn) _reviewer) ->
@@ -188,13 +192,46 @@ observeExistingPullRequest executor config events replay issueConfig = do
     Left reason -> pure (Left (DaemonLoopExternalFailure reason))
     Right openPullRequests ->
       case find ((== issueConfig.issueBranch) . ghPullRequestHeadRefName) openPullRequests of
-        Nothing -> idle executor config replay ("waiting for pull request for branch " <> unBranchName issueConfig.issueBranch)
+        Nothing -> retryCreatePullRequest executor config replay issueConfig
         Just pullRequest ->
           observeWithExecutor
             executor
             config
             events
             (DaemonIssueImplementObservation (ObservedPullRequestReused pullRequest.ghPullRequestNumber))
+
+retryCreatePullRequest
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> EventReplayResult
+  -> IssueConfig
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+retryCreatePullRequest executor config replay issueConfig = do
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions -> pure ()
+    ExecuteActions ->
+      mapM_ writeCompatibility (compatibilityStateWrites config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+  let retryPlan =
+        compileEffectPlan
+          config.loopDaemonOptions.daemonRuntimeConfig
+          [ SomeEffect (CreatePullRequest issueConfig)
+          , SomeEffect SleepUntilNextPoll
+          ]
+  reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode retryPlan
+  pure
+    ( Right
+        DaemonLoopTickResult
+          { loopReplayResult = replay
+          , loopObservation = Nothing
+          , loopObservedTick = Nothing
+          , loopIdleReason = Just ("waiting for pull request for branch " <> unBranchName issueConfig.issueBranch)
+          , loopActionReports = reports
+          }
+    )
+ where
+  writeCompatibility write =
+    runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)
 
 classifyIssueImplementationObservation :: [WatcherEvent] -> Maybe PrNumber -> AppServerTurn -> Maybe IssueImplementObservation
 classifyIssueImplementationObservation events maybePr turn =
@@ -218,6 +255,25 @@ hasReviewHandoffStarted prNumber =
   any \case
     IssueReviewHandoffStartedEvent eventPr -> eventPr == prNumber
     _ -> False
+
+observeIssuePullRequestMerged
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> IssueConfig
+  -> PrNumber
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+observeIssuePullRequestMerged executor config events replay issueConfig prNumber = do
+  pullRequest <- runGhPrView executor.actionRuntime issueConfig.issueRepo prNumber
+  case pullRequest of
+    Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+    Right remote
+      | Text.toUpper remote.remotePullRequestState == "MERGED" ->
+          observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
+      | otherwise ->
+          idle executor config replay ("waiting for PR merge before completing issue implementer: #" <> Text.pack (show (unPrNumber prNumber)))
 
 observeMergeCompletion
   :: Monad m
@@ -347,6 +403,10 @@ idle
   -> Text
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 idle executor config replay reason = do
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions -> pure ()
+    ExecuteActions ->
+      mapM_ writeIdleCompatibility (compatibilityStateWrites config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
   let sleepPlan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig [SomeEffect SleepUntilNextPoll]
   reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode sleepPlan
   pure
@@ -359,6 +419,9 @@ idle executor config replay reason = do
           , loopActionReports = reports
           }
     )
+ where
+  writeIdleCompatibility write =
+    runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)
 
 formatDaemonLoopFailure :: DaemonLoopFailure -> Text
 formatDaemonLoopFailure = \case

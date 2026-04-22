@@ -50,6 +50,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   IssueReviewHandoffInitialized :: PrNumber -> Event 'IssueImplement 'Implementing
   IssueReviewHandoffStarted :: PrNumber -> Event 'IssueImplement 'Implementing
   IssueImplementationCompleted :: PrNumber -> Event 'IssueImplement 'Implementing
+  IssuePullRequestMerged :: PrNumber -> Event 'IssueImplement 'Implementing
 
   ReviewThreadsFound :: ReviewEvidence -> ActiveTurn -> Event 'PrReview 'CheckingReviews
   NoReviewThreadsFound :: CommitSha -> ActiveTurn -> Event 'PrReview 'CheckingReviews
@@ -163,19 +164,39 @@ step (IssueImplementing config maybePr (WorkerActive activeTurn)) IssueImplement
     [SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId activeTurn))]
 step state@IssueImplementationReady {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step state@IssueImplementationReady {} (IssueReviewHandoffStarted _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+step (IssueImplementationReady config _maybePr _worker) (IssueReviewHandoffStarted prNumber) =
+  Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
 step state@IssueImplementing {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step state@IssueImplementing {} (IssueReviewHandoffStarted _prNumber) =
+step (IssueImplementing config _maybePr _thread) (IssueReviewHandoffStarted prNumber) =
+  Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
+step state@IssueWaitingForPrMerge {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step (IssueImplementing _config _maybePr _thread) (IssueImplementationCompleted prNumber) =
+step state@IssueWaitingForPrMerge {} (IssueReviewHandoffStarted _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@IssueImplementing {} (IssueImplementationCompleted _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@IssueImplementationReady {} (IssueImplementationCompleted _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@IssueWaitingForPrMerge {} (IssueImplementationCompleted _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step (IssueWaitingForPrMerge _config expectedPrNumber) (IssuePullRequestMerged prNumber)
+  | expectedPrNumber == prNumber =
+      Decision
+        (CompleteState (IssueComplete prNumber))
+        [SomeEffect StopDaemon]
+  | otherwise =
+      let reason =
+            BlockedReason
+              ( Text.pack ("issue implementer observed merged PR #" <> show (unPrNumber prNumber))
+                  <> Text.pack (" while waiting for PR #" <> show (unPrNumber expectedPrNumber))
+              )
+       in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
+step state@(IssueImplementing {}) (IssuePullRequestMerged _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@(IssueImplementationReady {}) (IssuePullRequestMerged _prNumber) =
   Decision
-    (CompleteState (IssueComplete prNumber))
-    [SomeEffect SleepUntilNextPoll]
-step (IssueImplementationReady _config _maybePr _thread) (IssueImplementationCompleted prNumber) =
-  Decision
-    (CompleteState (IssueComplete prNumber))
+    state
     [SomeEffect SleepUntilNextPoll]
 step (PrCheckingReviews config _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
   Decision

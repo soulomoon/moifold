@@ -106,7 +106,7 @@ compileEffect config requestId (SomeEffect effect) =
     CreateIssue repo request ->
       unchanged [PlannedCommand (GhIssueCreate repo request)]
     CreatePullRequest issueConfig ->
-      unchanged [PlannedCommand (GhCreatePullRequest issueConfig)]
+      unchanged [PlannedCommand (GhCreatePullRequest config.effectRuntimeWorkdir issueConfig)]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
     RecordPlanningGraph graph ->
