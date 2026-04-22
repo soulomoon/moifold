@@ -698,9 +698,49 @@ runnerGuardLoop config pollSeconds = do
     Just guardProblem -> do
       createDirectoryIfMissing True config.guardStateDir
       LazyByteString.writeFile (config.guardStateDir </> "runner-guard-problem.json") (encode guardProblem)
-      repair <- startRunnerGuardRepairThread config guardProblem
-      LazyByteString.writeFile (config.guardStateDir </> "runner-guard-repair.json") (encode repair)
-      putStrLn ("runner guard launched repair thread " <> Text.unpack (unThreadId repair.runnerGuardRepairThreadId) <> " turn " <> Text.unpack (unTurnId repair.runnerGuardRepairTurnId))
+      handleRunnerGuardProblem config pollSeconds guardProblem
+
+handleRunnerGuardProblem :: RunnerGuardConfig -> Int -> RunnerGuardProblem -> IO ()
+handleRunnerGuardProblem config pollSeconds guardProblem =
+  case guardProblem.runnerGuardProblemAction of
+    RestartWatcher -> do
+      report <- commandSummary "bash" ["-lc", Text.unpack config.guardRestartWatcherCommand] Nothing
+      LazyByteString.writeFile
+        (config.guardStateDir </> "runner-guard-restart.json")
+        ( encode
+            ( object
+                [ "problem" .= guardProblem
+                , "command" .= config.guardRestartWatcherCommand
+                , "report" .= report
+                ]
+            )
+        )
+      if report.ok
+        then do
+          putStrLn "runner guard restarted issue planning watcher"
+          threadDelay (pollSeconds * 1000000)
+          runnerGuardLoop config pollSeconds
+        else do
+          let repairProblem =
+                RunnerGuardProblem
+                  { runnerGuardProblemAction = LaunchRepairThread
+                  , runnerGuardProblemSummary = "runner guard failed to restart issue planning watcher"
+                  , runnerGuardProblemDetails =
+                      guardProblem.runnerGuardProblemSummary
+                        : guardProblem.runnerGuardProblemDetails
+                          <> [ "restart command: " <> config.guardRestartWatcherCommand
+                             , "restart output: " <> commandText report
+                             ]
+                  }
+          launchRunnerGuardRepair config repairProblem
+    LaunchRepairThread ->
+      launchRunnerGuardRepair config guardProblem
+
+launchRunnerGuardRepair :: RunnerGuardConfig -> RunnerGuardProblem -> IO ()
+launchRunnerGuardRepair config guardProblem = do
+  repair <- startRunnerGuardRepairThread config guardProblem
+  LazyByteString.writeFile (config.guardStateDir </> "runner-guard-repair.json") (encode repair)
+  putStrLn ("runner guard launched repair thread " <> Text.unpack (unThreadId repair.runnerGuardRepairThreadId) <> " turn " <> Text.unpack (unTurnId repair.runnerGuardRepairTurnId))
 
 issuePlanningWatcherStartCommand :: FilePath -> FilePath -> LoopCli -> Text.Text
 issuePlanningWatcherStartCommand executable watcherPidFile cli =

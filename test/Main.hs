@@ -1848,6 +1848,68 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
   removePathForcibly stateDir
   assert "runner guard ignores missing pid after planning complete" (guardProblem == Nothing)
 
+runnerGuardRestartsMissingPidForIncompletePlanning :: IO Bool
+runnerGuardRestartsMissingPidForIncompletePlanning = do
+  let stateDir = "/tmp/codex-watcher-hs-runner-guard-restart"
+      eventsPath = stateDir </> "events.jsonl"
+      pidPath = stateDir </> "watcher.pid"
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])]
+      config =
+        RunnerGuardConfig
+          { guardRepo = RepoName "owner/name"
+          , guardEventsPath = eventsPath
+          , guardStateDir = stateDir
+          , guardWatcherPidFile = pidPath
+          , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
+          , guardStaleSeconds = 999999
+          , guardRepairCwd = stateDir
+          , guardRestartWatcherCommand = "restart watcher"
+          , guardRestartGuardCommand = "restart guard"
+          }
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  writeFile eventsPath (unlines (fmap (Text.unpack . Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode) events))
+  guardProblem <- checkRunnerGuard config
+  removePathForcibly stateDir
+  assert "runner guard asks to restart watcher when pid is missing and planning is incomplete" $
+    case guardProblem of
+      Just problem' -> runnerGuardProblemAction problem' == RestartWatcher
+      Nothing -> False
+
+runnerGuardRepairsInvalidPlanningEventLog :: IO Bool
+runnerGuardRepairsInvalidPlanningEventLog = do
+  let stateDir = "/tmp/codex-watcher-hs-runner-guard-repair"
+      eventsPath = stateDir </> "events.jsonl"
+      pidPath = stateDir </> "watcher.pid"
+      events =
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
+        , IssuePlanningTurnCompleted
+        ]
+      config =
+        RunnerGuardConfig
+          { guardRepo = RepoName "owner/name"
+          , guardEventsPath = eventsPath
+          , guardStateDir = stateDir
+          , guardWatcherPidFile = pidPath
+          , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
+          , guardStaleSeconds = 999999
+          , guardRepairCwd = stateDir
+          , guardRestartWatcherCommand = "restart watcher"
+          , guardRestartGuardCommand = "restart guard"
+          }
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  writeFile pidPath "1\n"
+  writeFile eventsPath (unlines (fmap (Text.unpack . Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode) events))
+  guardProblem <- checkRunnerGuard config
+  removePathForcibly stateDir
+  assert "runner guard asks repair thread for invalid event logs" $
+    case guardProblem of
+      Just problem' -> runnerGuardProblemAction problem' == LaunchRepairThread
+      Nothing -> False
+
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
   PlannedAppServerRequest request -> Just request.requestId
@@ -2604,6 +2666,8 @@ main = do
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
+  runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
+  runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   if
     all isSuccess results
       && goldenOk
@@ -2621,5 +2685,7 @@ main = do
       && automaticActiveTurnOk
       && automaticImplementationHandoffOk
       && runnerGuardOk
+      && runnerGuardRestartOk
+      && runnerGuardRepairOk
     then pure ()
     else exitFailure
