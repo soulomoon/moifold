@@ -6,6 +6,7 @@ module Main (main) where
 
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
+import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
@@ -14,6 +15,7 @@ import CodexWatcher.GhGit
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Healthcheck
 import CodexWatcher.IssueImplementWatcher
+import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.Migration
 import CodexWatcher.PrReviewWatcher
@@ -43,6 +45,7 @@ main =
     ["replay-events", path] -> replayEvents path
     "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
     "mark-runtime-owner" : rest -> markRuntimeOwner rest
+    "issue-fanout" : rest -> issueFanout rest
     "observe-once" : rest -> observeOnce rest
     "run-pr-review" : rest -> runAutomaticLoop "pr-review" rest
     "run-issue-implement" : rest -> runAutomaticLoop "issue-implement" rest
@@ -55,6 +58,7 @@ main =
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
+      putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N --open-issues 1,2 [--active-issues 3] [--execute]"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop]"
       putStrLn "type-level domains:"
@@ -92,6 +96,59 @@ markRuntimeOwner args = do
   owner <- either (die . Text.unpack) pure (parseRuntimeOwner ownerText)
   writeRuntimeOwner ioRuntimeInterpreter stateDir owner
   putStrLn ("wrote runtime owner " <> Text.unpack (runtimeOwnerText owner) <> " to " <> stateDir)
+
+issueFanout :: [String] -> IO ()
+issueFanout args = do
+  repo <- RepoName . Text.pack <$> requiredFlag "--repo" args
+  implementersRoot <- requiredFlag "--implementers-root" args
+  maxParallel <- requiredIntFlag "--max-parallel" args
+  openIssues <- issueNumbersFlag "--open-issues" args
+  activeIssues <- maybe (pure []) (parseIssueNumbers "--active-issues") (lookupFlag "--active-issues" args)
+  let fanoutConfig =
+        (defaultIssuePlanningFanoutConfig implementersRoot)
+          { fanoutWorkdirRoot = lookupFlag "--workdir-root" args
+          , fanoutBranchPrefix = Text.pack (maybe "codex/issue-" id (lookupFlag "--branch-prefix" args))
+          , fanoutThreadPrefix = Text.pack (maybe "issue-worker-" id (lookupFlag "--thread-prefix" args))
+          }
+      plannerConfig = PlannerConfig repo maxParallel
+      launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
+  if hasFlag "--execute" args
+    then mapM_ writeIssueImplementerLaunch launches
+    else mapM_ printIssueImplementerLaunch launches
+  putStrLn ("launches: " <> show (length launches))
+
+writeIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
+writeIssueImplementerLaunch launch = do
+  configExists <- doesFileExist launch.launchConfigPath
+  eventsExists <- doesFileExist launch.launchEventsPath
+  when (configExists || eventsExists) $
+    die ("refusing to overwrite existing issue implementer state: " <> launch.launchStateDir)
+  createDirectoryIfMissing True launch.launchStateDir
+  writeJsonValue launch.launchConfigPath launch.launchConfigJson
+  appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent
+  mapM_ (writeCompatibilityLaunch ioRuntimeInterpreter) launch.launchCompatibilityWrites
+  writeRuntimeOwner ioRuntimeInterpreter launch.launchStateDir HaskellRuntime
+  putStrLn ("wrote issue implementer " <> show (unIssueNumber (launchIssueNumber launch)) <> " to " <> launch.launchStateDir)
+
+printIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
+printIssueImplementerLaunch launch =
+  putStrLn
+    ( "issue "
+        <> show (unIssueNumber (launchIssueNumber launch))
+        <> " -> "
+        <> launch.launchStateDir
+        <> " thread "
+        <> Text.unpack (unThreadId launch.launchThreadId)
+    )
+
+writeCompatibilityLaunch :: RuntimeInterpreter IO -> CompatibilityWrite -> IO ()
+writeCompatibilityLaunch interpreter write =
+  interpreter.runtimeWriteJsonValue write.compatibilityWritePath write.compatibilityWriteValue
+
+launchIssueNumber :: IssueImplementerLaunchPlan -> IssueNumber
+launchIssueNumber launch =
+  case launch.launchIssueConfig of
+    IssueConfig _ issue _ -> issue
 
 observeOnce :: [String] -> IO ()
 observeOnce args = do
@@ -389,6 +446,25 @@ splitComma text =
   case break (== ',') text of
     (part, []) -> [part]
     (part, _comma : rest) -> part : splitComma rest
+
+issueNumbersFlag :: String -> [String] -> IO [IssueNumber]
+issueNumbersFlag flag args =
+  case lookupFlag flag args of
+    Nothing -> die ("missing required flag " <> flag)
+    Just value -> parseIssueNumbers flag value
+
+parseIssueNumbers :: String -> String -> IO [IssueNumber]
+parseIssueNumbers flag value =
+  either (die . Text.unpack) pure (parseIssueNumbersText flag (Text.pack value))
+
+parseIssueNumbersText :: String -> Text.Text -> Either Text.Text [IssueNumber]
+parseIssueNumbersText flag text =
+  traverse parsePart (filter (not . Text.null) (Text.strip <$> Text.splitOn "," text))
+ where
+  parsePart part =
+    case readMaybe (Text.unpack part) of
+      Just value | value > 0 -> Right (IssueNumber value)
+      _ -> Left ("invalid issue number for " <> Text.pack flag <> ": " <> part)
 
 requiredCleanReviewEvidence :: [String] -> IO CleanReviewEvidence
 requiredCleanReviewEvidence args =

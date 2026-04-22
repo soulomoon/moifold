@@ -87,6 +87,20 @@ Mark migration ownership for a watcher state directory:
 
 The marker is surfaced by healthcheck and gives a simple backout handle without deleting event history or compatibility state.
 
+Prepare issue implementer child state from a planner selection:
+
+```bash
+"$bin" issue-fanout \
+  --repo owner/name \
+  --implementers-root /workspace/artifacts/issue-implementers \
+  --workdir-root /workspace/artifacts \
+  --max-parallel 3 \
+  --open-issues 101,102,103 \
+  --active-issues 102
+```
+
+Without `--execute`, this prints the selected child implementers. With `--execute`, it creates each child state directory, writes `config.json`, initializes `events.jsonl` with `issue_implement_initialized`, writes compatibility state, and marks the child state as Haskell-owned. Existing child config/event files are never overwritten.
+
 The runtime event format is documented in `docs/event-log-schema.md`.
 
 ## Design Rule
