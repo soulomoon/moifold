@@ -38,8 +38,8 @@ structuredTurnOutputSchema =
           , "summary" .= stringField
           , "comment" .= stringField
           , "evidence" .= stringField
-          , "issues_to_create" .= issueArrayField
-          , "subissues_to_create" .= issueArrayField
+          , "issues_to_create" .= issueArrayField ["title"]
+          , "subissues_to_create" .= issueArrayField ["title", "parentIssueNumber"]
           ]
     ]
 
@@ -50,7 +50,7 @@ structuredTurnOutcomeInstructions =
 plannerTurnInput :: Text
 plannerTurnInput =
   structuredTurnOutcomeInstructions
-    <> " For issue planning, use issues_to_create or subissues_to_create when new GitHub issues must be created; after issue creation the watcher will re-enter planning. Use outcome=complete only when the issue set is stable and ready for implementer fanout."
+    <> " For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work. Use issues_to_create only for independent top-level issues. Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include parentIssueNumber. When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings. After issue creation the watcher will re-enter planning, so only use outcome=complete when the issue graph is stable and ready for implementer fanout."
 
 issueWorkerTurnInput :: Text
 issueWorkerTurnInput =
@@ -66,19 +66,20 @@ stringField :: Value
 stringField =
   object ["type" .= ("string" :: Text)]
 
-issueArrayField :: Value
-issueArrayField =
+issueArrayField :: [Text] -> Value
+issueArrayField requiredFields =
   object
     [ "type" .= ("array" :: Text)
     , "items"
         .= object
           [ "type" .= ("object" :: Text)
           , "additionalProperties" .= False
-          , "required" .= (["title"] :: [Text])
+          , "required" .= requiredFields
           , "properties"
               .= object
                 [ "title" .= stringField
                 , "body" .= stringField
+                , "parentIssueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
                 ]
           ]
     ]

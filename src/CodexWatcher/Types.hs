@@ -46,9 +46,11 @@ module CodexWatcher.Types
   ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
+import Control.Applicative ((<|>))
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Aeson.Types (Parser)
 
 data Domain
   = IssuePlanning
@@ -137,15 +139,17 @@ data PlannerConfig = PlannerConfig
 data IssueCreationRequest = IssueCreationRequest
   { issueCreationTitle :: Text
   , issueCreationBody :: Text
+  , issueCreationParent :: Maybe IssueNumber
   }
   deriving stock (Eq, Show)
 
 instance ToJSON IssueCreationRequest where
   toJSON request =
-    object
+    object $
       [ "title" .= issueCreationTitle request
       , "body" .= issueCreationBody request
       ]
+        <> maybe [] (\parent -> ["parentIssueNumber" .= unIssueNumber parent]) (issueCreationParent request)
 
 instance FromJSON IssueCreationRequest where
   parseJSON = withObject "IssueCreationRequest" $ \objectValue -> do
@@ -154,7 +158,14 @@ instance FromJSON IssueCreationRequest where
       then fail "title must not be empty"
       else do
         body <- objectValue .:? "body" .!= ""
-        pure (IssueCreationRequest title body)
+        parentNumber <- objectValue .:? "parentIssueNumber" <|> objectValue .:? "parent_issue_number"
+        parent <- traverse parseParentIssueNumber parentNumber
+        pure (IssueCreationRequest title body parent)
+
+parseParentIssueNumber :: Int -> Parser IssueNumber
+parseParentIssueNumber number
+  | number > 0 = pure (IssueNumber number)
+  | otherwise = fail "parentIssueNumber must be positive"
 
 data IssueConfig = IssueConfig
   { issueRepo :: RepoName

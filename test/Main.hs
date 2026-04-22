@@ -95,6 +95,7 @@ instance Arbitrary IssueCreationRequest where
     IssueCreationRequest
       <$> (Text.pack <$> listOf1 (elements (['a' .. 'z'] <> [' ', '-'])))
       <*> (Text.pack <$> listOf (elements (['a' .. 'z'] <> [' ', '-'])))
+      <*> arbitrary
 
 instance Arbitrary IssueConfig where
   arbitrary = IssueConfig <$> arbitrary <*> arbitrary <*> arbitrary
@@ -249,8 +250,8 @@ prop_plannerCompletionReturnsToReady :: PlannerConfig -> ActiveTurn -> Bool
 prop_plannerCompletionReturnsToReady config activeTurn =
   case step (PlanningTurnActive config activeTurn) PlannerTurnCompleted of
     Decision state effects ->
-      phaseOf state == Initialized
-        && not (hasMutation effects)
+      phaseOf state == Complete
+        && SomeEffect StopDaemon `elem` effects
 
 prop_plannerIssueCreationReturnsToPlanning :: PlannerConfig -> ActiveTurn -> IssueCreationRequest -> Bool
 prop_plannerIssueCreationReturnsToPlanning config activeTurn request =
@@ -411,7 +412,7 @@ prop_eventLogFullIssuePlanningPathReturnsReady config plannerThread plannerTurn 
     ] of
     Right replay ->
       someDomain replay.replayState == IssuePlanning
-        && somePhase replay.replayState == Initialized
+        && somePhase replay.replayState == Complete
     Left _ -> False
 
 prop_eventLogIssuePlanningIssueCreationReturnsReady :: PlannerConfig -> ThreadId -> TurnId -> IssueCreationRequest -> Bool
@@ -450,7 +451,7 @@ prop_issuePlanningWatcherStartsAndCompletesTurn config threadId turnId =
                 && somePhase started.issuePlanningTickState == PlanMode
                 && any effectIsStartPlanner started.issuePlanningTickEffects
                 && issuePlanningTickEvent completed == IssuePlanningTurnCompleted
-                && somePhase completed.issuePlanningTickState == Initialized
+                && somePhase completed.issuePlanningTickState == Complete
             Left _ -> False
         Left _ -> False
 
@@ -523,14 +524,14 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
         && plannerConfigFromState planningActive == Just config
         && plannerConfigFromState issueState == Nothing
         && issuePlanningCompletionEvent IssuePlanningTurnCompleted
-        && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested [IssueCreationRequest "subissue" "details"]))
+        && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested [IssueCreationRequest "subissue" "details" Nothing]))
         && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
 
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
   , IssuePlanningTurnStarted plannerThread plannerTurn
-  , IssuePlanningIssuesRequested [IssueCreationRequest "Subissue title" "Subissue body"]
+  , IssuePlanningIssuesRequested [IssueCreationRequest "Subissue title" "Subissue body" Nothing]
   , IssuePlanningTurnCompleted
   , PrReviewInitialized prConfig workerThread reviewerThread
   , PrReviewUnresolvedFound (ReviewThreadId "review-thread-1" :| [ReviewThreadId "review-thread-2"]) commit workerTurn
@@ -801,7 +802,7 @@ runtimeCommandExamples =
   , GhAuthStatus
   , GhApiUser
   , GhIssueListOpen (RepoName "soulomoon/mlf2")
-  , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body")
+  , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body" Nothing)
   , GhPrListOpen (RepoName "soulomoon/mlf2")
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
   , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
@@ -855,8 +856,9 @@ prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
              ]
 
 prop_runtimeGhIssueCreateUsesRepoTitleAndBody :: RepoName -> IssueCreationRequest -> Bool
-prop_runtimeGhIssueCreateUsesRepoTitleAndBody repo request =
-  let spec = renderRuntimeCommand (GhIssueCreate repo request)
+prop_runtimeGhIssueCreateUsesRepoTitleAndBody repo requestWithMaybeParent =
+  let request = requestWithMaybeParent {issueCreationParent = Nothing}
+      spec = renderRuntimeCommand (GhIssueCreate repo request)
    in spec.command == "gh"
         && spec.args
           == [ "issue"
@@ -867,6 +869,26 @@ prop_runtimeGhIssueCreateUsesRepoTitleAndBody repo request =
              , Text.unpack (issueCreationTitle request)
              , "--body"
              , Text.unpack (issueCreationBody request)
+             ]
+
+prop_runtimeGhIssueCreateWithParentLinksSubIssue :: RepoName -> IssueCreationRequest -> IssueNumber -> Bool
+prop_runtimeGhIssueCreateWithParentLinksSubIssue repo requestWithoutParent parentIssue =
+  let request = requestWithoutParent {issueCreationParent = Just parentIssue}
+      spec = renderRuntimeCommand (GhIssueCreate repo request)
+      script = Text.pack (spec.args !! 1)
+   in spec.command == "bash"
+        && take 2 spec.args == ["-lc", Text.unpack script]
+        && "sub_issues" `Text.isInfixOf` script
+        && "sub_issue_id" `Text.isInfixOf` script
+        && "-F \"sub_issue_id=$sub_issue_id\"" `Text.isInfixOf` script
+        && spec.args
+          == [ "-lc"
+             , Text.unpack script
+             , "codex-watcher-gh-sub-issue-create"
+             , Text.unpack (unRepoName repo)
+             , Text.unpack (issueCreationTitle request)
+             , Text.unpack (issueCreationBody request)
+             , show (unIssueNumber parentIssue)
              ]
 
 prop_runtimeKillZeroOnlyChecksPid :: ThreadId -> Bool
@@ -1204,9 +1226,11 @@ prop_turnClassifierMapsDomainOutputs =
 
 prop_turnClassifierPrefersStructuredOutputs :: Bool
 prop_turnClassifierPrefersStructuredOutputs =
-  let issueRequest = IssueCreationRequest "Subissue A" "Split from parent"
+  let issueRequest = IssueCreationRequest "Subissue A" "Split from parent" Nothing
+      subissueRequest = IssueCreationRequest "Subissue B" "Split from existing parent" (Just (IssueNumber 8))
    in parseStructuredTurnOutcome "{\"outcome\":\"blocked\",\"reason\":\"schema blocker\"}" == Just (StructuredBlocked "schema blocker")
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "{\"outcome\":\"complete\",\"issues_to_create\":[{\"title\":\"Subissue A\",\"body\":\"Split from parent\"}]}")) == Just (ObservedPlanningIssuesRequested [issueRequest])
+    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"body\":\"Split from existing parent\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningIssuesRequested [subissueRequest])
     && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "{\"outcome\":\"already_fixed\",\"reason\":\"schema fixed\"}")) == Just ObservedTriageAlreadyFixed
     && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"ready\"}")) == Just (ObservedImplementationCompleted (PrNumber 7))
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
@@ -1642,7 +1666,7 @@ goldenEventLogCases = do
       , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-pr-reused/events.jsonl" IssueImplement Implementing
       , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-incomplete-then-complete/events.jsonl" IssueImplement Complete
       , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-implementation-blocked/events.jsonl" IssueImplement Blocked
-      , goldenEventLogCase "golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl" IssuePlanning Initialized
+      , goldenEventLogCase "golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl" IssuePlanning Complete
       ]
   pure (and results)
 
@@ -1834,7 +1858,7 @@ daemonTickDryRunReplaysEventsAndDoesNotExecute = do
     Right tick -> do
       results <-
         sequence
-          [ assert "daemon tick replays event log" (someDomain tick.daemonReplayResult.replayState == IssuePlanning && somePhase tick.daemonReplayResult.replayState == Initialized)
+          [ assert "daemon tick replays event log" (someDomain tick.daemonReplayResult.replayState == IssuePlanning && somePhase tick.daemonReplayResult.replayState == Complete)
           , assert "daemon tick compiles supplied effects only" (length tick.daemonCompiledEffects.compiledActions == 2)
           , assert "daemon dry-run does not execute actions" (null calls)
           , assert "daemon dry-run reports actions" (length tick.daemonActionReports == 2 && all ((== DryRunActions) . actionExecutionMode) tick.daemonActionReports)
@@ -1936,7 +1960,7 @@ automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
 automaticDaemonLoopPlanningIssueCreationRequestsReplanning :: IO Bool
 automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
   let repo = RepoName "soulomoon/mlf2"
-      issueRequest = IssueCreationRequest "Subissue A" "Split from parent"
+      issueRequest = IssueCreationRequest "Subissue A" "Split from parent" Nothing
       plannerOutput =
         jsonText
           ( object
@@ -2183,6 +2207,7 @@ main = do
       , quickCheckResult prop_runtimeGitPushNeverForces
       , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
       , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
+      , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
       , quickCheckResult prop_ghGitParsesRemotePrView

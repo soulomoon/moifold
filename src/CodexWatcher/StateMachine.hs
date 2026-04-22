@@ -79,10 +79,10 @@ step (PlanningReady config) (StartPlanningTurn activeTurn) =
   Decision
     (PlanningTurnActive config activeTurn)
     [SomeEffect (StartPlannerTurn (activeThreadId activeTurn))]
-step (PlanningTurnActive config _activeTurn) PlannerTurnCompleted =
+step (PlanningTurnActive _config _activeTurn) PlannerTurnCompleted =
   Decision
-    (PlanningReady config)
-    [SomeEffect SleepUntilNextPoll]
+    (CompleteState PlanningComplete)
+    [SomeEffect StopDaemon]
 step (PlanningTurnActive config _activeTurn) (PlannerRequestedIssueCreation requests) =
   Decision
     (PlanningReady config)

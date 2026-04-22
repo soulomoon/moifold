@@ -27,6 +27,7 @@ import CodexWatcher.Types
   ( BranchName (..)
   , IssueCreationRequest (..)
   , IssueConfig (..)
+  , IssueNumber (..)
   , PrNumber (..)
   , PrConfig (..)
   , RepoName (..)
@@ -118,25 +119,14 @@ renderRuntimeCommand (GhIssueListOpen repo) =
     Nothing
     ""
 renderRuntimeCommand (GhIssueCreate repo request) =
-  RuntimeCommandSpec
-    "gh"
-    [ "issue"
-    , "create"
-    , "--repo"
-    , Text.unpack (unRepoName repo)
-    , "--title"
-    , Text.unpack (issueCreationTitle request)
-    , "--body"
-    , Text.unpack (issueCreationBody request)
-    ]
-    Nothing
-    ""
+  renderGhIssueCreate repo request
 renderRuntimeCommand (GhPrListOpen repo) =
   RuntimeCommandSpec
     "gh"
     ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid"]
     Nothing
     ""
+
 renderRuntimeCommand (GhPrView repo prNumber fields) =
   RuntimeCommandSpec
     "gh"
@@ -222,6 +212,52 @@ renderRuntimeCommand (KillTerm pid) =
   RuntimeCommandSpec "kill" ["-TERM", Text.unpack pid] Nothing ""
 renderRuntimeCommand (RawCommand command' args' cwd') =
   RuntimeCommandSpec command' args' cwd' ""
+
+renderGhIssueCreate :: RepoName -> IssueCreationRequest -> RuntimeCommandSpec
+renderGhIssueCreate repo request =
+  case request.issueCreationParent of
+    Nothing ->
+      RuntimeCommandSpec
+        "gh"
+        [ "issue"
+        , "create"
+        , "--repo"
+        , Text.unpack (unRepoName repo)
+        , "--title"
+        , Text.unpack (issueCreationTitle request)
+        , "--body"
+        , Text.unpack (issueCreationBody request)
+        ]
+        Nothing
+        ""
+    Just parentIssue ->
+      RuntimeCommandSpec
+        "bash"
+        [ "-lc"
+        , Text.unpack createAndLinkSubIssueScript
+        , "codex-watcher-gh-sub-issue-create"
+        , Text.unpack (unRepoName repo)
+        , Text.unpack (issueCreationTitle request)
+        , Text.unpack (issueCreationBody request)
+        , show (unIssueNumber parentIssue)
+        ]
+        Nothing
+        ""
+
+createAndLinkSubIssueScript :: Text
+createAndLinkSubIssueScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "repo=\"$1\""
+    , "title=\"$2\""
+    , "body=\"$3\""
+    , "parent=\"$4\""
+    , "url=$(gh issue create --repo \"$repo\" --title \"$title\" --body \"$body\")"
+    , "number=\"${url##*/}\""
+    , "sub_issue_id=$(gh api \"repos/$repo/issues/$number\" --jq '.id')"
+    , "gh api --method POST -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2026-03-10' \"repos/$repo/issues/$parent/sub_issues\" -F \"sub_issue_id=$sub_issue_id\" >/dev/null"
+    , "printf '%s\\n' \"$url\""
+    ]
 
 repoOwnerName :: RepoName -> (Text, Text)
 repoOwnerName repo =
