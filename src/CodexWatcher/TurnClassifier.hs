@@ -119,6 +119,8 @@ classifyIssueTriageTurn turn =
     TurnFailed reason ->
       Just (ObservedIssueImplementBlocked (BlockedReason reason))
     TurnCompleted output
+      | not (hasMeaningfulOutput output) ->
+          Just (ObservedIssueImplementBlocked (BlockedReason "triage turn completed without output"))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssueTriage structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -136,6 +138,8 @@ classifyIssuePlanningTurn turn =
     TurnFailed reason ->
       Just (ObservedPlanningBlocked (BlockedReason reason))
     TurnCompleted output
+      | not (hasMeaningfulOutput output) ->
+          Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without output"))
       | Just (firstRequest : restRequests) <- output >>= parsePlanningIssueRequests ->
           Just (ObservedPlanningIssuesRequested (firstRequest : restRequests))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
@@ -153,6 +157,8 @@ classifyIssuePlanTurn turn =
     TurnFailed reason ->
       Just (ObservedIssueImplementBlocked (BlockedReason reason))
     TurnCompleted output
+      | not (hasMeaningfulOutput output) ->
+          Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without output"))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssuePlan structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -168,6 +174,8 @@ classifyIssueImplementationTurn maybePr turn =
     TurnFailed reason ->
       Just (ObservedImplementationBlocked (BlockedReason reason))
     TurnCompleted output
+      | not (hasMeaningfulOutput output) ->
+          Just (ObservedImplementationBlocked (BlockedReason "implementation turn completed without output"))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssueImplementation maybePr structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -188,6 +196,8 @@ classifyPrReviewWorkerTurn turn =
     TurnFailed reason ->
       Just (WorkerBlocked (BlockedReason reason))
     TurnCompleted output
+      | not (hasMeaningfulOutput output) ->
+          Just (WorkerBlocked (BlockedReason "worker turn completed without output"))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredPrReviewWorker structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -205,6 +215,8 @@ classifyPrReviewReviewerTurn commit turn =
     TurnFailed reason ->
       Just (ReviewerBlocked (BlockedReason reason))
     TurnCompleted output
+      | not (hasMeaningfulOutput output) ->
+          Just (ReviewerBlocked (BlockedReason "reviewer turn completed without output"))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredPrReviewReviewer commit structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -314,6 +326,10 @@ failedStatuses =
 outputHasAny :: [Text] -> Maybe Text -> Bool
 outputHasAny needles output =
   maybe False (\text -> any (`Text.isInfixOf` normalize text) needles) output
+
+hasMeaningfulOutput :: Maybe Text -> Bool
+hasMeaningfulOutput =
+  maybe False (not . Text.null . Text.strip)
 
 outputReason :: Text -> Maybe Text -> Text
 outputReason fallback =

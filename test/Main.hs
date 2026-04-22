@@ -1194,6 +1194,15 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "schema LGTM")))
 
+prop_turnClassifierBlocksMissingOutputs :: Bool
+prop_turnClassifierBlocksMissingOutputs =
+  classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" Nothing) == Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without output"))
+    && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "  ")) == Just (ObservedIssueImplementBlocked (BlockedReason "triage turn completed without output"))
+    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" Nothing) == Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without output"))
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" Nothing) == Just (ObservedImplementationBlocked (BlockedReason "implementation turn completed without output"))
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" Nothing) == Just (ObservedWorkerOutcome (WorkerBlocked (BlockedReason "worker turn completed without output")))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "  ")) == Just (ObservedReviewerOutcome (ReviewerBlocked (BlockedReason "reviewer turn completed without output")))
+
 effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
 effectRuntimeConfig repo workdir requestId =
   EffectRuntimeConfig
@@ -2120,6 +2129,7 @@ main = do
       , quickCheckResult prop_turnClassifierCompletionStates
       , quickCheckResult prop_turnClassifierMapsDomainOutputs
       , quickCheckResult prop_turnClassifierPrefersStructuredOutputs
+      , quickCheckResult prop_turnClassifierBlocksMissingOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
