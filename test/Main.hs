@@ -434,6 +434,8 @@ prop_issuePlanningFanoutBuildsLaunchPlans =
       launchIssues = fmap (issueNumberOfConfig . launchIssueConfig) launches
    in case launches of
         firstLaunch : _ ->
+          let createdThreadLaunch = withLaunchThreadId (ThreadId "created-thread") firstLaunch
+           in
           launchIssues == [IssueNumber 1, IssueNumber 3]
             && launchStateDir firstLaunch == "/tmp/implementers/owner_name__issue1"
             && launchEventsPath firstLaunch == "/tmp/implementers/owner_name__issue1/events.jsonl"
@@ -442,6 +444,9 @@ prop_issuePlanningFanoutBuildsLaunchPlans =
             && length (launchCompatibilityWrites firstLaunch) == 2
             && lookupValue "threadId" (launchConfigJson firstLaunch) == Just (String "issue-worker-1")
             && lookupValue "branch" (launchConfigJson firstLaunch) == Just (String "codex/issue-1")
+            && launchThreadId createdThreadLaunch == ThreadId "created-thread"
+            && launchInitialEvent createdThreadLaunch == IssueImplementInitialized (launchIssueConfig createdThreadLaunch) (ThreadId "created-thread")
+            && lookupValue "threadId" (launchConfigJson createdThreadLaunch) == Just (String "created-thread")
         [] -> False
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
@@ -1026,6 +1031,11 @@ prop_appServerClientParsesTurnStartTurnId :: Bool
 prop_appServerClientParsesTurnStartTurnId =
   parseTurnStartTurnId (object ["turn" .= object ["id" .= ("turn-created" :: Text)]])
     == Right (TurnId "turn-created")
+
+prop_appServerClientParsesThreadStartThreadId :: Bool
+prop_appServerClientParsesThreadStartThreadId =
+  parseThreadStartThreadId (object ["thread" .= object ["id" .= ("thread-created" :: Text)]])
+    == Right (ThreadId "thread-created")
 
 prop_appServerClientParsesNestedThreadReadTurns :: Bool
 prop_appServerClientParsesNestedThreadReadTurns =
@@ -1698,6 +1708,7 @@ main = do
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_appServerClientParsesThreadReadTurns
       , quickCheckResult prop_appServerClientParsesTurnStartTurnId
+      , quickCheckResult prop_appServerClientParsesThreadStartThreadId
       , quickCheckResult prop_appServerClientParsesNestedThreadReadTurns
       , quickCheckResult prop_turnClassifierCompletionStates
       , quickCheckResult prop_turnClassifierMapsDomainOutputs

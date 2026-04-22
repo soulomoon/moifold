@@ -99,7 +99,7 @@ Prepare issue implementer child state from a planner selection:
   --active-issues 102
 ```
 
-Without `--execute`, this prints the selected child implementers. With `--execute`, it creates each child state directory, writes `config.json`, initializes `events.jsonl` with `issue_implement_initialized`, writes compatibility state, and marks the child state as Haskell-owned. Existing child config/event files are never overwritten.
+Without `--execute`, this prints the selected child implementers. With `--execute`, it creates each child state directory, writes `config.json`, initializes `events.jsonl` with `issue_implement_initialized`, writes compatibility state, and marks the child state as Haskell-owned. Existing child config/event files are never overwritten. Add `--app-server-host <host> --app-server-port <port>` during execute mode to create real app-server threads and persist their returned thread ids; otherwise deterministic thread ids are used for offline rehearsal.
 
 The runtime event format is documented in `docs/event-log-schema.md`.
 

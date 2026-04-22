@@ -10,6 +10,7 @@ module CodexWatcher.IssuePlanningFanout
   , issueImplementerConfigJson
   , issueImplementerStateDir
   , planIssueImplementerLaunches
+  , withLaunchThreadId
   ) where
 
 import CodexWatcher.CompatibilityState
@@ -80,6 +81,17 @@ issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber' =
   workdir = (</> issueImplementerSlug repo issueNumber') <$> fanoutConfig.fanoutWorkdirRoot
   initialEvent = IssueImplementInitialized issueConfig threadId
   initialState = SomeWatcherState (IssueNeedsTriage issueConfig (WorkerIdle threadId))
+
+withLaunchThreadId :: ThreadId -> IssueImplementerLaunchPlan -> IssueImplementerLaunchPlan
+withLaunchThreadId threadId launch =
+  launch
+    { launchThreadId = threadId
+    , launchConfigJson = issueImplementerConfigJson launch.launchIssueConfig threadId launch.launchStateDir launch.launchWorkdir
+    , launchInitialEvent = IssueImplementInitialized launch.launchIssueConfig threadId
+    , launchCompatibilityWrites = compatibilityStateWrites launch.launchStateDir initialState
+    }
+ where
+  initialState = SomeWatcherState (IssueNeedsTriage launch.launchIssueConfig (WorkerIdle threadId))
 
 issueImplementerConfigJson :: IssueConfig -> ThreadId -> FilePath -> Maybe FilePath -> Value
 issueImplementerConfigJson issueConfig threadId stateDir maybeWorkdir =

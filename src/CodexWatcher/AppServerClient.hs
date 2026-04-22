@@ -22,6 +22,7 @@ module CodexWatcher.AppServerClient
   , formatAppServerClientFailure
   , latestTurnById
   , matchAppServerIncoming
+  , parseThreadStartThreadId
   , parseTurnStartTurnId
   , parseThreadReadTurns
   , sendAppServerRequest
@@ -30,7 +31,7 @@ module CodexWatcher.AppServerClient
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerProtocol (AppServerRequest (..))
-import CodexWatcher.Types (TurnId (..))
+import CodexWatcher.Types (ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, bracket, try)
 import Data.Bits ((.&.), (.|.), shiftL, shiftR, xor)
@@ -231,6 +232,12 @@ parseTurnStartTurnId value =
     Left errorMessage -> Left (AppServerDecodeFailure (Text.pack errorMessage))
     Right turnId -> Right turnId
 
+parseThreadStartThreadId :: Value -> Either AppServerClientFailure ThreadId
+parseThreadStartThreadId value =
+  case parseEither threadStartThreadIdParser value of
+    Left errorMessage -> Left (AppServerDecodeFailure (Text.pack errorMessage))
+    Right threadId -> Right threadId
+
 latestTurnById :: TurnId -> [AppServerTurn] -> Maybe AppServerTurn
 latestTurnById turnId =
   foldl
@@ -278,6 +285,15 @@ turnStartTurnIdParser = withObject "TurnStartResult" \objectValue ->
             <|> objectValue .: "id"
             <|> nestedRequiredText ["turn", "turnId"] objectValue
             <|> nestedRequiredText ["turn", "id"] objectValue
+        )
+
+threadStartThreadIdParser :: Value -> Parser ThreadId
+threadStartThreadIdParser = withObject "ThreadStartResult" \objectValue ->
+  ThreadId
+    <$> ( objectValue .: "threadId"
+            <|> objectValue .: "id"
+            <|> nestedRequiredText ["thread", "threadId"] objectValue
+            <|> nestedRequiredText ["thread", "id"] objectValue
         )
 
 turnIdField :: Object -> Parser Text

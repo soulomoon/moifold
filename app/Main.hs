@@ -6,6 +6,7 @@ module Main (main) where
 
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
+import CodexWatcher.AppServerProtocol
 import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
@@ -112,10 +113,40 @@ issueFanout args = do
           }
       plannerConfig = PlannerConfig repo maxParallel
       launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
+      maybeEndpoint = healthcheckAppServerEndpoint args
   if hasFlag "--execute" args
-    then mapM_ writeIssueImplementerLaunch launches
+    then do
+      preparedLaunches <- traverse (uncurry (prepareIssueImplementerLaunch maybeEndpoint)) (zip [8000 ..] launches)
+      mapM_ writeIssueImplementerLaunch preparedLaunches
     else mapM_ printIssueImplementerLaunch launches
   putStrLn ("launches: " <> show (length launches))
+
+prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> IO IssueImplementerLaunchPlan
+prepareIssueImplementerLaunch Nothing _requestId launch =
+  pure launch
+prepareIssueImplementerLaunch (Just endpoint) requestId launch = do
+  response <-
+    sendOneAppServerRequest
+      endpoint
+      defaultAppServerClientOptions
+      (threadStartRequest requestId (issueImplementerThreadStartOptions launch))
+  case response >>= parseThreadStartThreadId of
+    Left failure -> die (Text.unpack (formatAppServerClientFailure failure))
+    Right threadId -> pure (withLaunchThreadId threadId launch)
+
+issueImplementerThreadStartOptions :: IssueImplementerLaunchPlan -> ThreadStartOptions
+issueImplementerThreadStartOptions launch =
+  ThreadStartOptions
+    { threadCwd = maybe "." id launch.launchWorkdir
+    , threadApprovalPolicy = "never"
+    , threadSandbox = "danger-full-access"
+    , threadModel = "gpt-5.4"
+    , threadDeveloperInstructions =
+        "Issue implementation watcher for "
+          <> unRepoName launch.launchIssueConfig.issueRepo
+          <> "#"
+          <> Text.pack (show (unIssueNumber (launchIssueNumber launch)))
+    }
 
 writeIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
 writeIssueImplementerLaunch launch = do
