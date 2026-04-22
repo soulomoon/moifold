@@ -178,6 +178,7 @@ rehearseMigration options = do
   when options.rehearsalCliExecute $ do
     copyWatcherStateDir plan.rehearsalSourceStateDir plan.rehearsalTargetStateDir
     writeRuntimeOwner ioRuntimeInterpreter plan.rehearsalTargetStateDir HaskellRuntime
+    bootstrapRehearsalEventsIfMissing plan
   putStrLn ("source: " <> plan.rehearsalSourceStateDir)
   putStrLn ("target: " <> plan.rehearsalTargetStateDir)
   putStrLn ("mode: " <> if options.rehearsalCliExecute then "copied" else "dry-run")
@@ -189,6 +190,17 @@ rehearseMigration options = do
   putStr (Text.unpack (renderLogrotateConfig service))
   putStrLn "# backout"
   mapM_ (putStrLn . Text.unpack) (renderBackoutCommands plan.rehearsalTargetStateDir plan.rehearsalDomain)
+
+bootstrapRehearsalEventsIfMissing :: MigrationRehearsalPlan -> IO ()
+bootstrapRehearsalEventsIfMissing plan = do
+  exists <- doesFileExist plan.rehearsalEventsPath
+  unless exists $ do
+    loaded <- loadNodeSnapshot plan.rehearsalTargetStateDir
+    snapshot <- either die pure loaded
+    let events = bootstrapNodeSnapshotEvents snapshot
+    createDirectoryIfMissing True (takeDirectory plan.rehearsalEventsPath)
+    mapM_ (appendWatcherEvent ioRuntimeInterpreter plan.rehearsalEventsPath) events
+    putStrLn ("bootstrapped event replay log: " <> plan.rehearsalEventsPath <> " (" <> show (length events) <> " events)")
 
 migrationRehearsalPlanFromCli :: RehearsalCli -> IO MigrationRehearsalPlan
 migrationRehearsalPlanFromCli options = do

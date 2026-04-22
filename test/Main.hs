@@ -1484,6 +1484,52 @@ goldenEventLogCases = do
       ]
   pure (and results)
 
+goldenBootstrapCase :: FilePath -> IO Bool
+goldenBootstrapCase fixture = do
+  loaded <- loadNodeSnapshot fixture
+  case loaded of
+    Left err -> do
+      putStrLn ("FAIL golden bootstrap decode " <> fixture <> ": " <> err)
+      pure False
+    Right snapshot ->
+      case (replayNodeSnapshot snapshot, replayEventLog (bootstrapNodeSnapshotEvents snapshot)) of
+        (Left err, _) -> do
+          putStrLn ("FAIL golden bootstrap normalized replay " <> fixture <> ": " <> Text.unpack err)
+          pure False
+        (_, Left err) -> do
+          putStrLn ("FAIL golden bootstrap event replay " <> fixture <> ": " <> show err)
+          pure False
+        (Right normalized, Right bootstrapped) -> do
+          let events = bootstrapNodeSnapshotEvents snapshot
+              roundTripped =
+                traverse
+                  (eitherDecodeStrict' . LazyByteString.toStrict . encode)
+                  events ::
+                  Either String [WatcherEvent]
+          results <-
+            sequence
+              [ assert (fixture <> " bootstrap nonempty") (not (null events))
+              , assert (fixture <> " bootstrap json roundtrip") (roundTripped == Right events)
+              , assert (fixture <> " bootstrap domain") (someDomain bootstrapped.replayState == someDomain normalized.replayState)
+              , assert (fixture <> " bootstrap phase") (somePhase bootstrapped.replayState == somePhase normalized.replayState)
+              ]
+          pure (and results)
+
+goldenBootstrapCases :: IO Bool
+goldenBootstrapCases = do
+  results <-
+    sequence
+      [ goldenBootstrapCase "golden/pr-review/mlf2-pr6-merged"
+      , goldenBootstrapCase "golden/pr-review/mlf2-pr6-unresolved"
+      , goldenBootstrapCase "golden/pr-review/mlf2-pr6-blocked"
+      , goldenBootstrapCase "golden/pr-review/mlf2-pr6-clean-ready"
+      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-already-resolved"
+      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-plan-ready"
+      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-incomplete"
+      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-blocked"
+      ]
+  pure (and results)
+
 data FakeActionCall
   = FakeCommand RuntimeCommand
   | FakeReadJson FilePath
@@ -1948,6 +1994,7 @@ main = do
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases
+  bootstrapOk <- goldenBootstrapCases
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
@@ -1961,6 +2008,7 @@ main = do
     all isSuccess results
       && goldenOk
       && eventLogOk
+      && bootstrapOk
       && actionExecutorDryRunOk
       && actionExecutorExecuteOk
       && daemonTickOk

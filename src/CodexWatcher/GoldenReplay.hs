@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
@@ -12,8 +13,12 @@ module CodexWatcher.GoldenReplay
   , replayNodeSnapshot
   , replayNodeIssueImplementSnapshot
   , replayNodePrReviewSnapshot
+  , bootstrapNodeSnapshotEvents
+  , bootstrapNodePrReviewSnapshotEvents
+  , bootstrapNodeIssueImplementSnapshotEvents
   ) where
 
+import CodexWatcher.EventLog (WatcherEvent (..))
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
 import Data.Maybe (fromMaybe)
@@ -57,6 +62,126 @@ replayNodePrReviewSnapshot snapshot = replayNodeSnapshot (NodePrReview snapshot)
 
 replayNodeIssueImplementSnapshot :: NodeIssueImplementSnapshot -> Either Text ReplayResult
 replayNodeIssueImplementSnapshot snapshot = replayNodeSnapshot (NodeIssueImplement snapshot)
+
+bootstrapNodeSnapshotEvents :: NodeSnapshot -> [WatcherEvent]
+bootstrapNodeSnapshotEvents = \case
+  NodePrReview snapshot -> bootstrapNodePrReviewSnapshotEvents snapshot
+  NodeIssueImplement snapshot -> bootstrapNodeIssueImplementSnapshotEvents snapshot
+
+bootstrapNodePrReviewSnapshotEvents :: NodePrReviewSnapshot -> [WatcherEvent]
+bootstrapNodePrReviewSnapshotEvents snapshot =
+  case snapshot.blockedState of
+    Just blocked | blocked.blocked ->
+      initialEvents <> [WatcherBlocked (BlockedReason (fromMaybe "Node watcher blocked without reason" blocked.reason))]
+    _ ->
+      bootstrapUnblockedPrReviewSnapshotEvents snapshot initialEvents
+ where
+  initialEvents =
+    [ PrReviewInitialized
+        (toPrConfig snapshot.config)
+        (ThreadId snapshot.config.threadId)
+        (ThreadId (fromMaybe snapshot.config.threadId snapshot.config.reviewerThreadId))
+    ]
+
+bootstrapUnblockedPrReviewSnapshotEvents :: NodePrReviewSnapshot -> [WatcherEvent] -> [WatcherEvent]
+bootstrapUnblockedPrReviewSnapshotEvents snapshot initialEvents
+  | Just reason <- snapshot.watcherState.blockedReason =
+      initialEvents <> [WatcherBlocked (BlockedReason reason)]
+  | snapshot.watcherState.lastTurnStatus == Just "merged" =
+      reviewerCleanEvents <> [PrReviewMergeCompleted (MergeCommit commit)]
+  | reviewerSaysClean snapshot =
+      reviewerCleanEvents
+  | otherwise =
+      initialEvents
+ where
+  commit = CommitSha (bestKnownCommit snapshot)
+  reviewerCleanEvents =
+    initialEvents
+      <> [ PrReviewNoUnresolvedFound commit bootstrapReviewerTurn
+         , PrReviewCleanFound (CleanReviewEvidence commit "LGTM")
+         ]
+
+bootstrapNodeIssueImplementSnapshotEvents :: NodeIssueImplementSnapshot -> [WatcherEvent]
+bootstrapNodeIssueImplementSnapshotEvents snapshot =
+  case snapshot.blockedState of
+    Just blocked | blocked.blocked ->
+      initialEvents <> [WatcherBlocked (BlockedReason (fromMaybe "Node issue watcher blocked without reason" blocked.reason))]
+    _ ->
+      bootstrapUnblockedIssueImplementSnapshotEvents snapshot initialEvents
+ where
+  initialEvents =
+    [ IssueImplementInitialized
+        (toIssueConfig snapshot.config)
+        (ThreadId snapshot.config.threadId)
+    ]
+
+bootstrapUnblockedIssueImplementSnapshotEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> [WatcherEvent]
+bootstrapUnblockedIssueImplementSnapshotEvents snapshot initialEvents
+  | Just reason <- snapshot.issueState >>= (.issueBlockedReason), issueStatusText snapshot == Just "blocked" =
+      initialEvents <> [WatcherBlocked (BlockedReason reason)]
+  | Just (purpose, activeTurn) <- activeIssueTurn snapshot =
+      bootstrapActiveIssueTurnEvents snapshot initialEvents purpose activeTurn
+  | otherwise =
+      bootstrapIdleIssueStatusEvents snapshot initialEvents (issueStatusText snapshot)
+
+bootstrapActiveIssueTurnEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> Text -> ActiveTurn -> [WatcherEvent]
+bootstrapActiveIssueTurnEvents snapshot initialEvents purpose activeTurn
+  | purpose == "triage" =
+      initialEvents <> [IssueTriageTurnStartedEvent activeTurn.activeTurnId]
+  | purpose == "plan" =
+      initialEvents <> [IssuePlanTurnStartedEvent activeTurn.activeTurnId]
+  | purpose == "implement" =
+      bootstrapImplementationReadyEvents snapshot initialEvents
+        <> [IssueImplementationTurnStartedEvent activeTurn.activeTurnId]
+  | otherwise =
+      initialEvents
+
+bootstrapIdleIssueStatusEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> Maybe Text -> [WatcherEvent]
+bootstrapIdleIssueStatusEvents snapshot initialEvents = \case
+  Nothing ->
+    initialEvents
+  Just "blocked" ->
+    initialEvents <> [WatcherBlocked (BlockedReason (fromMaybe "Issue worker reported blocked without reason" (snapshot.issueState >>= (.issueBlockedReason))))]
+  Just "already_resolved" ->
+    initialEvents
+      <> [ IssueTriageTurnStartedEvent bootstrapTriageTurn
+         , IssueTriageAlreadyFixedEvent
+         ]
+  Just "needs_implementation" ->
+    initialEvents
+      <> [ IssueTriageTurnStartedEvent bootstrapTriageTurn
+         , IssueTriageNeedsImplementationEvent
+         ]
+  Just "plan_ready" ->
+    initialEvents
+      <> [ IssueTriageTurnStartedEvent bootstrapTriageTurn
+         , IssueTriageNeedsImplementationEvent
+         ]
+  Just "in_progress" ->
+    bootstrapImplementationReadyEvents snapshot initialEvents
+  Just "incomplete" ->
+    bootstrapImplementationReadyEvents snapshot initialEvents
+  Just "complete" ->
+    case snapshotPrNumber snapshot of
+      Just prNumber ->
+        bootstrapImplementationReadyEvents snapshot initialEvents
+          <> [IssueImplementationCompletedEvent prNumber]
+      Nothing ->
+        initialEvents <> [WatcherBlocked (BlockedReason "Issue state is complete but pr_number is missing")]
+  Just _unknown ->
+    initialEvents
+
+bootstrapImplementationReadyEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> [WatcherEvent]
+bootstrapImplementationReadyEvents snapshot initialEvents =
+  initialEvents
+    <> [ IssuePlanTurnStartedEvent bootstrapPlanTurn
+       , IssuePlanCompletedEvent Nothing
+       ]
+    <> maybe [] (\prNumber -> [IssuePullRequestReusedEvent prNumber]) (snapshotPrNumber snapshot)
+
+snapshotPrNumber :: NodeIssueImplementSnapshot -> Maybe PrNumber
+snapshotPrNumber snapshot =
+  PrNumber <$> (snapshot.issueState >>= (.issuePrNumber))
 
 normalizeNodePrReviewSnapshot :: NodePrReviewSnapshot -> Either Text TypedSnapshot
 normalizeNodePrReviewSnapshot snapshot =
@@ -219,6 +344,15 @@ staleReviewerBlockedWarning snapshot =
   case snapshot.reviewerState >>= (.blockedReason) of
     Just reason -> ["Ignoring stale reviewer blocked reason for merged PR snapshot: " <> reason]
     Nothing -> []
+
+bootstrapTriageTurn :: TurnId
+bootstrapTriageTurn = TurnId "bootstrap-triage-turn"
+
+bootstrapPlanTurn :: TurnId
+bootstrapPlanTurn = TurnId "bootstrap-plan-turn"
+
+bootstrapReviewerTurn :: TurnId
+bootstrapReviewerTurn = TurnId "bootstrap-reviewer-turn"
 
 firstJust :: [Maybe a] -> a -> a
 firstJust [] fallback = fallback
