@@ -23,7 +23,9 @@ import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
 import CodexWatcher.Types
-import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?), (.!=))
+import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', withObject, (.:?), (.!=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -142,6 +144,9 @@ classifyIssuePlanningTurn turn =
           Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without output"))
       | Just (firstRequest : restRequests) <- output >>= parsePlanningIssueRequests ->
           Just (ObservedPlanningIssuesRequested (firstRequest : restRequests))
+      | Just outputText <- output
+      , planningIssueRequestPayloadInvalid outputText ->
+          Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssuePlanning structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
@@ -241,6 +246,22 @@ parsePlanningIssueRequests output =
   case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
     Left _ -> Nothing
     Right (StructuredPlanningIssueRequests requests) -> Just requests
+
+planningIssueRequestPayloadInvalid :: Text -> Bool
+planningIssueRequestPayloadInvalid output =
+  case eitherDecodeStrict' bytes :: Either String StructuredPlanningIssueRequests of
+    Right _ -> False
+    Left _ ->
+      case eitherDecodeStrict' bytes :: Either String Value of
+        Right (Object objectValue) ->
+          any
+            (`KeyMap.member` objectValue)
+            [ Key.fromString "issues_to_create"
+            , Key.fromString "subissues_to_create"
+            ]
+        _ -> False
+ where
+  bytes = Text.Encoding.encodeUtf8 (Text.strip output)
 
 classifyStructuredIssuePlanning :: StructuredTurnOutcome -> Maybe IssuePlanningObservation
 classifyStructuredIssuePlanning = \case

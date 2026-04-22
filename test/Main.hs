@@ -91,11 +91,15 @@ instance Arbitrary PlannerConfig where
   arbitrary = PlannerConfig <$> arbitrary <*> (getPositive <$> arbitrary)
 
 instance Arbitrary IssueCreationRequest where
-  arbitrary =
-    IssueCreationRequest
-      <$> (Text.pack <$> listOf1 (elements (['a' .. 'z'] <> [' ', '-'])))
-      <*> (Text.pack <$> listOf (elements (['a' .. 'z'] <> [' ', '-'])))
-      <*> arbitrary
+  arbitrary = do
+    title <- Text.pack <$> listOf1 (elements (['a' .. 'z'] <> [' ', '-']))
+    parent <- arbitrary
+    body <-
+      Text.pack
+        <$> case parent of
+          Just _ -> listOf1 (elements (['a' .. 'z'] <> [' ', '-']))
+          Nothing -> listOf (elements (['a' .. 'z'] <> [' ', '-']))
+    pure (IssueCreationRequest title body parent)
 
 instance Arbitrary IssueConfig where
   arbitrary = IssueConfig <$> arbitrary <*> arbitrary <*> arbitrary
@@ -1231,6 +1235,7 @@ prop_turnClassifierPrefersStructuredOutputs =
    in parseStructuredTurnOutcome "{\"outcome\":\"blocked\",\"reason\":\"schema blocker\"}" == Just (StructuredBlocked "schema blocker")
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "{\"outcome\":\"complete\",\"issues_to_create\":[{\"title\":\"Subissue A\",\"body\":\"Split from parent\"}]}")) == Just (ObservedPlanningIssuesRequested [issueRequest])
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"body\":\"Split from existing parent\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningIssuesRequested [subissueRequest])
+    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-invalid-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
     && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "{\"outcome\":\"already_fixed\",\"reason\":\"schema fixed\"}")) == Just ObservedTriageAlreadyFixed
     && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"ready\"}")) == Just (ObservedImplementationCompleted (PrNumber 7))
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))

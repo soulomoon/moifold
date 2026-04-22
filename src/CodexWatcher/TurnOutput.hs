@@ -39,7 +39,7 @@ structuredTurnOutputSchema =
           , "comment" .= stringField
           , "evidence" .= stringField
           , "issues_to_create" .= issueArrayField ["title"]
-          , "subissues_to_create" .= issueArrayField ["title", "parentIssueNumber"]
+          , "subissues_to_create" .= issueArrayField ["title", "body", "parentIssueNumber"]
           ]
     ]
 
@@ -50,7 +50,7 @@ structuredTurnOutcomeInstructions =
 plannerTurnInput :: Text
 plannerTurnInput =
   structuredTurnOutcomeInstructions
-    <> " For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work. Use issues_to_create only for independent top-level issues. Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include parentIssueNumber. When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings. After issue creation the watcher will re-enter planning, so only use outcome=complete when the issue graph is stable and ready for implementer fanout."
+    <> " For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work. Use issues_to_create only for independent top-level issues. Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include title, a concrete body, and parentIssueNumber. A sub-issue body must describe scope, acceptance criteria, dependencies/blockers, and how it stays compatible with sibling sub-issues. When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings. After issue creation the watcher will re-enter planning, so only use outcome=complete when the issue graph is stable and ready for implementer fanout."
 
 issueWorkerTurnInput :: Text
 issueWorkerTurnInput =

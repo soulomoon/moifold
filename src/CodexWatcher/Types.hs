@@ -160,7 +160,9 @@ instance FromJSON IssueCreationRequest where
         body <- objectValue .:? "body" .!= ""
         parentNumber <- objectValue .:? "parentIssueNumber" <|> objectValue .:? "parent_issue_number"
         parent <- traverse parseParentIssueNumber parentNumber
-        pure (IssueCreationRequest title body parent)
+        case parent of
+          Just _ | Text.null (Text.strip body) -> fail "sub-issue body must not be empty"
+          _ -> pure (IssueCreationRequest title body parent)
 
 parseParentIssueNumber :: Int -> Parser IssueNumber
 parseParentIssueNumber number
