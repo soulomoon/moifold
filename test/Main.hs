@@ -663,6 +663,39 @@ prop_issuePlanningFanoutUsesOnlyReadyIssues =
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
 
+prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers :: Bool
+prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers =
+  let plannerConfig = PlannerConfig (RepoName "owner/name") 2 []
+      fanoutConfig = defaultIssuePlanningFanoutConfig "/tmp/implementers"
+      terminalOnly =
+        planReadyIssueFanout
+          fanoutConfig
+          plannerConfig
+          []
+          [(IssueNumber 26, ReadyIssueTerminal)]
+      mixed =
+        planReadyIssueFanout
+          fanoutConfig
+          plannerConfig
+          []
+          [(IssueNumber 26, ReadyIssueTerminal), (IssueNumber 27, ReadyIssueMissing)]
+      stopped =
+        planReadyIssueFanout
+          fanoutConfig
+          plannerConfig
+          []
+          [(IssueNumber 28, ReadyIssueActiveStopped)]
+   in null terminalOnly.readyIssueLaunches
+        && null terminalOnly.readyIssueRestarts
+        && terminalOnly.readyIssuesAllTerminal
+        && fmap (issueNumberOfConfig . launchIssueConfig) mixed.readyIssueLaunches == [IssueNumber 27]
+        && not mixed.readyIssuesAllTerminal
+        && null stopped.readyIssueLaunches
+        && fmap (issueNumberOfConfig . launchIssueConfig) stopped.readyIssueRestarts == [IssueNumber 28]
+        && not stopped.readyIssuesAllTerminal
+ where
+  issueNumberOfConfig (IssueConfig _ issue _) = issue
+
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
@@ -2652,6 +2685,7 @@ main = do
       , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
       , quickCheckResult prop_issuePlanningFanoutDetectsCompletionBoundary
       , quickCheckResult prop_issuePlanningFanoutUsesOnlyReadyIssues
+      , quickCheckResult prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases

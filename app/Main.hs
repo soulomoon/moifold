@@ -886,17 +886,19 @@ maintainReadyIssueImplementers cli endpoint executionMode implementersRoot plann
           }
   statuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
   activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
-  let launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues
+  let fanoutPlan =
+        planReadyIssueFanout
+          fanoutConfig
+          plannerConfig
+          activeIssues
+          (zip readyIssues (fmap readyIssueStatusFromRuntime statuses))
+      launches = fanoutPlan.readyIssueLaunches
       launchEndpoint =
         case executionMode of
           ExecuteActions -> Just endpoint
           DryRunActions -> Nothing
-      stoppedActiveLaunches =
-        [ issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber'
-        | (issueNumber', IssueImplementerActiveStopped) <- zip readyIssues statuses
-        ]
-      allReadyIssuesTerminal =
-        not (null readyIssues) && all (== IssueImplementerTerminal) statuses
+      stoppedActiveLaunches = fanoutPlan.readyIssueRestarts
+      allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
   childLaunch <-
     issueImplementerChildLaunchMode
       cli.loopCliStartChildren
@@ -914,6 +916,13 @@ maintainReadyIssueImplementers cli endpoint executionMode implementersRoot plann
       markPlanningReadyIssuesFixed cli planningState
       pure False
     else pure False
+
+readyIssueStatusFromRuntime :: IssueImplementerRuntimeStatus -> ReadyIssueStatus
+readyIssueStatusFromRuntime = \case
+  IssueImplementerMissing -> ReadyIssueMissing
+  IssueImplementerActiveStopped -> ReadyIssueActiveStopped
+  IssueImplementerActiveRunning -> ReadyIssueActiveRunning
+  IssueImplementerTerminal -> ReadyIssueTerminal
 
 issueImplementerRuntimeStatus :: IssuePlanningFanoutConfig -> PlannerConfig -> IssueNumber -> IO IssueImplementerRuntimeStatus
 issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do

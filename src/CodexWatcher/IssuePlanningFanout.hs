@@ -7,6 +7,8 @@
 module CodexWatcher.IssuePlanningFanout
   ( IssueImplementerLaunchPlan (..)
   , IssuePlanningFanoutConfig (..)
+  , ReadyIssueFanoutPlan (..)
+  , ReadyIssueStatus (..)
   , defaultIssuePlanningFanoutConfig
   , issueImplementerConfigJson
   , issueImplementerLaunchPlan
@@ -14,6 +16,7 @@ module CodexWatcher.IssuePlanningFanout
   , issuePlanningCompletionEvent
   , parseIssueImplementerConfigIssue
   , plannerConfigFromState
+  , planReadyIssueFanout
   , planIssueImplementerLaunches
   , withLaunchThreadId
   ) where
@@ -25,6 +28,7 @@ import CodexWatcher.Types
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
 import Data.Char (isAlphaNum)
+import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
@@ -50,6 +54,20 @@ data IssueImplementerLaunchPlan = IssueImplementerLaunchPlan
   }
   deriving stock (Eq, Show)
 
+data ReadyIssueStatus
+  = ReadyIssueMissing
+  | ReadyIssueActiveStopped
+  | ReadyIssueActiveRunning
+  | ReadyIssueTerminal
+  deriving stock (Eq, Show)
+
+data ReadyIssueFanoutPlan = ReadyIssueFanoutPlan
+  { readyIssueLaunches :: [IssueImplementerLaunchPlan]
+  , readyIssueRestarts :: [IssueImplementerLaunchPlan]
+  , readyIssuesAllTerminal :: Bool
+  }
+  deriving stock (Eq, Show)
+
 defaultIssuePlanningFanoutConfig :: FilePath -> IssuePlanningFanoutConfig
 defaultIssuePlanningFanoutConfig implementersRoot =
   IssuePlanningFanoutConfig
@@ -64,6 +82,31 @@ planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues
   fmap (issueImplementerLaunchPlan fanoutConfig plannerConfig) selectedIssues
  where
   selectedIssues = selectIssueImplementationStarts plannerConfig activeIssues readyIssues
+
+planReadyIssueFanout :: IssuePlanningFanoutConfig -> PlannerConfig -> [IssueNumber] -> [(IssueNumber, ReadyIssueStatus)] -> ReadyIssueFanoutPlan
+planReadyIssueFanout fanoutConfig plannerConfig activeIssues readyIssueStatuses =
+  ReadyIssueFanoutPlan
+    { readyIssueLaunches = planIssueImplementerLaunches fanoutConfig plannerConfig occupiedIssues missingIssues
+    , readyIssueRestarts = fmap (issueImplementerLaunchPlan fanoutConfig plannerConfig) stoppedIssues
+    , readyIssuesAllTerminal = not (null readyIssueStatuses) && all ((== ReadyIssueTerminal) . snd) readyIssueStatuses
+    }
+ where
+  missingIssues =
+    [ issue
+    | (issue, ReadyIssueMissing) <- readyIssueStatuses
+    ]
+  stoppedIssues =
+    [ issue
+    | (issue, ReadyIssueActiveStopped) <- readyIssueStatuses
+    ]
+  occupiedIssues =
+    nub
+      ( activeIssues
+          <> [ issue
+             | (issue, status) <- readyIssueStatuses
+             , status == ReadyIssueActiveStopped || status == ReadyIssueActiveRunning
+             ]
+      )
 
 plannerConfigFromState :: SomeWatcherState -> Maybe PlannerConfig
 plannerConfigFromState (SomeWatcherState (PlanningReady config)) = Just config
