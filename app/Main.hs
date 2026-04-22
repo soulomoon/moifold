@@ -834,7 +834,16 @@ defaultEffectRuntimeConfig repo workdir stateDir =
     , effectRuntimeStateDir = stateDir
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
-    , effectRuntimePlannerTurn = turnConfig plannerTurnInput
+    , effectRuntimePlannerTurn =
+        (turnConfig plannerTurnInput)
+          { turnRuntimeCollaborationMode =
+              Just
+                ( planCollaborationMode
+                    "Plan issue decomposition, dependencies, subissue creation, and implementer fanout. Do not edit files in this turn."
+                    "gpt-5.4"
+                    "xhigh"
+                )
+          }
     , effectRuntimeWorkerTurn = turnConfig issueWorkerTurnInput
     , effectRuntimeReviewerTurn = turnConfig reviewerTurnInput
     }
