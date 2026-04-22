@@ -179,7 +179,7 @@ data LoopCli = LoopCli
   , loopCliIterations :: Maybe Int
   , loopCliPidFile :: Maybe FilePath
   , loopCliPlannerThread :: Maybe ThreadId
-  , loopCliScopeIssue :: Maybe IssueNumber
+  , loopCliScopeIssues :: [IssueNumber]
   , loopCliImplementersRoot :: Maybe FilePath
   , loopCliOpenIssues :: Maybe [IssueNumber]
   , loopCliActiveIssues :: Maybe [IssueNumber]
@@ -374,7 +374,7 @@ loopParser domain =
     <*> optional (intOption "iterations" "N" "Maximum loop iterations")
     <*> optional (strOption (long "pid-file" <> metavar "PATH" <> help "Override daemon pid file"))
     <*> optional plannerThreadOption
-    <*> optional (IssueNumber <$> intOption "scope-issue" "NUMBER" "Restrict issue planning to this issue and its sub-issues")
+    <*> scopeIssuesParser
     <*> optional (strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root"))
     <*> optional (option (issueNumbersReader "--open-issues") (long "open-issues" <> metavar "1,2" <> help "Open issue numbers to consider during planning fanout"))
     <*> optional (option (issueNumbersReader "--active-issues") (long "active-issues" <> metavar "1,2" <> help "Issue numbers already active during planning fanout"))
@@ -445,6 +445,15 @@ plannerThreadOption :: Parser ThreadId
 plannerThreadOption =
   ThreadId <$> strOption (long "planner-thread-id" <> long "thread-id" <> metavar "THREAD_ID" <> help "Planner app-server thread id")
 
+scopeIssuesParser :: Parser [IssueNumber]
+scopeIssuesParser =
+  combineScopes
+    <$> optional (option (issueNumberReader "--scope-issue") (long "scope-issue" <> metavar "NUMBER" <> help "Restrict issue planning to this issue and its sub-issues"))
+    <*> optional (option (issueNumbersReader "--scope-issues") (long "scope-issues" <> metavar "1,2" <> help "Restrict issue planning to these issues and their sub-issues"))
+ where
+  combineScopes maybeSingle maybeMany =
+    maybe [] (: []) maybeSingle <> maybe [] id maybeMany
+
 turnIdOption :: Parser TurnId
 turnIdOption =
   TurnId <$> textOption "turn-id" "TURN_ID" "App-server turn id"
@@ -499,6 +508,14 @@ issueNumbersReader flagName =
   eitherReader \input ->
     case parseIssueNumbersText flagName (Text.pack input) of
       Right issueNumbers -> Right issueNumbers
+      Left errorMessage -> Left (Text.unpack errorMessage)
+
+issueNumberReader :: String -> ReadM IssueNumber
+issueNumberReader flagName =
+  eitherReader \input ->
+    case parseIssueNumbersText flagName (Text.pack input) of
+      Right [issueNumber'] -> Right issueNumber'
+      Right _ -> Left ("expected one issue number for " <> flagName)
       Left errorMessage -> Left (Text.unpack errorMessage)
 
 reviewThreadIdsReader :: ReadM [ReviewThreadId]

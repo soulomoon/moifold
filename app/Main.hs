@@ -372,7 +372,7 @@ issueFanout options = do
           , fanoutBranchPrefix = options.issueFanoutCliBranchPrefix
           , fanoutThreadPrefix = options.issueFanoutCliThreadPrefix
           }
-      plannerConfig = PlannerConfig options.issueFanoutCliRepo options.issueFanoutCliMaxParallel Nothing
+      plannerConfig = PlannerConfig options.issueFanoutCliRepo options.issueFanoutCliMaxParallel []
       launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
       launchEndpoint =
         case executionMode of
@@ -609,7 +609,7 @@ runAutomaticLoop cli = do
       options =
         DaemonOptions
           { daemonEventLogPath = cli.loopCliEventsPath
-          , daemonRuntimeConfig = defaultEffectRuntimeConfigWithPlannerScope cli.loopCliScopeIssue cli.loopCliRepo cli.loopCliWorkdir cli.loopCliStateDir
+          , daemonRuntimeConfig = defaultEffectRuntimeConfigWithPlannerScope cli.loopCliScopeIssues cli.loopCliRepo cli.loopCliWorkdir cli.loopCliStateDir
           , daemonExecutionMode = executionMode
           }
       loopConfig =
@@ -724,7 +724,10 @@ loopCliCommandArgs watcherPidFile cli =
     <> boolSwitch cli.loopCliLoop "--loop"
     <> maybe [] (\iterations -> ["--iterations", Text.pack (show iterations)]) cli.loopCliIterations
     <> maybe [] (\threadId -> ["--thread-id", unThreadId threadId]) cli.loopCliPlannerThread
-    <> maybe [] (\issueNumber' -> ["--scope-issue", Text.pack (show (unIssueNumber issueNumber'))]) cli.loopCliScopeIssue
+    <> ( case cli.loopCliScopeIssues of
+           [] -> []
+           issueNumbers -> ["--scope-issues", issueNumbersText issueNumbers]
+       )
     <> maybe [] (\root -> ["--implementers-root", Text.pack root]) cli.loopCliImplementersRoot
     <> maybe [] (\issues -> ["--open-issues", issueNumbersText issues]) cli.loopCliOpenIssues
     <> maybe [] (\issues -> ["--active-issues", issueNumbersText issues]) cli.loopCliActiveIssues
@@ -952,10 +955,10 @@ parseDaemonObservation cli =
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
 defaultEffectRuntimeConfig =
-  defaultEffectRuntimeConfigWithPlannerScope Nothing
+  defaultEffectRuntimeConfigWithPlannerScope []
 
-defaultEffectRuntimeConfigWithPlannerScope :: Maybe IssueNumber -> RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
-defaultEffectRuntimeConfigWithPlannerScope maybeScopeIssue repo workdir stateDir =
+defaultEffectRuntimeConfigWithPlannerScope :: [IssueNumber] -> RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
+defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
   EffectRuntimeConfig
     { effectRuntimeRepo = repo
     , effectRuntimeWorkdir = workdir
@@ -963,11 +966,11 @@ defaultEffectRuntimeConfigWithPlannerScope maybeScopeIssue repo workdir stateDir
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
     , effectRuntimePlannerTurn =
-        (turnConfig (plannerTurnInputForScope maybeScopeIssue))
+        (turnConfig (plannerTurnInputForScope scopeIssues))
           { turnRuntimeCollaborationMode =
               Just
                 ( planCollaborationMode
-                    (plannerPlanModeSummary maybeScopeIssue)
+                    (plannerPlanModeSummary scopeIssues)
                     "gpt-5.4"
                     "xhigh"
                 )
@@ -988,22 +991,22 @@ defaultEffectRuntimeConfigWithPlannerScope maybeScopeIssue repo workdir stateDir
       , turnRuntimeCollaborationMode = Nothing
       }
 
-plannerTurnInputForScope :: Maybe IssueNumber -> Text.Text
-plannerTurnInputForScope Nothing =
+plannerTurnInputForScope :: [IssueNumber] -> Text.Text
+plannerTurnInputForScope [] =
   plannerTurnInput
-plannerTurnInputForScope (Just scopeIssue) =
+plannerTurnInputForScope scopeIssues =
   plannerTurnInput
-    <> " Target scope: only issue #"
-    <> Text.pack (show (unIssueNumber scopeIssue))
-    <> " and its existing or newly created GitHub sub-issues are in scope. Do not create, classify, mark ready, mark blocked, or start work for issues outside this issue tree. If the root issue needs decomposition, create concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only the root issue and descendants that belong to this scoped issue tree."
+    <> " Target scope: only these root issues and their existing or newly created GitHub sub-issues are in scope: "
+    <> issueNumbersText scopeIssues
+    <> ". Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees. If a scoped root issue needs decomposition, create concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only scoped root issues and descendants that belong to these issue trees."
 
-plannerPlanModeSummary :: Maybe IssueNumber -> Text.Text
-plannerPlanModeSummary Nothing =
+plannerPlanModeSummary :: [IssueNumber] -> Text.Text
+plannerPlanModeSummary [] =
   "Plan issue decomposition, dependencies, subissue creation, and implementer fanout. Do not edit files in this turn."
-plannerPlanModeSummary (Just scopeIssue) =
-  "Plan issue #"
-    <> Text.pack (show (unIssueNumber scopeIssue))
-    <> " and its sub-issues only. Do not edit files in this turn."
+plannerPlanModeSummary scopeIssues =
+  "Plan scoped issues "
+    <> issueNumbersText scopeIssues
+    <> " and their sub-issues only. Do not edit files in this turn."
 
 reviewThreadsReportFromCli :: ObserveOnceCli -> IO ReviewThreadsReport
 reviewThreadsReportFromCli cli =

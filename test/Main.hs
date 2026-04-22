@@ -535,14 +535,14 @@ prop_issuePlanningWatcherRecordsGraphBeforeFanout config threadId turnId graph =
 
 prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive :: Bool
 prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive =
-  let config = PlannerConfig (RepoName "owner/name") 3 Nothing
+  let config = PlannerConfig (RepoName "owner/name") 3 []
       active = [IssueNumber 2]
       open = [IssueNumber 1, IssueNumber 2, IssueNumber 3, IssueNumber 4]
    in selectIssueImplementationStarts config active open == [IssueNumber 1, IssueNumber 3]
 
 prop_issuePlanningFanoutBuildsLaunchPlans :: Bool
 prop_issuePlanningFanoutBuildsLaunchPlans =
-  let plannerConfig = PlannerConfig (RepoName "owner/name") 3 Nothing
+  let plannerConfig = PlannerConfig (RepoName "owner/name") 3 []
       fanoutConfig =
         (defaultIssuePlanningFanoutConfig "/tmp/implementers")
           { fanoutWorkdirRoot = Just "/tmp/worktrees"
@@ -580,7 +580,7 @@ prop_issuePlanningFanoutParsesImplementerConfig =
 
 prop_issuePlanningFanoutDetectsCompletionBoundary :: Bool
 prop_issuePlanningFanoutDetectsCompletionBoundary =
-  let config = PlannerConfig (RepoName "owner/name") 3 Nothing
+  let config = PlannerConfig (RepoName "owner/name") 3 []
       planningReady = SomeWatcherState (PlanningReady config)
       planningActive = SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn")))
       issueState = SomeWatcherState (IssueNeedsTriage (IssueConfig (RepoName "owner/name") (IssueNumber 42) (BranchName "codex/issue-42")) (WorkerIdle (ThreadId "worker-thread")))
@@ -595,7 +595,7 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
 
 prop_issuePlanningFanoutUsesOnlyReadyIssues :: Bool
 prop_issuePlanningFanoutUsesOnlyReadyIssues =
-  let plannerConfig = PlannerConfig (RepoName "owner/name") 8 Nothing
+  let plannerConfig = PlannerConfig (RepoName "owner/name") 8 []
       fanoutConfig = defaultIssuePlanningFanoutConfig "/tmp/implementers"
       ready = [IssueNumber 10, IssueNumber 12]
       active = [IssueNumber 12]
@@ -641,7 +641,7 @@ canonicalEventExamples =
   ]
  where
   repo = RepoName "owner/name"
-  plannerConfig = PlannerConfig repo 8 Nothing
+  plannerConfig = PlannerConfig repo 8 []
   issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
   prNumber = PrNumber 7
   prConfig = PrConfig repo prNumber (BranchName "codex/pr-7")
@@ -1498,7 +1498,7 @@ prop_cliParsesHealthcheckAndRunLoop =
               , loopCliIterations = Just 2
               , loopCliPidFile = Nothing
               , loopCliPlannerThread = Just (ThreadId "planner-thread")
-              , loopCliScopeIssue = Just (IssueNumber 12)
+              , loopCliScopeIssues = [IssueNumber 12]
               , loopCliImplementersRoot = Nothing
               , loopCliOpenIssues = Nothing
               , loopCliActiveIssues = Nothing
@@ -1552,7 +1552,7 @@ prop_cliParsesHealthcheckAndRunLoop =
                     , loopCliIterations = Nothing
                     , loopCliPidFile = Nothing
                     , loopCliPlannerThread = Just (ThreadId "planner-thread")
-                    , loopCliScopeIssue = Nothing
+                    , loopCliScopeIssues = []
                     , loopCliImplementersRoot = Nothing
                     , loopCliOpenIssues = Nothing
                     , loopCliActiveIssues = Nothing
@@ -1680,7 +1680,7 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
       events =
-        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 Nothing)
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
         , IssuePlanningGraphUpdated (PlanningGraph [IssueNumber 42] [] [])
         ]
@@ -1976,7 +1976,7 @@ daemonTickDryRunReplaysEventsAndDoesNotExecute = do
   (executor, getCalls) <- fakeActionExecutor
   let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 90
       events =
-        [ IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 Nothing)
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         , IssuePlanningTurnCompleted
         ]
@@ -2010,7 +2010,7 @@ observedDaemonTickDryRunDoesNotMutate = do
           , daemonRuntimeConfig = runtimeConfig
           , daemonExecutionMode = DryRunActions
           }
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 Nothing)]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
       observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
   result <- runObservedDaemonTickWithEvents executor options events observation
   calls <- getCalls
@@ -2038,7 +2038,7 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
           , daemonRuntimeConfig = runtimeConfig
           , daemonExecutionMode = ExecuteActions
           }
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 Nothing)]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
       observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
   result <- runObservedDaemonTickWithEvents executor options events observation
   calls <- getCalls
@@ -2072,7 +2072,7 @@ automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
           , daemonExecutionMode = DryRunActions
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 Nothing)]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
   case result of
@@ -2126,7 +2126,7 @@ automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 8 Nothing)
+        [ IssuePlanningInitialized (PlannerConfig repo 8 [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -2183,7 +2183,7 @@ automaticDaemonLoopPlanningGraphCompletesAndRecords = do
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 8 Nothing)
+        [ IssuePlanningInitialized (PlannerConfig repo 8 [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events

@@ -137,7 +137,7 @@ newtype StopReason = StopReason { unStopReason :: Text }
 data PlannerConfig = PlannerConfig
   { plannerRepo :: RepoName
   , plannerMaxParallel :: Int
-  , plannerScopeIssue :: Maybe IssueNumber
+  , plannerScopeIssues :: [IssueNumber]
   }
   deriving stock (Eq, Show)
 

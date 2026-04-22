@@ -410,7 +410,7 @@ parsePlannerConfig objectValue =
   PlannerConfig
     <$> (RepoName <$> nonEmptyTextField objectValue "repoFullName")
     <*> positiveIntField objectValue "maxParallel"
-    <*> optionalIssueNumberField objectValue "scopeIssueNumber"
+    <*> scopeIssueNumbersField objectValue
 
 parsePrConfig :: Object -> Parser PrConfig
 parsePrConfig objectValue =
@@ -462,7 +462,7 @@ plannerConfigFields :: PlannerConfig -> [Pair]
 plannerConfigFields config =
   [ "repoFullName" .= unRepoName (plannerRepo config)
   , "maxParallel" .= plannerMaxParallel config
-  , "scopeIssueNumber" .= fmap unIssueNumber (plannerScopeIssue config)
+  , "scopeIssueNumbers" .= fmap unIssueNumber (plannerScopeIssues config)
   ]
 
 optionalIssueNumberField :: Object -> Key.Key -> Parser (Maybe IssueNumber)
@@ -473,6 +473,18 @@ optionalIssueNumberField objectValue key = do
     Just value
       | value > 0 -> pure (Just (IssueNumber value))
       | otherwise -> fail (Key.toString key <> " must be positive")
+
+scopeIssueNumbersField :: Object -> Parser [IssueNumber]
+scopeIssueNumbersField objectValue = do
+  legacyScope <- optionalIssueNumberField objectValue "scopeIssueNumber"
+  scopeNumbers <- objectValue .:? "scopeIssueNumbers" .!= ([] :: [Int])
+  parsedScopeNumbers <- traverse (positiveIssueNumber "scopeIssueNumbers[]") scopeNumbers
+  pure (maybe [] (: []) legacyScope <> parsedScopeNumbers)
+
+positiveIssueNumber :: String -> Int -> Parser IssueNumber
+positiveIssueNumber field value
+  | value > 0 = pure (IssueNumber value)
+  | otherwise = fail (field <> " must be positive")
 
 issueConfigFields :: IssueConfig -> [Pair]
 issueConfigFields config =
