@@ -87,6 +87,8 @@ Mark migration ownership for a watcher state directory:
 
 The marker is surfaced by healthcheck and gives a simple backout handle without deleting event history or compatibility state. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during rollback.
 
+Use `render-service` with the same watcher loop flags to print a systemd unit and matching logrotate snippet. The command is render-only; it does not install or enable host services.
+
 Prepare issue implementer child state from a planner selection:
 
 ```bash

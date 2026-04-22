@@ -27,6 +27,7 @@ import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
+import CodexWatcher.Supervisor
 import CodexWatcher.TurnClassifier
 import CodexWatcher.TurnOutput
 import CodexWatcher.Types
@@ -1206,6 +1207,27 @@ prop_migrationRuntimeOwnerJsonAndParsing =
     && parseRuntimeOwner "unknown" /= Right NodeRuntime
     && runtimeOwnerJson HaskellRuntime == object ["owner" .= ("haskell" :: Text)]
 
+prop_supervisorRendersRestartAndLogrotate :: Bool
+prop_supervisorRendersRestartAndLogrotate =
+  let config =
+        WatcherServiceConfig
+          { serviceName = "watcher-one"
+          , serviceDescription = "Codex watcher one"
+          , serviceExecutable = "/tmp/codex watcher"
+          , serviceArguments = ["run-pr-review", "--loop", "--execute"]
+          , serviceWorkingDirectory = "/tmp/work"
+          , serviceLogDirectory = "/tmp/logs"
+          , serviceRestartSeconds = 5
+          , serviceLogRotateCount = 7
+          }
+      service = renderSystemdService config
+      logrotate = renderLogrotateConfig config
+   in "Restart=always" `Text.isInfixOf` service
+        && "RestartSec=5" `Text.isInfixOf` service
+        && "StandardOutput=append:/tmp/logs/watcher-one.log" `Text.isInfixOf` service
+        && "\"/tmp/codex watcher\"" `Text.isInfixOf` service
+        && "rotate 7" `Text.isInfixOf` logrotate
+
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
   PlannedAppServerRequest request -> Just request.requestId
@@ -1759,6 +1781,7 @@ main = do
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
       , quickCheckResult prop_migrationRuntimeOwnerJsonAndParsing
+      , quickCheckResult prop_supervisorRendersRestartAndLogrotate
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases

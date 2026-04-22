@@ -50,6 +50,7 @@ library
     CodexWatcher.Runtime
     CodexWatcher.Snapshot
     CodexWatcher.StateMachine
+    CodexWatcher.Supervisor
     CodexWatcher.TurnOutput
     CodexWatcher.Types
     CodexWatcher.TurnClassifier

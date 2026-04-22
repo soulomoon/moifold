@@ -25,6 +25,7 @@ import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
 import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
+import CodexWatcher.Supervisor
 import CodexWatcher.Types
 import CodexWatcher.TurnOutput
 import Control.Applicative ((<|>))
@@ -54,6 +55,7 @@ main =
     "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
     "mark-runtime-owner" : rest -> markRuntimeOwner rest
     "stop-daemon" : rest -> stopDaemon rest
+    "render-service" : rest -> renderService rest
     "issue-fanout" : rest -> issueFanout rest
     "observe-once" : rest -> observeOnce rest
     "run-pr-review" : rest -> runAutomaticLoop "pr-review" rest
@@ -68,6 +70,7 @@ main =
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
       putStrLn "       codex-watcher-hs stop-daemon --pid-file <path> | --state-dir <path> --domain pr-review|issue-implement|issue-planning"
+      putStrLn "       codex-watcher-hs render-service --name <name> --domain pr-review|issue-implement|issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port"
       putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N [--open-issues 1,2] [--active-issues 3] [--execute] [--start-children]"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop] [--implementers-root <path> --start-children]"
@@ -136,6 +139,77 @@ stopDaemonPidPath args =
       unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
         die ("unsupported daemon domain: " <> domain)
       pure (stateDir </> pidFileNameForDomain domain)
+
+renderService :: [String] -> IO ()
+renderService args = do
+  service <- serviceConfigFromArgs args
+  putStrLn "# systemd service"
+  putStr (Text.unpack (renderSystemdService service))
+  putStrLn "# logrotate"
+  putStr (Text.unpack (renderLogrotateConfig service))
+
+serviceConfigFromArgs :: [String] -> IO WatcherServiceConfig
+serviceConfigFromArgs args = do
+  name <- Text.pack <$> requiredFlag "--name" args
+  domain <- requiredFlag "--domain" args
+  unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
+    die ("unsupported daemon domain: " <> domain)
+  eventsPath <- requiredFlag "--events" args
+  stateDir <- requiredFlag "--state-dir" args
+  repo <- requiredFlag "--repo" args
+  workdir <- requiredFlag "--workdir" args
+  host <- requiredFlag "--app-server-host" args
+  port <- requiredFlag "--app-server-port" args
+  executable <- maybe getExecutablePath pure (lookupFlag "--executable" args)
+  plannerArgs <-
+    case (domain, lookupFlag "--planner-thread-id" args <|> lookupFlag "--thread-id" args) of
+      ("issue-planning", Just threadId) -> pure ["--planner-thread-id", threadId]
+      ("issue-planning", Nothing) -> die "render-service for issue-planning requires --planner-thread-id <thread-id>"
+      _ -> pure []
+  let pollSeconds = maybe "30" id (lookupFlag "--poll-seconds" args)
+      logDir = maybe (stateDir </> "logs") id (lookupFlag "--log-dir" args)
+      restartSeconds = maybe 10 id (lookupFlag "--restart-seconds" args >>= readMaybe)
+      rotateCount = maybe 14 id (lookupFlag "--rotate" args >>= readMaybe)
+      appServerPathArgs =
+        maybe [] (\path -> ["--app-server-path", path]) (lookupFlag "--app-server-path" args)
+      implementerArgs =
+        maybe [] (\root -> ["--implementers-root", root]) (lookupFlag "--implementers-root" args)
+      childArgs =
+        if hasFlag "--start-children" args then ["--start-children"] else []
+      commandArgs =
+        [ "run-" <> domain
+        , "--events"
+        , eventsPath
+        , "--state-dir"
+        , stateDir
+        , "--repo"
+        , repo
+        , "--workdir"
+        , workdir
+        , "--app-server-host"
+        , host
+        , "--app-server-port"
+        , port
+        , "--poll-seconds"
+        , pollSeconds
+        , "--execute"
+        , "--loop"
+        ]
+          <> appServerPathArgs
+          <> plannerArgs
+          <> implementerArgs
+          <> childArgs
+  pure
+    WatcherServiceConfig
+      { serviceName = name
+      , serviceDescription = "Codex watcher " <> name
+      , serviceExecutable = executable
+      , serviceArguments = commandArgs
+      , serviceWorkingDirectory = workdir
+      , serviceLogDirectory = logDir
+      , serviceRestartSeconds = restartSeconds
+      , serviceLogRotateCount = rotateCount
+      }
 
 issueFanout :: [String] -> IO ()
 issueFanout args = do
