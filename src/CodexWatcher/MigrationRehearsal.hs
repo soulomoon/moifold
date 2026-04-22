@@ -68,7 +68,6 @@ shouldCopyStateEntry path =
 renderBackoutCommands :: FilePath -> String -> [Text]
 renderBackoutCommands stateDir domain =
   [ "codex-watcher-hs stop-daemon --state-dir " <> quote (Text.pack stateDir) <> " --domain " <> Text.pack domain
-  , "codex-watcher-hs mark-runtime-owner --state-dir " <> quote (Text.pack stateDir) <> " --owner node"
   ]
 
 migrationReadinessReport :: FilePath -> String -> MigrationReadinessInput -> MigrationReadinessReport

@@ -764,7 +764,7 @@ runtimeCommandExamples =
   , GitPushDryRun "/tmp/work" (BranchName "codex/example")
   , GitPush "/tmp/work" (BranchName "codex/example")
   , KillZero "123"
-  , RawCommand "node" ["--version"] Nothing
+  , RawCommand "cabal" ["--version"] Nothing
   ]
 
 prop_runtimeCommandSpecsHaveExecutable :: Bool
@@ -1314,7 +1314,6 @@ prop_migrationRehearsalPlanSkipsRuntimeFiles =
     && shouldCopyStateEntry "events.jsonl"
     && renderBackoutCommands "/tmp/rehearsal/source-state" "pr-review"
       == [ "codex-watcher-hs stop-daemon --state-dir \"/tmp/rehearsal/source-state\" --domain pr-review"
-         , "codex-watcher-hs mark-runtime-owner --state-dir \"/tmp/rehearsal/source-state\" --owner node"
          ]
 
 prop_migrationReadinessRequiresHaskellTarget :: Bool

@@ -591,15 +591,13 @@ failedEventReplay path' reason' =
 
 environmentCommands :: IO Value
 environmentCommands = do
-  node <- checkCommand "node"
   git <- checkCommand "git"
   gh <- checkCommand "gh"
   cabal <- checkCommand "cabal"
   ghc <- checkCommand "ghc"
   ghcup <- checkCommand "ghcup"
   let reports =
-        [ ("node", node)
-        , ("git", git)
+        [ ("git", git)
         , ("gh", gh)
         , ("cabal", cabal)
         , ("ghc", ghc)
@@ -641,14 +639,14 @@ analyzePlanning :: WatcherSummary -> [Problem]
 analyzePlanning summary
   | summary.kind /= IssuePlanningKind = []
   | otherwise =
-      [problem "error" summary.label "missing planner threadId" (Just "run issue-planning-control initialize") | summary.threadId == Nothing]
+      [problem "error" summary.label "missing planner threadId" (Just "create a Codex planner thread, then run run-issue-planning with --planner-thread-id") | summary.threadId == Nothing]
         <> [problem "error" summary.label "maxParallel is less than 1" Nothing | maybe False (< 1) summary.maxParallel]
 
 analyzeImplement :: WatcherSummary -> [Problem]
 analyzeImplement summary
   | summary.kind /= IssueImplementKind = []
   | otherwise =
-      [problem "error" summary.label "missing worker threadId" (Just "run issue-implement-control initialize") | summary.threadId == Nothing]
+      [problem "error" summary.label "missing worker threadId" (Just "create a Codex worker thread or rehearse legacy state before run-issue-implement --execute") | summary.threadId == Nothing]
         <> workdirProblems summary
         <> [problem "warn" summary.label "workdir has uncommitted changes" Nothing | summary.workdir.dirty]
         <> [problem "warn" summary.label ("git push dry-run failed: " <> commandText summary.gitPushDryRun) Nothing | shouldWarnGitPush summary.gitPushDryRun]
@@ -659,7 +657,7 @@ analyzePrReview :: WatcherSummary -> [Problem]
 analyzePrReview summary
   | summary.kind /= PrReviewKind = []
   | otherwise =
-      [problem "error" summary.label "missing PR worker threadId" (Just "run pr-review-control initialize") | summary.threadId == Nothing]
+      [problem "error" summary.label "missing PR worker threadId" (Just "create a Codex worker thread or rehearse legacy state before run-pr-review --execute") | summary.threadId == Nothing]
         <> [problem "error" summary.label "reviewWhenClean is enabled but reviewerThreadId is missing" Nothing | summary.reviewWhenClean /= Just False && summary.reviewerThreadId == Nothing]
         <> workdirProblems summary
         <> [problem "warn" summary.label "workdir has uncommitted changes" Nothing | summary.workdir.dirty]

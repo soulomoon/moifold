@@ -8,13 +8,13 @@ This repository starts with the correctness core instead of runtime glue:
 - GADT states that prevent impossible state combinations.
 - Typed effects, including mutation permissions.
 - Pure transitions from typed state plus event to next typed state and effect plan.
-- JSON event-log replay for Node watcher `events.jsonl` files.
+- JSON event-log replay for legacy watcher `events.jsonl` files.
 - A small runtime boundary for `gh`, `git`, process checks, and JSON file IO.
 - Pure JSON-RPC request builders for the Codex app-server thread/turn protocol.
 - A pure effect interpreter that compiles typed effects into ordered runtime/app-server actions.
 - QuickCheck properties for global invariants.
 
-The existing Node watcher remains the runtime reference while this model matures.
+The Haskell runtime is the primary implementation. Legacy Node state support is retained only for migration, replay, and golden compatibility checks.
 
 ## Current Scope
 
@@ -32,13 +32,13 @@ The core explicitly tracks phases such as triage, plan mode, implementation, rev
 cabal test all
 ```
 
-Replay a Node watcher event log:
+Replay a legacy watcher event log:
 
 ```bash
 cabal run codex-watcher-hs -- replay-events /path/to/events.jsonl
 ```
 
-Run the read-only Haskell healthcheck over existing Node watcher state:
+Run the read-only Haskell healthcheck over watcher state:
 
 ```bash
 bin=$(cabal list-bin codex-watcher-hs)
@@ -76,20 +76,19 @@ bin=$(cabal list-bin codex-watcher-hs)
   --app-server-port 3000
 ```
 
-The automatic commands are `run-pr-review`, `run-issue-implement`, and `run-issue-planning`. They replay the event log, fetch the next observation from `gh`, `git`, and/or app-server `thread/read`, classify turn output into typed watcher observations, and report the next canonical event and planned actions. They default to a dry run; add `--execute` to append the event, write Node-compatible state files, and run the compiled effects. Execute mode requires `runtime-owner.json` to contain `{"owner":"haskell"}`. Use `--loop --iterations N` for bounded daemon polling, or `--loop` for continuous polling. Loop mode writes the conventional watcher pid file under `--state-dir` unless `--pid-file` is supplied, and refuses to start over a running pid. `run-issue-planning` also requires `--planner-thread-id`. Add `--implementers-root <path>` to `run-issue-planning` to fan out issue implementer child state immediately after a canonical planning-completed event; in execute mode this uses the configured app-server endpoint to create real child threads. Add `--start-children` to print child daemon commands in dry-run mode or start the new child `run-issue-implement --loop --execute` processes after state is written in execute mode.
+The automatic commands are `run-pr-review`, `run-issue-implement`, and `run-issue-planning`. They replay the event log, fetch the next observation from `gh`, `git`, and/or app-server `thread/read`, classify turn output into typed watcher observations, and report the next canonical event and planned actions. They default to a dry run; add `--execute` to append the event, write Haskell-compatible state files, and run the compiled effects. Execute mode requires `runtime-owner.json` to contain `{"owner":"haskell"}`. Use `--loop --iterations N` for bounded daemon polling, or `--loop` for continuous polling. Loop mode writes the conventional watcher pid file under `--state-dir` unless `--pid-file` is supplied, and refuses to start over a running pid. `run-issue-planning` also requires `--planner-thread-id`. Add `--implementers-root <path>` to `run-issue-planning` to fan out issue implementer child state immediately after a canonical planning-completed event; in execute mode this uses the configured app-server endpoint to create real child threads. Add `--start-children` to print child daemon commands in dry-run mode or start the new child `run-issue-implement --loop --execute` processes after state is written in execute mode.
 
 Mark migration ownership for a watcher state directory:
 
 ```bash
 "$bin" mark-runtime-owner --state-dir /path/to/state --owner haskell
-"$bin" mark-runtime-owner --state-dir /path/to/state --owner node
 ```
 
-The marker is surfaced by healthcheck and gives a simple backout handle without deleting event history or compatibility state. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during rollback.
+The marker is surfaced by healthcheck and prevents accidental writes to state that is not Haskell-owned. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during rollback.
 
 Use `render-service` with the same watcher loop flags to print a systemd unit and matching logrotate snippet. The command is render-only; it does not install or enable host services.
 
-Use `rehearse-migration` to prepare a side-by-side Haskell watcher rehearsal without touching the Node-owned source state. By default it renders the target path, event replay result, service definition, logrotate snippet, and rollback commands. Add `--execute` to copy the source watcher directory into `--target-state-dir` or `--rehearsal-root`, skip runtime files such as pid/log/owner markers, and mark the copy as Haskell-owned. If the copied target has no canonical `events.jsonl`, rehearsal bootstraps one from supported legacy Node snapshot files before replaying it.
+Use `rehearse-migration` to prepare a side-by-side Haskell watcher rehearsal without touching the legacy source state. By default it renders the target path, event replay result, service definition, logrotate snippet, and rollback commands. Add `--execute` to copy the source watcher directory into `--target-state-dir` or `--rehearsal-root`, skip runtime files such as pid/log/owner markers, and mark the copy as Haskell-owned. If the copied target has no canonical `events.jsonl`, rehearsal bootstraps one from supported legacy snapshot files before replaying it.
 
 Before cutover, run `validate-migration --source-state-dir <source> --target-state-dir <copy> --domain pr-review|issue-implement|issue-planning`. It is read-only and fails if the copied target is not Haskell-owned, has a live pid file, cannot replay its event log, or replays to a different watcher domain. It prints the same rollback commands as the rehearsal output.
 
