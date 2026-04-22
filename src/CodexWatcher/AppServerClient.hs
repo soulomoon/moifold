@@ -12,6 +12,7 @@ module CodexWatcher.AppServerClient
   , AppServerConnection (..)
   , AppServerEndpoint (..)
   , AppServerIncoming (..)
+  , AppServerTurn (..)
   , JsonRpcError (..)
   , appServerInterpreterFromEndpoint
   , connectAppServer
@@ -19,13 +20,16 @@ module CodexWatcher.AppServerClient
   , decodeAppServerIncomingValue
   , defaultAppServerClientOptions
   , formatAppServerClientFailure
+  , latestTurnById
   , matchAppServerIncoming
+  , parseThreadReadTurns
   , sendAppServerRequest
   , sendOneAppServerRequest
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerProtocol (AppServerRequest (..))
+import CodexWatcher.Types (TurnId (..))
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, bracket, try)
 import Data.Bits ((.&.), (.|.), shiftL, shiftR, xor)
@@ -41,6 +45,8 @@ import Data.Aeson
   , (.!=)
   )
 import Data.Aeson.Types (Parser, parseEither)
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as ByteString.Char8
 import Data.ByteString.Lazy qualified as LazyByteString
@@ -105,6 +111,20 @@ data AppServerIncoming
   | AppServerErrorResponse Int JsonRpcError
   | AppServerNotification Text Value
   deriving stock (Eq, Show, Generic)
+
+data AppServerTurn = AppServerTurn
+  { appServerTurnId :: TurnId
+  , appServerTurnStatus :: Text
+  , appServerTurnOutput :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance FromJSON AppServerTurn where
+  parseJSON = withObject "AppServerTurn" \objectValue ->
+    AppServerTurn
+      <$> (TurnId <$> turnIdField objectValue)
+      <*> objectValue .:? "status" .!= "unknown"
+      <*> optionalTurnOutput objectValue
 
 instance FromJSON AppServerIncoming where
   parseJSON = withObject "AppServerIncoming" \objectValue -> do
@@ -198,6 +218,22 @@ matchAppServerIncoming request = \case
     | responseId == request.requestId -> Left (AppServerJsonRpcFailure responseId errorValue)
     | otherwise -> Left (AppServerResponseIdMismatch request.requestId responseId)
 
+parseThreadReadTurns :: Value -> Either AppServerClientFailure [AppServerTurn]
+parseThreadReadTurns value =
+  case parseEither threadReadTurnsParser value of
+    Left errorMessage -> Left (AppServerDecodeFailure (Text.pack errorMessage))
+    Right turns -> Right turns
+
+latestTurnById :: TurnId -> [AppServerTurn] -> Maybe AppServerTurn
+latestTurnById turnId =
+  foldr
+    ( \turn found ->
+        if appServerTurnId turn == turnId
+          then Just turn
+          else found
+    )
+    Nothing
+
 formatAppServerClientFailure :: AppServerClientFailure -> Text
 formatAppServerClientFailure = \case
   AppServerDecodeFailure message ->
@@ -221,6 +257,33 @@ validateJsonRpcVersion objectValue = do
     Nothing -> pure ()
     Just "2.0" -> pure ()
     Just other -> fail ("unsupported jsonrpc version: " <> Text.unpack other)
+
+threadReadTurnsParser :: Value -> Parser [AppServerTurn]
+threadReadTurnsParser = withObject "ThreadReadResult" \objectValue ->
+  objectValue .:? "turns" .!= []
+
+turnIdField :: Object -> Parser Text
+turnIdField objectValue =
+  objectValue .: "id" <|> objectValue .: "turnId"
+
+optionalTurnOutput :: Object -> Parser (Maybe Text)
+optionalTurnOutput objectValue = do
+  output <- objectValue .:? "output"
+  text <- objectValue .:? "text"
+  resultOutput <- nestedText ["result", "output"] objectValue
+  resultText <- nestedText ["result", "text"] objectValue
+  pure (output <|> text <|> resultOutput <|> resultText)
+
+nestedText :: [Text] -> Object -> Parser (Maybe Text)
+nestedText path objectValue =
+  pure case lookupPath path (Object objectValue) of
+    Just (String text) -> Just text
+    _ -> Nothing
+
+lookupPath :: [Text] -> Value -> Maybe Value
+lookupPath [] value = Just value
+lookupPath (key : rest) (Object objectValue) = KeyMap.lookup (Key.fromText key) objectValue >>= lookupPath rest
+lookupPath _ _ = Nothing
 
 openAppServerConnection :: AppServerEndpoint -> IO AppServerConnection
 openAppServerConnection endpoint = do

@@ -968,6 +968,29 @@ prop_appServerClientRejectsUnsupportedJsonRpcVersion =
         Left AppServerDecodeFailure {} -> True
         _ -> False
 
+prop_appServerClientParsesThreadReadTurns :: Bool
+prop_appServerClientParsesThreadReadTurns =
+  let response =
+        object
+          [ "turns"
+              .= [ object
+                    [ "id" .= ("turn-old" :: Text)
+                    , "status" .= ("completed" :: Text)
+                    , "output" .= ("old output" :: Text)
+                    ]
+                 , object
+                    [ "turnId" .= ("turn-target" :: Text)
+                    , "status" .= ("running" :: Text)
+                    , "result" .= object ["text" .= ("target output" :: Text)]
+                    ]
+                 ]
+          ]
+   in case parseThreadReadTurns response of
+        Right turns ->
+          latestTurnById (TurnId "turn-target") turns
+            == Just (AppServerTurn (TurnId "turn-target") "running" (Just "target output"))
+        Left _ -> False
+
 effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
 effectRuntimeConfig repo workdir requestId =
   EffectRuntimeConfig
@@ -1303,6 +1326,67 @@ daemonTickDryRunReplaysEventsAndDoesNotExecute = do
       putStrLn ("FAIL daemon tick: " <> Text.unpack (formatDaemonFailure failure))
       pure False
 
+observedDaemonTickDryRunDoesNotMutate :: IO Bool
+observedDaemonTickDryRunDoesNotMutate = do
+  (executor, getCalls) <- fakeActionExecutor
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 100
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8)]
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "observed dry-run emits canonical event" (daemonObservedEvent tick == IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
+          , assert "observed dry-run computes compatibility writes" (length tick.daemonObservedCompatibilityWrites == 2)
+          , assert "observed dry-run does not mutate" (null calls)
+          , assert "observed dry-run reports planned actions" (length tick.daemonObservedActionReports == 1)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL observed daemon dry-run: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+
+observedDaemonTickExecuteAppendsWritesAndRunsEffects :: IO Bool
+observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
+  (executor, getCalls) <- fakeActionExecutor
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 110
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8)]
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let expectedEvent = IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
+      results <-
+        sequence
+          [ assert "observed execute appends event first" (take 1 calls == [FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)])
+          , assert "observed execute writes compatibility state" (length [() | FakeWriteJson {} <- calls] == length tick.daemonObservedCompatibilityWrites)
+          , assert "observed execute runs effect actions" (any isFakeAppServer calls)
+          , assert "observed execute reaches plan mode" (somePhase tick.daemonObservedState == PlanMode)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL observed daemon execute: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+ where
+  isFakeAppServer = \case
+    FakeAppServer {} -> True
+    _ -> False
+
 main :: IO ()
 main = do
   results <-
@@ -1372,6 +1456,7 @@ main = do
       , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds
       , quickCheckResult prop_appServerClientSurfacesJsonRpcErrors
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
+      , quickCheckResult prop_appServerClientParsesThreadReadTurns
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
@@ -1384,4 +1469,16 @@ main = do
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
-  if all isSuccess results && goldenOk && eventLogOk && actionExecutorDryRunOk && actionExecutorExecuteOk && daemonTickOk then pure () else exitFailure
+  observedDaemonDryRunOk <- observedDaemonTickDryRunDoesNotMutate
+  observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
+  if
+    all isSuccess results
+      && goldenOk
+      && eventLogOk
+      && actionExecutorDryRunOk
+      && actionExecutorExecuteOk
+      && daemonTickOk
+      && observedDaemonDryRunOk
+      && observedDaemonExecuteOk
+    then pure ()
+    else exitFailure

@@ -47,6 +47,31 @@ bin=$(cabal list-bin codex-watcher-hs)
 
 The command emits JSON and checks command availability, `gh auth`, watcher state files, workdir/git health, PR review event-log replay, duplicate ownership, and planner `maxParallel` invariants. It intentionally does not mutate GitHub, app-server threads, or local checkouts.
 
+Dry-run one typed watcher observation against an event log:
+
+```bash
+bin=$(cabal list-bin codex-watcher-hs)
+"$bin" observe-once \
+  --events /path/to/events.jsonl \
+  --state-dir /path/to/state \
+  --repo owner/name \
+  --domain issue-planning \
+  --observation turn-started \
+  --thread-id planner-thread \
+  --turn-id turn-next
+```
+
+The command replays the log, applies the observation through the typed watcher policy, reports the canonical event, compatibility writes, and planned actions, and defaults to `DryRunActions`. Use `--execute --app-server-host <host> --app-server-port <port>` only during a controlled migration rehearsal.
+
+Mark migration ownership for a watcher state directory:
+
+```bash
+"$bin" mark-runtime-owner --state-dir /path/to/state --owner haskell
+"$bin" mark-runtime-owner --state-dir /path/to/state --owner node
+```
+
+The marker is surfaced by healthcheck and gives a simple backout handle without deleting event history or compatibility state.
+
 The runtime event format is documented in `docs/event-log-schema.md`.
 
 ## Design Rule
