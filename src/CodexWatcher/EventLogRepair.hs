@@ -41,6 +41,8 @@ repairIssueImplementEventLog events =
 repairFromFailure :: [WatcherEvent] -> ReplayFailure -> Either Text EventLogRepairPlan
 repairFromFailure events failure =
   case failure.event of
+    IssuePlanningReadyIssuesFixed ->
+      repairStalePlanningReadyIssuesFixed events failure
     IssuePullRequestCreatedEvent prNumber ->
       repairMissingPlanBeforePullRequest events failure (IssuePullRequestCreatedEvent prNumber) prNumber
     IssuePullRequestReusedEvent prNumber ->
@@ -49,6 +51,12 @@ repairFromFailure events failure =
       repairCompletionWithoutImplementationTurn events failure prNumber
     _ ->
       Left ("no deterministic repair rule for event " <> eventName failure.event)
+
+repairStalePlanningReadyIssuesFixed :: [WatcherEvent] -> ReplayFailure -> Either Text EventLogRepairPlan
+repairStalePlanningReadyIssuesFixed events failure = do
+  let (prefix, suffixAfterFailure) = splitAtFailure failure events
+      candidate = prefix <> suffixAfterFailure
+  finishPlan events failure "dropped stale planning ready-issues marker" [] [failure.event] candidate
 
 repairMissingPlanBeforePullRequest :: [WatcherEvent] -> ReplayFailure -> WatcherEvent -> PrNumber -> Either Text EventLogRepairPlan
 repairMissingPlanBeforePullRequest events failure prEvent prNumber = do

@@ -913,7 +913,7 @@ maintainReadyIssueImplementers cli endpoint executionMode implementersRoot plann
   putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
   if allReadyIssuesTerminal
     then do
-      markPlanningReadyIssuesFixed cli planningState
+      markPlanningReadyIssuesFixed executionMode cli planningState
       pure False
     else pure False
 
@@ -966,15 +966,43 @@ issueImplementerPidRunning stateDir = do
         then pure False
         else isPidRunning pidText
 
-markPlanningReadyIssuesFixed :: LoopCli -> SomeWatcherState -> IO ()
-markPlanningReadyIssuesFixed cli planningState =
-  case issuePlanningObserve planningState ObservedPlanningReadyIssuesFixed of
-    Left reason ->
-      die ("failed to mark planning ready issues fixed: " <> Text.unpack reason)
-    Right fixedTick -> do
-      appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath fixedTick.issuePlanningTickEvent
-      mapM_ (writeCompatibilityLaunch ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir fixedTick.issuePlanningTickState)
-      putStrLn "planner ready issues fixed; re-entering planning"
+markPlanningReadyIssuesFixed :: ActionExecutionMode -> LoopCli -> SomeWatcherState -> IO ()
+markPlanningReadyIssuesFixed executionMode cli planningState =
+  case executionMode of
+    DryRunActions ->
+      applyReadyIssuesFixed planningState \_fixedTick ->
+        putStrLn "planner ready issues fixed; would re-enter planning"
+    ExecuteActions -> do
+      currentState <- loadCurrentPlanningState
+      case currentState of
+        SomeWatcherState PlanningReady {} ->
+          putStrLn "planner ready issues already fixed; skipping stale marker"
+        SomeWatcherState PlanningTurnActive {} ->
+          putStrLn "planner already re-entered planning; skipping stale ready-issues marker"
+        SomeWatcherState PlanningWaitingForReadyIssues {} ->
+          applyReadyIssuesFixed currentState \fixedTick -> do
+            appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath fixedTick.issuePlanningTickEvent
+            mapM_ (writeCompatibilityLaunch ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir fixedTick.issuePlanningTickState)
+            putStrLn "planner ready issues fixed; re-entering planning"
+        other ->
+          die
+            ( "failed to mark planning ready issues fixed from current state "
+                <> show (someDomain other)
+                <> "/"
+                <> show (somePhase other)
+            )
+ where
+  loadCurrentPlanningState = do
+    loaded <- loadEventLogFile cli.loopCliEventsPath
+    events <- either die pure loaded
+    replay <- either (die . formatReplayFailure) pure (replayEventLog events)
+    pure replay.replayState
+  applyReadyIssuesFixed state onFixed =
+    case issuePlanningObserve state ObservedPlanningReadyIssuesFixed of
+      Left reason ->
+        die ("failed to mark planning ready issues fixed: " <> Text.unpack reason)
+      Right fixedTick ->
+        onFixed fixedTick
 
 resolveFanoutReadyIssues :: WatcherEvent -> IO [IssueNumber]
 resolveFanoutReadyIssues = \case

@@ -846,6 +846,29 @@ prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete =
               Right replay -> somePhase replay.replayState == Implementing
               Left _ -> False
 
+prop_eventLogRepairDropsStalePlanningReadyIssuesFixed :: Bool
+prop_eventLogRepairDropsStalePlanningReadyIssuesFixed =
+  let config = PlannerConfig (RepoName "owner/name") 8 [IssueNumber 12]
+      plannerThread = ThreadId "planner-thread"
+      firstTurn = TurnId "planner-turn-1"
+      secondTurn = TurnId "planner-turn-2"
+      graph = PlanningGraph [IssueNumber 26] [] []
+      invalidEvents =
+        [ IssuePlanningInitialized config
+        , IssuePlanningTurnStarted plannerThread firstTurn
+        , IssuePlanningGraphUpdated graph
+        , IssuePlanningReadyIssuesFixed
+        , IssuePlanningTurnStarted plannerThread secondTurn
+        , IssuePlanningReadyIssuesFixed
+        ]
+   in case repairIssueImplementEventLog invalidEvents of
+        Left _ -> False
+        Right plan ->
+          plan.repairDroppedEvents == [IssuePlanningReadyIssuesFixed]
+            && case replayEventLog plan.repairRepairedEvents of
+              Right replay -> someDomain replay.replayState == IssuePlanning && somePhase replay.replayState == PlanMode
+              Left _ -> False
+
 prop_eventLogRepairRejectsValidEventLog :: IssueConfig -> ThreadId -> TurnId -> TurnId -> PrNumber -> Bool
 prop_eventLogRepairRejectsValidEventLog config workerThread planTurn implementationTurn prNumber' =
   case repairIssueImplementEventLog
@@ -2692,6 +2715,7 @@ main = do
       , quickCheckResult prop_eventLogRejectsEmptyReviewThreads
       , quickCheckResult prop_eventLogRepairIssue26MissingPlanReentersImplementation
       , quickCheckResult prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete
+      , quickCheckResult prop_eventLogRepairDropsStalePlanningReadyIssuesFixed
       , quickCheckResult prop_eventLogRepairRejectsValidEventLog
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerIncompleteReturnsToChecking
