@@ -22,6 +22,9 @@ data Effect (mutability :: Mutability) where
   ReadReviewThreads :: PrConfig -> Effect 'ReadOnly
   StartPlannerTurn :: ThreadId -> Effect 'CanStartTurn
   StartWorkerTurn :: ThreadId -> Effect 'CanStartTurn
+  StartIssueTriageWorkerTurn :: ThreadId -> Effect 'CanStartTurn
+  StartIssuePlanWorkerTurn :: ThreadId -> Effect 'CanStartTurn
+  StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartReviewerTurn :: ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
@@ -52,6 +55,9 @@ effectMutability ReadOpenPullRequests {} = ReadOnly
 effectMutability ReadReviewThreads {} = ReadOnly
 effectMutability StartPlannerTurn {} = CanStartTurn
 effectMutability StartWorkerTurn {} = CanStartTurn
+effectMutability StartIssueTriageWorkerTurn {} = CanStartTurn
+effectMutability StartIssuePlanWorkerTurn {} = CanStartTurn
+effectMutability StartIssueImplementationWorkerTurn {} = CanStartTurn
 effectMutability StartReviewerTurn {} = CanStartTurn
 effectMutability PushBranch {} = CanMutateLocal
 effectMutability CreateIssue {} = CanMutateGitHub

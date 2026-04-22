@@ -84,8 +84,6 @@ issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (Obse
   Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedReviewHandoffStarted prNumber) =
   Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
-issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedImplementationCompleted prNumber) =
-  Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedImplementationCompleted prNumber) =
   Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueNeedsTriage {}) (ObservedIssueImplementBlocked reason) =

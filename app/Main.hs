@@ -1000,7 +1000,14 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
                     "xhigh"
                 )
           }
-    , effectRuntimeWorkerTurn = turnConfig issueWorkerTurnInput
+    , effectRuntimeWorkerTurn = turnConfig prReviewWorkerTurnInput
+    , effectRuntimeIssueTriageTurn = turnConfig issueTriageTurnInput
+    , effectRuntimeIssuePlanTurn =
+        (turnConfig issuePlanTurnInput)
+          { turnRuntimeCollaborationMode =
+              Just (planCollaborationMode "Plan the implementation. Do not edit files in this turn." "gpt-5.4" "xhigh")
+          }
+    , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput
     , effectRuntimeReviewerTurn = turnConfig reviewerTurnInput
     }
  where

@@ -378,8 +378,6 @@ applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueImplementationBlo
   fromDecision (step state (MarkBlocked reason))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
-applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
-  fromDecision (step state (IssueImplementationCompleted prNumber))
 applyEvent (SomeWatcherState state) (WatcherBlocked reason) =
   Right (blockSameDomain state reason, [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon])
 applyEvent (SomeWatcherState state) (WatcherStopped reason) =

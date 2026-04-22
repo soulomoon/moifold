@@ -95,7 +95,7 @@ step (PlanningTurnActive config _activeTurn) (PlannerRequestedIssueCreation requ
 step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssueTriageTurn activeTurn) =
   Decision
     (IssueTriageActive config (WorkerActive activeTurn))
-    [SomeEffect (StartWorkerTurn threadId)]
+    [SomeEffect (StartIssueTriageWorkerTurn threadId)]
 step state@IssueTriageActive {} (StartIssueTriageTurn _activeTurn) =
   Decision state []
 step (IssueTriageActive config _activeTurn) IssueTriageAlreadyFixed =
@@ -111,13 +111,13 @@ step _ (IssueTriageBlocked reason) =
 step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
-    [SomeEffect (StartWorkerTurn threadId)]
+    [SomeEffect (StartIssuePlanWorkerTurn threadId)]
 step state@IssueTriageActive {} (StartIssuePlanTurn _activeTurn) =
   Decision state []
 step (IssuePlanReady config (WorkerIdle threadId)) (StartReadyIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
-    [SomeEffect (StartWorkerTurn threadId)]
+    [SomeEffect (StartIssuePlanWorkerTurn threadId)]
 step (IssueInPlanMode config (WorkerActive activeTurn)) (IssuePlanCompleted Nothing) =
   Decision
     (IssueImplementationReady config Nothing (WorkerIdle (activeThreadId activeTurn)))
@@ -129,7 +129,7 @@ step (IssueInPlanMode config (WorkerActive _activeTurn)) (IssuePlanCompleted (Ju
     (IssueImplementing config Nothing (WorkerActive nextTurn))
     [ SomeEffect (PushBranch (issueBranch config))
     , SomeEffect (CreatePullRequest config)
-    , SomeEffect (StartWorkerTurn (activeThreadId nextTurn))
+    , SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId nextTurn))
     ]
 step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted Nothing) =
   Decision
@@ -142,7 +142,7 @@ step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted (Just ne
     (IssueImplementing config Nothing (WorkerActive nextTurn))
     [ SomeEffect (PushBranch (issueBranch config))
     , SomeEffect (CreatePullRequest config)
-    , SomeEffect (StartWorkerTurn (activeThreadId nextTurn))
+    , SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId nextTurn))
     ]
 step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady prNumber) =
   Decision
@@ -151,11 +151,11 @@ step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady pr
 step (IssueImplementationReady config maybePr (WorkerIdle threadId)) (StartIssueImplementationTurn activeTurn) =
   Decision
     (IssueImplementing config maybePr (WorkerActive activeTurn))
-    [SomeEffect (StartWorkerTurn threadId)]
+    [SomeEffect (StartIssueImplementationWorkerTurn threadId)]
 step (IssueImplementing config maybePr (WorkerActive activeTurn)) IssueImplementationIncomplete =
   Decision
     (IssueImplementationReady config maybePr (WorkerIdle (activeThreadId activeTurn)))
-    [SomeEffect (StartWorkerTurn (activeThreadId activeTurn))]
+    [SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId activeTurn))]
 step state@IssueImplementationReady {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step state@IssueImplementationReady {} (IssueReviewHandoffStarted _prNumber) =

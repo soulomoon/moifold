@@ -48,6 +48,9 @@ data EffectRuntimeConfig = EffectRuntimeConfig
   , effectRuntimeNextRequestId :: Int
   , effectRuntimePlannerTurn :: TurnRuntimeConfig
   , effectRuntimeWorkerTurn :: TurnRuntimeConfig
+  , effectRuntimeIssueTriageTurn :: TurnRuntimeConfig
+  , effectRuntimeIssuePlanTurn :: TurnRuntimeConfig
+  , effectRuntimeIssueImplementationTurn :: TurnRuntimeConfig
   , effectRuntimeReviewerTurn :: TurnRuntimeConfig
   }
   deriving stock (Eq, Show, Generic)
@@ -90,6 +93,12 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest config.effectRuntimePlannerTurn threadId
     StartWorkerTurn threadId ->
       oneAppServerRequest config.effectRuntimeWorkerTurn threadId
+    StartIssueTriageWorkerTurn threadId ->
+      oneAppServerRequest config.effectRuntimeIssueTriageTurn threadId
+    StartIssuePlanWorkerTurn threadId ->
+      oneAppServerRequest config.effectRuntimeIssuePlanTurn threadId
+    StartIssueImplementationWorkerTurn threadId ->
+      oneAppServerRequest config.effectRuntimeIssueImplementationTurn threadId
     StartReviewerTurn threadId ->
       oneAppServerRequest config.effectRuntimeReviewerTurn threadId
     PushBranch branch ->

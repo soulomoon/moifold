@@ -60,6 +60,9 @@ data DaemonLoopTickResult = DaemonLoopTickResult
 data StartTurnKind
   = StartPlannerTurnKind
   | StartWorkerTurnKind
+  | StartIssueTriageWorkerTurnKind
+  | StartIssuePlanWorkerTurnKind
+  | StartIssueImplementationWorkerTurnKind
   | StartReviewerTurnKind
   deriving stock (Eq, Show)
 
@@ -98,17 +101,17 @@ runFromState executor config events replay =
       observeActiveTurn executor config events replay activeTurn \turn ->
         DaemonIssuePlanningObservation <$> classifyIssuePlanningTurn turn
     SomeWatcherState (IssueNeedsTriage _ (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events StartWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedTriageTurnStarted)
+      prestartAndObserve executor config events StartIssueTriageWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedTriageTurnStarted)
     SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueTriageTurn)
     SomeWatcherState (IssuePlanReady _ (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events StartWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
+      prestartAndObserve executor config events StartIssuePlanWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
     SomeWatcherState (IssueInPlanMode _ (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssuePlanTurn)
     SomeWatcherState (IssueImplementationReady issueConfig Nothing _worker) ->
       observeExistingPullRequest executor config events replay issueConfig
     SomeWatcherState (IssueImplementationReady _issueConfig (Just _prNumber) (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events StartWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
+      prestartAndObserve executor config events StartIssueImplementationWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
     SomeWatcherState (IssueImplementing _issueConfig maybePr (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueImplementationObservation events maybePr)
     SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
@@ -286,6 +289,9 @@ startTurnEffect kind threadId =
   case kind of
     StartPlannerTurnKind -> SomeEffect (StartPlannerTurn threadId)
     StartWorkerTurnKind -> SomeEffect (StartWorkerTurn threadId)
+    StartIssueTriageWorkerTurnKind -> SomeEffect (StartIssueTriageWorkerTurn threadId)
+    StartIssuePlanWorkerTurnKind -> SomeEffect (StartIssuePlanWorkerTurn threadId)
+    StartIssueImplementationWorkerTurnKind -> SomeEffect (StartIssueImplementationWorkerTurn threadId)
     StartReviewerTurnKind -> SomeEffect (StartReviewerTurn threadId)
 
 syntheticTurnId :: StartTurnKind -> Int -> TurnId
@@ -296,6 +302,9 @@ kindText :: StartTurnKind -> Text
 kindText = \case
   StartPlannerTurnKind -> "planner-turn"
   StartWorkerTurnKind -> "worker-turn"
+  StartIssueTriageWorkerTurnKind -> "issue-triage-turn"
+  StartIssuePlanWorkerTurnKind -> "issue-plan-turn"
+  StartIssueImplementationWorkerTurnKind -> "issue-implementation-turn"
   StartReviewerTurnKind -> "reviewer-turn"
 
 readActiveTurn :: Monad m => ActionExecutor m -> DaemonLoopConfig -> ActiveTurn -> m (Either DaemonLoopFailure (Maybe AppServerTurn))

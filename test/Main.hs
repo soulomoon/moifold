@@ -142,6 +142,11 @@ effectIsStartWorker = \case
   SomeEffect StartWorkerTurn {} -> True
   _ -> False
 
+effectIsStartIssueImplementation :: SomeEffect -> Bool
+effectIsStartIssueImplementation = \case
+  SomeEffect StartIssueImplementationWorkerTurn {} -> True
+  _ -> False
+
 effectIsStartPlanner :: SomeEffect -> Bool
 effectIsStartPlanner = \case
   SomeEffect StartPlannerTurn {} -> True
@@ -228,7 +233,7 @@ prop_issuePlanCompletionCreatesPrBeforeImplementation config planningTurn implem
       phaseOf state == Implementing
         && any effectIsPush effects
         && any effectIsCreatePr effects
-        && any effectIsStartWorker effects
+        && any effectIsStartIssueImplementation effects
 
 prop_issueTriageAlreadyFixedCompletesWithoutPlan :: IssueConfig -> ActiveTurn -> Bool
 prop_issueTriageAlreadyFixedCompletesWithoutPlan config triageTurn =
@@ -260,7 +265,7 @@ prop_issueImplementationIncompleteRestartsWorker config prNumber activeTurn =
   case step (IssueImplementing config (Just prNumber) (WorkerActive activeTurn)) IssueImplementationIncomplete of
     Decision state effects ->
       phaseOf state == Implementing
-        && any effectIsStartWorker effects
+        && any effectIsStartIssueImplementation effects
         && not (any effectIsRecordBlocked effects)
 
 prop_issueImplementationBlockedStops :: IssueConfig -> PrNumber -> ActiveTurn -> BlockedReason -> Bool
@@ -359,6 +364,29 @@ prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
     Left _ -> True
     Right _ -> False
 
+prop_eventLogCannotCreatePrBeforeIssuePlan :: IssueConfig -> ThreadId -> TurnId -> PrNumber -> Bool
+prop_eventLogCannotCreatePrBeforeIssuePlan config workerThread triageTurn prNumber =
+  case replayEventLog
+    [ IssueImplementInitialized config workerThread
+    , IssueTriageTurnStartedEvent triageTurn
+    , IssueTriageNeedsImplementationEvent
+    , IssuePullRequestCreatedEvent prNumber
+    ] of
+    Left _ -> True
+    Right _ -> False
+
+prop_eventLogCannotCompleteIssueBeforeImplementationTurn :: IssueConfig -> ThreadId -> TurnId -> PrNumber -> Bool
+prop_eventLogCannotCompleteIssueBeforeImplementationTurn config workerThread planTurn prNumber =
+  case replayEventLog
+    [ IssueImplementInitialized config workerThread
+    , IssuePlanTurnStartedEvent planTurn
+    , IssuePlanCompletedEvent Nothing
+    , IssuePullRequestCreatedEvent prNumber
+    , IssueImplementationCompletedEvent prNumber
+    ] of
+    Left _ -> True
+    Right _ -> False
+
 prop_eventLogIssueAlreadyFixedCompletes :: IssueConfig -> ThreadId -> TurnId -> Bool
 prop_eventLogIssueAlreadyFixedCompletes config workerThread triageTurn =
   case replayEventLog
@@ -412,7 +440,7 @@ prop_issueImplementWatcherPlanCompletionPublishesBeforeImplementation config wor
             && somePhase tick.issueImplementTickState == Implementing
             && any effectIsPush tick.issueImplementTickEffects
             && any effectIsCreatePr tick.issueImplementTickEffects
-            && any effectIsStartWorker tick.issueImplementTickEffects
+            && any effectIsStartIssueImplementation tick.issueImplementTickEffects
         Left _ -> False
 
 prop_issueImplementWatcherIncompleteRestartsImplementation :: IssueConfig -> PrNumber -> ThreadId -> TurnId -> Bool
@@ -422,8 +450,15 @@ prop_issueImplementWatcherIncompleteRestartsImplementation config prNumber worke
         Right tick ->
           issueImplementTickEvent tick == IssueImplementationIncompleteEvent "incomplete"
             && somePhase tick.issueImplementTickState == Implementing
-            && any effectIsStartWorker tick.issueImplementTickEffects
+            && any effectIsStartIssueImplementation tick.issueImplementTickEffects
         Left _ -> False
+
+prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn :: IssueConfig -> PrNumber -> ThreadId -> Bool
+prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn config prNumber workerThread =
+  let state = SomeWatcherState (IssueImplementationReady config (Just prNumber) (WorkerIdle workerThread))
+   in case issueImplementObserve state (ObservedImplementationCompleted prNumber) of
+        Left _ -> True
+        Right _ -> False
 
 prop_issueImplementWatcherBlockedStops :: IssueConfig -> PrNumber -> ThreadId -> TurnId -> BlockedReason -> Bool
 prop_issueImplementWatcherBlockedStops config prNumber workerThread implementationTurn reason =
@@ -1361,6 +1396,9 @@ effectRuntimeConfig repo workdir requestId =
     , effectRuntimeNextRequestId = requestId
     , effectRuntimePlannerTurn = turnRuntime "planner prompt" Nothing
     , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
+    , effectRuntimeIssueTriageTurn = turnRuntime "issue triage prompt" Nothing
+    , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" (Just (planCollaborationMode "issue plan mode" "gpt-5.4" "xhigh"))
+    , effectRuntimeIssueImplementationTurn = turnRuntime "issue implementation prompt" Nothing
     , effectRuntimeReviewerTurn = turnRuntime "reviewer prompt" Nothing
     }
  where
@@ -1388,6 +1426,14 @@ actionIsTurnStartFor threadId = \case
       && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
   _ -> False
 
+actionIsTurnStartWithInput :: ThreadId -> Text -> PlannedAction -> Bool
+actionIsTurnStartWithInput threadId input action =
+  actionIsTurnStartFor threadId action
+    && case action of
+      PlannedAppServerRequest request ->
+        lookupValue "input" request.requestParams == Just (toJSON [object ["type" .= ("text" :: Text), "text" .= input]])
+      _ -> False
+
 prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker :: IssueConfig -> ActiveTurn -> ActiveTurn -> Bool
 prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planningTurn implementationTurn =
   case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted (Just implementationTurn)) of
@@ -1400,8 +1446,26 @@ prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planni
        in length actions == 3
             && actionIsCommand (== GitPush "/tmp/work" (issueBranch config)) (actions !! 0)
             && actionIsCommand (== GhCreatePullRequest config) (actions !! 1)
-            && actionIsTurnStartFor (activeThreadId implementationTurn) (actions !! 2)
+            && actionIsTurnStartWithInput (activeThreadId implementationTurn) "issue implementation prompt" (actions !! 2)
             && compiled.compiledNextRequestId == 11
+
+prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts :: ThreadId -> Bool
+prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
+  let compiled =
+        compileEffectPlan
+          (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 16)
+          [ SomeEffect (StartIssueTriageWorkerTurn threadId)
+          , SomeEffect (StartIssuePlanWorkerTurn threadId)
+          , SomeEffect (StartIssueImplementationWorkerTurn threadId)
+          , SomeEffect (StartWorkerTurn threadId)
+          ]
+      actions = compiled.compiledActions
+   in length actions == 4
+        && actionIsTurnStartWithInput threadId "issue triage prompt" (actions !! 0)
+        && actionIsTurnStartWithInput threadId "issue plan prompt" (actions !! 1)
+        && actionIsTurnStartWithInput threadId "issue implementation prompt" (actions !! 2)
+        && actionIsTurnStartWithInput threadId "worker prompt" (actions !! 3)
+        && compiled.compiledNextRequestId == 20
 
 prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds :: ThreadId -> ThreadId -> Bool
 prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerThread =
@@ -2374,11 +2438,14 @@ main = do
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
+      , quickCheckResult prop_eventLogCannotCreatePrBeforeIssuePlan
+      , quickCheckResult prop_eventLogCannotCompleteIssueBeforeImplementationTurn
       , quickCheckResult prop_eventLogIssueAlreadyFixedCompletes
       , quickCheckResult prop_eventLogIssueIncompleteCanContinueToComplete
       , quickCheckResult prop_issueImplementWatcherTriageNeedsImplementation
       , quickCheckResult prop_issueImplementWatcherPlanCompletionPublishesBeforeImplementation
       , quickCheckResult prop_issueImplementWatcherIncompleteRestartsImplementation
+      , quickCheckResult prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn
       , quickCheckResult prop_issueImplementWatcherBlockedStops
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
@@ -2441,6 +2508,7 @@ main = do
       , quickCheckResult prop_turnClassifierPrefersStructuredOutputs
       , quickCheckResult prop_turnClassifierBlocksMissingOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
+      , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
       , quickCheckResult prop_effectInterpreterRecordPlanningGraphWritesState
