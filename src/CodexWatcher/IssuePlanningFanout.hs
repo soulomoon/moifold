@@ -9,6 +9,7 @@ module CodexWatcher.IssuePlanningFanout
   , defaultIssuePlanningFanoutConfig
   , issueImplementerConfigJson
   , issueImplementerStateDir
+  , parseIssueImplementerConfigIssue
   , planIssueImplementerLaunches
   , withLaunchThreadId
   ) where
@@ -17,7 +18,8 @@ import CodexWatcher.CompatibilityState
 import CodexWatcher.EventLog
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.Types
-import Data.Aeson (Value, object, (.=))
+import Data.Aeson (Value, object, withObject, (.:), (.=))
+import Data.Aeson.Types (parseEither)
 import Data.Char (isAlphaNum)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -105,6 +107,20 @@ issueImplementerConfigJson issueConfig threadId stateDir maybeWorkdir =
     , "eventsPath" .= (stateDir </> "events.jsonl")
     , "workdir" .= maybeWorkdir
     ]
+
+parseIssueImplementerConfigIssue :: Value -> Either Text (RepoName, IssueNumber)
+parseIssueImplementerConfigIssue value =
+  case parseEither parser value of
+    Left errorMessage -> Left (Text.pack errorMessage)
+    Right parsed -> Right parsed
+ where
+  parser =
+    withObject "IssueImplementerConfig" $ \objectValue -> do
+      repo <- RepoName <$> objectValue .: "repoFullName"
+      issue <- objectValue .: "issueNumber"
+      if issue > 0
+        then pure (repo, IssueNumber issue)
+        else fail "issueNumber must be positive"
 
 issueImplementerStateDir :: FilePath -> RepoName -> IssueNumber -> FilePath
 issueImplementerStateDir implementersRoot repo issueNumber' =

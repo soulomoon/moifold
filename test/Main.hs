@@ -451,6 +451,16 @@ prop_issuePlanningFanoutBuildsLaunchPlans =
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
 
+prop_issuePlanningFanoutParsesImplementerConfig :: Bool
+prop_issuePlanningFanoutParsesImplementerConfig =
+  let issueConfig = IssueConfig (RepoName "owner/name") (IssueNumber 42) (BranchName "codex/issue-42")
+      validConfig = issueImplementerConfigJson issueConfig (ThreadId "thread-42") "/tmp/state" Nothing
+      invalidConfig = object ["repoFullName" .= ("owner/name" :: Text), "issueNumber" .= (0 :: Int)]
+   in parseIssueImplementerConfigIssue validConfig == Right (RepoName "owner/name", IssueNumber 42)
+        && case parseIssueImplementerConfigIssue invalidConfig of
+          Left _ -> True
+          Right _ -> False
+
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
@@ -1670,6 +1680,7 @@ main = do
       , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
+      , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases

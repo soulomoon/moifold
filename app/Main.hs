@@ -29,8 +29,10 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
 import Control.Monad (unless, when)
 import Data.Aeson (Value (..))
+import Data.List (nub, sortOn)
+import Data.Maybe (catMaybes)
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
 import System.Environment (getArgs)
 import System.Exit (die)
 import System.FilePath (takeDirectory, (</>))
@@ -59,7 +61,7 @@ main =
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
-      putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N --open-issues 1,2 [--active-issues 3] [--execute]"
+      putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N [--open-issues 1,2] [--active-issues 3] [--execute]"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop]"
       putStrLn "type-level domains:"
@@ -103,8 +105,8 @@ issueFanout args = do
   repo <- RepoName . Text.pack <$> requiredFlag "--repo" args
   implementersRoot <- requiredFlag "--implementers-root" args
   maxParallel <- requiredIntFlag "--max-parallel" args
-  openIssues <- issueNumbersFlag "--open-issues" args
-  activeIssues <- maybe (pure []) (parseIssueNumbers "--active-issues") (lookupFlag "--active-issues" args)
+  openIssues <- resolveFanoutOpenIssues args repo
+  activeIssues <- resolveFanoutActiveIssues args repo implementersRoot
   let fanoutConfig =
         (defaultIssuePlanningFanoutConfig implementersRoot)
           { fanoutWorkdirRoot = lookupFlag "--workdir-root" args
@@ -120,6 +122,46 @@ issueFanout args = do
       mapM_ writeIssueImplementerLaunch preparedLaunches
     else mapM_ printIssueImplementerLaunch launches
   putStrLn ("launches: " <> show (length launches))
+
+resolveFanoutOpenIssues :: [String] -> RepoName -> IO [IssueNumber]
+resolveFanoutOpenIssues args repo =
+  case lookupFlag "--open-issues" args of
+    Just value -> parseIssueNumbers "--open-issues" value
+    Nothing -> do
+      issueResult <- runGhIssueListOpen ioRuntimeInterpreter repo
+      case issueResult of
+        Left errorMessage -> die ("failed to discover open issues: " <> Text.unpack errorMessage)
+        Right issues -> pure (fmap ghIssueNumber issues)
+
+resolveFanoutActiveIssues :: [String] -> RepoName -> FilePath -> IO [IssueNumber]
+resolveFanoutActiveIssues args repo implementersRoot =
+  case lookupFlag "--active-issues" args of
+    Just value -> parseIssueNumbers "--active-issues" value
+    Nothing -> discoverActiveIssueImplementers repo implementersRoot
+
+discoverActiveIssueImplementers :: RepoName -> FilePath -> IO [IssueNumber]
+discoverActiveIssueImplementers repo implementersRoot = do
+  exists <- doesDirectoryExist implementersRoot
+  if not exists
+    then pure []
+    else do
+      children <- listDirectory implementersRoot
+      issues <- traverse (loadIssueImplementerConfigIssue repo . (implementersRoot </>)) children
+      pure (nub (sortOn unIssueNumber (catMaybes issues)))
+
+loadIssueImplementerConfigIssue :: RepoName -> FilePath -> IO (Maybe IssueNumber)
+loadIssueImplementerConfigIssue repo stateDir = do
+  let configPath = stateDir </> "config.json"
+  exists <- doesFileExist configPath
+  if not exists
+    then pure Nothing
+    else do
+      loaded <- readJsonValue configPath
+      case loaded >>= parseIssueImplementerConfigIssue of
+        Left errorMessage -> die ("failed to read issue implementer config " <> configPath <> ": " <> Text.unpack errorMessage)
+        Right (configRepo, issue)
+          | configRepo == repo -> pure (Just issue)
+          | otherwise -> pure Nothing
 
 prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> IO IssueImplementerLaunchPlan
 prepareIssueImplementerLaunch Nothing _requestId launch =
@@ -477,12 +519,6 @@ splitComma text =
   case break (== ',') text of
     (part, []) -> [part]
     (part, _comma : rest) -> part : splitComma rest
-
-issueNumbersFlag :: String -> [String] -> IO [IssueNumber]
-issueNumbersFlag flag args =
-  case lookupFlag flag args of
-    Nothing -> die ("missing required flag " <> flag)
-    Just value -> parseIssueNumbers flag value
 
 parseIssueNumbers :: String -> String -> IO [IssueNumber]
 parseIssueNumbers flag value =
