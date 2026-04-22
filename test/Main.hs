@@ -984,6 +984,14 @@ prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
         && lookupValue "threadId" interruptRequest.requestParams == Just (String (unThreadId threadId))
         && lookupValue "turnId" interruptRequest.requestParams == Just (String (unTurnId turnId))
 
+prop_appServerClientInitializesSingleRequestSessions :: ThreadId -> Bool
+prop_appServerClientInitializesSingleRequestSessions threadId =
+  let request = threadReadRequest 4 threadId True
+      session = appServerRequestSession request
+   in fmap requestMethod session == ["initialize", "thread/read"]
+        && fmap requestId session == [0, 4]
+        && appServerRequestSession (initializeRequest 10 "client" "1") == [initializeRequest 10 "client" "1"]
+
 prop_appServerClientMatchesSuccessResponse :: Bool
 prop_appServerClientMatchesSuccessResponse =
   let request = initializeRequest 80 "codex-watcher-hs" "0.1.0"
@@ -1913,6 +1921,7 @@ main = do
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
       , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
       , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds
+      , quickCheckResult prop_appServerClientInitializesSingleRequestSessions
       , quickCheckResult prop_appServerClientMatchesSuccessResponse
       , quickCheckResult prop_appServerClientSkipsNotifications
       , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds

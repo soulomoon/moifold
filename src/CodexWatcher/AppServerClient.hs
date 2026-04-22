@@ -14,6 +14,7 @@ module CodexWatcher.AppServerClient
   , AppServerIncoming (..)
   , AppServerTurn (..)
   , JsonRpcError (..)
+  , appServerRequestSession
   , appServerInterpreterFromEndpoint
   , connectAppServer
   , decodeAppServerIncoming
@@ -30,7 +31,7 @@ module CodexWatcher.AppServerClient
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
-import CodexWatcher.AppServerProtocol (AppServerRequest (..))
+import CodexWatcher.AppServerProtocol (AppServerRequest (..), initializeRequest)
 import CodexWatcher.Types (ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, bracket, try)
@@ -157,9 +158,25 @@ connectAppServer endpoint action =
 
 sendOneAppServerRequest :: AppServerEndpoint -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 sendOneAppServerRequest endpoint options request =
-  try (connectAppServer endpoint \connection -> sendAppServerRequest connection options request) >>= \case
+  try (connectAppServer endpoint \connection -> sendAppServerRequestSession connection options (appServerRequestSession request)) >>= \case
     Left (exception :: IOException) -> pure (Left (AppServerTransportFailure (Text.pack (show exception))))
     Right result -> pure result
+
+appServerRequestSession :: AppServerRequest -> [AppServerRequest]
+appServerRequestSession request
+  | request.requestMethod == "initialize" = [request]
+  | otherwise = [initializeRequest 0 "codex-watcher-hs" "0.1.0", request]
+
+sendAppServerRequestSession :: AppServerConnection -> AppServerClientOptions -> [AppServerRequest] -> IO (Either AppServerClientFailure Value)
+sendAppServerRequestSession _connection _options [] =
+  pure (Right Null)
+sendAppServerRequestSession connection options [request] =
+  sendAppServerRequest connection options request
+sendAppServerRequestSession connection options (request : rest) = do
+  result <- sendAppServerRequest connection options request
+  case result of
+    Left failure -> pure (Left failure)
+    Right _ -> sendAppServerRequestSession connection options rest
 
 sendAppServerRequest :: AppServerConnection -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 sendAppServerRequest connection options request = do
