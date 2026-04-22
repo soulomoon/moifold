@@ -1,15 +1,19 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module CodexWatcher.TurnClassifier
   ( TurnCompletion (..)
+  , StructuredTurnOutcome (..)
   , classifyIssueImplementationTurn
   , classifyIssuePlanTurn
   , classifyIssueTriageTurn
   , classifyPrReviewReviewerTurn
   , classifyPrReviewWorkerTurn
   , classifyTurnCompletion
+  , parseStructuredTurnOutcome
   ) where
 
 import CodexWatcher.AppServerClient
@@ -17,14 +21,74 @@ import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
 import CodexWatcher.Types
+import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 
 data TurnCompletion
   = TurnStillRunning
   | TurnCompleted (Maybe Text)
   | TurnFailed Text
   deriving stock (Eq, Show)
+
+data StructuredTurnOutcome
+  = StructuredBlocked Text
+  | StructuredIncomplete Text
+  | StructuredComplete Text
+  | StructuredAlreadyFixed Text
+  | StructuredNeedsImplementation Text
+  | StructuredProblems Text
+  | StructuredClean Text
+  deriving stock (Eq, Show)
+
+instance FromJSON StructuredTurnOutcome where
+  parseJSON = withObject "StructuredTurnOutcome" \objectValue -> do
+    maybeOutcome <- objectValue .:? "outcome"
+    maybeStatus <- objectValue .:? "status"
+    maybeResult <- objectValue .:? "result"
+    outcome <- maybe (fail "missing outcome/status/result") pure (firstNonEmpty [maybeOutcome, maybeStatus, maybeResult])
+    reason <- objectValue .:? "reason"
+    summary <- objectValue .:? "summary"
+    comment <- objectValue .:? "comment"
+    evidence <- objectValue .:? "evidence"
+    let detail = firstNonEmpty [reason, summary, comment, evidence]
+        withDetail constructor fallback = pure (constructor (maybe fallback id detail))
+    case normalize outcome of
+      "blocked" -> withDetail StructuredBlocked "blocked"
+      "cannot_proceed" -> withDetail StructuredBlocked "cannot proceed"
+      "cannot proceed" -> withDetail StructuredBlocked "cannot proceed"
+      "incomplete" -> withDetail StructuredIncomplete "incomplete"
+      "not_complete" -> withDetail StructuredIncomplete "not complete"
+      "not complete" -> withDetail StructuredIncomplete "not complete"
+      "needs_follow_up" -> withDetail StructuredIncomplete "needs follow-up"
+      "needs follow-up" -> withDetail StructuredIncomplete "needs follow-up"
+      "complete" -> withDetail StructuredComplete "complete"
+      "completed" -> withDetail StructuredComplete "complete"
+      "success" -> withDetail StructuredComplete "complete"
+      "ready_for_review" -> withDetail StructuredComplete "ready for review"
+      "ready for review" -> withDetail StructuredComplete "ready for review"
+      "pr_ready" -> withDetail StructuredComplete "PR ready"
+      "already_fixed" -> withDetail StructuredAlreadyFixed "already fixed"
+      "already fixed" -> withDetail StructuredAlreadyFixed "already fixed"
+      "already_resolved" -> withDetail StructuredAlreadyFixed "already resolved"
+      "already resolved" -> withDetail StructuredAlreadyFixed "already resolved"
+      "no_changes_needed" -> withDetail StructuredAlreadyFixed "no changes needed"
+      "needs_implementation" -> withDetail StructuredNeedsImplementation "needs implementation"
+      "needs implementation" -> withDetail StructuredNeedsImplementation "needs implementation"
+      "implement" -> withDetail StructuredNeedsImplementation "needs implementation"
+      "problems" -> withDetail StructuredProblems "problems found"
+      "problem" -> withDetail StructuredProblems "problems found"
+      "comments_added" -> withDetail StructuredProblems "comments added"
+      "comments added" -> withDetail StructuredProblems "comments added"
+      "changes_requested" -> withDetail StructuredProblems "changes requested"
+      "changes requested" -> withDetail StructuredProblems "changes requested"
+      "clean" -> withDetail StructuredClean "LGTM"
+      "lgtm" -> withDetail StructuredClean "LGTM"
+      "approved" -> withDetail StructuredClean "approved"
+      "no_issues" -> withDetail StructuredClean "no issues"
+      "no issues" -> withDetail StructuredClean "no issues"
+      other -> fail ("unsupported structured turn outcome: " <> Text.unpack other)
 
 classifyTurnCompletion :: AppServerTurn -> TurnCompletion
 classifyTurnCompletion turn
@@ -44,6 +108,8 @@ classifyIssueTriageTurn turn =
     TurnFailed reason ->
       Just (ObservedIssueImplementBlocked (BlockedReason reason))
     TurnCompleted output
+      | Just structured <- output >>= parseStructuredTurnOutcome ->
+          classifyStructuredIssueTriage structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
           Just (ObservedIssueImplementBlocked (BlockedReason (outputReason "triage turn reported blocked" output)))
       | outputHasAny ["already_fixed", "already fixed", "already_resolved", "already resolved", "no changes needed"] output ->
@@ -59,6 +125,8 @@ classifyIssuePlanTurn turn =
     TurnFailed reason ->
       Just (ObservedIssueImplementBlocked (BlockedReason reason))
     TurnCompleted output
+      | Just structured <- output >>= parseStructuredTurnOutcome ->
+          classifyStructuredIssuePlan structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
           Just (ObservedIssueImplementBlocked (BlockedReason (outputReason "plan turn reported blocked" output)))
       | otherwise ->
@@ -72,6 +140,8 @@ classifyIssueImplementationTurn maybePr turn =
     TurnFailed reason ->
       Just (ObservedImplementationBlocked (BlockedReason reason))
     TurnCompleted output
+      | Just structured <- output >>= parseStructuredTurnOutcome ->
+          classifyStructuredIssueImplementation maybePr structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
           Just (ObservedImplementationBlocked (BlockedReason (outputReason "implementation turn reported blocked" output)))
       | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
@@ -90,6 +160,8 @@ classifyPrReviewWorkerTurn turn =
     TurnFailed reason ->
       Just (WorkerBlocked (BlockedReason reason))
     TurnCompleted output
+      | Just structured <- output >>= parseStructuredTurnOutcome ->
+          classifyStructuredPrReviewWorker structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
           Just (WorkerBlocked (BlockedReason (outputReason "worker turn reported blocked" output)))
       | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
@@ -105,6 +177,8 @@ classifyPrReviewReviewerTurn commit turn =
     TurnFailed reason ->
       Just (ReviewerBlocked (BlockedReason reason))
     TurnCompleted output
+      | Just structured <- output >>= parseStructuredTurnOutcome ->
+          classifyStructuredPrReviewReviewer commit structured
       | outputHasAny ["blocked", "cannot proceed"] output ->
           Just (ReviewerBlocked (BlockedReason (outputReason "reviewer turn reported blocked" output)))
       | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
@@ -115,6 +189,71 @@ classifyPrReviewReviewerTurn commit turn =
           Just (ReviewerClean (CleanReviewEvidence commit (outputReason "LGTM" output)))
       | otherwise ->
           Just (ReviewerIncomplete (outputReason "reviewer turn completed without a clean/problems marker" output))
+
+parseStructuredTurnOutcome :: Text -> Maybe StructuredTurnOutcome
+parseStructuredTurnOutcome output =
+  case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
+    Left _ -> Nothing
+    Right structured -> Just structured
+
+classifyStructuredIssueTriage :: StructuredTurnOutcome -> Maybe IssueImplementObservation
+classifyStructuredIssueTriage = \case
+  StructuredBlocked reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
+  StructuredAlreadyFixed _reason -> Just ObservedTriageAlreadyFixed
+  StructuredNeedsImplementation _reason -> Just ObservedTriageNeedsImplementation
+  StructuredComplete _reason -> Just ObservedTriageNeedsImplementation
+  StructuredIncomplete reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
+  StructuredProblems reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
+  StructuredClean _reason -> Just ObservedTriageAlreadyFixed
+
+classifyStructuredIssuePlan :: StructuredTurnOutcome -> Maybe IssueImplementObservation
+classifyStructuredIssuePlan = \case
+  StructuredBlocked reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
+  StructuredIncomplete reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
+  StructuredComplete _reason -> Just (ObservedPlanCompleted Nothing)
+  StructuredNeedsImplementation _reason -> Just (ObservedPlanCompleted Nothing)
+  StructuredAlreadyFixed _reason -> Just (ObservedPlanCompleted Nothing)
+  StructuredProblems reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
+  StructuredClean _reason -> Just (ObservedPlanCompleted Nothing)
+
+classifyStructuredIssueImplementation :: Maybe PrNumber -> StructuredTurnOutcome -> Maybe IssueImplementObservation
+classifyStructuredIssueImplementation maybePr = \case
+  StructuredBlocked reason -> Just (ObservedImplementationBlocked (BlockedReason reason))
+  StructuredIncomplete reason -> Just (ObservedImplementationIncomplete reason)
+  StructuredComplete _reason ->
+    case maybePr of
+      Just prNumber -> Just (ObservedImplementationCompleted prNumber)
+      Nothing -> Just (ObservedImplementationIncomplete "implementation completed before a pull request was known")
+  StructuredNeedsImplementation reason -> Just (ObservedImplementationIncomplete reason)
+  StructuredAlreadyFixed _reason ->
+    case maybePr of
+      Just prNumber -> Just (ObservedImplementationCompleted prNumber)
+      Nothing -> Just (ObservedImplementationIncomplete "implementation completed before a pull request was known")
+  StructuredProblems reason -> Just (ObservedImplementationIncomplete reason)
+  StructuredClean _reason ->
+    case maybePr of
+      Just prNumber -> Just (ObservedImplementationCompleted prNumber)
+      Nothing -> Just (ObservedImplementationIncomplete "implementation completed before a pull request was known")
+
+classifyStructuredPrReviewWorker :: StructuredTurnOutcome -> Maybe WorkerOutcome
+classifyStructuredPrReviewWorker = \case
+  StructuredBlocked reason -> Just (WorkerBlocked (BlockedReason reason))
+  StructuredIncomplete reason -> Just (WorkerIncomplete reason)
+  StructuredComplete _reason -> Just WorkerCompleted
+  StructuredNeedsImplementation reason -> Just (WorkerIncomplete reason)
+  StructuredAlreadyFixed _reason -> Just WorkerCompleted
+  StructuredProblems reason -> Just (WorkerIncomplete reason)
+  StructuredClean _reason -> Just WorkerCompleted
+
+classifyStructuredPrReviewReviewer :: CommitSha -> StructuredTurnOutcome -> Maybe ReviewerOutcome
+classifyStructuredPrReviewReviewer commit = \case
+  StructuredBlocked reason -> Just (ReviewerBlocked (BlockedReason reason))
+  StructuredIncomplete reason -> Just (ReviewerIncomplete reason)
+  StructuredProblems _reason -> Just (ReviewerProblemsAdded commit)
+  StructuredClean comment -> Just (ReviewerClean (CleanReviewEvidence commit comment))
+  StructuredComplete comment -> Just (ReviewerClean (CleanReviewEvidence commit comment))
+  StructuredAlreadyFixed comment -> Just (ReviewerClean (CleanReviewEvidence commit comment))
+  StructuredNeedsImplementation reason -> Just (ReviewerIncomplete reason)
 
 runningStatuses :: [Text]
 runningStatuses =
@@ -135,6 +274,13 @@ outputHasAny needles output =
 outputReason :: Text -> Maybe Text -> Text
 outputReason fallback =
   maybe fallback nonEmptyOutput
+
+firstNonEmpty :: [Maybe Text] -> Maybe Text
+firstNonEmpty [] = Nothing
+firstNonEmpty (Nothing : rest) = firstNonEmpty rest
+firstNonEmpty (Just text : rest)
+  | Text.null (Text.strip text) = firstNonEmpty rest
+  | otherwise = Just (Text.strip text)
 
 nonEmptyOutput :: Text -> Text
 nonEmptyOutput output

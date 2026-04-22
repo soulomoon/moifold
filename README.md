@@ -103,6 +103,8 @@ Without `--open-issues`, fanout discovers open issues with `gh issue list`. With
 
 The runtime event format is documented in `docs/event-log-schema.md`.
 
+Automatic turn classification first accepts structured JSON outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `already_fixed`, `needs_implementation`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
+
 ## Design Rule
 
 The type-level model owns lifecycle correctness. Runtime policy and external IO stay behind `CodexWatcher.Runtime` until they are driven by typed effects.

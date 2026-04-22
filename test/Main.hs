@@ -1090,6 +1090,14 @@ prop_turnClassifierMapsDomainOutputs =
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "resolved")) == Just (ObservedWorkerOutcome WorkerCompleted)
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "LGTM clean")) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM clean")))
 
+prop_turnClassifierPrefersStructuredOutputs :: Bool
+prop_turnClassifierPrefersStructuredOutputs =
+  parseStructuredTurnOutcome "{\"outcome\":\"blocked\",\"reason\":\"schema blocker\"}" == Just (StructuredBlocked "schema blocker")
+    && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "{\"outcome\":\"already_fixed\",\"reason\":\"schema fixed\"}")) == Just ObservedTriageAlreadyFixed
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"ready\"}")) == Just (ObservedImplementationCompleted (PrNumber 7))
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "schema LGTM")))
+
 effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
 effectRuntimeConfig repo workdir requestId =
   EffectRuntimeConfig
@@ -1736,6 +1744,7 @@ main = do
       , quickCheckResult prop_appServerClientParsesNestedThreadReadTurns
       , quickCheckResult prop_turnClassifierCompletionStates
       , quickCheckResult prop_turnClassifierMapsDomainOutputs
+      , quickCheckResult prop_turnClassifierPrefersStructuredOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
