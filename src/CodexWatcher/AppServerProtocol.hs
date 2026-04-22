@@ -129,7 +129,7 @@ turnStartRequest requestId options =
               , "effort" .= options.turnEffort
               , "model" .= options.turnModel
               , "approvalPolicy" .= options.turnApprovalPolicy
-              , "sandboxPolicy" .= options.turnSandboxPolicy
+              , "sandboxPolicy" .= turnSandboxPolicyValue options.turnSandboxPolicy
               , "personality" .= Null
               , "serviceTier" .= Null
               , "summary" .= Null
@@ -165,3 +165,12 @@ planCollaborationMode developerInstructions model reasoningEffort =
         , "reasoning_effort" .= reasoningEffort
         ]
     ]
+
+turnSandboxPolicyValue :: Text -> Value
+turnSandboxPolicyValue "danger-full-access" = object ["type" .= ("dangerFullAccess" :: Text)]
+turnSandboxPolicyValue "dangerFullAccess" = object ["type" .= ("dangerFullAccess" :: Text)]
+turnSandboxPolicyValue "read-only" = object ["type" .= ("readOnly" :: Text)]
+turnSandboxPolicyValue "readOnly" = object ["type" .= ("readOnly" :: Text)]
+turnSandboxPolicyValue "workspace-write" = object ["type" .= ("workspaceWrite" :: Text)]
+turnSandboxPolicyValue "workspaceWrite" = object ["type" .= ("workspaceWrite" :: Text)]
+turnSandboxPolicyValue other = object ["type" .= other]
