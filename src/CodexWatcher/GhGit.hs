@@ -10,11 +10,13 @@ module CodexWatcher.GhGit
   ( GhIssue (..)
   , GhPullRequest (..)
   , GitWorktreeStatus (..)
+  , RemoteIssue (..)
   , RemotePullRequest (..)
   , ReviewComment (..)
   , ReviewThread (..)
   , ReviewThreadsReport (..)
   , parseGhIssueList
+  , parseGhIssueView
   , parseGhPrList
   , parseGhPrView
   , parseGhReviewThreads
@@ -23,6 +25,7 @@ module CodexWatcher.GhGit
   , parseLsRemoteBranch
   , runGitWorktreeStatus
   , runGhIssueListOpen
+  , runGhIssueView
   , runGhPrListOpen
   , runGhPrView
   , runGhReviewThreads
@@ -60,6 +63,19 @@ instance FromJSON GhIssue where
     GhIssue
       <$> (IssueNumber <$> objectValue .: "number")
       <*> objectValue .: "title"
+
+data RemoteIssue = RemoteIssue
+  { remoteIssueState :: Text
+  , remoteIssueClosed :: Bool
+  , remoteIssueUrl :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance FromJSON RemoteIssue where
+  parseJSON = withObject "RemoteIssue" \objectValue -> do
+    state <- objectValue .: "state"
+    closed <- objectValue .:? "closed" .!= (state == "CLOSED")
+    RemoteIssue state closed <$> objectValue .:? "url"
 
 data GhPullRequest = GhPullRequest
   { ghPullRequestNumber :: PrNumber
@@ -154,6 +170,10 @@ parseGhIssueList :: Text -> Either Text [GhIssue]
 parseGhIssueList =
   decodeJsonText "gh issue list"
 
+parseGhIssueView :: Text -> Either Text RemoteIssue
+parseGhIssueView =
+  decodeJsonText "gh issue view"
+
 parseGhPrList :: Text -> Either Text [GhPullRequest]
 parseGhPrList =
   decodeJsonText "gh pr list"
@@ -189,6 +209,11 @@ parseLsRemoteBranch text =
 runGhIssueListOpen :: Monad m => RuntimeInterpreter m -> RepoName -> m (Either Text [GhIssue])
 runGhIssueListOpen interpreter repo =
   parseCommandJson parseGhIssueList <$> interpreter.runtimeRunCommand (GhIssueListOpen repo)
+
+runGhIssueView :: Monad m => RuntimeInterpreter m -> RepoName -> IssueNumber -> m (Either Text RemoteIssue)
+runGhIssueView interpreter repo issueNumber =
+  parseCommandJson parseGhIssueView
+    <$> interpreter.runtimeRunCommand (GhIssueView repo issueNumber ["state", "closed", "url"])
 
 runGhPrListOpen :: Monad m => RuntimeInterpreter m -> RepoName -> m (Either Text [GhPullRequest])
 runGhPrListOpen interpreter repo =

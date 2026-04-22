@@ -1064,6 +1064,7 @@ runtimeCommandExamples =
   , GhAuthStatus
   , GhApiUser
   , GhIssueListOpen (RepoName "soulomoon/mlf2")
+  , GhIssueView (RepoName "soulomoon/mlf2") (IssueNumber 42) ["state", "closed", "url"]
   , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body" Nothing)
   , GhPrListOpen (RepoName "soulomoon/mlf2")
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
@@ -1187,6 +1188,26 @@ prop_ghGitParsesIssueAndPrLists =
           )
    in parseGhIssueList issuesJson == Right [GhIssue (IssueNumber 42) "Fix bug"]
         && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123"))]
+
+prop_ghGitParsesRemoteIssueView :: Bool
+prop_ghGitParsesRemoteIssueView =
+  let closedIssueJson =
+        jsonText
+          ( object
+              [ "state" .= ("CLOSED" :: Text)
+              , "closed" .= True
+              , "url" .= ("https://github.com/owner/name/issues/42" :: Text)
+              ]
+          )
+      legacyIssueJson =
+        jsonText
+          ( object
+              [ "state" .= ("CLOSED" :: Text)
+              ]
+          )
+   in parseGhIssueView closedIssueJson
+        == Right (RemoteIssue "CLOSED" True (Just "https://github.com/owner/name/issues/42"))
+        && parseGhIssueView legacyIssueJson == Right (RemoteIssue "CLOSED" True Nothing)
 
 prop_ghGitParsesRemotePrView :: Bool
 prop_ghGitParsesRemotePrView =
@@ -2739,6 +2760,7 @@ main = do
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
+      , quickCheckResult prop_ghGitParsesRemoteIssueView
       , quickCheckResult prop_ghGitParsesRemotePrView
       , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
       , quickCheckResult prop_ghGitParsesGitOutputs

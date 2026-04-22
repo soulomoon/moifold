@@ -932,7 +932,9 @@ issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
   configExists <- doesFileExist configPath
   eventsExists <- doesFileExist eventsPath
   if not configExists && not eventsExists
-    then pure IssueImplementerMissing
+    then do
+      fixed <- githubIssueClosed plannerConfig.plannerRepo issueNumber'
+      pure (if fixed then IssueImplementerTerminal else IssueImplementerMissing)
     else do
       running <- issueImplementerPidRunning stateDir
       if not eventsExists
@@ -947,12 +949,23 @@ issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
                 Left _failure ->
                   pure (if running then IssueImplementerActiveRunning else IssueImplementerActiveStopped)
                 Right replay
-                  | someDomain replay.replayState == IssueImplement && isTerminalPhase (somePhase replay.replayState) ->
-                      pure IssueImplementerTerminal
+                  | someDomain replay.replayState == IssueImplement && isTerminalPhase (somePhase replay.replayState) -> do
+                      fixed <- githubIssueClosed plannerConfig.plannerRepo issueNumber'
+                      pure (if fixed then IssueImplementerTerminal else IssueImplementerActiveRunning)
                   | running ->
                       pure IssueImplementerActiveRunning
                   | otherwise ->
                       pure IssueImplementerActiveStopped
+
+githubIssueClosed :: RepoName -> IssueNumber -> IO Bool
+githubIssueClosed repo issueNumber' = do
+  remoteIssue <- runGhIssueView ioRuntimeInterpreter repo issueNumber'
+  case remoteIssue of
+    Right issue ->
+      pure (issue.remoteIssueClosed || issue.remoteIssueState == "CLOSED")
+    Left errorMessage -> do
+      putStrLn ("planner could not verify issue " <> show (unIssueNumber issueNumber') <> " remote state: " <> Text.unpack errorMessage)
+      pure False
 
 issueImplementerPidRunning :: FilePath -> IO Bool
 issueImplementerPidRunning stateDir = do

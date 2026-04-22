@@ -53,6 +53,7 @@ data RuntimeCommand
   | GhAuthStatus
   | GhApiUser
   | GhIssueListOpen RepoName
+  | GhIssueView RepoName IssueNumber [Text]
   | GhIssueCreate RepoName IssueCreationRequest
   | GhPrListOpen RepoName
   | GhPrView RepoName PrNumber [Text]
@@ -116,6 +117,19 @@ renderRuntimeCommand (GhIssueListOpen repo) =
   RuntimeCommandSpec
     "gh"
     ["issue", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,labels,assignees"]
+    Nothing
+    ""
+renderRuntimeCommand (GhIssueView repo issueNumber fields) =
+  RuntimeCommandSpec
+    "gh"
+    [ "issue"
+    , "view"
+    , show (unIssueNumber issueNumber)
+    , "--repo"
+    , Text.unpack (unRepoName repo)
+    , "--json"
+    , Text.unpack (Text.intercalate "," fields)
+    ]
     Nothing
     ""
 renderRuntimeCommand (GhIssueCreate repo request) =
