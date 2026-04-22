@@ -1386,6 +1386,64 @@ prop_cliParsesHealthcheckAndRunLoop =
               }
         )
     && parseCliCommand
+      [ "guard-issue-planning"
+      , "--events"
+      , "/tmp/events.jsonl"
+      , "--state-dir"
+      , "/tmp/state"
+      , "--repo"
+      , "owner/name"
+      , "--app-server-host"
+      , "127.0.0.1"
+      , "--app-server-port"
+      , "3000"
+      , "--thread-id"
+      , "planner-thread"
+      , "--execute"
+      , "--loop"
+      , "--guard-pid-file"
+      , "/tmp/state/runner-guard.pid"
+      , "--guard-poll-seconds"
+      , "15"
+      , "--stale-seconds"
+      , "120"
+      , "--repair-cwd"
+      , "/tmp/repo"
+      ]
+      == Right
+        ( CliGuardIssuePlanning
+            GuardIssuePlanningCli
+              { guardCliLoop =
+                  LoopCli
+                    { loopCliDomain = CliIssuePlanning
+                    , loopCliEventsPath = "/tmp/events.jsonl"
+                    , loopCliStateDir = "/tmp/state"
+                    , loopCliRepo = RepoName "owner/name"
+                    , loopCliWorkdir = "."
+                    , loopCliEndpoint = AppServerEndpoint "127.0.0.1" 3000 "/"
+                    , loopCliPollSeconds = 30
+                    , loopCliExecute = True
+                    , loopCliLoop = True
+                    , loopCliIterations = Nothing
+                    , loopCliPidFile = Nothing
+                    , loopCliPlannerThread = Just (ThreadId "planner-thread")
+                    , loopCliImplementersRoot = Nothing
+                    , loopCliOpenIssues = Nothing
+                    , loopCliActiveIssues = Nothing
+                    , loopCliImplementerWorkdirRoot = Nothing
+                    , loopCliWorkdirRoot = Nothing
+                    , loopCliBranchPrefix = "codex/issue-"
+                    , loopCliThreadPrefix = "issue-worker-"
+                    , loopCliStartChildren = False
+                    , loopCliChildPollSeconds = Nothing
+                    }
+              , guardCliPidFile = Just "/tmp/state/runner-guard.pid"
+              , guardCliPollSeconds = 15
+              , guardCliStaleSeconds = 120
+              , guardCliRepairCwd = Just "/tmp/repo"
+              }
+        )
+    && parseCliCommand
       [ "validate-migration"
       , "--source-state-dir"
       , "/tmp/source"

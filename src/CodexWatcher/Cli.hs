@@ -8,6 +8,7 @@
 module CodexWatcher.Cli
   ( CliCommand (..)
   , CliDomain (..)
+  , GuardIssuePlanningCli (..)
   , HealthcheckCli (..)
   , IssueFanoutCli (..)
   , LoopCli (..)
@@ -61,6 +62,7 @@ data CliCommand
   | CliIssueFanout IssueFanoutCli
   | CliObserveOnce ObserveOnceCli
   | CliRunLoop LoopCli
+  | CliGuardIssuePlanning GuardIssuePlanningCli
   deriving stock (Eq, Show, Generic)
 
 data HealthcheckCli = HealthcheckCli
@@ -189,6 +191,15 @@ data LoopCli = LoopCli
   }
   deriving stock (Eq, Show, Generic)
 
+data GuardIssuePlanningCli = GuardIssuePlanningCli
+  { guardCliLoop :: LoopCli
+  , guardCliPidFile :: Maybe FilePath
+  , guardCliPollSeconds :: Int
+  , guardCliStaleSeconds :: Int
+  , guardCliRepairCwd :: Maybe FilePath
+  }
+  deriving stock (Eq, Show, Generic)
+
 execCliCommandParser :: IO CliCommand
 execCliCommandParser =
   customExecParser parserPrefs cliCommandParserInfo
@@ -231,6 +242,7 @@ cliCommandParser =
         <> command "run-pr-review" (info (CliRunLoop <$> loopParser CliPrReview) (progDesc "Run one or more PR review watcher loop iterations"))
         <> command "run-issue-implement" (info (CliRunLoop <$> loopParser CliIssueImplement) (progDesc "Run one or more issue implementation watcher loop iterations"))
         <> command "run-issue-planning" (info (CliRunLoop <$> loopParser CliIssuePlanning) (progDesc "Run one or more issue planning watcher loop iterations"))
+        <> command "guard-issue-planning" (info (CliGuardIssuePlanning <$> guardIssuePlanningParser) (progDesc "Guard an issue planning watcher and launch a repair thread on failure"))
     )
 
 healthcheckParser :: Parser HealthcheckCli
@@ -370,6 +382,15 @@ loopParser domain =
     <*> textOptionDefault "thread-prefix" "issue-worker-" "PREFIX" "Issue implementer thread prefix"
     <*> switch (long "start-children" <> help "Print or start child watcher loop commands after planning fanout")
     <*> optional (intOption "child-poll-seconds" "SECONDS" "Child polling interval override")
+
+guardIssuePlanningParser :: Parser GuardIssuePlanningCli
+guardIssuePlanningParser =
+  GuardIssuePlanningCli
+    <$> loopParser CliIssuePlanning
+    <*> optional (strOption (long "guard-pid-file" <> metavar "PATH" <> help "Runner guard pid file"))
+    <*> intOptionDefault "guard-poll-seconds" 60 "SECONDS" "Runner guard polling interval"
+    <*> intOptionDefault "stale-seconds" 1800 "SECONDS" "Maximum event-log idle time before guard triggers repair"
+    <*> optional (strOption (long "repair-cwd" <> metavar "PATH" <> help "Repository cwd for the repair thread"))
 
 requiredEndpointParser :: Parser AppServerEndpoint
 requiredEndpointParser =

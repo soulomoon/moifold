@@ -26,6 +26,7 @@ import CodexWatcher.MigrationRehearsal
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
 import CodexWatcher.Runtime
+import CodexWatcher.RunnerGuard
 import CodexWatcher.Snapshot
 import CodexWatcher.Supervisor
 import CodexWatcher.Types
@@ -33,12 +34,13 @@ import CodexWatcher.TurnOutput
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
 import Control.Monad (unless, when)
-import Data.Aeson (Value (..))
+import Data.Aeson (Value (..), encode)
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub, sortOn)
 import Data.Maybe (catMaybes)
 import Data.Text qualified as Text
-import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
+import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, removeFile)
 import System.Environment (getExecutablePath)
 import System.Exit (die, exitFailure)
 import System.FilePath (takeDirectory, takeFileName, (</>))
@@ -65,6 +67,7 @@ runCliCommand = \case
   CliIssueFanout options -> issueFanout options
   CliObserveOnce options -> observeOnce options
   CliRunLoop options -> runAutomaticLoop options
+  CliGuardIssuePlanning options -> runIssuePlanningRunnerGuard options
 
 healthcheckOptionsFromCli :: HealthcheckCli -> HealthcheckOptions
 healthcheckOptionsFromCli options =
@@ -634,6 +637,117 @@ runAutomaticLoop cli = do
   validateLoopDomain cli.loopCliDomain cli.loopCliPlannerThread
   validateRuntimeOwnerForExecution cli.loopCliStateDir executionMode
   runWithOptionalPidFile maybePidFile (runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations 1)
+
+runIssuePlanningRunnerGuard :: GuardIssuePlanningCli -> IO ()
+runIssuePlanningRunnerGuard cli = do
+  executable <- getExecutablePath
+  defaultRepairCwd <- getCurrentDirectory
+  let loopCli = cli.guardCliLoop
+      guardPidFile = maybe (loopCli.loopCliStateDir </> "runner-guard.pid") id cli.guardCliPidFile
+      watcherPidFile = maybe (loopCli.loopCliStateDir </> pidFileNameForDomain CliIssuePlanning) id loopCli.loopCliPidFile
+      repairCwd = maybe defaultRepairCwd id cli.guardCliRepairCwd
+      guardConfig =
+        RunnerGuardConfig
+          { guardRepo = loopCli.loopCliRepo
+          , guardEventsPath = loopCli.loopCliEventsPath
+          , guardStateDir = loopCli.loopCliStateDir
+          , guardWatcherPidFile = watcherPidFile
+          , guardAppServerEndpoint = loopCli.loopCliEndpoint
+          , guardStaleSeconds = cli.guardCliStaleSeconds
+          , guardRepairCwd = repairCwd
+          , guardRestartWatcherCommand = issuePlanningWatcherStartCommand executable watcherPidFile loopCli
+          , guardRestartGuardCommand = issuePlanningGuardStartCommand executable guardPidFile cli
+          }
+  runWithOptionalPidFile (Just guardPidFile) (runnerGuardLoop guardConfig cli.guardCliPollSeconds)
+
+runnerGuardLoop :: RunnerGuardConfig -> Int -> IO ()
+runnerGuardLoop config pollSeconds = do
+  checkRunnerGuard config >>= \case
+    Nothing -> do
+      threadDelay (pollSeconds * 1000000)
+      runnerGuardLoop config pollSeconds
+    Just guardProblem -> do
+      createDirectoryIfMissing True config.guardStateDir
+      LazyByteString.writeFile (config.guardStateDir </> "runner-guard-problem.json") (encode guardProblem)
+      repair <- startRunnerGuardRepairThread config guardProblem
+      LazyByteString.writeFile (config.guardStateDir </> "runner-guard-repair.json") (encode repair)
+      putStrLn ("runner guard launched repair thread " <> Text.unpack (unThreadId repair.runnerGuardRepairThreadId) <> " turn " <> Text.unpack (unTurnId repair.runnerGuardRepairTurnId))
+
+issuePlanningWatcherStartCommand :: FilePath -> FilePath -> LoopCli -> Text.Text
+issuePlanningWatcherStartCommand executable watcherPidFile cli =
+  "setsid -f "
+    <> shellWords (Text.pack executable : "run-issue-planning" : loopCliCommandArgs watcherPidFile cli)
+    <> " >> "
+    <> shellQuoteText (Text.pack (cli.loopCliStateDir </> "watcher.log"))
+    <> " 2>> "
+    <> shellQuoteText (Text.pack (cli.loopCliStateDir </> "watcher.err.log"))
+
+issuePlanningGuardStartCommand :: FilePath -> FilePath -> GuardIssuePlanningCli -> Text.Text
+issuePlanningGuardStartCommand executable guardPidFile cli =
+  "setsid -f "
+    <> shellWords (Text.pack executable : "guard-issue-planning" : guardCliCommandArgs guardPidFile cli)
+    <> " >> "
+    <> shellQuoteText (Text.pack (cli.guardCliLoop.loopCliStateDir </> "runner-guard.log"))
+    <> " 2>> "
+    <> shellQuoteText (Text.pack (cli.guardCliLoop.loopCliStateDir </> "runner-guard.err.log"))
+
+guardCliCommandArgs :: FilePath -> GuardIssuePlanningCli -> [Text.Text]
+guardCliCommandArgs guardPidFile cli =
+  loopCliCommandArgs watcherPidFile cli.guardCliLoop
+    <> ["--guard-pid-file", Text.pack guardPidFile, "--guard-poll-seconds", Text.pack (show cli.guardCliPollSeconds), "--stale-seconds", Text.pack (show cli.guardCliStaleSeconds)]
+    <> maybe [] (\repairCwd -> ["--repair-cwd", Text.pack repairCwd]) cli.guardCliRepairCwd
+ where
+  watcherPidFile = maybe (cli.guardCliLoop.loopCliStateDir </> pidFileNameForDomain CliIssuePlanning) id cli.guardCliLoop.loopCliPidFile
+
+loopCliCommandArgs :: FilePath -> LoopCli -> [Text.Text]
+loopCliCommandArgs watcherPidFile cli =
+  [ "--events"
+  , Text.pack cli.loopCliEventsPath
+  , "--state-dir"
+  , Text.pack cli.loopCliStateDir
+  , "--repo"
+  , unRepoName cli.loopCliRepo
+  , "--workdir"
+  , Text.pack cli.loopCliWorkdir
+  , "--app-server-host"
+  , Text.pack cli.loopCliEndpoint.appServerHost
+  , "--app-server-port"
+  , Text.pack (show cli.loopCliEndpoint.appServerPort)
+  , "--app-server-path"
+  , Text.pack cli.loopCliEndpoint.appServerPath
+  , "--poll-seconds"
+  , Text.pack (show cli.loopCliPollSeconds)
+  , "--pid-file"
+  , Text.pack watcherPidFile
+  ]
+    <> boolSwitch cli.loopCliExecute "--execute"
+    <> boolSwitch cli.loopCliLoop "--loop"
+    <> maybe [] (\iterations -> ["--iterations", Text.pack (show iterations)]) cli.loopCliIterations
+    <> maybe [] (\threadId -> ["--thread-id", unThreadId threadId]) cli.loopCliPlannerThread
+    <> maybe [] (\root -> ["--implementers-root", Text.pack root]) cli.loopCliImplementersRoot
+    <> maybe [] (\issues -> ["--open-issues", issueNumbersText issues]) cli.loopCliOpenIssues
+    <> maybe [] (\issues -> ["--active-issues", issueNumbersText issues]) cli.loopCliActiveIssues
+    <> maybe [] (\root -> ["--implementer-workdir-root", Text.pack root]) cli.loopCliImplementerWorkdirRoot
+    <> maybe [] (\root -> ["--workdir-root", Text.pack root]) cli.loopCliWorkdirRoot
+    <> ["--branch-prefix", cli.loopCliBranchPrefix, "--thread-prefix", cli.loopCliThreadPrefix]
+    <> boolSwitch cli.loopCliStartChildren "--start-children"
+    <> maybe [] (\seconds -> ["--child-poll-seconds", Text.pack (show seconds)]) cli.loopCliChildPollSeconds
+
+issueNumbersText :: [IssueNumber] -> Text.Text
+issueNumbersText =
+  Text.intercalate "," . fmap (Text.pack . show . unIssueNumber)
+
+boolSwitch :: Bool -> Text.Text -> [Text.Text]
+boolSwitch enabled switchText =
+  [switchText | enabled]
+
+shellWords :: [Text.Text] -> Text.Text
+shellWords =
+  Text.unwords . fmap shellQuoteText
+
+shellQuoteText :: Text.Text -> Text.Text
+shellQuoteText text =
+  "'" <> Text.replace "'" "'\"'\"'" text <> "'"
 
 runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO ()) -> Bool -> Int -> Int -> IO ()
 runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
