@@ -9,6 +9,8 @@
 
 module CodexWatcher.Healthcheck
   ( HealthcheckOptions (..)
+  , warnIssueImplementDirtyWorkdir
+  , warnPrReviewDirtyWorkdir
   , runHealthcheck
   ) where
 
@@ -648,7 +650,7 @@ analyzeImplement summary
   | otherwise =
       [problem "error" summary.label "missing worker threadId" (Just "create a Codex worker thread or rehearse legacy state before run-issue-implement --execute") | summary.threadId == Nothing]
         <> workdirProblems summary
-        <> [problem "warn" summary.label "workdir has uncommitted changes" Nothing | summary.workdir.dirty]
+        <> [problem "warn" summary.label "workdir has uncommitted changes while daemon is stopped" Nothing | warnIssueImplementDirtyWorkdir summary.workdir.dirty summary.pid.running]
         <> [problem "warn" summary.label ("git push dry-run failed: " <> commandText summary.gitPushDryRun) Nothing | shouldWarnGitPush summary.gitPushDryRun]
         <> [problem "warn" summary.label ("issue status is " <> status <> " but daemon is not running") Nothing | Just status <- [summary.issueStatus], status `elem` activeIssueStatuses, not summary.pid.running]
         <> appServerThreadProblems summary.label "worker" summary.workerThreadInspection
@@ -660,7 +662,7 @@ analyzePrReview summary
       [problem "error" summary.label "missing PR worker threadId" (Just "create a Codex worker thread or rehearse legacy state before run-pr-review --execute") | summary.threadId == Nothing]
         <> [problem "error" summary.label "reviewWhenClean is enabled but reviewerThreadId is missing" Nothing | summary.reviewWhenClean /= Just False && summary.reviewerThreadId == Nothing]
         <> workdirProblems summary
-        <> [problem "warn" summary.label "workdir has uncommitted changes" Nothing | summary.workdir.dirty]
+        <> [problem "warn" summary.label "workdir has uncommitted changes while daemon is stopped" Nothing | warnPrReviewDirtyWorkdir summary.workdir.dirty summary.pid.running summary.remotePr.merged]
         <> [problem "warn" summary.label "local HEAD differs from remote branch head" Nothing | summary.workdir.localDiffersFromRemote]
         <> [problem "warn" summary.label ("git push dry-run failed: " <> commandText summary.gitPushDryRun) Nothing | shouldWarnGitPush summary.gitPushDryRun]
         <> [problem "warn" summary.label ("cannot read remote PR state: " <> fromMaybe "unknown" summary.remotePr.errorMessage) Nothing | not summary.remotePr.skipped && not summary.remotePr.ok]
@@ -710,8 +712,28 @@ duplicateRunningPrWatcherProblems summaries =
 duplicateWorkdirProblems :: [WatcherSummary] -> [Problem]
 duplicateWorkdirProblems summaries =
   [ problem "warn" workdir' ("workdir is shared by multiple configs: " <> Text.intercalate ", " labels) Nothing
-  | (workdir', labels) <- duplicateLabelsBy (fmap Text.pack . workdirPath) summaries
+  | (workdir', labels) <- duplicateLabelsBy liveWorkdirKey summaries
   ]
+
+liveWorkdirKey :: WatcherSummary -> Maybe Text
+liveWorkdirKey summary
+  | isTerminalWorkdirOwner summary = Nothing
+  | otherwise = Text.pack <$> summary.workdirPath
+
+isTerminalWorkdirOwner :: WatcherSummary -> Bool
+isTerminalWorkdirOwner summary =
+  case summary.kind of
+    IssuePlanningKind -> summary.eventReplay.phase == Just "Complete"
+    IssueImplementKind -> maybe False (`elem` terminalIssueStatuses) summary.issueStatus
+    PrReviewKind -> summary.remotePr.merged
+
+warnIssueImplementDirtyWorkdir :: Bool -> Bool -> Bool
+warnIssueImplementDirtyWorkdir dirty daemonRunning =
+  dirty && not daemonRunning
+
+warnPrReviewDirtyWorkdir :: Bool -> Bool -> Bool -> Bool
+warnPrReviewDirtyWorkdir dirty daemonRunning prMerged =
+  dirty && not daemonRunning && not prMerged
 
 maxParallelProblems :: [WatcherSummary] -> [Problem]
 maxParallelProblems summaries =
@@ -743,6 +765,9 @@ isActiveImplementer summary =
 
 activeIssueStatuses :: [Text]
 activeIssueStatuses = ["needs_implementation", "plan_ready", "in_progress", "incomplete"]
+
+terminalIssueStatuses :: [Text]
+terminalIssueStatuses = ["already_resolved", "complete"]
 
 blockedSeverity :: WatcherSummary -> Text
 blockedSeverity summary
@@ -795,7 +820,7 @@ logicReview =
         .= [ "one active implementer per issue" :: Text
            , "one running review watcher per PR"
            , "planner maxParallel not exceeded"
-           , "review/implement workdirs exist, are git checkouts, and are not dirty"
+           , "review/implement workdirs exist, are git checkouts, and are not unexpectedly dirty while stopped"
            , "gh-authenticated git push dry-run works for workdirs with branches"
            , "watcher events.jsonl can replay through the Haskell lifecycle model when present"
            , "configured app-server threads can be read when an app-server endpoint is provided"

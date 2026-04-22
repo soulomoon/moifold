@@ -19,6 +19,7 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit
+import CodexWatcher.Healthcheck
 import CodexWatcher.GoldenReplay
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
@@ -1596,6 +1597,15 @@ prop_migrationRuntimeOwnerJsonAndParsing =
     && parseRuntimeOwner "unknown" /= Right NodeRuntime
     && runtimeOwnerJson HaskellRuntime == object ["owner" .= ("haskell" :: Text)]
 
+prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork :: Bool
+prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork =
+  warnIssueImplementDirtyWorkdir True False
+    && not (warnIssueImplementDirtyWorkdir True True)
+    && not (warnIssueImplementDirtyWorkdir False False)
+    && warnPrReviewDirtyWorkdir True False False
+    && not (warnPrReviewDirtyWorkdir True True False)
+    && not (warnPrReviewDirtyWorkdir True False True)
+
 prop_cliParsesHealthcheckAndRunLoop :: Bool
 prop_cliParsesHealthcheckAndRunLoop =
   parseCliCommand ["healthcheck", "--state-root", "/tmp/state", "--repo", "owner/name"]
@@ -2645,6 +2655,7 @@ main = do
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
       , quickCheckResult prop_migrationRuntimeOwnerJsonAndParsing
+      , quickCheckResult prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
       , quickCheckResult prop_cliParsesHealthcheckAndRunLoop
       , quickCheckResult prop_cliRejectsBadDomain
       , quickCheckResult prop_migrationRehearsalPlanSkipsRuntimeFiles
