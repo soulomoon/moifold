@@ -15,6 +15,7 @@ module CodexWatcher.Cli
   , RehearsalCli (..)
   , RenderServiceCli (..)
   , StopDaemonCli (..)
+  , ValidateMigrationCli (..)
   , cliCommandParserInfo
   , cliDomainName
   , cliDomainToDomain
@@ -56,6 +57,7 @@ data CliCommand
   | CliStopDaemon StopDaemonCli
   | CliRenderService RenderServiceCli
   | CliRehearseMigration RehearsalCli
+  | CliValidateMigration ValidateMigrationCli
   | CliIssueFanout IssueFanoutCli
   | CliObserveOnce ObserveOnceCli
   | CliRunLoop LoopCli
@@ -113,6 +115,14 @@ data RehearsalCli = RehearsalCli
   , rehearsalCliImplementersRoot :: Maybe FilePath
   , rehearsalCliStartChildren :: Bool
   , rehearsalCliExecute :: Bool
+  }
+  deriving stock (Eq, Show, Generic)
+
+data ValidateMigrationCli = ValidateMigrationCli
+  { validateMigrationCliSourceStateDir :: FilePath
+  , validateMigrationCliTargetStateDir :: FilePath
+  , validateMigrationCliDomain :: CliDomain
+  , validateMigrationCliEventsPath :: Maybe FilePath
   }
   deriving stock (Eq, Show, Generic)
 
@@ -215,6 +225,7 @@ cliCommandParser =
         <> command "stop-daemon" (info (CliStopDaemon <$> stopDaemonParser) (progDesc "Send TERM to a Haskell watcher daemon"))
         <> command "render-service" (info (CliRenderService <$> renderServiceParser) (progDesc "Render a systemd unit and logrotate config"))
         <> command "rehearse-migration" (info (CliRehearseMigration <$> rehearsalParser) (progDesc "Prepare and render a side-by-side Haskell migration rehearsal"))
+        <> command "validate-migration" (info (CliValidateMigration <$> validateMigrationParser) (progDesc "Validate copied watcher state before migration cutover"))
         <> command "issue-fanout" (info (CliIssueFanout <$> issueFanoutParser) (progDesc "Plan or create issue implementer child watcher state"))
         <> command "observe-once" (info (CliObserveOnce <$> observeOnceParser) (progDesc "Apply one explicit typed watcher observation"))
         <> command "run-pr-review" (info (CliRunLoop <$> loopParser CliPrReview) (progDesc "Run one or more PR review watcher loop iterations"))
@@ -288,6 +299,14 @@ rehearsalParser =
     <*> optional (strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root"))
     <*> switch (long "start-children" <> help "Start issue implementer children after planning fanout")
     <*> switch (long "execute" <> help "Copy source watcher state and mark the copy Haskell-owned")
+
+validateMigrationParser :: Parser ValidateMigrationCli
+validateMigrationParser =
+  ValidateMigrationCli
+    <$> strOption (long "source-state-dir" <> metavar "PATH" <> help "Original watcher state directory")
+    <*> strOption (long "target-state-dir" <> metavar "PATH" <> help "Copied Haskell rehearsal state directory")
+    <*> domainOption
+    <*> optional eventsPathOption
 
 issueFanoutParser :: Parser IssueFanoutCli
 issueFanoutParser =

@@ -39,7 +39,7 @@ import Data.Maybe (catMaybes)
 import Data.Text qualified as Text
 import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
 import System.Environment (getExecutablePath)
-import System.Exit (die)
+import System.Exit (die, exitFailure)
 import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (IOMode (AppendMode), hFlush, withFile)
 import System.Posix.Process (getProcessID)
@@ -60,6 +60,7 @@ runCliCommand = \case
   CliStopDaemon options -> stopDaemon options
   CliRenderService options -> renderService options
   CliRehearseMigration options -> rehearseMigration options
+  CliValidateMigration options -> validateMigration options
   CliIssueFanout options -> issueFanout options
   CliObserveOnce options -> observeOnce options
   CliRunLoop options -> runAutomaticLoop options
@@ -268,6 +269,73 @@ replayRehearsalEvents eventsPath = do
       putStrLn ("event replay domain: " <> show (someDomain replay.replayState))
       putStrLn ("event replay phase: " <> show (somePhase replay.replayState))
       putStrLn ("event replay events: " <> show (length events))
+
+validateMigration :: ValidateMigrationCli -> IO ()
+validateMigration options = do
+  sourceOwner <- loadOwnerForReadiness "source" options.validateMigrationCliSourceStateDir
+  targetOwner <- loadOwnerForReadiness "target" options.validateMigrationCliTargetStateDir
+  (replayProblem, replayDomain) <- loadReplayForReadiness eventsPath
+  targetPidExists <- doesFileExist (options.validateMigrationCliTargetStateDir </> pidFileNameForDomain options.validateMigrationCliDomain)
+  let ownerProblems = sourceOwner.ownerProblem <> targetOwner.ownerProblem
+      report =
+        migrationReadinessReport
+          options.validateMigrationCliTargetStateDir
+          (cliDomainName options.validateMigrationCliDomain)
+          MigrationReadinessInput
+            { readinessSourceOwner = sourceOwner.ownerValue
+            , readinessTargetOwner = targetOwner.ownerValue
+            , readinessOwnerProblems = ownerProblems
+            , readinessReplayDomain = replayDomain
+            , readinessExpectedDomain = cliDomainToDomain options.validateMigrationCliDomain
+            , readinessReplayProblem = replayProblem
+            , readinessTargetPidExists = targetPidExists
+            }
+  printMigrationReadinessReport report
+  unless report.migrationReady exitFailure
+ where
+  eventsPath =
+    maybe (options.validateMigrationCliTargetStateDir </> "events.jsonl") id options.validateMigrationCliEventsPath
+
+data OwnerReadiness = OwnerReadiness
+  { ownerValue :: Maybe RuntimeOwner
+  , ownerProblem :: [Text.Text]
+  }
+
+loadOwnerForReadiness :: Text.Text -> FilePath -> IO OwnerReadiness
+loadOwnerForReadiness label stateDir = do
+  ownerResult <- readRuntimeOwner stateDir
+  pure case ownerResult of
+    Right owner ->
+      OwnerReadiness owner []
+    Left problem ->
+      OwnerReadiness Nothing [label <> " runtime-owner.json is invalid: " <> problem]
+
+loadReplayForReadiness :: FilePath -> IO (Maybe Text.Text, Maybe Domain)
+loadReplayForReadiness eventsPath = do
+  exists <- doesFileExist eventsPath
+  if not exists
+    then pure (Just ("missing " <> Text.pack eventsPath), Nothing)
+    else do
+      loaded <- loadEventLogFile eventsPath
+      case loaded of
+        Left problem ->
+          pure (Just (Text.pack problem), Nothing)
+        Right events ->
+          case replayEventLog events of
+            Left failure ->
+              pure (Just (Text.pack (formatReplayFailure failure)), Nothing)
+            Right replay ->
+              pure (Nothing, Just (someDomain replay.replayState))
+
+printMigrationReadinessReport :: MigrationReadinessReport -> IO ()
+printMigrationReadinessReport report = do
+  putStrLn ("ready: " <> if report.migrationReady then "true" else "false")
+  putStrLn "problems:"
+  if null report.migrationProblems
+    then putStrLn "- none"
+    else mapM_ (putStrLn . ("- " <>) . Text.unpack) report.migrationProblems
+  putStrLn "backout:"
+  mapM_ (putStrLn . Text.unpack) report.migrationBackout
 
 issueFanout :: IssueFanoutCli -> IO ()
 issueFanout options = do

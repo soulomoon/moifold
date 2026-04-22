@@ -1264,6 +1264,24 @@ prop_cliParsesHealthcheckAndRunLoop =
               , loopCliChildPollSeconds = Nothing
               }
         )
+    && parseCliCommand
+      [ "validate-migration"
+      , "--source-state-dir"
+      , "/tmp/source"
+      , "--target-state-dir"
+      , "/tmp/target"
+      , "--domain"
+      , "pr-review"
+      ]
+      == Right
+        ( CliValidateMigration
+            ValidateMigrationCli
+              { validateMigrationCliSourceStateDir = "/tmp/source"
+              , validateMigrationCliTargetStateDir = "/tmp/target"
+              , validateMigrationCliDomain = CliPrReview
+              , validateMigrationCliEventsPath = Nothing
+              }
+        )
 
 prop_cliRejectsBadDomain :: Bool
 prop_cliRejectsBadDomain =
@@ -1282,6 +1300,54 @@ prop_migrationRehearsalPlanSkipsRuntimeFiles =
       == [ "codex-watcher-hs stop-daemon --state-dir \"/tmp/rehearsal/source-state\" --domain pr-review"
          , "codex-watcher-hs mark-runtime-owner --state-dir \"/tmp/rehearsal/source-state\" --owner node"
          ]
+
+prop_migrationReadinessRequiresHaskellTarget :: Bool
+prop_migrationReadinessRequiresHaskellTarget =
+  let ready =
+        migrationReadinessReport
+          "/tmp/target"
+          "issue-planning"
+          MigrationReadinessInput
+            { readinessSourceOwner = Just NodeRuntime
+            , readinessTargetOwner = Just HaskellRuntime
+            , readinessOwnerProblems = []
+            , readinessReplayDomain = Just IssuePlanning
+            , readinessExpectedDomain = IssuePlanning
+            , readinessReplayProblem = Nothing
+            , readinessTargetPidExists = False
+            }
+      badTarget =
+        migrationReadinessReport
+          "/tmp/target"
+          "issue-planning"
+          MigrationReadinessInput
+            { readinessSourceOwner = Just NodeRuntime
+            , readinessTargetOwner = Just NodeRuntime
+            , readinessOwnerProblems = []
+            , readinessReplayDomain = Just IssuePlanning
+            , readinessExpectedDomain = IssuePlanning
+            , readinessReplayProblem = Nothing
+            , readinessTargetPidExists = False
+            }
+      wrongDomain =
+        migrationReadinessReport
+          "/tmp/target"
+          "issue-planning"
+          MigrationReadinessInput
+            { readinessSourceOwner = Just NodeRuntime
+            , readinessTargetOwner = Just HaskellRuntime
+            , readinessOwnerProblems = []
+            , readinessReplayDomain = Just PrReview
+            , readinessExpectedDomain = IssuePlanning
+            , readinessReplayProblem = Nothing
+            , readinessTargetPidExists = False
+            }
+   in migrationReady ready
+        && migrationBackout ready == renderBackoutCommands "/tmp/target" "issue-planning"
+        && not (migrationReady badTarget)
+        && "target runtime-owner.json must be haskell, got node" `elem` migrationProblems badTarget
+        && not (migrationReady wrongDomain)
+        && any ("does not match expected" `Text.isInfixOf`) (migrationProblems wrongDomain)
 
 prop_supervisorRendersRestartAndLogrotate :: Bool
 prop_supervisorRendersRestartAndLogrotate =
@@ -1860,6 +1926,7 @@ main = do
       , quickCheckResult prop_cliParsesHealthcheckAndRunLoop
       , quickCheckResult prop_cliRejectsBadDomain
       , quickCheckResult prop_migrationRehearsalPlanSkipsRuntimeFiles
+      , quickCheckResult prop_migrationReadinessRequiresHaskellTarget
       , quickCheckResult prop_supervisorRendersRestartAndLogrotate
       ]
   goldenOk <- goldenReplayCases

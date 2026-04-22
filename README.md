@@ -91,6 +91,8 @@ Use `render-service` with the same watcher loop flags to print a systemd unit an
 
 Use `rehearse-migration` to prepare a side-by-side Haskell watcher rehearsal without touching the Node-owned source state. By default it renders the target path, event replay result, service definition, logrotate snippet, and rollback commands. Add `--execute` to copy the source watcher directory into `--target-state-dir` or `--rehearsal-root`, skip runtime files such as pid/log/owner markers, and mark the copy as Haskell-owned.
 
+Before cutover, run `validate-migration --source-state-dir <source> --target-state-dir <copy> --domain pr-review|issue-implement|issue-planning`. It is read-only and fails if the copied target is not Haskell-owned, has a live pid file, cannot replay its event log, or replays to a different watcher domain. It prints the same rollback commands as the rehearsal output.
+
 Prepare issue implementer child state from a planner selection:
 
 ```bash
