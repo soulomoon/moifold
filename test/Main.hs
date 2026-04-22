@@ -1037,6 +1037,7 @@ prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
         && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
         && lookupValue "collaborationMode" request.requestParams == Just collaborationMode
         && lookupValue "summary" request.requestParams == Just Null
+        && lookupValue "input" request.requestParams == Just (toJSON [object ["type" .= ("text" :: Text), "text" .= ("write the plan" :: Text)]])
         && lookupValue "outputSchema" request.requestParams == Just structuredTurnOutputSchema
 
 prop_appServerThreadReadAndInterruptUseThreadIds :: ThreadId -> TurnId -> Bool

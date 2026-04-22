@@ -134,7 +134,7 @@ turnStartRequest requestId options =
               , "serviceTier" .= Null
               , "summary" .= Null
               , "outputSchema" .= maybe Null id options.turnOutputSchema
-              , "input" .= options.turnInput
+              , "input" .= [object ["type" .= ("text" :: Text), "text" .= options.turnInput]]
               ]
             fields =
               case options.turnCollaborationMode of
