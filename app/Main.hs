@@ -7,6 +7,8 @@ module Main (main) where
 import CodexWatcher.EventLog
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Healthcheck
+import CodexWatcher.Migration
+import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
 import Data.Text qualified as Text
@@ -21,6 +23,7 @@ main =
     ["replay-issue-implement", dir] -> replayIssueImplement dir
     ["replay-events", path] -> replayEvents path
     "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
+    "mark-runtime-owner" : rest -> markRuntimeOwner rest
     [] -> do
       putStrLn "codex-watcher-hs"
       putStrLn "usage: codex-watcher-hs replay <node-watcher-state-dir>"
@@ -28,10 +31,11 @@ main =
       putStrLn "       codex-watcher-hs replay-issue-implement <node-issue-implement-state-dir>"
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name]"
+      putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
       putStrLn "type-level domains:"
       print [IssuePlanning, IssueImplement, PrReview]
       putStrLn ("example repo newtype is available: " <> Text.unpack (unRepoName (RepoName "soulomoon/mlf2")))
-    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl> | healthcheck [--state-root <path>] [--repo owner/name]"
+    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl> | healthcheck [--state-root <path>] [--repo owner/name] | mark-runtime-owner --state-dir <path> --owner node|haskell"
 
 parseHealthcheckOptions :: [String] -> HealthcheckOptions
 parseHealthcheckOptions args =
@@ -46,6 +50,14 @@ lookupFlag flag (current : value : rest)
   | current == flag = Just value
   | otherwise = lookupFlag flag (value : rest)
 lookupFlag _ [_] = Nothing
+
+markRuntimeOwner :: [String] -> IO ()
+markRuntimeOwner args = do
+  stateDir <- maybe (die "mark-runtime-owner requires --state-dir <path>") pure (lookupFlag "--state-dir" args)
+  ownerText <- maybe (die "mark-runtime-owner requires --owner node|haskell") (pure . Text.pack) (lookupFlag "--owner" args)
+  owner <- either (die . Text.unpack) pure (parseRuntimeOwner ownerText)
+  writeRuntimeOwner ioRuntimeInterpreter stateDir owner
+  putStrLn ("wrote runtime owner " <> Text.unpack (runtimeOwnerText owner) <> " to " <> stateDir)
 
 replayAny :: FilePath -> IO ()
 replayAny dir = do

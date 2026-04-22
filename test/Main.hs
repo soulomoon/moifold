@@ -10,11 +10,18 @@ module Main (main) where
 
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
+import CodexWatcher.AppServerClient
+import CodexWatcher.Daemon
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
+import CodexWatcher.GhGit
 import CodexWatcher.GoldenReplay
+import CodexWatcher.IssueImplementWatcher
+import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Migration
 import CodexWatcher.Protocol
+import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
@@ -32,8 +39,10 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.IORef
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import System.FilePath ((</>))
 import System.Exit (exitFailure)
 import Test.QuickCheck
@@ -97,6 +106,11 @@ effectIsMerge = \case
 effectIsStartWorker :: SomeEffect -> Bool
 effectIsStartWorker = \case
   SomeEffect StartWorkerTurn {} -> True
+  _ -> False
+
+effectIsStartPlanner :: SomeEffect -> Bool
+effectIsStartPlanner = \case
+  SomeEffect StartPlannerTurn {} -> True
   _ -> False
 
 effectIsStartReviewer :: SomeEffect -> Bool
@@ -320,6 +334,49 @@ prop_eventLogIssueIncompleteCanContinueToComplete config workerThread triageTurn
             && somePhase replay.replayState == Complete
         Left _ -> False
 
+prop_issueImplementWatcherTriageNeedsImplementation :: IssueConfig -> ThreadId -> TurnId -> Bool
+prop_issueImplementWatcherTriageNeedsImplementation config workerThread triageTurn =
+  let state = SomeWatcherState (IssueTriageActive config (WorkerActive (ActiveTurn workerThread triageTurn)))
+   in case issueImplementObserve state ObservedTriageNeedsImplementation of
+        Right tick ->
+          issueImplementTickEvent tick == IssueTriageNeedsImplementationEvent
+            && somePhase tick.issueImplementTickState == PlanMode
+            && not (any effectIsCreatePr tick.issueImplementTickEffects)
+        Left _ -> False
+
+prop_issueImplementWatcherPlanCompletionPublishesBeforeImplementation :: IssueConfig -> ThreadId -> TurnId -> TurnId -> Bool
+prop_issueImplementWatcherPlanCompletionPublishesBeforeImplementation config workerThread planTurn implementationTurn =
+  let state = SomeWatcherState (IssueInPlanMode config (WorkerActive (ActiveTurn workerThread planTurn)))
+   in case issueImplementObserve state (ObservedPlanCompleted (Just implementationTurn)) of
+        Right tick ->
+          issueImplementTickEvent tick == IssuePlanCompletedEvent (Just implementationTurn)
+            && somePhase tick.issueImplementTickState == Implementing
+            && any effectIsPush tick.issueImplementTickEffects
+            && any effectIsCreatePr tick.issueImplementTickEffects
+            && any effectIsStartWorker tick.issueImplementTickEffects
+        Left _ -> False
+
+prop_issueImplementWatcherIncompleteRestartsImplementation :: IssueConfig -> PrNumber -> ThreadId -> TurnId -> Bool
+prop_issueImplementWatcherIncompleteRestartsImplementation config prNumber workerThread implementationTurn =
+  let state = SomeWatcherState (IssueImplementing config (Just prNumber) (WorkerActive (ActiveTurn workerThread implementationTurn)))
+   in case issueImplementObserve state (ObservedImplementationIncomplete "incomplete") of
+        Right tick ->
+          issueImplementTickEvent tick == IssueImplementationIncompleteEvent "incomplete"
+            && somePhase tick.issueImplementTickState == Implementing
+            && any effectIsStartWorker tick.issueImplementTickEffects
+        Left _ -> False
+
+prop_issueImplementWatcherBlockedStops :: IssueConfig -> PrNumber -> ThreadId -> TurnId -> BlockedReason -> Bool
+prop_issueImplementWatcherBlockedStops config prNumber workerThread implementationTurn reason =
+  let state = SomeWatcherState (IssueImplementing config (Just prNumber) (WorkerActive (ActiveTurn workerThread implementationTurn)))
+   in case issueImplementObserve state (ObservedImplementationBlocked reason) of
+        Right tick ->
+          issueImplementTickEvent tick == IssueImplementationBlockedEvent reason
+            && somePhase tick.issueImplementTickState == Blocked
+            && any effectIsRecordBlocked tick.issueImplementTickEffects
+            && SomeEffect StopDaemon `elem` tick.issueImplementTickEffects
+        Left _ -> False
+
 prop_eventLogFullIssuePlanningPathReturnsReady :: PlannerConfig -> ThreadId -> TurnId -> Bool
 prop_eventLogFullIssuePlanningPathReturnsReady config plannerThread plannerTurn =
   case replayEventLog
@@ -340,6 +397,28 @@ prop_eventLogCannotCompletePlanningBeforeStart config =
     ] of
     Left _ -> True
     Right _ -> False
+
+prop_issuePlanningWatcherStartsAndCompletesTurn :: PlannerConfig -> ThreadId -> TurnId -> Bool
+prop_issuePlanningWatcherStartsAndCompletesTurn config threadId turnId =
+  let ready = SomeWatcherState (PlanningReady config)
+   in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
+        Right started ->
+          case issuePlanningObserve started.issuePlanningTickState ObservedPlanningTurnCompleted of
+            Right completed ->
+              issuePlanningTickEvent started == IssuePlanningTurnStarted threadId turnId
+                && somePhase started.issuePlanningTickState == PlanMode
+                && any effectIsStartPlanner started.issuePlanningTickEffects
+                && issuePlanningTickEvent completed == IssuePlanningTurnCompleted
+                && somePhase completed.issuePlanningTickState == Initialized
+            Left _ -> False
+        Left _ -> False
+
+prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive :: Bool
+prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive =
+  let config = PlannerConfig (RepoName "owner/name") 3
+      active = [IssueNumber 2]
+      open = [IssueNumber 1, IssueNumber 2, IssueNumber 3, IssueNumber 4]
+   in selectIssueImplementationStarts config active open == [IssueNumber 1, IssueNumber 3]
 
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
@@ -539,6 +618,76 @@ prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread re
             && somePhase replay.replayState == Complete
         Left _ -> False
 
+reviewThreadsReport :: [ReviewThreadId] -> ReviewThreadsReport
+reviewThreadsReport unresolved =
+  ReviewThreadsReport
+    { reviewThreads = unresolvedThreads <> [resolvedThread]
+    , unresolvedReviewThreads = unresolvedThreads
+    }
+ where
+  unresolvedThreads =
+    fmap
+      (\threadId -> ReviewThread threadId False False (Just "src/File.hs") (Just 12) Nothing [])
+      unresolved
+  resolvedThread =
+    ReviewThread (ReviewThreadId "resolved-thread") True False Nothing Nothing Nothing []
+
+prop_prReviewWatcherUnresolvedStartsWorker :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> TurnId -> Bool
+prop_prReviewWatcherUnresolvedStartsWorker config workerThread reviewerThread reviewThreadId commit turnId =
+  let state = SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      observation = ObservedReviewThreads (reviewThreadsReport [reviewThreadId]) commit turnId
+   in case prReviewObserve state observation of
+        Right tick ->
+          prReviewTickEvent tick == PrReviewUnresolvedFound (reviewThreadId :| []) commit turnId
+            && somePhase tick.prReviewTickState == FixingReviews
+            && any effectIsStartWorker tick.prReviewTickEffects
+        Left _ -> False
+
+prop_prReviewWatcherCleanStartsReviewer :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> Bool
+prop_prReviewWatcherCleanStartsReviewer config workerThread reviewerThread commit turnId =
+  let state = SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      observation = ObservedReviewThreads (reviewThreadsReport []) commit turnId
+   in case prReviewObserve state observation of
+        Right tick ->
+          prReviewTickEvent tick == PrReviewNoUnresolvedFound commit turnId
+            && somePhase tick.prReviewTickState == ReviewingClean
+            && any effectIsStartReviewer tick.prReviewTickEffects
+        Left _ -> False
+
+prop_prReviewWatcherWorkerIncompleteReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
+prop_prReviewWatcherWorkerIncompleteReturnsToChecking config workerThread reviewerThread reviewThreadId commit turnId reason =
+  let state =
+        SomeWatcherState
+          ( PrFixingReviews
+              config
+              (ReviewEvidence (reviewThreadId :| []) commit)
+              (WorkerActive (ActiveTurn workerThread turnId))
+              (ReviewerIdle reviewerThread)
+          )
+   in case prReviewObserve state (ObservedWorkerOutcome (WorkerIncomplete (unBlockedReason reason))) of
+        Right tick ->
+          prReviewTickEvent tick == PrReviewFixIncomplete (unBlockedReason reason)
+            && somePhase tick.prReviewTickState == CheckingReviews
+            && not (any effectIsMerge tick.prReviewTickEffects)
+        Left _ -> False
+
+prop_prReviewWatcherCleanReviewerMovesToMerging :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> CleanReviewEvidence -> Bool
+prop_prReviewWatcherCleanReviewerMovesToMerging config workerThread reviewerThread commit turnId evidence =
+  let state =
+        SomeWatcherState
+          ( PrReviewingClean
+              config
+              commit
+              (WorkerIdle workerThread)
+              (ReviewerActive (ActiveTurn reviewerThread turnId))
+          )
+   in case prReviewObserve state (ObservedReviewerOutcome (ReviewerClean evidence)) of
+        Right tick ->
+          prReviewTickEvent tick == PrReviewCleanFound evidence
+            && somePhase tick.prReviewTickState == Merging
+            && any effectIsMerge tick.prReviewTickEffects
+        Left _ -> False
+
 runtimeCommandExamples :: [RuntimeCommand]
 runtimeCommandExamples =
   [ CommandVersion "git"
@@ -605,6 +754,110 @@ prop_runtimeKillZeroOnlyChecksPid threadId =
         && spec.args == ["-0", Text.unpack pidText]
         && spec.cwd == Nothing
 
+jsonText :: Value -> Text
+jsonText =
+  Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode
+
+prop_ghGitParsesIssueAndPrLists :: Bool
+prop_ghGitParsesIssueAndPrLists =
+  let issuesJson =
+        jsonText
+          (toJSON [object ["number" .= (42 :: Int), "title" .= ("Fix bug" :: Text)]])
+      prsJson =
+        jsonText
+          ( toJSON
+              [ object
+                  [ "number" .= (7 :: Int)
+                  , "title" .= ("Implement fix" :: Text)
+                  , "headRefName" .= ("codex/issue-42" :: Text)
+                  , "headRefOid" .= ("abc123" :: Text)
+                  ]
+              ]
+          )
+   in parseGhIssueList issuesJson == Right [GhIssue (IssueNumber 42) "Fix bug"]
+        && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123"))]
+
+prop_ghGitParsesRemotePrView :: Bool
+prop_ghGitParsesRemotePrView =
+  let prJson =
+        jsonText
+          ( object
+              [ "state" .= ("MERGED" :: Text)
+              , "url" .= ("https://github.com/owner/name/pull/7" :: Text)
+              , "headRefOid" .= ("head-sha" :: Text)
+              , "mergeCommit" .= object ["oid" .= ("merge-sha" :: Text)]
+              , "mergedAt" .= ("2026-04-21T00:00:00Z" :: Text)
+              ]
+          )
+   in parseGhPrView prJson
+        == Right
+          RemotePullRequest
+            { remotePullRequestState = "MERGED"
+            , remotePullRequestUrl = Just "https://github.com/owner/name/pull/7"
+            , remotePullRequestHeadRefOid = Just (CommitSha "head-sha")
+            , remotePullRequestMergeCommit = Just (CommitSha "merge-sha")
+            , remotePullRequestMergedAt = Just "2026-04-21T00:00:00Z"
+            }
+
+prop_ghGitParsesReviewThreadsGraphql :: Bool
+prop_ghGitParsesReviewThreadsGraphql =
+  let payload =
+        jsonText
+          ( object
+              [ "data"
+                  .= object
+                    [ "repository"
+                        .= object
+                          [ "pullRequest"
+                              .= object
+                                [ "reviewThreads"
+                                    .= object
+                                      [ "nodes"
+                                          .= [ object
+                                                [ "id" .= ("thread-unresolved" :: Text)
+                                                , "isResolved" .= False
+                                                , "isOutdated" .= False
+                                                , "path" .= ("src/File.hs" :: Text)
+                                                , "line" .= (12 :: Int)
+                                                , "startLine" .= (10 :: Int)
+                                                , "comments"
+                                                    .= object
+                                                      [ "nodes"
+                                                          .= [ object
+                                                                [ "id" .= ("comment-1" :: Text)
+                                                                , "body" .= ("please fix" :: Text)
+                                                                , "author" .= object ["login" .= ("reviewer" :: Text)]
+                                                                ]
+                                                              ]
+                                                         ]
+                                                ]
+                                             , object
+                                                [ "id" .= ("thread-resolved" :: Text)
+                                                , "isResolved" .= True
+                                                , "isOutdated" .= False
+                                                , "comments" .= object ["nodes" .= ([] :: [Value])]
+                                                ]
+                                             ]
+                                      ]
+                                ]
+                          ]
+                    ]
+              ]
+          )
+   in case parseGhReviewThreads payload of
+        Right report ->
+          fmap reviewThreadId report.unresolvedReviewThreads == [ReviewThreadId "thread-unresolved"]
+            && length report.reviewThreads == 2
+            && maybe False ((== Just "reviewer") . reviewCommentAuthorLogin) (listToMaybe report.reviewThreads >>= listToMaybe . reviewThreadComments)
+        Left _ -> False
+
+prop_ghGitParsesGitOutputs :: Bool
+prop_ghGitParsesGitOutputs =
+  parseGitBranch "codex/example\n" == Just (BranchName "codex/example")
+    && parseGitSha "abc123\n" == Just (CommitSha "abc123")
+    && parseLsRemoteBranch "abc123\trefs/heads/codex/example\n" == Just (CommitSha "abc123")
+    && parseGitBranch "\n" == Nothing
+
 prop_appServerInitializeRequestMatchesJsonRpc :: Bool
 prop_appServerInitializeRequestMatchesJsonRpc =
   toJSON (initializeRequest 1 "codex-script" "0.1.0")
@@ -668,6 +921,52 @@ prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
         && interruptRequest.requestMethod == "turn/interrupt"
         && lookupValue "threadId" interruptRequest.requestParams == Just (String (unThreadId threadId))
         && lookupValue "turnId" interruptRequest.requestParams == Just (String (unTurnId turnId))
+
+prop_appServerClientMatchesSuccessResponse :: Bool
+prop_appServerClientMatchesSuccessResponse =
+  let request = initializeRequest 80 "codex-watcher-hs" "0.1.0"
+      result = object ["server" .= ("ready" :: Text)]
+      response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (80 :: Int), "result" .= result]
+   in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
+        Right (Just value) -> value == result
+        _ -> False
+
+prop_appServerClientSkipsNotifications :: Bool
+prop_appServerClientSkipsNotifications =
+  let request = initializeRequest 81 "codex-watcher-hs" "0.1.0"
+      notification = object ["jsonrpc" .= ("2.0" :: Text), "method" .= ("turn/update" :: Text), "params" .= object ["status" .= ("running" :: Text)]]
+   in case decodeAppServerIncomingValue notification >>= matchAppServerIncoming request of
+        Right Nothing -> True
+        _ -> False
+
+prop_appServerClientRejectsMismatchedResponseIds :: Bool
+prop_appServerClientRejectsMismatchedResponseIds =
+  let request = initializeRequest 82 "codex-watcher-hs" "0.1.0"
+      response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (83 :: Int), "result" .= object []]
+   in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
+        Left (AppServerResponseIdMismatch 82 83) -> True
+        _ -> False
+
+prop_appServerClientSurfacesJsonRpcErrors :: Bool
+prop_appServerClientSurfacesJsonRpcErrors =
+  let request = initializeRequest 84 "codex-watcher-hs" "0.1.0"
+      response =
+        object
+          [ "jsonrpc" .= ("2.0" :: Text)
+          , "id" .= (84 :: Int)
+          , "error" .= object ["code" .= (-32000 :: Int), "message" .= ("boom" :: Text)]
+          ]
+   in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
+        Left (AppServerJsonRpcFailure 84 errorValue) ->
+          jsonRpcErrorCode errorValue == -32000 && jsonRpcErrorMessage errorValue == "boom"
+        _ -> False
+
+prop_appServerClientRejectsUnsupportedJsonRpcVersion :: Bool
+prop_appServerClientRejectsUnsupportedJsonRpcVersion =
+  let response = object ["jsonrpc" .= ("1.0" :: Text), "id" .= (85 :: Int), "result" .= object []]
+   in case decodeAppServerIncomingValue response of
+        Left AppServerDecodeFailure {} -> True
+        _ -> False
 
 effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
 effectRuntimeConfig repo workdir requestId =
@@ -762,6 +1061,13 @@ prop_actionExecutorDryRunPreservesActionOrder =
    in fmap actionExecutionAction reports == compiled.compiledActions
         && all ((== DryRunActions) . actionExecutionMode) reports
         && all ((== DryRunActionResult) . actionExecutionResult) reports
+
+prop_migrationRuntimeOwnerJsonAndParsing :: Bool
+prop_migrationRuntimeOwnerJsonAndParsing =
+  parseRuntimeOwner "node" == Right NodeRuntime
+    && parseRuntimeOwner "HASKELL" == Right HaskellRuntime
+    && parseRuntimeOwner "unknown" /= Right NodeRuntime
+    && runtimeOwnerJson HaskellRuntime == object ["owner" .= ("haskell" :: Text)]
 
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
@@ -968,6 +1274,35 @@ actionExecutorExecuteCallsInjectedInterpreters = do
       , turnCollaborationMode = Nothing
       }
 
+daemonTickDryRunReplaysEventsAndDoesNotExecute :: IO Bool
+daemonTickDryRunReplaysEventsAndDoesNotExecute = do
+  (executor, getCalls) <- fakeActionExecutor
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 90
+      events =
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8)
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
+        , IssuePlanningTurnCompleted
+        ]
+      nextEffects =
+        [ SomeEffect (StartPlannerTurn (ThreadId "planner-thread"))
+        , SomeEffect SleepUntilNextPoll
+        ]
+  result <- runDaemonTickWithEvents executor runtimeConfig DryRunActions events nextEffects
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "daemon tick replays event log" (someDomain tick.daemonReplayResult.replayState == IssuePlanning && somePhase tick.daemonReplayResult.replayState == Initialized)
+          , assert "daemon tick compiles supplied effects only" (length tick.daemonCompiledEffects.compiledActions == 2)
+          , assert "daemon dry-run does not execute actions" (null calls)
+          , assert "daemon dry-run reports actions" (length tick.daemonActionReports == 2 && all ((== DryRunActions) . actionExecutionMode) tick.daemonActionReports)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL daemon tick: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+
 main :: IO ()
 main = do
   results <-
@@ -993,8 +1328,14 @@ main = do
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
       , quickCheckResult prop_eventLogIssueAlreadyFixedCompletes
       , quickCheckResult prop_eventLogIssueIncompleteCanContinueToComplete
+      , quickCheckResult prop_issueImplementWatcherTriageNeedsImplementation
+      , quickCheckResult prop_issueImplementWatcherPlanCompletionPublishesBeforeImplementation
+      , quickCheckResult prop_issueImplementWatcherIncompleteRestartsImplementation
+      , quickCheckResult prop_issueImplementWatcherBlockedStops
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
+      , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
+      , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
@@ -1009,23 +1350,38 @@ main = do
       , quickCheckResult prop_protocolPrReviewReviewerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewReviewerEmitsStartThenCleanEvent
       , quickCheckResult prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes
+      , quickCheckResult prop_prReviewWatcherUnresolvedStartsWorker
+      , quickCheckResult prop_prReviewWatcherCleanStartsReviewer
+      , quickCheckResult prop_prReviewWatcherWorkerIncompleteReturnsToChecking
+      , quickCheckResult prop_prReviewWatcherCleanReviewerMovesToMerging
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
       , quickCheckResult prop_runtimeGitPushDryRunNeverForces
       , quickCheckResult prop_runtimeGitPushNeverForces
       , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
+      , quickCheckResult prop_ghGitParsesIssueAndPrLists
+      , quickCheckResult prop_ghGitParsesRemotePrView
+      , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
+      , quickCheckResult prop_ghGitParsesGitOutputs
       , quickCheckResult prop_appServerInitializeRequestMatchesJsonRpc
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
       , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
       , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds
+      , quickCheckResult prop_appServerClientMatchesSuccessResponse
+      , quickCheckResult prop_appServerClientSkipsNotifications
+      , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds
+      , quickCheckResult prop_appServerClientSurfacesJsonRpcErrors
+      , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
+      , quickCheckResult prop_migrationRuntimeOwnerJsonAndParsing
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
-  if all isSuccess results && goldenOk && eventLogOk && actionExecutorDryRunOk && actionExecutorExecuteOk then pure () else exitFailure
+  daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
+  if all isSuccess results && goldenOk && eventLogOk && actionExecutorDryRunOk && actionExecutorExecuteOk && daemonTickOk then pure () else exitFailure

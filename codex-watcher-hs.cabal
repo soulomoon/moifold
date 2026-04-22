@@ -29,14 +29,21 @@ library
   hs-source-dirs:   src
   exposed-modules:
     CodexWatcher.ActionExecutor
+    CodexWatcher.AppServerClient
     CodexWatcher.AppServerProtocol
+    CodexWatcher.Daemon
     CodexWatcher.EffectInterpreter
     CodexWatcher.Effects
     CodexWatcher.EventLog
+    CodexWatcher.GhGit
     CodexWatcher.GoldenReplay
     CodexWatcher.Healthcheck
+    CodexWatcher.IssueImplementWatcher
+    CodexWatcher.IssuePlanningWatcher
     CodexWatcher.Json
+    CodexWatcher.Migration
     CodexWatcher.Protocol
+    CodexWatcher.PrReviewWatcher
     CodexWatcher.Runtime
     CodexWatcher.Snapshot
     CodexWatcher.StateMachine
@@ -48,6 +55,7 @@ library
     containers >=0.6 && <0.9,
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
+    network >=3.2 && <3.3,
     process >=1.6 && <1.7,
     time >=1.12 && <1.15,
     text >=2.0 && <3

@@ -80,6 +80,7 @@ data GenericConfig = GenericConfig
   , reviewWhenClean :: Maybe Bool
   , maxParallel :: Maybe Int
   , handoffReview :: Maybe Bool
+  , runtimeOwner :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
@@ -99,6 +100,7 @@ instance FromJSON GenericConfig where
       <*> object' .:? "reviewWhenClean"
       <*> object' .:? "maxParallel"
       <*> object' .:? "handoffReview"
+      <*> object' .:? "runtimeOwner"
 
 data ConfigItem = ConfigItem
   { kind :: WatcherKind
@@ -169,6 +171,7 @@ data WatcherSummary = WatcherSummary
   , reviewerThreadId :: Maybe Text
   , reviewWhenClean :: Maybe Bool
   , maxParallel :: Maybe Int
+  , runtimeOwner :: Maybe Text
   , pid :: PidReport
   , issueStatus :: Maybe Text
   , blocked :: Bool
@@ -297,6 +300,7 @@ summarizeBrokenItem item error' = do
       , reviewerThreadId = Nothing
       , reviewWhenClean = Nothing
       , maxParallel = Nothing
+      , runtimeOwner = Nothing
       , pid
       , issueStatus = Nothing
       , blocked = False
@@ -318,6 +322,7 @@ summarizeLoadedItem item config = do
   let issueStatus' = lookupStateText ["issueState", "issue_status"] states
       blocked' = lookupStateBool ["blockedState", "blocked"] states
       blockedReason' = lookupStateText ["blockedState", "reason"] states
+      runtimeOwner' = config.runtimeOwner <|> lookupStateText ["runtimeOwner", "owner"] states
   workdirReport <- checkWorkdir config
   gitPush <- checkGitPushDryRun config workdirReport
   remotePrReport <- checkRemotePr config
@@ -337,6 +342,7 @@ summarizeLoadedItem item config = do
       , reviewerThreadId = config.reviewerThreadId
       , reviewWhenClean = config.reviewWhenClean
       , maxParallel = config.maxParallel
+      , runtimeOwner = runtimeOwner'
       , pid
       , issueStatus = issueStatus'
       , blocked = fromMaybe False blocked'
@@ -356,12 +362,14 @@ readStateFiles kind stateDir' =
         [ "daemonState" .=? readOptionalValueFile (stateDir' </> "daemon-state.json")
         , "plannerState" .=? readOptionalValueFile (stateDir' </> "planner-state.json")
         , "blockedState" .=? readOptionalValueFile (stateDir' </> "block-state.json")
+        , "runtimeOwner" .=? readOptionalValueFile (stateDir' </> "runtime-owner.json")
         ]
     IssueImplementKind -> object
       <$> sequence
         [ "daemonState" .=? readOptionalValueFile (stateDir' </> "daemon-state.json")
         , "issueState" .=? readOptionalValueFile (stateDir' </> "issue-state.json")
         , "blockedState" .=? readOptionalValueFile (stateDir' </> "block-state.json")
+        , "runtimeOwner" .=? readOptionalValueFile (stateDir' </> "runtime-owner.json")
         ]
     PrReviewKind -> object
       <$> sequence
@@ -370,6 +378,7 @@ readStateFiles kind stateDir' =
         , "agentState" .=? readOptionalValueFile (stateDir' </> "agent-state.json")
         , "reviewerState" .=? readOptionalValueFile (stateDir' </> "reviewer-state.json")
         , "blockedState" .=? readOptionalValueFile (stateDir' </> "block-state.json")
+        , "runtimeOwner" .=? readOptionalValueFile (stateDir' </> "runtime-owner.json")
         ]
  where
   key .=? action = do
@@ -717,6 +726,7 @@ logicReview =
            , "review/implement workdirs exist, are git checkouts, and are not dirty"
            , "gh-authenticated git push dry-run works for workdirs with branches"
            , "watcher events.jsonl can replay through the Haskell lifecycle model when present"
+           , "runtime-owner marker is surfaced for migration/backout visibility when present"
            , "blocked states are surfaced instead of retried forever"
            ]
     , "notes"
