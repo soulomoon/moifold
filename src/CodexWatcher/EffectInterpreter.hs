@@ -17,6 +17,7 @@ module CodexWatcher.EffectInterpreter
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.Runtime
+import CodexWatcher.TurnOutput (reviewerTurnInput, reviewerTurnOutputSchema)
 import CodexWatcher.Types
 import Data.Aeson
   ( Value
@@ -99,8 +100,8 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest config.effectRuntimeIssuePlanTurn threadId
     StartIssueImplementationWorkerTurn threadId ->
       oneAppServerRequest config.effectRuntimeIssueImplementationTurn threadId
-    StartReviewerTurn threadId ->
-      oneAppServerRequest config.effectRuntimeReviewerTurn threadId
+    StartReviewerTurn prConfig reviewTargetSha threadId ->
+      oneAppServerRequest (reviewerTurnRuntimeConfig config prConfig reviewTargetSha) threadId
     PushBranch branch ->
       unchanged [PlannedCommand (GitPush config.effectRuntimeWorkdir branch)]
     CreateIssue repo request ->
@@ -138,6 +139,18 @@ turnStartOptions config threadId =
     , turnInput = config.turnRuntimeInput
     , turnOutputSchema = config.turnRuntimeOutputSchema
     , turnCollaborationMode = config.turnRuntimeCollaborationMode
+    }
+
+reviewerTurnRuntimeConfig :: EffectRuntimeConfig -> PrConfig -> CommitSha -> TurnRuntimeConfig
+reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
+  config.effectRuntimeReviewerTurn
+    { turnRuntimeInput =
+        reviewerTurnInput
+          config.effectRuntimeWorkdir
+          (config.effectRuntimeStateDir </> "reviewer-state.json")
+          prConfig
+          reviewTargetSha
+    , turnRuntimeOutputSchema = Just reviewerTurnOutputSchema
     }
 
 blockedStateJson :: BlockedReason -> Value

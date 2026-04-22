@@ -65,7 +65,7 @@ data StartTurnKind
   | StartIssueTriageWorkerTurnKind
   | StartIssuePlanWorkerTurnKind
   | StartIssueImplementationWorkerTurnKind
-  | StartReviewerTurnKind
+  | StartReviewerTurnKind PrConfig CommitSha
   deriving stock (Eq, Show)
 
 runAutomaticDaemonLoopOnceFromFile :: ActionExecutor IO -> DaemonLoopConfig -> IO (Either DaemonLoopFailure DaemonLoopTickResult)
@@ -175,7 +175,7 @@ observeReviewThreads executor config events prConfig workerThread reviewerThread
         Right reviewReport ->
           let hasUnresolved = not (null reviewReport.unresolvedReviewThreads)
               targetThread = if hasUnresolved then workerThread else reviewerThread
-           in prestartAndObserve executor config events (if hasUnresolved then StartWorkerTurnKind else StartReviewerTurnKind) targetThread \turnId ->
+           in prestartAndObserve executor config events (if hasUnresolved then StartWorkerTurnKind else StartReviewerTurnKind prConfig commit) targetThread \turnId ->
                 DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
 
 observeExistingPullRequest
@@ -350,7 +350,7 @@ startTurnEffect kind threadId =
     StartIssueTriageWorkerTurnKind -> SomeEffect (StartIssueTriageWorkerTurn threadId)
     StartIssuePlanWorkerTurnKind -> SomeEffect (StartIssuePlanWorkerTurn threadId)
     StartIssueImplementationWorkerTurnKind -> SomeEffect (StartIssueImplementationWorkerTurn threadId)
-    StartReviewerTurnKind -> SomeEffect (StartReviewerTurn threadId)
+    StartReviewerTurnKind prConfig reviewTargetSha -> SomeEffect (StartReviewerTurn prConfig reviewTargetSha threadId)
 
 syntheticTurnId :: StartTurnKind -> Int -> TurnId
 syntheticTurnId kind requestId =
@@ -363,7 +363,7 @@ kindText = \case
   StartIssueTriageWorkerTurnKind -> "issue-triage-turn"
   StartIssuePlanWorkerTurnKind -> "issue-plan-turn"
   StartIssueImplementationWorkerTurnKind -> "issue-implementation-turn"
-  StartReviewerTurnKind -> "reviewer-turn"
+  StartReviewerTurnKind {} -> "reviewer-turn"
 
 readActiveTurn :: Monad m => ActionExecutor m -> DaemonLoopConfig -> ActiveTurn -> m (Either DaemonLoopFailure (Maybe AppServerTurn))
 readActiveTurn executor config activeTurn = do

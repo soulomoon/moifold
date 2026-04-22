@@ -22,6 +22,7 @@ import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
+import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import CodexWatcher.Types
 import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', withObject, (.:?), (.!=))
 import Data.Aeson.Key qualified as Key
@@ -44,6 +45,19 @@ data StructuredTurnOutcome
   | StructuredNeedsImplementation Text
   | StructuredProblems Text
   | StructuredClean Text
+  deriving stock (Eq, Show)
+
+data ReviewerTurnReport = ReviewerTurnReport
+  { reviewerReportStatus :: Maybe Text
+  , reviewerReportCommit :: Maybe CommitSha
+  , reviewerReportPromptVersion :: Maybe Text
+  , reviewerReportAddedCommentCount :: Maybe Int
+  , reviewerReportLgtmCommentPresent :: Bool
+  , reviewerReportLgtmComment :: Maybe Text
+  , reviewerReportFindingsSummary :: Maybe [Text]
+  , reviewerReportBlockedReasonPresent :: Bool
+  , reviewerReportBlockedReason :: Maybe Text
+  }
   deriving stock (Eq, Show)
 
 newtype StructuredPlanningIssueRequests = StructuredPlanningIssueRequests [IssueCreationRequest]
@@ -111,6 +125,20 @@ instance FromJSON StructuredTurnOutcome where
       "no_issues" -> withDetail StructuredClean "no issues"
       "no issues" -> withDetail StructuredClean "no issues"
       other -> fail ("unsupported structured turn outcome: " <> Text.unpack other)
+
+instance FromJSON ReviewerTurnReport where
+  parseJSON = withObject "ReviewerTurnReport" \objectValue -> do
+    let has key = KeyMap.member (Key.fromString key) objectValue
+    ReviewerTurnReport
+      <$> objectValue .:? "review_status"
+      <*> (fmap CommitSha <$> objectValue .:? "reviewed_commit_sha")
+      <*> objectValue .:? "reviewer_prompt_version"
+      <*> objectValue .:? "added_review_comment_count"
+      <*> pure (has "lgtm_comment")
+      <*> objectValue .:? "lgtm_comment"
+      <*> objectValue .:? "findings_summary"
+      <*> pure (has "blocked_reason")
+      <*> objectValue .:? "blocked_reason"
 
 classifyTurnCompletion :: AppServerTurn -> TurnCompletion
 classifyTurnCompletion turn
@@ -233,16 +261,16 @@ classifyPrReviewReviewerTurn commit turn =
     TurnCompleted output
       | not (hasMeaningfulOutput output) ->
           Just (ReviewerBlocked (BlockedReason "reviewer turn completed without output"))
-      | Just structured <- output >>= parseStructuredTurnOutcome ->
-          classifyStructuredPrReviewReviewer commit structured
+      | Just report <- output >>= parseReviewerTurnReport ->
+          Just (validateReviewerTurnReport commit report)
       | outputHasAny ["blocked", "cannot proceed"] output ->
           Just (ReviewerBlocked (BlockedReason (outputReason "reviewer turn reported blocked" output)))
       | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
           Just (ReviewerIncomplete (outputReason "reviewer turn reported incomplete" output))
       | outputHasAny ["problem", "problems", "commented", "comments added", "changes requested"] output ->
-          Just (ReviewerProblemsAdded commit)
+          Just (ReviewerIncomplete "reviewer reported problems without required reviewer-state JSON")
       | outputHasAny ["clean", "lgtm", "approved", "no issues"] output ->
-          Just (ReviewerClean (CleanReviewEvidence commit (outputReason "LGTM" output)))
+          Just (ReviewerIncomplete "clean review missing required reviewer-state JSON")
       | otherwise ->
           Just (ReviewerIncomplete (outputReason "reviewer turn completed without a clean/problems marker" output))
 
@@ -263,6 +291,75 @@ parsePlanningGraph output =
   case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
     Left _ -> Nothing
     Right (StructuredPlanningGraph graph) -> Just graph
+
+parseReviewerTurnReport :: Text -> Maybe ReviewerTurnReport
+parseReviewerTurnReport output =
+  case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
+    Left _ -> Nothing
+    Right report -> Just report
+
+validateReviewerTurnReport :: CommitSha -> ReviewerTurnReport -> ReviewerOutcome
+validateReviewerTurnReport expectedCommit report =
+  case missingReviewerFields report of
+    firstMissing : restMissing ->
+      ReviewerIncomplete ("reviewer state missing required fields: " <> Text.intercalate ", " (firstMissing : restMissing))
+    [] ->
+      validateCompleteReviewerTurnReport expectedCommit report
+
+validateCompleteReviewerTurnReport :: CommitSha -> ReviewerTurnReport -> ReviewerOutcome
+validateCompleteReviewerTurnReport expectedCommit report
+  | maybe False (< 0) report.reviewerReportAddedCommentCount =
+      ReviewerIncomplete "added_review_comment_count must be a non-negative integer"
+  | otherwise =
+      case normalize (requiredText report.reviewerReportStatus) of
+        "blocked" ->
+          ReviewerBlocked (BlockedReason (maybe "reviewer marked blocked without a reason" nonEmptyOutput report.reviewerReportBlockedReason))
+        "incomplete" ->
+          ReviewerIncomplete (maybe "reviewer marked review_status incomplete" nonEmptyOutput report.reviewerReportBlockedReason)
+        "clean"
+          | report.reviewerReportCommit /= Just expectedCommit ->
+              ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
+          | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
+              ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
+          | report.reviewerReportAddedCommentCount /= Just 0 ->
+              ReviewerIncomplete "clean review must record added_review_comment_count as 0"
+          | report.reviewerReportLgtmComment /= Just "LGTM" ->
+              ReviewerIncomplete "clean review must record lgtm_comment as LGTM"
+          | otherwise ->
+              ReviewerClean (CleanReviewEvidence expectedCommit "LGTM")
+        "comments_added"
+          | report.reviewerReportCommit /= Just expectedCommit ->
+              ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
+          | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
+              ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
+          | maybe True (< 1) report.reviewerReportAddedCommentCount ->
+              ReviewerIncomplete "comments_added review must record at least one added review comment"
+          | otherwise ->
+              ReviewerProblemsAdded expectedCommit
+        other ->
+          ReviewerIncomplete ("unsupported review_status: " <> other)
+
+missingReviewerFields :: ReviewerTurnReport -> [Text]
+missingReviewerFields report =
+  concat
+    [ missing "review_status" report.reviewerReportStatus
+    , missing "reviewed_commit_sha" report.reviewerReportCommit
+    , missing "reviewer_prompt_version" report.reviewerReportPromptVersion
+    , missing "added_review_comment_count" report.reviewerReportAddedCommentCount
+    , missingPresence "lgtm_comment" report.reviewerReportLgtmCommentPresent
+    , missing "findings_summary" report.reviewerReportFindingsSummary
+    , missingPresence "blocked_reason" report.reviewerReportBlockedReasonPresent
+    ]
+ where
+  missing _fieldName (Just _) = []
+  missing fieldName Nothing = [fieldName]
+  missingPresence fieldName present
+    | present = []
+    | otherwise = [fieldName]
+
+requiredText :: Maybe Text -> Text
+requiredText =
+  maybe "" id
 
 planningIssueRequestPayloadInvalid :: Text -> Bool
 planningIssueRequestPayloadInvalid output =
@@ -347,16 +444,6 @@ classifyStructuredPrReviewWorker = \case
   StructuredAlreadyFixed _reason -> Just WorkerCompleted
   StructuredProblems reason -> Just (WorkerIncomplete reason)
   StructuredClean _reason -> Just WorkerCompleted
-
-classifyStructuredPrReviewReviewer :: CommitSha -> StructuredTurnOutcome -> Maybe ReviewerOutcome
-classifyStructuredPrReviewReviewer commit = \case
-  StructuredBlocked reason -> Just (ReviewerBlocked (BlockedReason reason))
-  StructuredIncomplete reason -> Just (ReviewerIncomplete reason)
-  StructuredProblems _reason -> Just (ReviewerProblemsAdded commit)
-  StructuredClean comment -> Just (ReviewerClean (CleanReviewEvidence commit comment))
-  StructuredComplete comment -> Just (ReviewerClean (CleanReviewEvidence commit comment))
-  StructuredAlreadyFixed comment -> Just (ReviewerClean (CleanReviewEvidence commit comment))
-  StructuredNeedsImplementation reason -> Just (ReviewerIncomplete reason)
 
 runningStatuses :: [Text]
 runningStatuses =

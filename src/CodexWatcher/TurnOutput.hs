@@ -1,18 +1,35 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module CodexWatcher.TurnOutput
   ( issueImplementationTurnInput
   , issuePlanTurnInput
   , issueTriageTurnInput
   , prReviewWorkerTurnInput
+  , prReviewThreadDeveloperInstructions
   , plannerTurnInput
+  , reviewerPromptVersion
   , reviewerTurnInput
+  , reviewerTurnOutputSchema
   , structuredTurnOutcomeInstructions
   , structuredTurnOutputSchema
   ) where
 
+import CodexWatcher.PromptTemplates
+  ( issueImplementationTemplate
+  , issuePlanTemplate
+  , issueTriageTemplate
+  , plannerTemplate
+  , prReviewWorkerTemplate
+  , prReviewThreadDeveloperTemplate
+  , renderTemplate
+  , reviewerPromptVersion
+  , reviewerTemplate
+  )
+import CodexWatcher.Types
 import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
+import Data.Text qualified as Text
 
 structuredTurnOutputSchema :: Value
 structuredTurnOutputSchema =
@@ -49,43 +66,99 @@ structuredTurnOutputSchema =
           ]
     ]
 
+reviewerTurnOutputSchema :: Value
+reviewerTurnOutputSchema =
+  object
+    [ "type" .= ("object" :: Text)
+    , "additionalProperties" .= False
+    , "required"
+        .= ( [ "review_status"
+             , "reviewed_commit_sha"
+             , "reviewer_prompt_version"
+             , "added_review_comment_count"
+             , "lgtm_comment"
+             , "findings_summary"
+             , "blocked_reason"
+             ] ::
+              [Text]
+           )
+    , "properties"
+        .= object
+          [ "review_status"
+              .= object
+                [ "type" .= ("string" :: Text)
+                , "enum" .= (["clean", "comments_added", "incomplete", "blocked"] :: [Text])
+                ]
+          , "reviewed_commit_sha" .= stringField
+          , "reviewer_prompt_version" .= stringField
+          , "added_review_comment_count" .= object ["type" .= ("integer" :: Text), "minimum" .= (0 :: Int)]
+          , "lgtm_comment" .= nullableStringField
+          , "findings_summary" .= object ["type" .= ("array" :: Text), "items" .= stringField]
+          , "blocked_reason" .= nullableStringField
+          ]
+    ]
+
 structuredTurnOutcomeInstructions :: Text
 structuredTurnOutcomeInstructions =
   "Return only JSON with an outcome field. Use outcome=blocked with reason when you cannot proceed, outcome=incomplete with reason when follow-up is required, and outcome=complete with summary when the turn is done."
 
 plannerTurnInput :: Text
 plannerTurnInput =
-  structuredTurnOutcomeInstructions
-    <> " For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work. Use issues_to_create only for independent top-level issues. Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include title, a concrete body, and parentIssueNumber. A sub-issue body must describe scope, acceptance criteria, dependencies/blockers, and how it stays compatible with sibling sub-issues. When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings. After issue creation the watcher will re-enter planning. When no more issues need to be created, return ready_issues for issues safe to implement now, blocked_issues for issues that must wait, and dependencies for issue ordering. ready_issues must be an array of issue numbers, not objects. blocked_issues must use objects shaped as {\"issueNumber\": 27, \"blockedBy\": [26], \"reason\": \"...\"}. dependencies must use objects shaped as {\"issueNumber\": 27, \"dependsOn\": [26]}. Only issues listed in ready_issues can be started by fanout; do not list an issue as ready if another open issue must be completed first. Use outcome=complete only when the issue graph is stable and ready for dependency-aware implementer fanout."
+  renderTemplate
+    plannerTemplate
+    [ ("structuredInstructions", structuredTurnOutcomeInstructions)
+    , ("scopeInstructions", "")
+    ]
 
 issueTriageTurnInput :: Text
 issueTriageTurnInput =
-  structuredTurnOutcomeInstructions
-    <> " This is an issue implementation triage turn. Only inspect the issue, repository state, existing branches, and existing PRs. Do not edit files, commit, push, create PRs, write watcher state, or write events.jsonl. Return already_fixed when the issue is already solved on the target branch, needs_implementation when implementation is still required, or blocked with reason when it cannot proceed."
+  renderTemplate issueTriageTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
 
 issuePlanTurnInput :: Text
 issuePlanTurnInput =
-  structuredTurnOutcomeInstructions
-    <> " This is an issue implementation plan turn. Produce and persist an implementation plan in the repository or PR body only when requested by the surrounding workflow. Do not implement code changes, commit, push, create PRs, write watcher state, or write events.jsonl. Return complete with a concise plan summary when the implementation plan is ready, or blocked with reason when planning cannot proceed."
+  renderTemplate issuePlanTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
 
 issueImplementationTurnInput :: Text
 issueImplementationTurnInput =
-  structuredTurnOutcomeInstructions
-    <> " This is an issue implementation turn. Follow the existing implementation plan, edit code, run relevant tests, commit, and push to the configured branch when changes are ready. Do not create or mutate watcher events.jsonl, issue-state.json, daemon-state.json, pid files, or other watcher runtime state. Return complete only when the PR branch is ready for review, incomplete with reason when more implementation work remains, or blocked with reason when you cannot proceed."
+  renderTemplate issueImplementationTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
 
 prReviewWorkerTurnInput :: Text
 prReviewWorkerTurnInput =
-  structuredTurnOutcomeInstructions
-    <> " This is a PR review-fix worker turn. Address unresolved review comments on the current PR, run relevant tests, commit, and push fixes. Do not mutate watcher runtime state files. Return complete when review comments were addressed, incomplete when follow-up work remains, or blocked with reason when you cannot proceed."
+  renderTemplate prReviewWorkerTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
 
-reviewerTurnInput :: Text
-reviewerTurnInput =
-  structuredTurnOutcomeInstructions
-    <> " For PR review use clean with comment when the PR is acceptable, or problems when review comments were added."
+prReviewThreadDeveloperInstructions :: FilePath -> PrConfig -> Text -> Text
+prReviewThreadDeveloperInstructions workdir config role =
+  renderTemplate
+    prReviewThreadDeveloperTemplate
+    [ ("role", role)
+    , ("repoFullName", unRepoName config.prRepo)
+    , ("prNumber", Text.pack (show (unPrNumber config.prNumber)))
+    , ("workdir", Text.pack workdir)
+    , ("branch", unBranchName config.prBranch)
+    , ("model", "gpt-5.4")
+    , ("effort", "xhigh")
+    ]
+
+reviewerTurnInput :: FilePath -> FilePath -> PrConfig -> CommitSha -> Text
+reviewerTurnInput workdir reviewerStatePath config reviewTargetSha =
+  renderTemplate
+    reviewerTemplate
+    [ ("repoFullName", unRepoName config.prRepo)
+    , ("prNumber", Text.pack (show (unPrNumber config.prNumber)))
+    , ("workdir", Text.pack workdir)
+    , ("branch", unBranchName config.prBranch)
+    , ("reviewTargetSha", unCommitSha reviewTargetSha)
+    , ("reviewerPromptVersion", reviewerPromptVersion)
+    , ("reviewerStatePath", Text.pack reviewerStatePath)
+    ]
 
 stringField :: Value
 stringField =
   object ["type" .= ("string" :: Text)]
+
+nullableStringField :: Value
+nullableStringField =
+  object ["type" .= (["string", "null"] :: [Text])]
 
 issueArrayField :: [Text] -> Value
 issueArrayField requiredFields =

@@ -11,6 +11,7 @@ module CodexWatcher.CompatibilityState
   ) where
 
 import CodexWatcher.Types
+import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
@@ -145,9 +146,13 @@ checkerStateJson config threads =
 reviewerStateJson :: CleanReviewEvidence -> Value
 reviewerStateJson evidence =
   object
-    [ "review_status" .= ("clean" :: Value)
+    [ "review_status" .= ("clean" :: Text)
     , "reviewed_commit_sha" .= unCommitSha (cleanReviewCommit evidence)
-    , "approval_comment" .= cleanReviewComment evidence
+    , "reviewer_prompt_version" .= reviewerPromptVersion
+    , "added_review_comment_count" .= (0 :: Int)
+    , "lgtm_comment" .= cleanReviewComment evidence
+    , "findings_summary" .= ([] :: [Text])
+    , "blocked_reason" .= Null
     ]
 
 blockedStateJson :: BlockedReason -> Value

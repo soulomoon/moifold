@@ -49,6 +49,7 @@ library
     CodexWatcher.Json
     CodexWatcher.Migration
     CodexWatcher.Protocol
+    CodexWatcher.PromptTemplates
     CodexWatcher.PrReviewWatcher
     CodexWatcher.Runtime
     CodexWatcher.RunnerGuard

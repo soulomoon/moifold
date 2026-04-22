@@ -205,7 +205,7 @@ step (PrCheckingReviews config _worker (ReviewerIdle reviewerThreadId)) (ReviewT
 step (PrCheckingReviews config (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
   Decision
     (PrReviewingClean config commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
-    [SomeEffect (StartReviewerTurn (activeThreadId activeTurn))]
+    [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
 step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixCompleted =
   Decision
     (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))

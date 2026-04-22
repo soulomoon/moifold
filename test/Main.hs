@@ -1177,6 +1177,20 @@ jsonText :: Value -> Text
 jsonText =
   Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode
 
+reviewerStateOutput :: Text -> CommitSha -> Text -> Int -> Maybe Text -> [Text] -> Maybe Text -> Text
+reviewerStateOutput status commit promptVersion commentCount lgtmComment findings blockedReason =
+  jsonText
+    ( object
+        [ "review_status" .= status
+        , "reviewed_commit_sha" .= unCommitSha commit
+        , "reviewer_prompt_version" .= promptVersion
+        , "added_review_comment_count" .= commentCount
+        , "lgtm_comment" .= lgtmComment
+        , "findings_summary" .= findings
+        , "blocked_reason" .= blockedReason
+        ]
+    )
+
 prop_ghGitParsesIssueAndPrLists :: Bool
 prop_ghGitParsesIssueAndPrLists =
   let issuesJson =
@@ -1522,12 +1536,15 @@ prop_turnClassifierCompletionStates =
 
 prop_turnClassifierMapsDomainOutputs :: Bool
 prop_turnClassifierMapsDomainOutputs =
+  let reviewerCommit = CommitSha "abc123"
+      cleanReviewOutput = reviewerStateOutput "clean" reviewerCommit reviewerPromptVersion 0 (Just "LGTM") [] Nothing
+   in
   classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "stable issue set")) == Just ObservedPlanningTurnCompleted
     && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "already fixed")) == Just ObservedTriageAlreadyFixed
     && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "plan written")) == Just (ObservedPlanCompleted Nothing)
     && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "ready for review")) == Just (ObservedImplementationCompleted (PrNumber 7))
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "resolved")) == Just (ObservedWorkerOutcome WorkerCompleted)
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "LGTM clean")) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM clean")))
+    && classifyPrReviewReviewerTurn reviewerCommit (AppServerTurn (TurnId "reviewer") "completed" (Just cleanReviewOutput)) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence reviewerCommit "LGTM")))
 
 prop_turnClassifierPrefersStructuredOutputs :: Bool
 prop_turnClassifierPrefersStructuredOutputs =
@@ -1547,7 +1564,10 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "{\"outcome\":\"already_fixed\",\"reason\":\"schema fixed\"}")) == Just ObservedTriageAlreadyFixed
     && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"ready\"}")) == Just (ObservedImplementationCompleted (PrNumber 7))
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "schema LGTM")))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM")))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: review_status, reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, lgtm_comment, findings_summary, blocked_reason"))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-comments") "completed" (Just (reviewerStateOutput "comments_added" (CommitSha "abc123") reviewerPromptVersion 1 Nothing ["left inline comment"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (CommitSha "abc123")))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-sha-mismatch") "completed" (Just (reviewerStateOutput "clean" (CommitSha "def456") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer inspected def456, expected abc123"))
 
 prop_turnClassifierBlocksMissingOutputs :: Bool
 prop_turnClassifierBlocksMissingOutputs =
@@ -1645,7 +1665,7 @@ prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerT
         compileEffectPlan
           (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 20)
           [ SomeEffect (StartWorkerTurn workerThread)
-          , SomeEffect (StartReviewerTurn reviewerThread)
+          , SomeEffect (StartReviewerTurn (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 7) (BranchName "codex/issue-7")) (CommitSha "abc123") reviewerThread)
           ]
    in fmap appServerRequestId compiled.compiledActions == [Just 20, Just 21]
         && compiled.compiledNextRequestId == 22

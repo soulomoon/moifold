@@ -785,12 +785,7 @@ prReviewThreadStartOptions launch role =
     , threadSandbox = "danger-full-access"
     , threadModel = "gpt-5.4"
     , threadDeveloperInstructions =
-        "PR review "
-          <> role
-          <> " watcher for "
-          <> unRepoName launch.reviewLaunchPrConfig.prRepo
-          <> "#"
-          <> Text.pack (show (unPrNumber launch.reviewLaunchPrConfig.prNumber))
+        prReviewThreadDeveloperInstructions launch.reviewLaunchWorkdir launch.reviewLaunchPrConfig role
     }
 
 writePrReviewWatcherLaunch :: PrReviewWatcherLaunchPlan -> IO ()
@@ -1539,7 +1534,7 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
               Just (planCollaborationMode "Plan the implementation. Do not edit files in this turn." "gpt-5.4" "xhigh")
           }
     , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput
-    , effectRuntimeReviewerTurn = turnConfig reviewerTurnInput
+    , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit."
     }
  where
   turnConfig input =

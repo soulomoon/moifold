@@ -25,7 +25,7 @@ data Effect (mutability :: Mutability) where
   StartIssueTriageWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartIssuePlanWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'CanStartTurn
-  StartReviewerTurn :: ThreadId -> Effect 'CanStartTurn
+  StartReviewerTurn :: PrConfig -> CommitSha -> ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub
