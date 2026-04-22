@@ -60,6 +60,7 @@ data WatcherEvent
   | IssueReviewHandoffInitializedEvent PrNumber
   | IssueReviewHandoffStartedEvent PrNumber
   | IssueImplementationCompletedEvent PrNumber
+  | WatcherRecoveredInvalidState Text
   | WatcherBlocked BlockedReason
   | WatcherStopped StopReason
   deriving stock (Eq, Show)
@@ -157,6 +158,11 @@ instance ToJSON WatcherEvent where
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssueImplementationCompletedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
+      WatcherRecoveredInvalidState reason ->
+        eventType event
+          <> [ "reason" .= reason
+             , "recoveredFromInvalidState" .= True
+             ]
       WatcherBlocked reason ->
         eventType event <> ["reason" .= unBlockedReason reason]
       WatcherStopped reason ->
@@ -256,6 +262,9 @@ instance FromJSON WatcherEvent where
       "issue_implementation_completed" ->
         IssueImplementationCompletedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
+      "watcher_recovered_invalid_state" ->
+        WatcherRecoveredInvalidState
+          <$> (objectValue .:? "reason" .!= "recovered invalid watcher state")
       "watcher_blocked" ->
         WatcherBlocked
           <$> (BlockedReason <$> nonEmptyTextField objectValue "reason")
@@ -378,6 +387,8 @@ applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueImplementationBlo
   fromDecision (step state (MarkBlocked reason))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
+applyEvent (SomeWatcherState state) (WatcherRecoveredInvalidState _reason) =
+  Right (SomeWatcherState state, [])
 applyEvent (SomeWatcherState state) (WatcherBlocked reason) =
   Right (blockSameDomain state reason, [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon])
 applyEvent (SomeWatcherState state) (WatcherStopped reason) =
@@ -544,5 +555,6 @@ eventName = \case
   IssueReviewHandoffInitializedEvent {} -> "issue_review_handoff_initialized"
   IssueReviewHandoffStartedEvent {} -> "issue_review_handoff_started"
   IssueImplementationCompletedEvent {} -> "issue_implementation_completed"
+  WatcherRecoveredInvalidState {} -> "watcher_recovered_invalid_state"
   WatcherBlocked {} -> "watcher_blocked"
   WatcherStopped {} -> "watcher_stopped"

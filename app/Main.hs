@@ -15,6 +15,7 @@ import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.EventLog
+import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Healthcheck
@@ -34,7 +35,7 @@ import CodexWatcher.TurnOutput
 import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
 import Control.Monad (unless, when)
-import Data.Aeson (Value (..), encode)
+import Data.Aeson (Value (..), encode, object, (.=))
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub, sortOn)
@@ -47,6 +48,8 @@ import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (IOMode (AppendMode), hFlush, withFile)
 import System.Posix.Process (getProcessID)
 import System.Process qualified as Process
+import Data.Time.Clock (getCurrentTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 
 main :: IO ()
 main =
@@ -68,6 +71,7 @@ runCliCommand = \case
   CliObserveOnce options -> observeOnce options
   CliRunLoop options -> runAutomaticLoop options
   CliGuardIssuePlanning options -> runIssuePlanningRunnerGuard options
+  CliRepairInvalidState options -> repairInvalidState options
 
 healthcheckOptionsFromCli :: HealthcheckCli -> HealthcheckOptions
 healthcheckOptionsFromCli options =
@@ -782,7 +786,9 @@ runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> Stri
 runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
-    Left failure -> die (Text.unpack (formatDaemonLoopFailure failure))
+    Left failure -> do
+      recordInvalidReplayBlockState loopConfig failure
+      die (Text.unpack (formatDaemonLoopFailure failure))
     Right tick -> do
       validateLoopResultDomain domain tick
       printLoopTick domain iteration tick
@@ -790,6 +796,14 @@ runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop m
   shouldStop <- readIORef stopRequested
   when (shouldLoop && not shouldStop && iteration < maxIterations) $
     runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
+
+recordInvalidReplayBlockState :: DaemonLoopConfig -> DaemonLoopFailure -> IO ()
+recordInvalidReplayBlockState loopConfig = \case
+  DaemonLoopDaemonFailure (DaemonReplayFailed replayFailure) -> do
+    let stateDir = loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
+    createDirectoryIfMissing True stateDir
+    LazyByteString.writeFile (stateDir </> "block-state.json") (encode (repairFailureBlockStateJson replayFailure))
+  _ -> pure ()
 
 issuePlanningFanoutAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
 issuePlanningFanoutAfterTick cli endpoint executionMode tick =
@@ -1107,6 +1121,79 @@ replayEvents path = do
   putStrLn ("phase: " <> show (somePhase replay.replayState))
   putStrLn ("events: " <> show (length events))
   putStrLn ("effect batches: " <> show (length replay.replayEffects))
+
+repairInvalidState :: RepairInvalidStateCli -> IO ()
+repairInvalidState options = do
+  loaded <- loadEventLogFile options.repairCliEventsPath
+  events <- either die pure loaded
+  case replayEventLog events of
+    Right replay -> do
+      putStrLn "event log is valid; no repair needed"
+      putStrLn ("domain: " <> show (someDomain replay.replayState))
+      putStrLn ("phase: " <> show (somePhase replay.replayState))
+    Left _initialFailure -> do
+      plan <- either (die . Text.unpack) pure (repairIssueImplementEventLog events)
+      putStrLn ("repair strategy: " <> Text.unpack plan.repairStrategy)
+      putStrLn ("failed event index: " <> show plan.repairFailure.eventIndex)
+      putStrLn ("inserted events: " <> show (length plan.repairInsertedEvents))
+      putStrLn ("dropped events: " <> show (length plan.repairDroppedEvents))
+      putStrLn ("repaired phase: " <> show (somePhase plan.repairReplayResult.replayState))
+      if options.repairCliExecute
+        then do
+          archivePath <- archiveEventLog options.repairCliEventsPath
+          writeWatcherEventsFile options.repairCliEventsPath plan.repairRepairedEvents
+          writeRepairSummary options.repairCliStateDir archivePath plan
+          writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState
+          removeFileIfExists (options.repairCliStateDir </> "block-state.json")
+          putStrLn ("archived invalid event log: " <> archivePath)
+          putStrLn ("wrote repaired event log: " <> options.repairCliEventsPath)
+        else
+          putStrLn "dry-run: pass --execute to archive and rewrite events.jsonl"
+
+archiveEventLog :: FilePath -> IO FilePath
+archiveEventLog eventsPath = do
+  timestamp <- formatTime defaultTimeLocale "%Y%m%dT%H%M%SZ" <$> getCurrentTime
+  let archivePath = eventsPath <> ".invalid-" <> timestamp
+  copyFile eventsPath archivePath
+  pure archivePath
+
+writeWatcherEventsFile :: FilePath -> [WatcherEvent] -> IO ()
+writeWatcherEventsFile eventsPath events = do
+  createDirectoryIfMissing True (takeDirectory eventsPath)
+  LazyByteString.writeFile eventsPath (mconcat (fmap (\event -> encode event <> "\n") events))
+
+writeRepairSummary :: FilePath -> FilePath -> EventLogRepairPlan -> IO ()
+writeRepairSummary stateDir archivePath plan = do
+  LazyByteString.writeFile
+    (stateDir </> "repair-state.json")
+    ( encode
+        ( object
+            [ "repaired" .= True
+            , "strategy" .= plan.repairStrategy
+            , "archivePath" .= archivePath
+            , "failedEventIndex" .= plan.repairFailure.eventIndex
+            , "failedEventType" .= eventName plan.repairFailure.event
+            , "failedReason" .= plan.repairFailure.reason
+            , "insertedEvents" .= fmap eventName plan.repairInsertedEvents
+            , "droppedEvents" .= fmap eventName plan.repairDroppedEvents
+            , "finalDomain" .= show (someDomain plan.repairReplayResult.replayState)
+            , "finalPhase" .= show (somePhase plan.repairReplayResult.replayState)
+            ]
+        )
+    )
+
+writeCompatibilityFiles :: FilePath -> SomeWatcherState -> IO ()
+writeCompatibilityFiles stateDir state =
+  mapM_ writeOne (compatibilityStateWrites stateDir state)
+ where
+  writeOne compatibilityWrite = do
+    createDirectoryIfMissing True (takeDirectory compatibilityWrite.compatibilityWritePath)
+    LazyByteString.writeFile compatibilityWrite.compatibilityWritePath (encode compatibilityWrite.compatibilityWriteValue)
+
+removeFileIfExists :: FilePath -> IO ()
+removeFileIfExists path = do
+  exists <- doesFileExist path
+  when exists (removeFile path)
 
 formatReplayFailure :: ReplayFailure -> String
 formatReplayFailure failure =

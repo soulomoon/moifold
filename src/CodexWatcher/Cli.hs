@@ -13,6 +13,7 @@ module CodexWatcher.Cli
   , IssueFanoutCli (..)
   , LoopCli (..)
   , ObserveOnceCli (..)
+  , RepairInvalidStateCli (..)
   , RehearsalCli (..)
   , RenderServiceCli (..)
   , StopDaemonCli (..)
@@ -63,6 +64,7 @@ data CliCommand
   | CliObserveOnce ObserveOnceCli
   | CliRunLoop LoopCli
   | CliGuardIssuePlanning GuardIssuePlanningCli
+  | CliRepairInvalidState RepairInvalidStateCli
   deriving stock (Eq, Show, Generic)
 
 data HealthcheckCli = HealthcheckCli
@@ -166,6 +168,13 @@ data ObserveOnceCli = ObserveOnceCli
   }
   deriving stock (Eq, Show, Generic)
 
+data RepairInvalidStateCli = RepairInvalidStateCli
+  { repairCliEventsPath :: FilePath
+  , repairCliStateDir :: FilePath
+  , repairCliExecute :: Bool
+  }
+  deriving stock (Eq, Show, Generic)
+
 data LoopCli = LoopCli
   { loopCliDomain :: CliDomain
   , loopCliEventsPath :: FilePath
@@ -244,6 +253,7 @@ cliCommandParser =
         <> command "run-issue-implement" (info (CliRunLoop <$> loopParser CliIssueImplement) (progDesc "Run one or more issue implementation watcher loop iterations"))
         <> command "run-issue-planning" (info (CliRunLoop <$> loopParser CliIssuePlanning) (progDesc "Run one or more issue planning watcher loop iterations"))
         <> command "guard-issue-planning" (info (CliGuardIssuePlanning <$> guardIssuePlanningParser) (progDesc "Guard an issue planning watcher and launch a repair thread on failure"))
+        <> command "repair-invalid-state" (info (CliRepairInvalidState <$> repairInvalidStateParser) (progDesc "Plan or apply a deterministic repair for an invalid watcher event log"))
     )
 
 healthcheckParser :: Parser HealthcheckCli
@@ -358,6 +368,13 @@ observeOnceParser =
     <*> optional (textOption "reason" "TEXT" "Blocked or incomplete reason")
     <*> fmap (maybe [] id) (optional (option reviewThreadIdsReader (long "review-thread-ids" <> metavar "ID,ID" <> help "Unresolved review thread ids")))
     <*> optional (textOption "comment" "TEXT" "Clean review comment")
+
+repairInvalidStateParser :: Parser RepairInvalidStateCli
+repairInvalidStateParser =
+  RepairInvalidStateCli
+    <$> eventsPathOption
+    <*> stateDirOption
+    <*> switch (long "execute" <> help "Archive and rewrite events.jsonl plus compatibility state files")
 
 loopParser :: CliDomain -> Parser LoopCli
 loopParser domain =

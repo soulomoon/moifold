@@ -17,6 +17,7 @@ import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
+import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit
 import CodexWatcher.GoldenReplay
 import CodexWatcher.IssueImplementWatcher
@@ -671,6 +672,7 @@ canonicalEventExamples =
   , IssueReviewHandoffInitializedEvent prNumber
   , IssueReviewHandoffStartedEvent prNumber
   , IssueImplementationCompletedEvent prNumber
+  , WatcherRecoveredInvalidState "synthetic recovery marker"
   , WatcherBlocked blockedReason
   , WatcherStopped stopReason
   ]
@@ -736,7 +738,69 @@ prop_eventLogRejectsEmptyReviewThreads =
       , "reviewThreadIds" .= ([] :: [Text])
       , "commitSha" .= ("0123456789abcdef" :: Text)
       , "workerTurnId" .= ("turn-worker" :: Text)
-      ]
+    ]
+
+prop_eventLogRepairIssue26MissingPlanReentersImplementation :: Bool
+prop_eventLogRepairIssue26MissingPlanReentersImplementation =
+  let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 26) (BranchName "codex/issue-26")
+      workerThread = ThreadId "019db372-3514-73e0-9a0c-cded70672e15"
+      prNumber' = PrNumber 29
+      invalidEvents =
+        [ IssueImplementInitialized issueConfig workerThread
+        , IssueTriageTurnStartedEvent (TurnId "019db372-35d2-79e0-aac2-a50b23a3ef26")
+        , IssueTriageNeedsImplementationEvent
+        , IssuePullRequestCreatedEvent prNumber'
+        , IssueImplementationCompletedEvent prNumber'
+        ]
+   in case repairIssueImplementEventLog invalidEvents of
+        Left _ -> False
+        Right plan ->
+          any isRecovery plan.repairInsertedEvents
+            && IssueImplementationCompletedEvent prNumber' `elem` plan.repairDroppedEvents
+            && case replayEventLog plan.repairRepairedEvents of
+              Right replay ->
+                case replay.replayState of
+                  SomeWatcherState (IssueImplementationReady _ (Just repairedPr) (WorkerIdle repairedThread)) ->
+                    repairedPr == prNumber' && repairedThread == workerThread
+                  _ -> False
+              Left _ -> False
+ where
+  isRecovery = \case
+    WatcherRecoveredInvalidState {} -> True
+    _ -> False
+
+prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete :: Bool
+prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete =
+  let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+      workerThread = ThreadId "worker-thread"
+      prNumber' = PrNumber 7
+      invalidEvents =
+        [ IssueImplementInitialized issueConfig workerThread
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent Nothing
+        , IssuePullRequestCreatedEvent prNumber'
+        , IssueImplementationCompletedEvent prNumber'
+        ]
+   in case repairIssueImplementEventLog invalidEvents of
+        Left _ -> False
+        Right plan ->
+          IssueImplementationCompletedEvent prNumber' `elem` plan.repairDroppedEvents
+            && case replayEventLog plan.repairRepairedEvents of
+              Right replay -> somePhase replay.replayState == Implementing
+              Left _ -> False
+
+prop_eventLogRepairRejectsValidEventLog :: IssueConfig -> ThreadId -> TurnId -> TurnId -> PrNumber -> Bool
+prop_eventLogRepairRejectsValidEventLog config workerThread planTurn implementationTurn prNumber' =
+  case repairIssueImplementEventLog
+    [ IssueImplementInitialized config workerThread
+    , IssuePlanTurnStartedEvent planTurn
+    , IssuePlanCompletedEvent Nothing
+    , IssuePullRequestCreatedEvent prNumber'
+    , IssueImplementationTurnStartedEvent implementationTurn
+    , IssueImplementationCompletedEvent prNumber'
+    ] of
+    Left _ -> True
+    Right _ -> False
 
 prop_protocolPrReviewWorkerCompletedReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn =
@@ -2463,6 +2527,9 @@ main = do
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
       , quickCheckResult prop_eventLogRejectsEmptyReviewThreads
+      , quickCheckResult prop_eventLogRepairIssue26MissingPlanReentersImplementation
+      , quickCheckResult prop_eventLogRepairCompletionWithoutImplementationTurnDropsComplete
+      , quickCheckResult prop_eventLogRepairRejectsValidEventLog
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked
