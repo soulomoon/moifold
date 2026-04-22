@@ -859,7 +859,7 @@ defaultEffectRuntimeConfig repo workdir stateDir =
       , turnRuntimeApprovalPolicy = "never"
       , turnRuntimeSandboxPolicy = "danger-full-access"
       , turnRuntimeInput = input
-      , turnRuntimeOutputSchema = Just structuredTurnOutputSchema
+      , turnRuntimeOutputSchema = Nothing
       , turnRuntimeCollaborationMode = Nothing
       }
 

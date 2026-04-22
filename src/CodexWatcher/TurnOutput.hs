@@ -45,7 +45,7 @@ structuredTurnOutputSchema =
 
 structuredTurnOutcomeInstructions :: Text
 structuredTurnOutcomeInstructions =
-  "Return only JSON matching the configured output schema. Use outcome=blocked with reason when you cannot proceed, outcome=incomplete with reason when follow-up is required, and outcome=complete with summary when the turn is done."
+  "Return only JSON with an outcome field. Use outcome=blocked with reason when you cannot proceed, outcome=incomplete with reason when follow-up is required, and outcome=complete with summary when the turn is done."
 
 plannerTurnInput :: Text
 plannerTurnInput =
