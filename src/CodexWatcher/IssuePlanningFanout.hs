@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -9,7 +10,9 @@ module CodexWatcher.IssuePlanningFanout
   , defaultIssuePlanningFanoutConfig
   , issueImplementerConfigJson
   , issueImplementerStateDir
+  , issuePlanningCompletionEvent
   , parseIssueImplementerConfigIssue
+  , plannerConfigFromState
   , planIssueImplementerLaunches
   , withLaunchThreadId
   ) where
@@ -60,6 +63,15 @@ planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues 
   fmap (issueImplementerLaunchPlan fanoutConfig plannerConfig) selectedIssues
  where
   selectedIssues = selectIssueImplementationStarts plannerConfig activeIssues openIssues
+
+plannerConfigFromState :: SomeWatcherState -> Maybe PlannerConfig
+plannerConfigFromState (SomeWatcherState (PlanningReady config)) = Just config
+plannerConfigFromState (SomeWatcherState (PlanningTurnActive config _activeTurn)) = Just config
+plannerConfigFromState _ = Nothing
+
+issuePlanningCompletionEvent :: WatcherEvent -> Bool
+issuePlanningCompletionEvent IssuePlanningTurnCompleted = True
+issuePlanningCompletionEvent _ = False
 
 issueImplementerLaunchPlan :: IssuePlanningFanoutConfig -> PlannerConfig -> IssueNumber -> IssueImplementerLaunchPlan
 issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber' =

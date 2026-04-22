@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
@@ -117,10 +118,8 @@ issueFanout args = do
       launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
       maybeEndpoint = healthcheckAppServerEndpoint args
   if hasFlag "--execute" args
-    then do
-      preparedLaunches <- traverse (uncurry (prepareIssueImplementerLaunch maybeEndpoint)) (zip [8000 ..] launches)
-      mapM_ writeIssueImplementerLaunch preparedLaunches
-    else mapM_ printIssueImplementerLaunch launches
+    then runIssueImplementerLaunches ExecuteActions maybeEndpoint launches
+    else runIssueImplementerLaunches DryRunActions Nothing launches
   putStrLn ("launches: " <> show (length launches))
 
 resolveFanoutOpenIssues :: [String] -> RepoName -> IO [IssueNumber]
@@ -163,6 +162,21 @@ loadIssueImplementerConfigIssue repo stateDir = do
           | configRepo == repo -> pure (Just issue)
           | otherwise -> pure Nothing
 
+runIssueImplementerLaunches :: ActionExecutionMode -> Maybe AppServerEndpoint -> [IssueImplementerLaunchPlan] -> IO ()
+runIssueImplementerLaunches DryRunActions _endpoint launches =
+  mapM_ printIssueImplementerLaunch launches
+runIssueImplementerLaunches ExecuteActions maybeEndpoint launches = do
+  mapM_ ensureIssueImplementerLaunchWritable launches
+  preparedLaunches <- traverse (uncurry (prepareIssueImplementerLaunch maybeEndpoint)) (zip [8000 ..] launches)
+  mapM_ writeIssueImplementerLaunch preparedLaunches
+
+ensureIssueImplementerLaunchWritable :: IssueImplementerLaunchPlan -> IO ()
+ensureIssueImplementerLaunchWritable launch = do
+  configExists <- doesFileExist launch.launchConfigPath
+  eventsExists <- doesFileExist launch.launchEventsPath
+  when (configExists || eventsExists) $
+    die ("refusing to overwrite existing issue implementer state: " <> launch.launchStateDir)
+
 prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> IO IssueImplementerLaunchPlan
 prepareIssueImplementerLaunch Nothing _requestId launch =
   pure launch
@@ -192,10 +206,7 @@ issueImplementerThreadStartOptions launch =
 
 writeIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
 writeIssueImplementerLaunch launch = do
-  configExists <- doesFileExist launch.launchConfigPath
-  eventsExists <- doesFileExist launch.launchEventsPath
-  when (configExists || eventsExists) $
-    die ("refusing to overwrite existing issue implementer state: " <> launch.launchStateDir)
+  ensureIssueImplementerLaunchWritable launch
   createDirectoryIfMissing True launch.launchStateDir
   writeJsonValue launch.launchConfigPath launch.launchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent
@@ -299,20 +310,45 @@ runAutomaticLoop domain args = do
       maybePidFile =
         lookupFlag "--pid-file" args
           <|> if shouldLoop then Just (stateDir </> pidFileNameForDomain domain) else Nothing
+      postTick = issuePlanningFanoutAfterTick args endpoint executionMode domain
   validateLoopDomain domain plannerThread
   validateRuntimeOwnerForExecution stateDir executionMode
-  runWithOptionalPidFile maybePidFile (runLoopIterations executor loopConfig domain shouldLoop maxIterations 1)
+  runWithOptionalPidFile maybePidFile (runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations 1)
 
-runLoopIterations :: ActionExecutor IO -> DaemonLoopConfig -> String -> Bool -> Int -> Int -> IO ()
-runLoopIterations executor loopConfig domain shouldLoop maxIterations iteration = do
+runLoopIterations :: ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO ()) -> Bool -> Int -> Int -> IO ()
+runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations iteration = do
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
     Left failure -> die (Text.unpack (formatDaemonLoopFailure failure))
     Right tick -> do
       validateLoopResultDomain domain tick
       printLoopTick domain iteration tick
+      postTick tick
   when (shouldLoop && iteration < maxIterations) $
-    runLoopIterations executor loopConfig domain shouldLoop maxIterations (iteration + 1)
+    runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
+
+issuePlanningFanoutAfterTick :: [String] -> AppServerEndpoint -> ActionExecutionMode -> String -> DaemonLoopTickResult -> IO ()
+issuePlanningFanoutAfterTick args endpoint executionMode domain tick =
+  case (domain, lookupFlag "--implementers-root" args, tick.loopObservedTick) of
+    ("issue-planning", Just implementersRoot, Just observedTick)
+      | issuePlanningCompletionEvent observedTick.daemonObservedEvent -> do
+          plannerConfig <- maybe (die "issue planning fanout requires a planner config in the replay state") pure (plannerConfigFromState tick.loopReplayResult.replayState)
+          openIssues <- resolveFanoutOpenIssues args plannerConfig.plannerRepo
+          activeIssues <- resolveFanoutActiveIssues args plannerConfig.plannerRepo implementersRoot
+          let fanoutConfig =
+                (defaultIssuePlanningFanoutConfig implementersRoot)
+                  { fanoutWorkdirRoot = lookupFlag "--implementer-workdir-root" args <|> lookupFlag "--workdir-root" args
+                  , fanoutBranchPrefix = Text.pack (maybe "codex/issue-" id (lookupFlag "--branch-prefix" args))
+                  , fanoutThreadPrefix = Text.pack (maybe "issue-worker-" id (lookupFlag "--thread-prefix" args))
+                  }
+              launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
+              launchEndpoint =
+                case executionMode of
+                  ExecuteActions -> Just endpoint
+                  DryRunActions -> Nothing
+          runIssueImplementerLaunches executionMode launchEndpoint launches
+          putStrLn ("planner fanout launches: " <> show (length launches))
+    _ -> pure ()
 
 printLoopTick :: String -> Int -> DaemonLoopTickResult -> IO ()
 printLoopTick domain iteration tick = do

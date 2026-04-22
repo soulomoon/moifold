@@ -461,6 +461,18 @@ prop_issuePlanningFanoutParsesImplementerConfig =
           Left _ -> True
           Right _ -> False
 
+prop_issuePlanningFanoutDetectsCompletionBoundary :: Bool
+prop_issuePlanningFanoutDetectsCompletionBoundary =
+  let config = PlannerConfig (RepoName "owner/name") 3
+      planningReady = SomeWatcherState (PlanningReady config)
+      planningActive = SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn")))
+      issueState = SomeWatcherState (IssueNeedsTriage (IssueConfig (RepoName "owner/name") (IssueNumber 42) (BranchName "codex/issue-42")) (WorkerIdle (ThreadId "worker-thread")))
+   in plannerConfigFromState planningReady == Just config
+        && plannerConfigFromState planningActive == Just config
+        && plannerConfigFromState issueState == Nothing
+        && issuePlanningCompletionEvent IssuePlanningTurnCompleted
+        && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
+
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
@@ -1681,6 +1693,7 @@ main = do
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
       , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
+      , quickCheckResult prop_issuePlanningFanoutDetectsCompletionBoundary
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
