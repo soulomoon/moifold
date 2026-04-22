@@ -48,10 +48,12 @@ library
     CodexWatcher.MigrationRehearsal
     CodexWatcher.Json
     CodexWatcher.Migration
+    CodexWatcher.Observation
     CodexWatcher.Protocol
     CodexWatcher.PromptTemplates
     CodexWatcher.PrReviewWatcher
     CodexWatcher.Runtime
+    CodexWatcher.RuntimeStatus
     CodexWatcher.RunnerGuard
     CodexWatcher.Snapshot
     CodexWatcher.StateMachine
@@ -77,6 +79,11 @@ executable codex-watcher-hs
   import:           warnings
   hs-source-dirs:   app
   main-is:          Main.hs
+  other-modules:
+    CodexWatcher.App.Common
+    CodexWatcher.App.Fanout
+    CodexWatcher.App.Migration
+    CodexWatcher.App.Observe
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,
@@ -93,8 +100,13 @@ executable codex-watcher-hs
 test-suite watcher-core-test
   import:           warnings
   type:             exitcode-stdio-1.0
-  hs-source-dirs:   test
+  hs-source-dirs:   test, app
   main-is:          Main.hs
+  other-modules:
+    CodexWatcher.App.Common
+    CodexWatcher.App.Fanout
+    CodexWatcher.App.Migration
+    CodexWatcher.App.Observe
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,
@@ -102,6 +114,8 @@ test-suite watcher-core-test
     codex-watcher-hs,
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
+    process >=1.6 && <1.7,
     QuickCheck >=2.14 && <3,
-    text >=2.0 && <3
+    text >=2.0 && <3,
+    unix >=2.8 && <2.9
   default-language: GHC2021

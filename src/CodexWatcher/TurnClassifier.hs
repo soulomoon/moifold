@@ -27,6 +27,7 @@ import CodexWatcher.Types
 import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', withObject, (.:?), (.!=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.List (find)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -46,6 +47,12 @@ data StructuredTurnOutcome
   | StructuredProblems Text
   | StructuredClean Text
   deriving stock (Eq, Show)
+
+data StructuredOutcomeSpec = StructuredOutcomeSpec
+  { structuredOutcomeAliases :: [Text]
+  , structuredOutcomeConstructor :: Text -> StructuredTurnOutcome
+  , structuredOutcomeFallback :: Text
+  }
 
 data ReviewerTurnReport = ReviewerTurnReport
   { reviewerReportStatus :: Maybe Text
@@ -90,41 +97,35 @@ instance FromJSON StructuredTurnOutcome where
     evidence <- objectValue .:? "evidence"
     let detail = firstNonEmpty [reason, summary, comment, evidence]
         withDetail constructor fallback = pure (constructor (maybe fallback id detail))
-    case normalize outcome of
-      "blocked" -> withDetail StructuredBlocked "blocked"
-      "cannot_proceed" -> withDetail StructuredBlocked "cannot proceed"
-      "cannot proceed" -> withDetail StructuredBlocked "cannot proceed"
-      "incomplete" -> withDetail StructuredIncomplete "incomplete"
-      "not_complete" -> withDetail StructuredIncomplete "not complete"
-      "not complete" -> withDetail StructuredIncomplete "not complete"
-      "needs_follow_up" -> withDetail StructuredIncomplete "needs follow-up"
-      "needs follow-up" -> withDetail StructuredIncomplete "needs follow-up"
-      "complete" -> withDetail StructuredComplete "complete"
-      "completed" -> withDetail StructuredComplete "complete"
-      "success" -> withDetail StructuredComplete "complete"
-      "ready_for_review" -> withDetail StructuredComplete "ready for review"
-      "ready for review" -> withDetail StructuredComplete "ready for review"
-      "pr_ready" -> withDetail StructuredComplete "PR ready"
-      "already_fixed" -> withDetail StructuredAlreadyFixed "already fixed"
-      "already fixed" -> withDetail StructuredAlreadyFixed "already fixed"
-      "already_resolved" -> withDetail StructuredAlreadyFixed "already resolved"
-      "already resolved" -> withDetail StructuredAlreadyFixed "already resolved"
-      "no_changes_needed" -> withDetail StructuredAlreadyFixed "no changes needed"
-      "needs_implementation" -> withDetail StructuredNeedsImplementation "needs implementation"
-      "needs implementation" -> withDetail StructuredNeedsImplementation "needs implementation"
-      "implement" -> withDetail StructuredNeedsImplementation "needs implementation"
-      "problems" -> withDetail StructuredProblems "problems found"
-      "problem" -> withDetail StructuredProblems "problems found"
-      "comments_added" -> withDetail StructuredProblems "comments added"
-      "comments added" -> withDetail StructuredProblems "comments added"
-      "changes_requested" -> withDetail StructuredProblems "changes requested"
-      "changes requested" -> withDetail StructuredProblems "changes requested"
-      "clean" -> withDetail StructuredClean "LGTM"
-      "lgtm" -> withDetail StructuredClean "LGTM"
-      "approved" -> withDetail StructuredClean "approved"
-      "no_issues" -> withDetail StructuredClean "no issues"
-      "no issues" -> withDetail StructuredClean "no issues"
-      other -> fail ("unsupported structured turn outcome: " <> Text.unpack other)
+    case find (matchesStructuredOutcome (normalize outcome)) structuredOutcomeSpecs of
+      Just spec -> withDetail spec.structuredOutcomeConstructor spec.structuredOutcomeFallback
+      Nothing -> fail ("unsupported structured turn outcome: " <> Text.unpack (normalize outcome))
+
+matchesStructuredOutcome :: Text -> StructuredOutcomeSpec -> Bool
+matchesStructuredOutcome outcome spec =
+  outcome `elem` spec.structuredOutcomeAliases
+
+structuredOutcomeSpecs :: [StructuredOutcomeSpec]
+structuredOutcomeSpecs =
+  [ StructuredOutcomeSpec ["blocked"] StructuredBlocked "blocked"
+  , StructuredOutcomeSpec ["cannot_proceed", "cannot proceed"] StructuredBlocked "cannot proceed"
+  , StructuredOutcomeSpec ["incomplete"] StructuredIncomplete "incomplete"
+  , StructuredOutcomeSpec ["not_complete", "not complete"] StructuredIncomplete "not complete"
+  , StructuredOutcomeSpec ["needs_follow_up", "needs follow-up"] StructuredIncomplete "needs follow-up"
+  , StructuredOutcomeSpec ["complete", "completed", "success"] StructuredComplete "complete"
+  , StructuredOutcomeSpec ["ready_for_review", "ready for review"] StructuredComplete "ready for review"
+  , StructuredOutcomeSpec ["pr_ready"] StructuredComplete "PR ready"
+  , StructuredOutcomeSpec ["already_fixed", "already fixed"] StructuredAlreadyFixed "already fixed"
+  , StructuredOutcomeSpec ["already_resolved", "already resolved"] StructuredAlreadyFixed "already resolved"
+  , StructuredOutcomeSpec ["no_changes_needed"] StructuredAlreadyFixed "no changes needed"
+  , StructuredOutcomeSpec ["needs_implementation", "needs implementation", "implement"] StructuredNeedsImplementation "needs implementation"
+  , StructuredOutcomeSpec ["problems", "problem"] StructuredProblems "problems found"
+  , StructuredOutcomeSpec ["comments_added", "comments added"] StructuredProblems "comments added"
+  , StructuredOutcomeSpec ["changes_requested", "changes requested"] StructuredProblems "changes requested"
+  , StructuredOutcomeSpec ["clean", "lgtm"] StructuredClean "LGTM"
+  , StructuredOutcomeSpec ["approved"] StructuredClean "approved"
+  , StructuredOutcomeSpec ["no_issues", "no issues"] StructuredClean "no issues"
+  ]
 
 instance FromJSON ReviewerTurnReport where
   parseJSON = withObject "ReviewerTurnReport" \objectValue -> do
@@ -158,13 +159,13 @@ classifyIssueTriageTurn turn =
     TurnFailed reason ->
       Just (ObservedIssueImplementBlocked (BlockedReason reason))
     TurnCompleted output
-      | not (hasMeaningfulOutput output) ->
-          Just (ObservedIssueImplementBlocked (BlockedReason "triage turn completed without output"))
+      | Just observation <- missingOutputBlocked "triage turn completed without output" ObservedIssueImplementBlocked output ->
+          Just observation
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssueTriage structured
-      | outputHasAny ["blocked", "cannot proceed"] output ->
-          Just (ObservedIssueImplementBlocked (BlockedReason (outputReason "triage turn reported blocked" output)))
-      | outputHasAny ["already_fixed", "already fixed", "already_resolved", "already resolved", "no changes needed"] output ->
+      | Just observation <- blockedOutputObservation "triage turn reported blocked" ObservedIssueImplementBlocked output ->
+          Just observation
+      | outputHasAny alreadyFixedOutputAliases output ->
           Just ObservedTriageAlreadyFixed
       | otherwise ->
           Just ObservedTriageNeedsImplementation
@@ -177,8 +178,8 @@ classifyIssuePlanningTurn turn =
     TurnFailed reason ->
       Just (ObservedPlanningBlocked (BlockedReason reason))
     TurnCompleted output
-      | not (hasMeaningfulOutput output) ->
-          Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without output"))
+      | Just observation <- missingOutputBlocked "planning turn completed without output" ObservedPlanningBlocked output ->
+          Just observation
       | Just (firstRequest : restRequests) <- output >>= parsePlanningIssueRequests ->
           Just (ObservedPlanningIssuesRequested (firstRequest : restRequests))
       | Just outputText <- output
@@ -188,8 +189,8 @@ classifyIssuePlanningTurn turn =
           Just (ObservedPlanningGraphUpdated graph)
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssuePlanning structured
-      | outputHasAny ["blocked", "cannot proceed"] output ->
-          Just (ObservedPlanningBlocked (BlockedReason (outputReason "planning turn reported blocked" output)))
+      | Just observation <- blockedOutputObservation "planning turn reported blocked" ObservedPlanningBlocked output ->
+          Just observation
       | otherwise ->
           Just ObservedPlanningTurnCompleted
 
@@ -201,12 +202,12 @@ classifyIssuePlanTurn turn =
     TurnFailed reason ->
       Just (ObservedIssueImplementBlocked (BlockedReason reason))
     TurnCompleted output
-      | not (hasMeaningfulOutput output) ->
-          Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without output"))
+      | Just observation <- missingOutputBlocked "plan turn completed without output" ObservedIssueImplementBlocked output ->
+          Just observation
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssuePlan structured
-      | outputHasAny ["blocked", "cannot proceed"] output ->
-          Just (ObservedIssueImplementBlocked (BlockedReason (outputReason "plan turn reported blocked" output)))
+      | Just observation <- blockedOutputObservation "plan turn reported blocked" ObservedIssueImplementBlocked output ->
+          Just observation
       | otherwise ->
           Just (ObservedPlanCompleted Nothing)
 
@@ -218,16 +219,16 @@ classifyIssueImplementationTurn maybePr turn =
     TurnFailed reason ->
       Just (ObservedImplementationBlocked (BlockedReason reason))
     TurnCompleted output
-      | not (hasMeaningfulOutput output) ->
-          Just (ObservedImplementationBlocked (BlockedReason "implementation turn completed without output"))
+      | Just observation <- missingOutputBlocked "implementation turn completed without output" ObservedImplementationBlocked output ->
+          Just observation
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssueImplementation maybePr structured
-      | outputHasAny ["blocked", "cannot proceed"] output ->
-          Just (ObservedImplementationBlocked (BlockedReason (outputReason "implementation turn reported blocked" output)))
-      | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
-          Just (ObservedImplementationIncomplete (outputReason "implementation turn reported incomplete" output))
+      | Just observation <- blockedOutputObservation "implementation turn reported blocked" ObservedImplementationBlocked output ->
+          Just observation
+      | Just observation <- incompleteOutputObservation "implementation turn reported incomplete" ObservedImplementationIncomplete output ->
+          Just observation
       | Just prNumber <- maybePr
-      , outputHasAny ["complete", "completed", "ready for review", "review handoff", "pr ready"] output ->
+      , outputHasAny implementationCompleteOutputAliases output ->
           Just (ObservedImplementationCompleted prNumber)
       | otherwise ->
           Just (ObservedImplementationIncomplete (outputReason "implementation turn completed without a completion marker" output))
@@ -240,14 +241,14 @@ classifyPrReviewWorkerTurn turn =
     TurnFailed reason ->
       Just (WorkerBlocked (BlockedReason reason))
     TurnCompleted output
-      | not (hasMeaningfulOutput output) ->
-          Just (WorkerBlocked (BlockedReason "worker turn completed without output"))
+      | Just outcome <- missingOutputBlocked "worker turn completed without output" WorkerBlocked output ->
+          Just outcome
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredPrReviewWorker structured
-      | outputHasAny ["blocked", "cannot proceed"] output ->
-          Just (WorkerBlocked (BlockedReason (outputReason "worker turn reported blocked" output)))
-      | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
-          Just (WorkerIncomplete (outputReason "worker turn reported incomplete" output))
+      | Just outcome <- blockedOutputObservation "worker turn reported blocked" WorkerBlocked output ->
+          Just outcome
+      | Just outcome <- incompleteOutputObservation "worker turn reported incomplete" WorkerIncomplete output ->
+          Just outcome
       | otherwise ->
           Just WorkerCompleted
 
@@ -259,17 +260,17 @@ classifyPrReviewReviewerTurn commit turn =
     TurnFailed reason ->
       Just (ReviewerBlocked (BlockedReason reason))
     TurnCompleted output
-      | not (hasMeaningfulOutput output) ->
-          Just (ReviewerBlocked (BlockedReason "reviewer turn completed without output"))
+      | Just outcome <- missingOutputBlocked "reviewer turn completed without output" ReviewerBlocked output ->
+          Just outcome
       | Just report <- output >>= parseReviewerTurnReport ->
           Just (validateReviewerTurnReport commit report)
-      | outputHasAny ["blocked", "cannot proceed"] output ->
-          Just (ReviewerBlocked (BlockedReason (outputReason "reviewer turn reported blocked" output)))
-      | outputHasAny ["incomplete", "not complete", "needs follow-up", "needs follow up"] output ->
-          Just (ReviewerIncomplete (outputReason "reviewer turn reported incomplete" output))
-      | outputHasAny ["problem", "problems", "commented", "comments added", "changes requested"] output ->
+      | Just outcome <- blockedOutputObservation "reviewer turn reported blocked" ReviewerBlocked output ->
+          Just outcome
+      | Just outcome <- incompleteOutputObservation "reviewer turn reported incomplete" ReviewerIncomplete output ->
+          Just outcome
+      | outputHasAny reviewerProblemsOutputAliases output ->
           Just (ReviewerIncomplete "reviewer reported problems without required reviewer-state JSON")
-      | outputHasAny ["clean", "lgtm", "approved", "no issues"] output ->
+      | outputHasAny reviewerCleanOutputAliases output ->
           Just (ReviewerIncomplete "clean review missing required reviewer-state JSON")
       | otherwise ->
           Just (ReviewerIncomplete (outputReason "reviewer turn completed without a clean/problems marker" output))
@@ -387,14 +388,11 @@ hasPlanningGraphFields objectValue =
     ]
 
 classifyStructuredIssuePlanning :: StructuredTurnOutcome -> Maybe IssuePlanningObservation
-classifyStructuredIssuePlanning = \case
-  StructuredBlocked reason -> Just (ObservedPlanningBlocked (BlockedReason reason))
-  StructuredIncomplete reason -> Just (ObservedPlanningBlocked (BlockedReason reason))
-  StructuredProblems reason -> Just (ObservedPlanningBlocked (BlockedReason reason))
-  StructuredComplete _reason -> Just ObservedPlanningTurnCompleted
-  StructuredNeedsImplementation _reason -> Just ObservedPlanningTurnCompleted
-  StructuredAlreadyFixed _reason -> Just ObservedPlanningTurnCompleted
-  StructuredClean _reason -> Just ObservedPlanningTurnCompleted
+classifyStructuredIssuePlanning structured =
+  maybe
+    (Just ObservedPlanningTurnCompleted)
+    Just
+    (structuredBlockedLikeObservation ObservedPlanningBlocked structured)
 
 classifyStructuredIssueTriage :: StructuredTurnOutcome -> Maybe IssueImplementObservation
 classifyStructuredIssueTriage = \case
@@ -407,33 +405,24 @@ classifyStructuredIssueTriage = \case
   StructuredClean _reason -> Just ObservedTriageAlreadyFixed
 
 classifyStructuredIssuePlan :: StructuredTurnOutcome -> Maybe IssueImplementObservation
-classifyStructuredIssuePlan = \case
-  StructuredBlocked reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
-  StructuredIncomplete reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
-  StructuredComplete _reason -> Just (ObservedPlanCompleted Nothing)
-  StructuredNeedsImplementation _reason -> Just (ObservedPlanCompleted Nothing)
-  StructuredAlreadyFixed _reason -> Just (ObservedPlanCompleted Nothing)
-  StructuredProblems reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
-  StructuredClean _reason -> Just (ObservedPlanCompleted Nothing)
+classifyStructuredIssuePlan structured =
+  maybe
+    (Just (ObservedPlanCompleted Nothing))
+    Just
+    (structuredBlockedLikeObservation ObservedIssueImplementBlocked structured)
 
 classifyStructuredIssueImplementation :: Maybe PrNumber -> StructuredTurnOutcome -> Maybe IssueImplementObservation
 classifyStructuredIssueImplementation maybePr = \case
   StructuredBlocked reason -> Just (ObservedImplementationBlocked (BlockedReason reason))
   StructuredIncomplete reason -> Just (ObservedImplementationIncomplete reason)
   StructuredComplete _reason ->
-    case maybePr of
-      Just prNumber -> Just (ObservedImplementationCompleted prNumber)
-      Nothing -> Just (ObservedImplementationIncomplete "implementation completed before a pull request was known")
+    Just (completedImplementationObservation maybePr)
   StructuredNeedsImplementation reason -> Just (ObservedImplementationIncomplete reason)
   StructuredAlreadyFixed _reason ->
-    case maybePr of
-      Just prNumber -> Just (ObservedImplementationCompleted prNumber)
-      Nothing -> Just (ObservedImplementationIncomplete "implementation completed before a pull request was known")
+    Just (completedImplementationObservation maybePr)
   StructuredProblems reason -> Just (ObservedImplementationIncomplete reason)
   StructuredClean _reason ->
-    case maybePr of
-      Just prNumber -> Just (ObservedImplementationCompleted prNumber)
-      Nothing -> Just (ObservedImplementationIncomplete "implementation completed before a pull request was known")
+    Just (completedImplementationObservation maybePr)
 
 classifyStructuredPrReviewWorker :: StructuredTurnOutcome -> Maybe WorkerOutcome
 classifyStructuredPrReviewWorker = \case
@@ -444,6 +433,18 @@ classifyStructuredPrReviewWorker = \case
   StructuredAlreadyFixed _reason -> Just WorkerCompleted
   StructuredProblems reason -> Just (WorkerIncomplete reason)
   StructuredClean _reason -> Just WorkerCompleted
+
+structuredBlockedLikeObservation :: (BlockedReason -> observation) -> StructuredTurnOutcome -> Maybe observation
+structuredBlockedLikeObservation toObservation = \case
+  StructuredBlocked reason -> Just (toObservation (BlockedReason reason))
+  StructuredIncomplete reason -> Just (toObservation (BlockedReason reason))
+  StructuredProblems reason -> Just (toObservation (BlockedReason reason))
+  _ -> Nothing
+
+completedImplementationObservation :: Maybe PrNumber -> IssueImplementObservation
+completedImplementationObservation = \case
+  Just prNumber -> ObservedImplementationCompleted prNumber
+  Nothing -> ObservedImplementationIncomplete "implementation completed before a pull request was known"
 
 runningStatuses :: [Text]
 runningStatuses =
@@ -460,6 +461,45 @@ failedStatuses =
 outputHasAny :: [Text] -> Maybe Text -> Bool
 outputHasAny needles output =
   maybe False (\text -> any (`Text.isInfixOf` normalize text) needles) output
+
+blockedOutputAliases :: [Text]
+blockedOutputAliases =
+  ["blocked", "cannot proceed"]
+
+incompleteOutputAliases :: [Text]
+incompleteOutputAliases =
+  ["incomplete", "not complete", "needs follow-up", "needs follow up"]
+
+alreadyFixedOutputAliases :: [Text]
+alreadyFixedOutputAliases =
+  ["already_fixed", "already fixed", "already_resolved", "already resolved", "no changes needed"]
+
+implementationCompleteOutputAliases :: [Text]
+implementationCompleteOutputAliases =
+  ["complete", "completed", "ready for review", "review handoff", "pr ready"]
+
+reviewerProblemsOutputAliases :: [Text]
+reviewerProblemsOutputAliases =
+  ["problem", "problems", "commented", "comments added", "changes requested"]
+
+reviewerCleanOutputAliases :: [Text]
+reviewerCleanOutputAliases =
+  ["clean", "lgtm", "approved", "no issues"]
+
+missingOutputBlocked :: Text -> (BlockedReason -> observation) -> Maybe Text -> Maybe observation
+missingOutputBlocked fallback toObservation output
+  | hasMeaningfulOutput output = Nothing
+  | otherwise = Just (toObservation (BlockedReason fallback))
+
+blockedOutputObservation :: Text -> (BlockedReason -> observation) -> Maybe Text -> Maybe observation
+blockedOutputObservation fallback toObservation output
+  | outputHasAny blockedOutputAliases output = Just (toObservation (BlockedReason (outputReason fallback output)))
+  | otherwise = Nothing
+
+incompleteOutputObservation :: Text -> (Text -> observation) -> Maybe Text -> Maybe observation
+incompleteOutputObservation fallback toObservation output
+  | outputHasAny incompleteOutputAliases output = Just (toObservation (outputReason fallback output))
+  | otherwise = Nothing
 
 hasMeaningfulOutput :: Maybe Text -> Bool
 hasMeaningfulOutput =
