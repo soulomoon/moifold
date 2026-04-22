@@ -1910,6 +1910,39 @@ runnerGuardRestartsMissingPidForIncompletePlanning = do
       Just problem' -> runnerGuardProblemAction problem' == RestartWatcher
       Nothing -> False
 
+runnerGuardRestartsMissingPidForWaitingPlanning :: IO Bool
+runnerGuardRestartsMissingPidForWaitingPlanning = do
+  let stateDir = "/tmp/codex-watcher-hs-runner-guard-waiting"
+      eventsPath = stateDir </> "events.jsonl"
+      pidPath = stateDir </> "watcher.pid"
+      events =
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
+        , IssuePlanningGraphUpdated (PlanningGraph [IssueNumber 42] [] [])
+        ]
+      config =
+        RunnerGuardConfig
+          { guardRepo = RepoName "owner/name"
+          , guardEventsPath = eventsPath
+          , guardStateDir = stateDir
+          , guardWatcherPidFile = pidPath
+          , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
+          , guardStaleSeconds = 999999
+          , guardRepairCwd = stateDir
+          , guardRestartWatcherCommand = "restart watcher"
+          , guardRestartGuardCommand = "restart guard"
+          }
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  writeFile eventsPath (unlines (fmap (Text.unpack . Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode) events))
+  guardProblem <- checkRunnerGuard config
+  removePathForcibly stateDir
+  assert "runner guard restarts missing pid while planning waits for ready issues" $
+    case guardProblem of
+      Just problem' -> runnerGuardProblemAction problem' == RestartWatcher
+      Nothing -> False
+
 runnerGuardRepairsInvalidPlanningEventLog :: IO Bool
 runnerGuardRepairsInvalidPlanningEventLog = do
   let stateDir = "/tmp/codex-watcher-hs-runner-guard-repair"
@@ -2702,6 +2735,7 @@ main = do
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
+  runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   if
     all isSuccess results
@@ -2721,6 +2755,7 @@ main = do
       && automaticImplementationHandoffOk
       && runnerGuardOk
       && runnerGuardRestartOk
+      && runnerGuardWaitingRestartOk
       && runnerGuardRepairOk
     then pure ()
     else exitFailure

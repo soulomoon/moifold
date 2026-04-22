@@ -271,6 +271,8 @@ checkReplayState config events = \case
     staleProblem config "issue planning watcher has not started a planner turn" ["last event: " <> lastEventName events]
   SomeWatcherState (PlanningTurnActive _ activeTurn) ->
     checkActivePlannerTurn config activeTurn
+  SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
+    pure Nothing
   SomeWatcherState (CompleteState {}) ->
     pure Nothing
   state ->
