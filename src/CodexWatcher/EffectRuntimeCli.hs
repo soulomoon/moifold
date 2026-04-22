@@ -27,23 +27,25 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
     , effectRuntimePlannerTurn =
-        (turnConfig (plannerTurnInputForScope scopeIssues))
+        (structuredTurnConfig (plannerTurnInputForScope scopeIssues))
           { turnRuntimeCollaborationMode =
               Just
                 (defaultPlanCollaborationMode (issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues))
           }
-    , effectRuntimeWorkerTurn = turnConfig prReviewWorkerTurnInput
-    , effectRuntimeIssueTriageTurn = turnConfig issueTriageTurnInput
+    , effectRuntimeWorkerTurn = structuredTurnConfig prReviewWorkerTurnInput
+    , effectRuntimeIssueTriageTurn = structuredTurnConfig issueTriageTurnInput
     , effectRuntimeIssuePlanTurn =
-        (turnConfig issuePlanTurnInput)
+        (structuredTurnConfig issuePlanTurnInput)
           { turnRuntimeCollaborationMode =
               Just (defaultPlanCollaborationMode "Issue-specific plan-mode instructions are generated when the plan turn starts.")
           }
-    , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput
-    , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit."
+    , effectRuntimeIssueImplementationTurn = structuredTurnConfig issueImplementationTurnInput
+    , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit." Nothing
     }
  where
-  turnConfig input =
+  structuredTurnConfig input =
+    turnConfig input (Just structuredTurnOutputSchema)
+  turnConfig input outputSchema =
     TurnRuntimeConfig
       { turnRuntimeCwd = workdir
       , turnRuntimeModel = defaultModel
@@ -51,7 +53,7 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
       , turnRuntimeApprovalPolicy = defaultApprovalPolicy
       , turnRuntimeSandboxPolicy = defaultSandboxPolicy
       , turnRuntimeInput = input
-      , turnRuntimeOutputSchema = Nothing
+      , turnRuntimeOutputSchema = outputSchema
       , turnRuntimeCollaborationMode = Nothing
       }
 

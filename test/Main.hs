@@ -18,6 +18,7 @@ import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
+import CodexWatcher.EffectRuntimeCli
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.EventLogRepair
@@ -136,9 +137,6 @@ instance Arbitrary BranchName where
 
 instance Arbitrary ReviewThreadId where
   arbitrary = ReviewThreadId . Text.pack <$> listOf1 (elements ['a' .. 'z'])
-
-instance Arbitrary (NonEmpty ReviewThreadId) where
-  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
 
 instance Arbitrary CommitSha where
   arbitrary = CommitSha . Text.pack <$> vectorOf 12 (elements (['a' .. 'f'] <> ['0' .. '9']))
@@ -1343,6 +1341,13 @@ actionIsTurnStartWithInput threadId input action =
         lookupValue "input" request.requestParams == Just (toJSON [object ["type" .= ("text" :: Text), "text" .= input]])
       _ -> False
 
+actionTurnOutputSchema :: PlannedAction -> Maybe Value
+actionTurnOutputSchema = \case
+  PlannedAppServerRequest request ->
+    lookupValue "outputSchema" request.requestParams
+  _ ->
+    Nothing
+
 prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker :: IssueConfig -> ActiveTurn -> ActiveTurn -> Bool
 prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planningTurn implementationTurn =
   case step (IssueInPlanMode config (WorkerActive planningTurn)) (IssuePlanCompleted (Just implementationTurn)) of
@@ -1377,6 +1382,29 @@ prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
         && actionIsTurnStartWithInput threadId "worker prompt" (actions !! 3)
         && compiled.compiledNextRequestId == 20
 
+prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas :: Bool
+prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas =
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 26) (BranchName "codex/issue-26")
+      prConfig = PrConfig repo (PrNumber 29) (BranchName "codex/issue-26")
+      plannerThread = ThreadId "planner"
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      compiled =
+        compileEffectPlan
+          (defaultEffectRuntimeConfig repo "/tmp/work" "/tmp/state")
+          [ SomeEffect (StartPlannerTurn plannerThread)
+          , SomeEffect (StartIssueTriageWorkerTurn workerThread)
+          , SomeEffect (StartIssuePlanWorkerTurn issueConfig workerThread)
+          , SomeEffect (StartIssueImplementationWorkerTurn workerThread)
+          , SomeEffect (StartWorkerTurn workerThread)
+          , SomeEffect (StartReviewerTurn prConfig (CommitSha "abc123") reviewerThread)
+          ]
+      actions = compiled.compiledActions
+   in length actions == 6
+        && all ((== Just structuredTurnOutputSchema) . actionTurnOutputSchema) (take 5 actions)
+        && actionTurnOutputSchema (actions !! 5) == Just reviewerTurnOutputSchema
+
 prop_threadDeveloperPromptTemplatesPortNodeProtocols :: Bool
 prop_threadDeveloperPromptTemplatesPortNodeProtocols =
   let prConfig = PrConfig (RepoName "soulomoon/mlf2") (PrNumber 29) (BranchName "codex/issue-26")
@@ -1393,6 +1421,9 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
         , "Completion contract:"
         , "remaining_unresolved_thread_ids"
         , "/tmp/state/pr29/agent-state.json"
+        , "Stage only files related to the current issue/PR"
+        , "never stage watcher state or runtime files"
+        , "If unrelated dirty changes make safe staging unclear"
         ]
         && promptContainsAll
           reviewerPrompt
@@ -1407,6 +1438,10 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           , "/tmp/state/issue26/issue-plan.md"
           , "gh auth setup-git"
           , "PR review watcher handles review threads after handoff"
+          , "`issue_status: \"complete\"` means PR-ready handoff"
+          , "does not mean the GitHub issue is closed"
+          , "watcher verifies PR merge and GitHub issue closed state"
+          , "stage only files related to this issue"
           ]
         && promptContainsAll
           plannerPrompt
@@ -1452,6 +1487,27 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
     , "outcome=complete with a summary"
     ]
     && reviewerPromptVersion == "haskell-pro-style-v3-agent-principle"
+
+prop_promptPipelineAlignmentContracts :: Bool
+prop_promptPipelineAlignmentContracts =
+  promptContainsAll
+    plannerTurnInput
+    [ "For fanout decisions, return one JSON object with outcome=complete, ready_issues, blocked_issues, and dependencies"
+    , "Bare {\"outcome\":\"complete\"} is only allowed when all scoped work is finished"
+    , "Do not return bare {\"outcome\":\"complete\"} while any open scoped work or pending dependency decision remains"
+    ]
+    && promptContainsAll
+      issueImplementationTurnInput
+      [ "Never mutate watcher events.jsonl"
+      , "pid/lock/runtime-owner files"
+      , "Only write state files explicitly named by the current thread developer instructions"
+      ]
+    && promptContainsAll
+      prReviewWorkerTurnInput
+      [ "Never mutate watcher events.jsonl"
+      , "pid/lock/runtime-owner files"
+      , "Only write state files explicitly named by the completion contract"
+      ]
 
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions :: Bool
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
@@ -3045,8 +3101,10 @@ main = do
       , quickCheckResult prop_turnClassifierBlocksMissingOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
+      , quickCheckResult prop_defaultEffectRuntimeConfigUsesTurnOutputSchemas
       , quickCheckResult prop_threadDeveloperPromptTemplatesPortNodeProtocols
       , quickCheckResult prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple
+      , quickCheckResult prop_promptPipelineAlignmentContracts
       , quickCheckResult prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState

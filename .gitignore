@@ -6,3 +6,5 @@ cabal.sandbox.config
 *.dyn_hi
 *.dyn_o
 result
+.DS_Store
+bin/
