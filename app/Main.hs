@@ -822,7 +822,7 @@ shellQuoteText :: Text.Text -> Text.Text
 shellQuoteText text =
   "'" <> Text.replace "'" "'\"'\"'" text <> "'"
 
-runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO ()) -> Bool -> Int -> Int -> IO ()
+runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO Bool) -> Bool -> Int -> Int -> IO ()
 runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
@@ -832,7 +832,8 @@ runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop m
     Right tick -> do
       validateLoopResultDomain domain tick
       printLoopTick domain iteration tick
-      postTick tick
+      shouldStopAfterTick <- postTick tick
+      when shouldStopAfterTick (writeIORef stopRequested True)
   shouldStop <- readIORef stopRequested
   when (shouldLoop && not shouldStop && iteration < maxIterations) $
     runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
@@ -845,35 +846,126 @@ recordInvalidReplayBlockState loopConfig = \case
     LazyByteString.writeFile (stateDir </> "block-state.json") (encode (repairFailureBlockStateJson replayFailure))
   _ -> pure ()
 
-issuePlanningFanoutAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
+issuePlanningFanoutAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
 issuePlanningFanoutAfterTick cli endpoint executionMode tick =
-  case (cli.loopCliDomain, cli.loopCliImplementersRoot, tick.loopObservedTick) of
-    (CliIssuePlanning, Just implementersRoot, Just observedTick)
-      | issuePlanningCompletionEvent observedTick.daemonObservedEvent -> do
-          plannerConfig <- maybe (die "issue planning fanout requires a planner config in the replay state") pure (plannerConfigFromState tick.loopReplayResult.replayState)
-          readyIssues <- resolveFanoutReadyIssues observedTick.daemonObservedEvent
-          activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
-          let fanoutConfig =
-                (defaultIssuePlanningFanoutConfig implementersRoot)
-                  { fanoutWorkdirRoot = firstJust cli.loopCliImplementerWorkdirRoot cli.loopCliWorkdirRoot
-                  , fanoutBranchPrefix = cli.loopCliBranchPrefix
-                  , fanoutThreadPrefix = cli.loopCliThreadPrefix
-                  }
-              launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues
-              launchEndpoint =
-                case executionMode of
-                  ExecuteActions -> Just endpoint
-                  DryRunActions -> Nothing
-          childLaunch <-
-            issueImplementerChildLaunchMode
-              cli.loopCliStartChildren
-              (Just cli.loopCliPollSeconds)
-              cli.loopCliChildPollSeconds
-              executionMode
-              (Just endpoint)
-          runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
-          putStrLn ("planner fanout launches: " <> show (length launches))
-    _ -> pure ()
+  case (cli.loopCliDomain, cli.loopCliImplementersRoot) of
+    (CliIssuePlanning, Just implementersRoot) -> do
+      completedFromObserved <- maintainObservedPlanningState implementersRoot
+      completedFromReplay <- maintainReplayPlanningState implementersRoot
+      pure (completedFromObserved || completedFromReplay)
+    _ -> pure False
+ where
+  maintainObservedPlanningState implementersRoot =
+    case tick.loopObservedTick of
+      Just observedTick
+        | issuePlanningCompletionEvent observedTick.daemonObservedEvent -> do
+            plannerConfig <- maybe (die "issue planning fanout requires a planner config in the observed state") pure (plannerConfigFromState observedTick.daemonObservedState)
+            readyIssues <- resolveFanoutReadyIssues observedTick.daemonObservedEvent
+            maintainReadyIssueImplementers cli endpoint executionMode implementersRoot observedTick.daemonObservedState plannerConfig readyIssues
+      _ -> pure False
+  maintainReplayPlanningState implementersRoot =
+    case tick.loopReplayResult.replayState of
+      SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig graph) ->
+        maintainReadyIssueImplementers cli endpoint executionMode implementersRoot tick.loopReplayResult.replayState plannerConfig graph.planningReadyIssues
+      _ -> pure False
+
+data IssueImplementerRuntimeStatus
+  = IssueImplementerMissing
+  | IssueImplementerActiveStopped
+  | IssueImplementerActiveRunning
+  | IssueImplementerTerminal
+  deriving (Eq, Show)
+
+maintainReadyIssueImplementers :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> FilePath -> SomeWatcherState -> PlannerConfig -> [IssueNumber] -> IO Bool
+maintainReadyIssueImplementers cli endpoint executionMode implementersRoot planningState plannerConfig readyIssues = do
+  let fanoutConfig =
+        (defaultIssuePlanningFanoutConfig implementersRoot)
+          { fanoutWorkdirRoot = firstJust cli.loopCliImplementerWorkdirRoot cli.loopCliWorkdirRoot
+          , fanoutBranchPrefix = cli.loopCliBranchPrefix
+          , fanoutThreadPrefix = cli.loopCliThreadPrefix
+          }
+  statuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
+  activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
+  let launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues
+      launchEndpoint =
+        case executionMode of
+          ExecuteActions -> Just endpoint
+          DryRunActions -> Nothing
+      stoppedActiveLaunches =
+        [ issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber'
+        | (issueNumber', IssueImplementerActiveStopped) <- zip readyIssues statuses
+        ]
+      allReadyIssuesTerminal =
+        not (null readyIssues) && all (== IssueImplementerTerminal) statuses
+  childLaunch <-
+    issueImplementerChildLaunchMode
+      cli.loopCliStartChildren
+      (Just cli.loopCliPollSeconds)
+      cli.loopCliChildPollSeconds
+      executionMode
+      (Just endpoint)
+  runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
+  mapM_ (startIssueImplementerChild childLaunch) stoppedActiveLaunches
+  putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
+  putStrLn ("planner fanout launches: " <> show (length launches))
+  putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
+  if allReadyIssuesTerminal
+    then do
+      markPlanningReadyIssuesFixed cli planningState
+      pure False
+    else pure False
+
+issueImplementerRuntimeStatus :: IssuePlanningFanoutConfig -> PlannerConfig -> IssueNumber -> IO IssueImplementerRuntimeStatus
+issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
+  let stateDir = issueImplementerStateDir fanoutConfig.fanoutImplementersRoot plannerConfig.plannerRepo issueNumber'
+      eventsPath = stateDir </> "events.jsonl"
+      configPath = stateDir </> "config.json"
+  configExists <- doesFileExist configPath
+  eventsExists <- doesFileExist eventsPath
+  if not configExists && not eventsExists
+    then pure IssueImplementerMissing
+    else do
+      running <- issueImplementerPidRunning stateDir
+      if not eventsExists
+        then pure (if running then IssueImplementerActiveRunning else IssueImplementerActiveStopped)
+        else do
+          loaded <- loadEventLogFile eventsPath
+          case loaded of
+            Left _failure ->
+              pure (if running then IssueImplementerActiveRunning else IssueImplementerActiveStopped)
+            Right events ->
+              case replayEventLog events of
+                Left _failure ->
+                  pure (if running then IssueImplementerActiveRunning else IssueImplementerActiveStopped)
+                Right replay
+                  | someDomain replay.replayState == IssueImplement && isTerminalPhase (somePhase replay.replayState) ->
+                      pure IssueImplementerTerminal
+                  | running ->
+                      pure IssueImplementerActiveRunning
+                  | otherwise ->
+                      pure IssueImplementerActiveStopped
+
+issueImplementerPidRunning :: FilePath -> IO Bool
+issueImplementerPidRunning stateDir = do
+  let pidPath = stateDir </> "issue-watcher.pid"
+  exists <- doesFileExist pidPath
+  if not exists
+    then pure False
+    else do
+      pidText <- Text.strip . Text.pack <$> readFile pidPath
+      if Text.null pidText
+        then pure False
+        else isPidRunning pidText
+
+markPlanningReadyIssuesFixed :: LoopCli -> SomeWatcherState -> IO ()
+markPlanningReadyIssuesFixed cli planningState =
+  case issuePlanningObserve planningState ObservedPlanningReadyIssuesFixed of
+    Left reason ->
+      die ("failed to mark planning ready issues fixed: " <> Text.unpack reason)
+    Right fixedTick -> do
+      appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath fixedTick.issuePlanningTickEvent
+      mapM_ (writeCompatibilityLaunch ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir fixedTick.issuePlanningTickState)
+      putStrLn "planner ready issues fixed; re-entering planning"
 
 resolveFanoutReadyIssues :: WatcherEvent -> IO [IssueNumber]
 resolveFanoutReadyIssues = \case

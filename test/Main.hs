@@ -285,13 +285,14 @@ prop_plannerCompletionReturnsToReady config activeTurn =
       phaseOf state == Complete
         && SomeEffect StopDaemon `elem` effects
 
-prop_plannerGraphUpdateCompletesAndRecords :: PlannerConfig -> ActiveTurn -> PlanningGraph -> Bool
-prop_plannerGraphUpdateCompletesAndRecords config activeTurn graph =
+prop_plannerGraphUpdateWaitsAndRecords :: PlannerConfig -> ActiveTurn -> PlanningGraph -> Bool
+prop_plannerGraphUpdateWaitsAndRecords config activeTurn graph =
   case step (PlanningTurnActive config activeTurn) (PlannerUpdatedGraph graph) of
     Decision state effects ->
-      phaseOf state == Complete
+      phaseOf state == Initialized
         && any effectIsRecordPlanningGraph effects
-        && SomeEffect StopDaemon `elem` effects
+        && SomeEffect SleepUntilNextPoll `elem` effects
+        && not (SomeEffect StopDaemon `elem` effects)
 
 prop_plannerIssueCreationReturnsToPlanning :: PlannerConfig -> ActiveTurn -> IssueCreationRequest -> Bool
 prop_plannerIssueCreationReturnsToPlanning config activeTurn request =
@@ -501,8 +502,8 @@ prop_eventLogIssuePlanningIssueCreationReturnsReady config plannerThread planner
           _ -> False
     Left _ -> False
 
-prop_eventLogIssuePlanningGraphCompletes :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
-prop_eventLogIssuePlanningGraphCompletes config plannerThread plannerTurn graph =
+prop_eventLogIssuePlanningGraphWaitsForReadyIssues :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
+prop_eventLogIssuePlanningGraphWaitsForReadyIssues config plannerThread plannerTurn graph =
   case replayEventLog
     [ IssuePlanningInitialized config
     , IssuePlanningTurnStarted plannerThread plannerTurn
@@ -510,12 +511,26 @@ prop_eventLogIssuePlanningGraphCompletes config plannerThread plannerTurn graph 
     ] of
     Right replay ->
       someDomain replay.replayState == IssuePlanning
-        && somePhase replay.replayState == Complete
+        && somePhase replay.replayState == Initialized
         && case replay.replayEffects of
           _initialEffects : _startEffects : graphEffects : _ ->
             any effectIsRecordPlanningGraph graphEffects
-              && SomeEffect StopDaemon `elem` graphEffects
+              && SomeEffect SleepUntilNextPoll `elem` graphEffects
+              && not (SomeEffect StopDaemon `elem` graphEffects)
           _ -> False
+    Left _ -> False
+
+prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
+prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning config plannerThread plannerTurn graph =
+  case replayEventLog
+    [ IssuePlanningInitialized config
+    , IssuePlanningTurnStarted plannerThread plannerTurn
+    , IssuePlanningGraphUpdated graph
+    , IssuePlanningReadyIssuesFixed
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssuePlanning
+        && somePhase replay.replayState == Initialized
     Left _ -> False
 
 prop_eventLogCannotCompletePlanningBeforeStart :: PlannerConfig -> Bool
@@ -556,17 +571,22 @@ prop_issuePlanningWatcherCreatesIssuesBeforeReplanning config threadId turnId re
             Left _ -> False
         Left _ -> False
 
-prop_issuePlanningWatcherRecordsGraphBeforeFanout :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
-prop_issuePlanningWatcherRecordsGraphBeforeFanout config threadId turnId graph =
+prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
+prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits config threadId turnId graph =
   let ready = SomeWatcherState (PlanningReady config)
    in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
         Right started ->
           case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningGraphUpdated graph) of
             Right graphed ->
               issuePlanningTickEvent graphed == IssuePlanningGraphUpdated graph
-                && somePhase graphed.issuePlanningTickState == Complete
+                && somePhase graphed.issuePlanningTickState == Initialized
                 && any effectIsRecordPlanningGraph graphed.issuePlanningTickEffects
-                && SomeEffect StopDaemon `elem` graphed.issuePlanningTickEffects
+                && SomeEffect SleepUntilNextPoll `elem` graphed.issuePlanningTickEffects
+                && case issuePlanningObserve graphed.issuePlanningTickState ObservedPlanningReadyIssuesFixed of
+                  Right fixed ->
+                    issuePlanningTickEvent fixed == IssuePlanningReadyIssuesFixed
+                      && somePhase fixed.issuePlanningTickState == Initialized
+                  Left _ -> False
             Left _ -> False
         Left _ -> False
 
@@ -620,13 +640,15 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
   let config = PlannerConfig (RepoName "owner/name") 3 []
       planningReady = SomeWatcherState (PlanningReady config)
       planningActive = SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn")))
+      planningWaiting = SomeWatcherState (PlanningWaitingForReadyIssues config graph)
       issueState = SomeWatcherState (IssueNeedsTriage (IssueConfig (RepoName "owner/name") (IssueNumber 42) (BranchName "codex/issue-42")) (WorkerIdle (ThreadId "worker-thread")))
       graph = PlanningGraph [IssueNumber 1] [BlockedPlanningIssue (IssueNumber 2) [IssueNumber 1] "wait"] [IssueDependency (IssueNumber 2) [IssueNumber 1]]
    in plannerConfigFromState planningReady == Just config
         && plannerConfigFromState planningActive == Just config
+        && plannerConfigFromState planningWaiting == Just config
         && plannerConfigFromState issueState == Nothing
         && issuePlanningCompletionEvent (IssuePlanningGraphUpdated graph)
-        && issuePlanningCompletionEvent IssuePlanningTurnCompleted
+        && not (issuePlanningCompletionEvent IssuePlanningTurnCompleted)
         && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested [IssueCreationRequest "subissue" "details" Nothing]))
         && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
 
@@ -647,6 +669,7 @@ canonicalEventExamples =
   , IssuePlanningTurnStarted plannerThread plannerTurn
   , IssuePlanningIssuesRequested [IssueCreationRequest "Subissue title" "Subissue body" Nothing]
   , IssuePlanningGraphUpdated planningGraph
+  , IssuePlanningReadyIssuesFixed
   , IssuePlanningTurnCompleted
   , PrReviewInitialized prConfig workerThread reviewerThread
   , PrReviewUnresolvedFound (ReviewThreadId "review-thread-1" :| [ReviewThreadId "review-thread-2"]) commit workerTurn
@@ -1836,7 +1859,7 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
       events =
         [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
-        , IssuePlanningGraphUpdated (PlanningGraph [IssueNumber 42] [] [])
+        , IssuePlanningTurnCompleted
         ]
       config =
         RunnerGuardConfig
@@ -2364,8 +2387,8 @@ automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
       putStrLn ("FAIL automatic planning issue creation: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
-automaticDaemonLoopPlanningGraphCompletesAndRecords :: IO Bool
-automaticDaemonLoopPlanningGraphCompletesAndRecords = do
+automaticDaemonLoopPlanningGraphWaitsAndRecords :: IO Bool
+automaticDaemonLoopPlanningGraphWaitsAndRecords = do
   let repo = RepoName "soulomoon/mlf2"
       graph =
         PlanningGraph
@@ -2411,9 +2434,9 @@ automaticDaemonLoopPlanningGraphCompletesAndRecords = do
       results <-
         sequence
           [ assert "planning graph emits graph update event" (observedEvent == Just (IssuePlanningGraphUpdated graph))
-          , assert "planning graph reaches complete" (maybe False ((== Complete) . somePhase . daemonObservedState) tick.loopObservedTick)
+          , assert "planning graph waits for ready issues" (maybe False ((== Initialized) . somePhase . daemonObservedState) tick.loopObservedTick)
           , assert "planning graph writes graph state" (FakeWriteJson expectedPath (toJSON graph) `elem` calls)
-          , assert "planning graph stops daemon after recording" (FakeStop `elem` calls)
+          , assert "planning graph sleeps instead of stopping" (FakeSleep `elem` calls && not (FakeStop `elem` calls))
           ]
       pure (and results)
     Left failure -> do
@@ -2566,7 +2589,7 @@ main = do
       , quickCheckResult prop_issueImplementationIncompleteRestartsWorker
       , quickCheckResult prop_issueImplementationBlockedStops
       , quickCheckResult prop_plannerCompletionReturnsToReady
-      , quickCheckResult prop_plannerGraphUpdateCompletesAndRecords
+      , quickCheckResult prop_plannerGraphUpdateWaitsAndRecords
       , quickCheckResult prop_plannerIssueCreationReturnsToPlanning
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       , quickCheckResult prop_eventLogFullPrReviewPathCompletes
@@ -2585,11 +2608,12 @@ main = do
       , quickCheckResult prop_issueImplementWatcherBlockedStops
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
-      , quickCheckResult prop_eventLogIssuePlanningGraphCompletes
+      , quickCheckResult prop_eventLogIssuePlanningGraphWaitsForReadyIssues
+      , quickCheckResult prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
       , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
       , quickCheckResult prop_issuePlanningWatcherCreatesIssuesBeforeReplanning
-      , quickCheckResult prop_issuePlanningWatcherRecordsGraphBeforeFanout
+      , quickCheckResult prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
       , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
@@ -2672,7 +2696,7 @@ main = do
   observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningIssueCreationOk <- automaticDaemonLoopPlanningIssueCreationRequestsReplanning
-  automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphCompletesAndRecords
+  automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphWaitsAndRecords
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff

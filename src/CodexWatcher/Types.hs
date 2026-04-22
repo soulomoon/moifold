@@ -336,6 +336,11 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> ActiveTurn
     -> WatcherState 'IssuePlanning 'PlanMode
 
+  PlanningWaitingForReadyIssues
+    :: PlannerConfig
+    -> PlanningGraph
+    -> WatcherState 'IssuePlanning 'Initialized
+
   IssueNeedsTriage
     :: IssueConfig
     -> WorkerThread 'Idle
@@ -419,6 +424,7 @@ domainOf _ = knownDomain @domain
 phaseOf :: WatcherState domain phase -> Phase
 phaseOf PlanningReady {} = Initialized
 phaseOf PlanningTurnActive {} = PlanMode
+phaseOf PlanningWaitingForReadyIssues {} = Initialized
 phaseOf IssueNeedsTriage {} = Triage
 phaseOf IssueTriageActive {} = Triage
 phaseOf IssuePlanReady {} = PlanMode

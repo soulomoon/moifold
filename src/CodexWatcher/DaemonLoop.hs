@@ -100,6 +100,8 @@ runFromState executor config events replay =
     SomeWatcherState (PlanningTurnActive _ activeTurn) ->
       observeActiveTurn executor config events replay activeTurn \turn ->
         DaemonIssuePlanningObservation <$> classifyIssuePlanningTurn turn
+    SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
+      idle executor config replay "issue planning is waiting for ready issues"
     SomeWatcherState (IssueNeedsTriage _ (WorkerIdle workerThread)) ->
       prestartAndObserve executor config events StartIssueTriageWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedTriageTurnStarted)
     SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->

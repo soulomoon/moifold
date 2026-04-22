@@ -9,6 +9,7 @@ module CodexWatcher.IssuePlanningFanout
   , IssuePlanningFanoutConfig (..)
   , defaultIssuePlanningFanoutConfig
   , issueImplementerConfigJson
+  , issueImplementerLaunchPlan
   , issueImplementerStateDir
   , issuePlanningCompletionEvent
   , parseIssueImplementerConfigIssue
@@ -67,11 +68,11 @@ planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues readyIssues
 plannerConfigFromState :: SomeWatcherState -> Maybe PlannerConfig
 plannerConfigFromState (SomeWatcherState (PlanningReady config)) = Just config
 plannerConfigFromState (SomeWatcherState (PlanningTurnActive config _activeTurn)) = Just config
+plannerConfigFromState (SomeWatcherState (PlanningWaitingForReadyIssues config _graph)) = Just config
 plannerConfigFromState _ = Nothing
 
 issuePlanningCompletionEvent :: WatcherEvent -> Bool
 issuePlanningCompletionEvent IssuePlanningGraphUpdated {} = True
-issuePlanningCompletionEvent IssuePlanningTurnCompleted = True
 issuePlanningCompletionEvent _ = False
 
 issueImplementerLaunchPlan :: IssuePlanningFanoutConfig -> PlannerConfig -> IssueNumber -> IssueImplementerLaunchPlan

@@ -11,7 +11,7 @@ module CodexWatcher.CompatibilityState
   ) where
 
 import CodexWatcher.Types
-import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import System.FilePath ((</>))
@@ -32,6 +32,11 @@ compatibilityStateWrites stateDir state =
     SomeWatcherState (PlanningTurnActive config activeTurn) ->
       [ write "planner-state.json" (plannerStateJson config "active")
       , write "daemon-state.json" (activeDaemonJson "plan" activeTurn)
+      ]
+    SomeWatcherState (PlanningWaitingForReadyIssues config graph) ->
+      [ write "planner-state.json" (plannerStateJson config "waiting_ready_issues")
+      , write "planning-state.json" (toJSON graph)
+      , write "daemon-state.json" idleDaemonJson
       ]
     SomeWatcherState (IssueNeedsTriage config (WorkerIdle _threadId)) ->
       [ write "issue-state.json" (issueStateJson config "triage" Nothing Nothing)
