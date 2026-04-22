@@ -53,6 +53,8 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as ByteString.Char8
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.Foldable (toList)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -325,7 +327,8 @@ optionalTurnOutput objectValue = do
       resultOutput = nestedOutput ["result", "output"] objectValue
       resultText = nestedOutput ["result", "text"] objectValue
       result = fieldOutput "result" objectValue
-  pure (output <|> text <|> resultOutput <|> resultText <|> result)
+      agentItems = agentItemsOutput objectValue
+  pure (output <|> text <|> resultOutput <|> resultText <|> result <|> agentItems)
 
 fieldOutput :: Text -> Object -> Maybe Text
 fieldOutput key objectValue =
@@ -334,6 +337,60 @@ fieldOutput key objectValue =
 nestedOutput :: [Text] -> Object -> Maybe Text
 nestedOutput path objectValue =
   turnOutputText =<< lookupPath path (Object objectValue)
+
+agentItemsOutput :: Object -> Maybe Text
+agentItemsOutput objectValue =
+  case KeyMap.lookup "items" objectValue of
+    Just (Array items) ->
+      lastMaybe (mapMaybe agentItemOutput (toList items))
+    _ -> Nothing
+
+agentItemOutput :: Value -> Maybe Text
+agentItemOutput (Object item)
+  | isAgentMessageItem item =
+      nonEmptyText =<< (fieldOutput "text" item <|> fieldOutput "output" item <|> nestedOutput ["message", "text"] item <|> itemContentOutput item)
+  | otherwise = Nothing
+agentItemOutput _ = Nothing
+
+isAgentMessageItem :: Object -> Bool
+isAgentMessageItem item =
+  case KeyMap.lookup "type" item of
+    Just (String itemType) -> normalizedMessageType itemType `elem` ["agentmessage", "assistantmessage", "assistant"]
+    _ -> False
+
+itemContentOutput :: Object -> Maybe Text
+itemContentOutput item =
+  case KeyMap.lookup "content" item of
+    Just (Array chunks) ->
+      nonEmptyText =<< textFromChunks (toList chunks)
+    Just value ->
+      turnOutputText value
+    Nothing -> Nothing
+
+textFromChunks :: [Value] -> Maybe Text
+textFromChunks chunks =
+  case mapMaybe chunkText chunks of
+    [] -> Nothing
+    texts -> Just (Text.intercalate "\n" texts)
+
+chunkText :: Value -> Maybe Text
+chunkText (Object chunk) =
+  fieldOutput "text" chunk <|> fieldOutput "content" chunk
+chunkText value =
+  turnOutputText value
+
+normalizedMessageType :: Text -> Text
+normalizedMessageType =
+  Text.filter (/= '_') . Text.toLower . Text.strip
+
+lastMaybe :: [a] -> Maybe a
+lastMaybe =
+  foldl (\_ item -> Just item) Nothing
+
+nonEmptyText :: Text -> Maybe Text
+nonEmptyText text
+  | Text.null (Text.strip text) = Nothing
+  | otherwise = Just text
 
 turnOutputText :: Value -> Maybe Text
 turnOutputText = \case

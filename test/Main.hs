@@ -1131,6 +1131,21 @@ prop_appServerClientParsesThreadReadTurns =
                     , "status" .= ("completed" :: Text)
                     , "output" .= object ["outcome" .= ("blocked" :: Text), "reason" .= ("schema blocker" :: Text)]
                     ]
+                 , object
+                    [ "id" .= ("turn-agent-item" :: Text)
+                    , "status" .= ("completed" :: Text)
+                    , "items"
+                        .= [ object
+                              [ "type" .= ("userMessage" :: Text)
+                              , "content" .= [object ["type" .= ("text" :: Text), "text" .= ("prompt" :: Text)]]
+                              ]
+                           , object
+                              [ "type" .= ("agentMessage" :: Text)
+                              , "phase" .= ("final_answer" :: Text)
+                              , "text" .= ("{\"outcome\":\"complete\",\"summary\":\"ok\"}" :: Text)
+                              ]
+                           ]
+                    ]
                  ]
           ]
    in case parseThreadReadTurns response of
@@ -1139,6 +1154,9 @@ prop_appServerClientParsesThreadReadTurns =
             == Just (AppServerTurn (TurnId "turn-target") "completed" (Just "latest output"))
             && ( (parseStructuredTurnOutcome =<< (appServerTurnOutput =<< latestTurnById (TurnId "turn-structured") turns))
                    == Just (StructuredBlocked "schema blocker")
+               )
+            && ( (parseStructuredTurnOutcome =<< (appServerTurnOutput =<< latestTurnById (TurnId "turn-agent-item") turns))
+                   == Just (StructuredComplete "ok")
                )
         Left _ -> False
 

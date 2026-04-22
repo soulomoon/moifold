@@ -34,6 +34,7 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
 import Control.Monad (unless, when)
 import Data.Aeson (Value (..))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub, sortOn)
 import Data.Maybe (catMaybes)
 import Data.Text qualified as Text
@@ -598,6 +599,7 @@ observeOnceExecutor cli
 
 runAutomaticLoop :: LoopCli -> IO ()
 runAutomaticLoop cli = do
+  stopRequested <- newIORef False
   let domain = cliDomainName cli.loopCliDomain
       endpoint = cli.loopCliEndpoint
       executionMode = if cli.loopCliExecute then ExecuteActions else DryRunActions
@@ -616,7 +618,7 @@ runAutomaticLoop cli = do
         ioActionExecutor
           (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions)
           (threadDelay (cli.loopCliPollSeconds * 1000000))
-          (pure ())
+          (writeIORef stopRequested True)
       shouldLoop = cli.loopCliLoop
       maxIterations =
         if shouldLoop
@@ -631,10 +633,10 @@ runAutomaticLoop cli = do
       postTick = issuePlanningFanoutAfterTick cli endpoint executionMode
   validateLoopDomain cli.loopCliDomain cli.loopCliPlannerThread
   validateRuntimeOwnerForExecution cli.loopCliStateDir executionMode
-  runWithOptionalPidFile maybePidFile (runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations 1)
+  runWithOptionalPidFile maybePidFile (runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations 1)
 
-runLoopIterations :: ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO ()) -> Bool -> Int -> Int -> IO ()
-runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations iteration = do
+runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO ()) -> Bool -> Int -> Int -> IO ()
+runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
     Left failure -> die (Text.unpack (formatDaemonLoopFailure failure))
@@ -642,8 +644,9 @@ runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations i
       validateLoopResultDomain domain tick
       printLoopTick domain iteration tick
       postTick tick
-  when (shouldLoop && iteration < maxIterations) $
-    runLoopIterations executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
+  shouldStop <- readIORef stopRequested
+  when (shouldLoop && not shouldStop && iteration < maxIterations) $
+    runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
 
 issuePlanningFanoutAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
 issuePlanningFanoutAfterTick cli endpoint executionMode tick =
