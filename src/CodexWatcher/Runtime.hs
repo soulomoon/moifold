@@ -48,7 +48,9 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Generics (Generic)
+import System.Directory (createDirectoryIfMissing, renameFile)
 import System.Exit (ExitCode (..))
+import System.FilePath (takeDirectory)
 import System.Process.Typed qualified as Process.Typed
 
 data RuntimeCommand
@@ -60,6 +62,7 @@ data RuntimeCommand
   | GhIssueCreate RepoName IssueCreationRequest
   | GhPrListOpen RepoName
   | GhPrView RepoName PrNumber [Text]
+  | GhPrChecks RepoName PrNumber
   | GhReviewThreads PrConfig
   | GhCreatePullRequest FilePath IssueConfig
   | GhResolveReviewThread ReviewThreadId
@@ -155,6 +158,20 @@ renderRuntimeCommand (GhPrView repo prNumber fields) =
     , Text.unpack (unRepoName repo)
     , "--json"
     , Text.unpack (Text.intercalate "," fields)
+    ]
+    Nothing
+    ""
+renderRuntimeCommand (GhPrChecks repo prNumber) =
+  RuntimeCommandSpec
+    "gh"
+    [ "pr"
+    , "checks"
+    , show (unPrNumber prNumber)
+    , "--repo"
+    , Text.unpack (unRepoName repo)
+    , "--required"
+    , "--json"
+    , "name,state,bucket"
     ]
     Nothing
     ""
@@ -297,7 +314,7 @@ createPullRequestScript =
     , "issue=\"$3\""
     , "existing=$(gh pr list --repo \"$repo\" --head \"$branch\" --state open --json number --jq '.[0].number // empty')"
     , "if [ -n \"$existing\" ]; then"
-    , "  printf 'PR #%s already exists for %s\\n' \"$existing\" \"$branch\""
+    , "  printf '{\"status\":\"reused\",\"prNumber\":%s}\\n' \"$existing\""
     , "  exit 0"
     , "fi"
     , "git fetch origin --prune >/dev/null"
@@ -314,7 +331,9 @@ createPullRequestScript =
     , "fi"
     , "git push -u origin \"$branch\""
     , "body=$(printf 'Implements #%s.\\n\\nCreated by codex-watcher after the issue planning turn. Implementation commits will be pushed to this PR.' \"$issue\")"
-    , "gh pr create --repo \"$repo\" --head \"$branch\" --title \"Implement #$issue\" --body \"$body\""
+    , "url=$(gh pr create --repo \"$repo\" --head \"$branch\" --title \"Implement #$issue\" --body \"$body\")"
+    , "number=\"${url##*/}\""
+    , "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\""
     ]
 
 repoOwnerName :: RepoName -> (Text, Text)
@@ -401,8 +420,11 @@ readJsonValue path = do
     Right bytes -> either (Left . Text.pack) Right (eitherDecodeStrict' bytes)
 
 writeJsonValue :: FilePath -> Value -> IO ()
-writeJsonValue path value =
-  LazyByteString.writeFile path (encode value)
+writeJsonValue path value = do
+  createDirectoryIfMissing True (takeDirectory path)
+  let tmpPath = path <> ".tmp"
+  LazyByteString.writeFile tmpPath (encode value)
+  renameFile tmpPath path
 
 appendJsonLine :: FilePath -> Value -> IO ()
 appendJsonLine path value =

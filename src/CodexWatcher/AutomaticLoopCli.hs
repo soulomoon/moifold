@@ -21,14 +21,18 @@ import CodexWatcher.EffectInterpreter
 import CodexWatcher.EffectRuntimeCli
 import CodexWatcher.EventLog
 import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
+import CodexWatcher.GhGit
 import CodexWatcher.IssueFanoutCli
+import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.PrReviewLaunchCli
 import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime (ioRuntimeInterpreter, writeJsonValue)
-import CodexWatcher.RuntimeOwnerCli (validateRuntimeOwnerForExecution)
+import CodexWatcher.RuntimeOwnerCli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Types
+import CodexWatcher.WatcherRuntimeStatus
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -82,6 +86,10 @@ automaticLoopAfterTick cli endpoint executionMode tick = do
 
 runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO Bool) -> Bool -> Int -> Int -> IO ()
 runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
+  renewRuntimeOwnerForExecution
+    loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
+    loopConfig.loopDaemonOptions.daemonExecutionMode
+  reconcileLoopCompatibility loopConfig
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
     Left failure -> do
@@ -104,6 +112,22 @@ recordInvalidReplayBlockState loopConfig = \case
     writeJsonValue (stateDir </> "block-state.json") (repairFailureBlockStateJson replayFailure)
   _ -> pure ()
 
+reconcileLoopCompatibility :: DaemonLoopConfig -> IO ()
+reconcileLoopCompatibility loopConfig =
+  case loopConfig.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions -> pure ()
+    ExecuteActions -> do
+      loaded <- loadEventLogFile loopConfig.loopDaemonOptions.daemonEventLogPath
+      case loaded of
+        Left _ -> pure ()
+        Right events ->
+          case replayEventLog events of
+            Left _ -> pure ()
+            Right replay ->
+              mapM_
+                (writeCompatibility ioRuntimeInterpreter)
+                (compatibilityStateWrites loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+
 issueImplementReviewHandoffAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
 issueImplementReviewHandoffAfterTick cli endpoint executionMode tick =
   case (cli.loopCliDomain, tick.loopObservedTick) of
@@ -111,15 +135,46 @@ issueImplementReviewHandoffAfterTick cli endpoint executionMode tick =
       | IssueReviewHandoffStartedEvent prNumber <- observedTick.daemonObservedEvent
       , Just (issueConfig, handoffPr) <- issueWaitingForPrMerge observedTick.daemonObservedState
       , handoffPr == prNumber ->
-          ensurePrReviewWatcherForHandoff cli endpoint executionMode issueConfig prNumber
+          ensurePrReviewWatcherOrBlock observedTick.daemonObservedState issueConfig prNumber
+      | IssueReviewHandoffStartedEvent prNumber <- observedTick.daemonObservedEvent
+      , Just (_issueConfig, handoffPr) <- issueWaitingForPrMerge observedTick.daemonObservedState
+      , handoffPr /= prNumber ->
+          blockIssueImplementerHandoff
+            cli
+            observedTick.daemonObservedState
+            ( BlockedReason
+                ( "PR review handoff PR number mismatch: expected #"
+                    <> Text.pack (show (unPrNumber handoffPr))
+                    <> ", actual #"
+                    <> Text.pack (show (unPrNumber prNumber))
+                )
+            )
     (CliIssueImplement, _) ->
       case issueWaitingForPrMerge tick.loopReplayResult.replayState of
         Just (issueConfig, prNumber) ->
-          ensurePrReviewWatcherForHandoff cli endpoint executionMode issueConfig prNumber
+          ensurePrReviewWatcherOrBlock tick.loopReplayResult.replayState issueConfig prNumber
         Nothing ->
           pure ()
     _ ->
       pure ()
+ where
+  ensurePrReviewWatcherOrBlock state issueConfig prNumber =
+    ensurePrReviewWatcherForHandoff cli endpoint executionMode issueConfig prNumber
+      >>= mapM_ (blockIssueImplementerHandoff cli state)
+
+blockIssueImplementerHandoff :: LoopCli -> SomeWatcherState -> BlockedReason -> IO ()
+blockIssueImplementerHandoff cli state reason =
+  case cli.loopCliExecute of
+    False ->
+      putStrLn ("would block issue implementer: " <> Text.unpack reason.unBlockedReason)
+    True ->
+      case issueImplementObserve state (ObservedIssueImplementBlocked reason) of
+        Left failure ->
+          die ("failed to block issue implementer after PR review handoff: " <> Text.unpack failure)
+        Right blockedTick -> do
+          appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath blockedTick.issueImplementTickEvent
+          mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir blockedTick.issueImplementTickState)
+          putStrLn ("blocked issue implementer: " <> Text.unpack reason.unBlockedReason)
 
 issueWaitingForPrMerge :: SomeWatcherState -> Maybe (IssueConfig, PrNumber)
 issueWaitingForPrMerge (SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber)) =
@@ -154,7 +209,7 @@ maintainReadyIssueImplementers :: LoopCli -> AppServerEndpoint -> ActionExecutio
 maintainReadyIssueImplementers cli endpoint executionMode implementersRoot planningState plannerConfig readyIssues = do
   let fanoutConfig =
         (defaultIssuePlanningFanoutConfig implementersRoot)
-          { fanoutWorkdirRoot = firstJust cli.loopCliImplementerWorkdirRoot cli.loopCliWorkdirRoot
+          { fanoutWorkdirRoot = cli.loopCliImplementerWorkdirRoot <|> cli.loopCliWorkdirRoot
           , fanoutBranchPrefix = cli.loopCliBranchPrefix
           , fanoutThreadPrefix = cli.loopCliThreadPrefix
           }
@@ -173,23 +228,71 @@ maintainReadyIssueImplementers cli endpoint executionMode implementersRoot plann
           DryRunActions -> Nothing
       stoppedActiveLaunches = fanoutPlan.readyIssueRestarts
       allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
-  childLaunch <-
-    issueImplementerChildLaunchMode
-      cli.loopCliStartChildren
-      (Just cli.loopCliPollSeconds)
-      cli.loopCliChildPollSeconds
-      executionMode
-      (Just endpoint)
-  runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
-  mapM_ (startIssueImplementerChild childLaunch) stoppedActiveLaunches
-  putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
-  putStrLn ("planner fanout launches: " <> show (length launches))
-  putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
-  if allReadyIssuesTerminal
-    then do
-      markPlanningReadyIssuesFixed executionMode cli planningState
+  validation <- validateReadyIssueFanout plannerConfig (zip readyIssues statuses) (launches <> stoppedActiveLaunches)
+  case validation of
+    Just reason -> do
+      blockPlanningFanout executionMode cli planningState reason
       pure False
-    else pure False
+    Nothing -> do
+      childLaunch <-
+        issueImplementerChildLaunchMode
+          cli.loopCliStartChildren
+          (Just cli.loopCliPollSeconds)
+          cli.loopCliChildPollSeconds
+          executionMode
+          (Just endpoint)
+      runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
+      mapM_ (startIssueImplementerChild childLaunch) stoppedActiveLaunches
+      putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
+      putStrLn ("planner fanout launches: " <> show (length launches))
+      putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
+      when allReadyIssuesTerminal $
+        markPlanningReadyIssuesFixed executionMode cli planningState
+      pure False
+
+validateReadyIssueFanout :: PlannerConfig -> [(IssueNumber, WatcherRuntimeStatus)] -> [IssueImplementerLaunchPlan] -> IO (Maybe BlockedReason)
+validateReadyIssueFanout plannerConfig readyStatuses launchPlans =
+  firstInvalid <$> traverse validateIssue (fmap (\launch -> launch.launchIssueConfig.issueNumber) launchPlans)
+ where
+  firstInvalid = foldr (<|>) Nothing
+  validateIssue issue
+    | not (null plannerConfig.plannerScopeIssues)
+    , issue `notElem` plannerConfig.plannerScopeIssues =
+        pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is outside planner scope")))
+    | otherwise =
+        case lookup issue readyStatuses of
+          Just WatcherActiveRunning ->
+            pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already active")))
+          Just (WatcherTerminal TerminalComplete) ->
+            pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already terminal complete")))
+          _ -> do
+            remote <- runGhIssueView ioRuntimeInterpreter plannerConfig.plannerRepo issue
+            pure case remote of
+              Left reason ->
+                Just (BlockedReason ("ready issue #" <> issueText issue <> " could not be read from GitHub: " <> reason))
+              Right remoteIssue
+                | remoteIssue.remoteIssueClosed || Text.toUpper remoteIssue.remoteIssueState == "CLOSED" ->
+                    Just (BlockedReason ("ready issue #" <> issueText issue <> " is already closed on GitHub"))
+                | otherwise ->
+                    Nothing
+
+issueText :: IssueNumber -> Text.Text
+issueText issue =
+  Text.pack (show (unIssueNumber issue))
+
+blockPlanningFanout :: ActionExecutionMode -> LoopCli -> SomeWatcherState -> BlockedReason -> IO ()
+blockPlanningFanout executionMode cli planningState reason =
+  case executionMode of
+    DryRunActions ->
+      putStrLn ("would block planner fanout: " <> Text.unpack reason.unBlockedReason)
+    ExecuteActions ->
+      case issuePlanningObserve planningState (ObservedPlanningBlocked reason) of
+        Left failure ->
+          die ("failed to block planner fanout: " <> Text.unpack failure)
+        Right blockedTick -> do
+          appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath blockedTick.issuePlanningTickEvent
+          mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir blockedTick.issuePlanningTickState)
+          putStrLn ("blocked planner fanout: " <> Text.unpack reason.unBlockedReason)
 
 markPlanningReadyIssuesFixed :: ActionExecutionMode -> LoopCli -> SomeWatcherState -> IO ()
 markPlanningReadyIssuesFixed executionMode cli planningState =
@@ -272,7 +375,3 @@ expectedLoopDomain :: String -> Domain
 expectedLoopDomain "pr-review" = PrReview
 expectedLoopDomain "issue-implement" = IssueImplement
 expectedLoopDomain _ = IssuePlanning
-
-firstJust :: Maybe a -> Maybe a -> Maybe a
-firstJust (Just value) _ = Just value
-firstJust Nothing fallback = fallback

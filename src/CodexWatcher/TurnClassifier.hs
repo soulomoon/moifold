@@ -192,7 +192,7 @@ classifyIssuePlanningTurn turn =
       | Just observation <- blockedOutputObservation "planning turn reported blocked" ObservedPlanningBlocked output ->
           Just observation
       | otherwise ->
-          Just ObservedPlanningTurnCompleted
+          Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without structured outcome"))
 
 classifyIssuePlanTurn :: AppServerTurn -> Maybe IssueImplementObservation
 classifyIssuePlanTurn turn =
@@ -209,7 +209,7 @@ classifyIssuePlanTurn turn =
       | Just observation <- blockedOutputObservation "plan turn reported blocked" ObservedIssueImplementBlocked output ->
           Just observation
       | otherwise ->
-          Just (ObservedPlanCompleted Nothing)
+          Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without structured outcome"))
 
 classifyIssueImplementationTurn :: Maybe PrNumber -> AppServerTurn -> Maybe IssueImplementObservation
 classifyIssueImplementationTurn maybePr turn =
@@ -227,9 +227,6 @@ classifyIssueImplementationTurn maybePr turn =
           Just observation
       | Just observation <- incompleteOutputObservation "implementation turn reported incomplete" ObservedImplementationIncomplete output ->
           Just observation
-      | Just prNumber <- maybePr
-      , outputHasAny implementationCompleteOutputAliases output ->
-          Just (ObservedImplementationCompleted prNumber)
       | otherwise ->
           Just (ObservedImplementationIncomplete (outputReason "implementation turn completed without a completion marker" output))
 
@@ -250,7 +247,7 @@ classifyPrReviewWorkerTurn turn =
       | Just outcome <- incompleteOutputObservation "worker turn reported incomplete" WorkerIncomplete output ->
           Just outcome
       | otherwise ->
-          Just WorkerCompleted
+          Just (WorkerIncomplete "worker turn completed without structured outcome")
 
 classifyPrReviewReviewerTurn :: CommitSha -> AppServerTurn -> Maybe PrReviewObservation
 classifyPrReviewReviewerTurn commit turn =
@@ -473,10 +470,6 @@ incompleteOutputAliases =
 alreadyFixedOutputAliases :: [Text]
 alreadyFixedOutputAliases =
   ["already_fixed", "already fixed", "already_resolved", "already resolved", "no changes needed"]
-
-implementationCompleteOutputAliases :: [Text]
-implementationCompleteOutputAliases =
-  ["complete", "completed", "ready for review", "review handoff", "pr ready"]
 
 reviewerProblemsOutputAliases :: [Text]
 reviewerProblemsOutputAliases =

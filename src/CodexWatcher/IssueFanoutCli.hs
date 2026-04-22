@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -31,11 +32,13 @@ import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions)
 import CodexWatcher.Types
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
+import Control.Applicative ((<|>))
 import Control.Monad (unless, when)
+import Data.Aeson (Value, object, (.=))
 import Data.List (nub, sortOn)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
 import System.Exit (die)
 import System.FilePath (takeDirectory, (</>))
 
@@ -142,7 +145,7 @@ issueImplementerChildLaunchMode startChildren maybePollSeconds maybeChildPollSec
   | not startChildren = pure DoNotLaunchChildren
   | otherwise = do
       endpoint <- maybe (die "--start-children requires --app-server-host and --app-server-port") pure maybeEndpoint
-      let pollSeconds = maybe 30 id (firstJust maybeChildPollSeconds maybePollSeconds)
+      let pollSeconds = fromMaybe 30 (maybeChildPollSeconds <|> maybePollSeconds)
       pure case executionMode of
         DryRunActions -> PrintChildLaunchCommands endpoint pollSeconds
         ExecuteActions -> StartChildLaunches endpoint pollSeconds
@@ -151,18 +154,38 @@ runIssueImplementerLaunches :: ActionExecutionMode -> Maybe AppServerEndpoint ->
 runIssueImplementerLaunches DryRunActions _endpoint childLaunch launches = do
   mapM_ printIssueImplementerLaunch launches
   mapM_ (printIssueImplementerChildLaunch childLaunch) launches
-runIssueImplementerLaunches ExecuteActions maybeEndpoint childLaunch launches = do
-  mapM_ ensureIssueImplementerLaunchWritable launches
-  mapM_ prepareIssueImplementerWorkdir launches
-  preparedLaunches <- traverse (uncurry (prepareIssueImplementerLaunch maybeEndpoint)) (zip [8000 ..] launches)
-  mapM_ writeIssueImplementerLaunch preparedLaunches
-  mapM_ (startIssueImplementerChild childLaunch) preparedLaunches
+runIssueImplementerLaunches ExecuteActions maybeEndpoint childLaunch launches =
+  mapM_ (uncurry (runIssueImplementerLaunch maybeEndpoint childLaunch)) (zip [8000 ..] launches)
+
+runIssueImplementerLaunch :: Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> Int -> IssueImplementerLaunchPlan -> IO ()
+runIssueImplementerLaunch maybeEndpoint childLaunch requestId launch = do
+  ensureIssueImplementerLaunchWritable launch
+  prepareIssueImplementerWorkdir launch
+  writeIssueImplementerLaunchPending childLaunch launch
+  preparedLaunch <- prepareIssueImplementerLaunch maybeEndpoint requestId launch
+  writeIssueImplementerLaunch preparedLaunch
+  writeIssueImplementerLaunchFinalized childLaunch preparedLaunch
+  startIssueImplementerChild childLaunch preparedLaunch
 
 ensureIssueImplementerLaunchWritable :: IssueImplementerLaunchPlan -> IO ()
 ensureIssueImplementerLaunchWritable launch = do
+  ensureIssueImplementerLaunchStateEmpty launch
+  pendingExists <- doesFileExist (launchPendingManifestPath launch.launchStateDir)
+  when pendingExists $
+    die
+      ( "refusing to overwrite pending issue implementer launch state: "
+          <> launch.launchStateDir
+          <> "; inspect or remove "
+          <> launchPendingManifestPath launch.launchStateDir
+          <> " before retrying"
+      )
+
+ensureIssueImplementerLaunchStateEmpty :: IssueImplementerLaunchPlan -> IO ()
+ensureIssueImplementerLaunchStateEmpty launch = do
   configExists <- doesFileExist launch.launchConfigPath
   eventsExists <- doesFileExist launch.launchEventsPath
-  when (configExists || eventsExists) $
+  finalizedExists <- doesFileExist (launchFinalizedManifestPath launch.launchStateDir)
+  when (configExists || eventsExists || finalizedExists) $
     die ("refusing to overwrite existing issue implementer state: " <> launch.launchStateDir)
 
 prepareIssueImplementerWorkdir :: IssueImplementerLaunchPlan -> IO ()
@@ -219,13 +242,58 @@ issueImplementerThreadStartOptions launch =
 
 writeIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
 writeIssueImplementerLaunch launch = do
-  ensureIssueImplementerLaunchWritable launch
+  ensureIssueImplementerLaunchStateEmpty launch
   createDirectoryIfMissing True launch.launchStateDir
   writeJsonValue launch.launchConfigPath launch.launchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent
   mapM_ (writeCompatibility ioRuntimeInterpreter) launch.launchCompatibilityWrites
   writeRuntimeOwner ioRuntimeInterpreter launch.launchStateDir HaskellRuntime
   putStrLn ("wrote issue implementer " <> show (unIssueNumber (launchIssueNumber launch)) <> " to " <> launch.launchStateDir)
+
+writeIssueImplementerLaunchPending :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
+writeIssueImplementerLaunchPending childLaunch launch =
+  writeJsonValue
+    (launchPendingManifestPath launch.launchStateDir)
+    (issueImplementerLaunchManifest "pending" childLaunch launch)
+
+writeIssueImplementerLaunchFinalized :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
+writeIssueImplementerLaunchFinalized childLaunch launch = do
+  writeJsonValue
+    (launchFinalizedManifestPath launch.launchStateDir)
+    (issueImplementerLaunchManifest "finalized" childLaunch launch)
+  pendingExists <- doesFileExist (launchPendingManifestPath launch.launchStateDir)
+  when pendingExists (removeFile (launchPendingManifestPath launch.launchStateDir))
+
+issueImplementerLaunchManifest :: Text.Text -> IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> Value
+issueImplementerLaunchManifest status childLaunch launch =
+  object
+    [ "status" .= status
+    , "launchKind" .= ("issue-implementer" :: Text.Text)
+    , "repo" .= unRepoName launch.launchIssueConfig.issueRepo
+    , "issueNumber" .= unIssueNumber launch.launchIssueConfig.issueNumber
+    , "workdir" .= launch.launchWorkdir
+    , "stateDir" .= launch.launchStateDir
+    , "configPath" .= launch.launchConfigPath
+    , "eventsPath" .= launch.launchEventsPath
+    , "intendedThreadRoles" .= (["worker"] :: [Text.Text])
+    , "threadId" .= unThreadId launch.launchThreadId
+    , "childLaunch" .= issueImplementerChildLaunchText childLaunch
+    , "createdAt" .= ("unknown" :: Text.Text)
+    ]
+
+issueImplementerChildLaunchText :: IssueImplementerChildLaunch -> Text.Text
+issueImplementerChildLaunchText = \case
+  DoNotLaunchChildren -> "disabled"
+  PrintChildLaunchCommands {} -> "print"
+  StartChildLaunches {} -> "start"
+
+launchPendingManifestPath :: FilePath -> FilePath
+launchPendingManifestPath stateDir =
+  stateDir </> "launch-pending.json"
+
+launchFinalizedManifestPath :: FilePath -> FilePath
+launchFinalizedManifestPath stateDir =
+  stateDir </> "launch-finalized.json"
 
 printIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
 printIssueImplementerLaunch launch =
@@ -291,7 +359,9 @@ readyIssueStatusFromRuntime = \case
   WatcherMissing -> ReadyIssueMissing
   WatcherActiveStopped -> ReadyIssueActiveStopped
   WatcherActiveRunning -> ReadyIssueActiveRunning
-  WatcherTerminal -> ReadyIssueTerminal
+  WatcherTerminal TerminalComplete -> ReadyIssueTerminal
+  WatcherTerminal (TerminalBlocked _) -> ReadyIssueActiveStopped
+  WatcherTerminal (TerminalStopped _) -> ReadyIssueActiveStopped
 
 issueImplementerRuntimeStatus :: IssuePlanningFanoutConfig -> PlannerConfig -> IssueNumber -> IO WatcherRuntimeStatus
 issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
@@ -307,8 +377,28 @@ issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
       , watcherRuntimeEventsPath = eventsPath
       , watcherRuntimePidPath = pidPath
       , watcherRuntimeMissingIsTerminal = issueClosed
-      , watcherRuntimeReplayTerminalIsTerminal = \_replay -> issueClosed
+      , watcherRuntimeReplayTerminalIsTerminal = issueImplementReplayTerminalSucceeded plannerConfig.plannerRepo issueNumber'
       }
+
+issueImplementReplayTerminalSucceeded :: RepoName -> IssueNumber -> EventReplayResult -> IO Bool
+issueImplementReplayTerminalSucceeded repo issueNumber' replay =
+  case replay.replayState of
+    SomeWatcherState (CompleteState (IssueAlreadyResolved resolvedIssueNumber)) ->
+      githubIssueClosed repo resolvedIssueNumber
+    SomeWatcherState (CompleteState (IssueComplete prNumber)) ->
+      (&&) <$> githubPullRequestMerged repo prNumber <*> githubIssueClosed repo issueNumber'
+    _ ->
+      pure False
+
+githubPullRequestMerged :: RepoName -> PrNumber -> IO Bool
+githubPullRequestMerged repo prNumber = do
+  remotePr <- runGhPrView ioRuntimeInterpreter repo prNumber
+  case remotePr of
+    Right pr ->
+      pure (Text.toUpper pr.remotePullRequestState == "MERGED")
+    Left errorMessage -> do
+      putStrLn ("planner could not verify PR " <> show (unPrNumber prNumber) <> " remote state: " <> Text.unpack errorMessage)
+      pure False
 
 githubIssueClosed :: RepoName -> IssueNumber -> IO Bool
 githubIssueClosed repo issueNumber' = do
@@ -324,7 +414,3 @@ launchIssueNumber :: IssueImplementerLaunchPlan -> IssueNumber
 launchIssueNumber launch =
   case launch.launchIssueConfig of
     IssueConfig _ issue _ -> issue
-
-firstJust :: Maybe a -> Maybe a -> Maybe a
-firstJust (Just value) _ = Just value
-firstJust Nothing fallback = fallback

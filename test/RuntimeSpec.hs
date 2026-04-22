@@ -7,6 +7,7 @@ module RuntimeSpec
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrChecksUsesRequiredStructuredFields
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
@@ -29,6 +30,7 @@ runtimeCommandExamples =
   , GhIssueView (RepoName "soulomoon/mlf2") (IssueNumber 42) ["state", "closed", "url"]
   , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body" Nothing)
   , GhPrListOpen (RepoName "soulomoon/mlf2")
+  , GhPrChecks (RepoName "soulomoon/mlf2") (PrNumber 6)
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
   , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
   , GhCreatePullRequest "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
@@ -91,6 +93,21 @@ prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
              , Text.unpack (unRepoName repo)
              , "--json"
              , "state,url,headRefOid"
+             ]
+
+prop_runtimeGhPrChecksUsesRequiredStructuredFields :: RepoName -> PrNumber -> Bool
+prop_runtimeGhPrChecksUsesRequiredStructuredFields repo prNumber =
+  let spec = renderRuntimeCommand (GhPrChecks repo prNumber)
+   in spec.command == "gh"
+        && spec.args
+          == [ "pr"
+             , "checks"
+             , show (unPrNumber prNumber)
+             , "--repo"
+             , Text.unpack (unRepoName repo)
+             , "--required"
+             , "--json"
+             , "name,state,bucket"
              ]
 
 prop_runtimeGhIssueCreateUsesRepoTitleAndBody :: RepoName -> IssueCreationRequest -> Bool

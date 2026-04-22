@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -154,6 +155,10 @@ step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady pr
   Decision
     (IssueImplementationReady config (Just prNumber) worker)
     [SomeEffect SleepUntilNextPoll]
+step (IssueImplementing config _maybePr worker) (IssuePullRequestReady prNumber) =
+  Decision
+    (IssueImplementing config (Just prNumber) worker)
+    [SomeEffect SleepUntilNextPoll]
 step (IssueImplementationReady config maybePr (WorkerIdle threadId)) (StartIssueImplementationTurn activeTurn) =
   Decision
     (IssueImplementing config maybePr (WorkerActive activeTurn))
@@ -164,12 +169,18 @@ step (IssueImplementing config maybePr (WorkerActive activeTurn)) IssueImplement
     [SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId activeTurn))]
 step state@IssueImplementationReady {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step (IssueImplementationReady config _maybePr _worker) (IssueReviewHandoffStarted prNumber) =
-  Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
+step (IssueImplementationReady config maybePr _worker) (IssueReviewHandoffStarted prNumber)
+  | prMatchesKnown maybePr prNumber =
+      Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked maybePr prNumber
 step state@IssueImplementing {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step (IssueImplementing config _maybePr _thread) (IssueReviewHandoffStarted prNumber) =
-  Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
+step (IssueImplementing config maybePr _thread) (IssueReviewHandoffStarted prNumber)
+  | prMatchesKnown maybePr prNumber =
+      Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked maybePr prNumber
 step state@IssueWaitingForPrMerge {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step state@IssueWaitingForPrMerge {} (IssueReviewHandoffStarted _prNumber) =
@@ -242,3 +253,18 @@ effectsForTerminalState = \case
   CompleteState {} -> []
   StoppedState {} -> []
   _ -> []
+
+prMatchesKnown :: Maybe PrNumber -> PrNumber -> Bool
+prMatchesKnown Nothing _ = True
+prMatchesKnown (Just expected) actual = expected == actual
+
+prMismatchBlocked :: Maybe PrNumber -> PrNumber -> Decision 'IssueImplement
+prMismatchBlocked expected actual =
+  let reason =
+        BlockedReason
+          ( "review handoff PR mismatch: expected "
+              <> maybe "known PR" (Text.pack . show . unPrNumber) expected
+              <> ", got "
+              <> Text.pack (show (unPrNumber actual))
+          )
+   in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]

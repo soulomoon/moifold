@@ -18,11 +18,11 @@ module CodexWatcher.ChildDaemon
 
 import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (KillZero), runRuntimeCommand)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Exception (finally)
-import Control.Monad (void, when)
+import Control.Exception (IOException, finally, try)
+import Control.Monad (unless, void, when)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesFileExist, removeFile, removePathForcibly)
 import System.Environment (getExecutablePath)
 import System.Exit (die)
 import System.FilePath (takeDirectory, (</>))
@@ -123,11 +123,9 @@ isPidRunning pidText = do
 runWithOptionalPidFile :: Maybe FilePath -> IO () -> IO ()
 runWithOptionalPidFile Nothing action = action
 runWithOptionalPidFile (Just pidPath) action = do
-  ensurePidFileAvailable pidPath
   pidText <- Text.pack . show <$> getProcessID
-  createDirectoryIfMissing True (takeDirectory pidPath)
-  writeFile pidPath (Text.unpack pidText <> "\n")
-  action `finally` removeOwnedPidFile pidPath pidText
+  acquirePidFileLock pidPath
+  (writeFile pidPath (Text.unpack pidText <> "\n") >> action) `finally` removeOwnedPidFile pidPath pidText
 
 ensurePidFileAvailable :: FilePath -> IO ()
 ensurePidFileAvailable pidPath = do
@@ -139,9 +137,37 @@ ensurePidFileAvailable pidPath = do
       when running $
         die ("refusing to start because pid file is already running: " <> pidPath)
 
+acquirePidFileLock :: FilePath -> IO ()
+acquirePidFileLock pidPath = do
+  createDirectoryIfMissing True (takeDirectory pidPath)
+  acquired <- tryCreatePidLock pidPath
+  unless acquired do
+    maybePid <- readPidFile pidPath
+    running <- maybe (pure False) isPidRunning maybePid
+    if running
+      then die ("refusing to start because pid file is already running: " <> pidPath)
+      else do
+        removePathForcibly (pidLockPath pidPath)
+        acquiredAfterCleanup <- tryCreatePidLock pidPath
+        unless acquiredAfterCleanup $
+          die ("refusing to start because pid lock is already held: " <> pidLockPath pidPath)
+
+tryCreatePidLock :: FilePath -> IO Bool
+tryCreatePidLock pidPath = do
+  result <- try (createDirectory (pidLockPath pidPath)) :: IO (Either IOException ())
+  pure case result of
+    Right () -> True
+    Left _ -> False
+
 removeOwnedPidFile :: FilePath -> Text -> IO ()
 removeOwnedPidFile pidPath expectedPid = do
   maybePid <- readPidFile pidPath
   case maybePid of
-    Just currentPid | currentPid == expectedPid -> removeFile pidPath
+    Just currentPid | currentPid == expectedPid -> do
+      removeFile pidPath
+      removePathForcibly (pidLockPath pidPath)
     _ -> pure ()
+
+pidLockPath :: FilePath -> FilePath
+pidLockPath pidPath =
+  pidPath <> ".lock"

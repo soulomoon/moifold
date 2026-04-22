@@ -21,6 +21,7 @@ module CodexWatcher.GoldenReplay
 import CodexWatcher.EventLog (WatcherEvent (..))
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
+import Control.Applicative (asum)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -338,13 +339,15 @@ activeIssueTurn snapshot = do
 
 bestKnownCommit :: NodePrReviewSnapshot -> Text
 bestKnownCommit snapshot =
-  firstJust
-    [ snapshot.watcherState.lastReviewTargetSha
-    , snapshot.watcherState.lastReviewerTargetSha
-    , snapshot.agentState >>= (.publishedCommitSha)
-    , snapshot.reviewerState >>= (.reviewedCommitSha)
-    ]
+  fromMaybe
     "unknown-commit"
+    ( asum
+        [ snapshot.watcherState.lastReviewTargetSha
+        , snapshot.watcherState.lastReviewerTargetSha
+        , snapshot.agentState >>= (.publishedCommitSha)
+        , snapshot.reviewerState >>= (.reviewedCommitSha)
+        ]
+    )
 
 staleReviewerBlockedWarning :: NodePrReviewSnapshot -> [Text]
 staleReviewerBlockedWarning snapshot =
@@ -360,8 +363,3 @@ bootstrapPlanTurn = TurnId "bootstrap-plan-turn"
 
 bootstrapReviewerTurn :: TurnId
 bootstrapReviewerTurn = TurnId "bootstrap-reviewer-turn"
-
-firstJust :: [Maybe a] -> a -> a
-firstJust [] fallback = fallback
-firstJust (Just value : _) _ = value
-firstJust (Nothing : rest) fallback = firstJust rest fallback

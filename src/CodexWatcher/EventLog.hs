@@ -26,6 +26,7 @@ import Data.Aeson.Types (Pair, Parser)
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as ByteString.Char8
 import Data.Char (isSpace)
+import Data.List (find, intersect)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -341,7 +342,11 @@ applyEvent (SomeWatcherState state@PlanningReady {}) (IssuePlanningTurnStarted p
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningIssuesRequested requests) =
   fromDecision (step state (PlannerRequestedIssueCreation requests))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningGraphUpdated graph) =
-  fromDecision (step state (PlannerUpdatedGraph graph))
+  case state of
+    PlanningTurnActive config _activeTurn ->
+      case validatePlanningGraphForReplay config graph of
+        Left reason -> Left reason
+        Right () -> fromDecision (step state (PlannerUpdatedGraph graph))
 applyEvent (SomeWatcherState state@PlanningWaitingForReadyIssues {}) IssuePlanningReadyIssuesFixed =
   fromDecision (step state PlannerReadyIssuesFixed)
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
@@ -381,6 +386,10 @@ applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId)
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestCreatedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestReady prNumber))
+applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssuePullRequestCreatedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestReady prNumber))
+applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr (WorkerIdle threadId))) (IssueImplementationTurnStartedEvent turnId) =
   fromDecision (step state (StartIssueImplementationTurn (ActiveTurn threadId turnId)))
@@ -536,6 +545,35 @@ prConfigFields config =
 
 nonEmptyToList :: NonEmpty a -> [a]
 nonEmptyToList (first :| rest) = first : rest
+
+validatePlanningGraphForReplay :: PlannerConfig -> PlanningGraph -> Either Text ()
+validatePlanningGraphForReplay config graph
+  | hasDuplicate graph.planningReadyIssues =
+      Left "planning graph has duplicate ready issues"
+  | hasDuplicate blockedIssues =
+      Left "planning graph has duplicate blocked issues"
+  | not (null (graph.planningReadyIssues `intersect` blockedIssues)) =
+      Left "planning graph marks an issue as both ready and blocked"
+  | any readyIssueHasDependency graph.planningDependencies =
+      Left "planning graph marks a dependent issue as ready"
+  | Just issue <- outOfScopeIssue =
+      Left ("planning graph references issue outside configured scope: #" <> Text.pack (show (unIssueNumber issue)))
+  | otherwise =
+      Right ()
+ where
+  blockedIssues = fmap blockedPlanningIssue graph.planningBlockedIssues
+  dependencyIssues = concatMap (\dependency -> dependency.dependencyIssue : dependency.dependencyDependsOn) graph.planningDependencies
+  graphIssues = graph.planningReadyIssues <> blockedIssues <> dependencyIssues
+  outOfScopeIssue =
+    case plannerScopeIssues config of
+      [] -> Nothing
+      scopeIssues -> find (`notElem` scopeIssues) graphIssues
+  readyIssueHasDependency dependency =
+    dependency.dependencyIssue `elem` graph.planningReadyIssues && not (null dependency.dependencyDependsOn)
+
+hasDuplicate :: Eq a => [a] -> Bool
+hasDuplicate [] = False
+hasDuplicate (item : rest) = item `elem` rest || hasDuplicate rest
 
 numberedNonBlankLines :: ByteString.ByteString -> [(Int, ByteString.ByteString)]
 numberedNonBlankLines =

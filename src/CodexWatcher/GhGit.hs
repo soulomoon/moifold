@@ -9,6 +9,8 @@
 module CodexWatcher.GhGit
   ( GhIssue (..)
   , GhPullRequest (..)
+  , GhPullRequestCheck (..)
+  , GhPullRequestCreateResult (..)
   , GitWorktreeStatus (..)
   , RemoteIssue (..)
   , RemotePullRequest (..)
@@ -18,6 +20,8 @@ module CodexWatcher.GhGit
   , parseGhIssueList
   , parseGhIssueView
   , parseGhPrList
+  , parseGhPrChecks
+  , parseGhPrCreateResult
   , parseGhPrView
   , parseGhReviewThreads
   , parseGitBranch
@@ -27,6 +31,7 @@ module CodexWatcher.GhGit
   , runGhIssueListOpen
   , runGhIssueView
   , runGhPrListOpen
+  , runGhPrChecks
   , runGhPrView
   , runGhReviewThreads
   ) where
@@ -91,12 +96,41 @@ instance FromJSON GhPullRequest where
       <*> (BranchName <$> objectValue .: "headRefName")
       <*> (fmap CommitSha <$> objectValue .:? "headRefOid")
 
+data GhPullRequestCreateResult
+  = GhPullRequestCreated PrNumber
+  | GhPullRequestReused PrNumber
+  deriving stock (Eq, Show, Generic)
+
+instance FromJSON GhPullRequestCreateResult where
+  parseJSON = withObject "GhPullRequestCreateResult" \objectValue -> do
+    status <- objectValue .: "status"
+    prNumber' <- PrNumber <$> objectValue .: "prNumber"
+    case normalizeStatus status of
+      "created" -> pure (GhPullRequestCreated prNumber')
+      "reused" -> pure (GhPullRequestReused prNumber')
+      other -> fail ("unsupported PR create status: " <> Text.unpack other)
+
+data GhPullRequestCheck = GhPullRequestCheck
+  { ghPullRequestCheckName :: Text
+  , ghPullRequestCheckState :: Text
+  , ghPullRequestCheckBucket :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance FromJSON GhPullRequestCheck where
+  parseJSON = withObject "GhPullRequestCheck" \objectValue ->
+    GhPullRequestCheck
+      <$> objectValue .: "name"
+      <*> objectValue .: "state"
+      <*> objectValue .:? "bucket"
+
 data RemotePullRequest = RemotePullRequest
   { remotePullRequestState :: Text
   , remotePullRequestUrl :: Maybe Text
   , remotePullRequestHeadRefOid :: Maybe CommitSha
   , remotePullRequestMergeCommit :: Maybe CommitSha
   , remotePullRequestMergedAt :: Maybe Text
+  , remotePullRequestMergeStateStatus :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
@@ -108,6 +142,7 @@ instance FromJSON RemotePullRequest where
       <*> (fmap CommitSha <$> objectValue .:? "headRefOid")
       <*> parseMergeCommit objectValue
       <*> objectValue .:? "mergedAt"
+      <*> objectValue .:? "mergeStateStatus"
 
 data ReviewComment = ReviewComment
   { reviewCommentId :: Text
@@ -176,6 +211,14 @@ parseGhPrList :: Text -> Either Text [GhPullRequest]
 parseGhPrList =
   decodeJsonText "gh pr list"
 
+parseGhPrCreateResult :: Text -> Either Text GhPullRequestCreateResult
+parseGhPrCreateResult =
+  decodeJsonText "gh pr create"
+
+parseGhPrChecks :: Text -> Either Text [GhPullRequestCheck]
+parseGhPrChecks =
+  decodeJsonText "gh pr checks"
+
 parseGhPrView :: Text -> Either Text RemotePullRequest
 parseGhPrView =
   decodeJsonText "gh pr view"
@@ -217,10 +260,14 @@ runGhPrListOpen :: Monad m => RuntimeInterpreter m -> RepoName -> m (Either Text
 runGhPrListOpen interpreter repo =
   parseCommandJson parseGhPrList <$> interpreter.runtimeRunCommand (GhPrListOpen repo)
 
+runGhPrChecks :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text [GhPullRequestCheck])
+runGhPrChecks interpreter repo prNumber =
+  parseCommandJson parseGhPrChecks <$> interpreter.runtimeRunCommand (GhPrChecks repo prNumber)
+
 runGhPrView :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text RemotePullRequest)
 runGhPrView interpreter repo prNumber =
   parseCommandJson parseGhPrView
-    <$> interpreter.runtimeRunCommand (GhPrView repo prNumber ["state", "mergedAt", "mergeCommit", "url", "headRefOid"])
+    <$> interpreter.runtimeRunCommand (GhPrView repo prNumber ["state", "mergedAt", "mergeCommit", "url", "headRefOid", "mergeStateStatus"])
 
 runGhReviewThreads :: Monad m => RuntimeInterpreter m -> PrConfig -> m (Either Text ReviewThreadsReport)
 runGhReviewThreads interpreter prConfig =
@@ -282,3 +329,7 @@ nonEmptyStripped text
   | otherwise = Just stripped
  where
   stripped = Text.strip text
+
+normalizeStatus :: Text -> Text
+normalizeStatus =
+  Text.toLower . Text.strip

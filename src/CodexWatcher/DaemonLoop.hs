@@ -27,14 +27,15 @@ import CodexWatcher.GhGit
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.PrReviewWatcher
-import CodexWatcher.Runtime (runtimeWriteJsonValue)
+import CodexWatcher.Runtime (CommandReport (..), runtimeReadJsonValue, runtimeWriteJsonValue)
 import CodexWatcher.TurnClassifier
 import CodexWatcher.Types
-import Data.Aeson (Value)
+import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON, object, withObject, (.:), (.=))
 import Data.List (find)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Generics (Generic)
+import System.FilePath ((</>))
 
 data DaemonLoopConfig = DaemonLoopConfig
   { loopDaemonOptions :: DaemonOptions
@@ -68,6 +69,43 @@ data StartTurnKind
   | StartReviewerTurnKind PrConfig CommitSha
   deriving stock (Eq, Show)
 
+data StaleActiveTurnMarker = StaleActiveTurnMarker
+  { staleMarkerDomain :: Text
+  , staleMarkerThreadId :: Text
+  , staleMarkerTurnId :: Text
+  , staleMarkerStateFingerprint :: Text
+  , staleMarkerReason :: Text
+  , staleMarkerFirstSeenAt :: Text
+  , staleMarkerLastSeenAt :: Text
+  , staleMarkerCount :: Int
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON StaleActiveTurnMarker where
+  toJSON marker =
+    object
+      [ "domain" .= marker.staleMarkerDomain
+      , "threadId" .= marker.staleMarkerThreadId
+      , "turnId" .= marker.staleMarkerTurnId
+      , "stateFingerprint" .= marker.staleMarkerStateFingerprint
+      , "reason" .= marker.staleMarkerReason
+      , "firstSeenAt" .= marker.staleMarkerFirstSeenAt
+      , "lastSeenAt" .= marker.staleMarkerLastSeenAt
+      , "count" .= marker.staleMarkerCount
+      ]
+
+instance FromJSON StaleActiveTurnMarker where
+  parseJSON = withObject "StaleActiveTurnMarker" \objectValue ->
+    StaleActiveTurnMarker
+      <$> objectValue .: "domain"
+      <*> objectValue .: "threadId"
+      <*> objectValue .: "turnId"
+      <*> objectValue .: "stateFingerprint"
+      <*> objectValue .: "reason"
+      <*> objectValue .: "firstSeenAt"
+      <*> objectValue .: "lastSeenAt"
+      <*> objectValue .: "count"
+
 runAutomaticDaemonLoopOnceFromFile :: ActionExecutor IO -> DaemonLoopConfig -> IO (Either DaemonLoopFailure DaemonLoopTickResult)
 runAutomaticDaemonLoopOnceFromFile executor config = do
   loaded <- loadEventLogFile config.loopDaemonOptions.daemonEventLogPath
@@ -93,7 +131,8 @@ runFromState
   -> [WatcherEvent]
   -> EventReplayResult
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
-runFromState executor config events replay =
+runFromState executor config events replay = do
+  clearStaleActiveTurnMarkerWhenInactive executor config replay.replayState
   case replay.replayState of
     SomeWatcherState (PlanningReady {}) ->
       case config.loopPlannerThreadId of
@@ -135,6 +174,22 @@ runFromState executor config events replay =
     SomeWatcherState (StoppedState {}) ->
       terminalStop executor config replay "watcher is stopped"
 
+clearStaleActiveTurnMarkerWhenInactive :: Monad m => ActionExecutor m -> DaemonLoopConfig -> SomeWatcherState -> m ()
+clearStaleActiveTurnMarkerWhenInactive executor config state =
+  if watcherStateHasActiveTurn state
+    then pure ()
+    else clearStaleActiveTurnMarker executor config
+
+watcherStateHasActiveTurn :: SomeWatcherState -> Bool
+watcherStateHasActiveTurn = \case
+  SomeWatcherState PlanningTurnActive {} -> True
+  SomeWatcherState IssueTriageActive {} -> True
+  SomeWatcherState IssueInPlanMode {} -> True
+  SomeWatcherState IssueImplementing {} -> True
+  SomeWatcherState PrFixingReviews {} -> True
+  SomeWatcherState PrReviewingClean {} -> True
+  _ -> False
+
 observeActiveTurn
   :: Monad m
   => ActionExecutor m
@@ -149,11 +204,131 @@ observeActiveTurn executor config events replay activeTurn classify = do
   case turnResult of
     Left failure -> pure (Left failure)
     Right Nothing ->
-      idle executor config replay ("active turn not found: " <> unTurnId activeTurn.activeTurnId)
-    Right (Just turn) ->
+      handleMissingActiveTurn executor config events replay activeTurn
+    Right (Just turn) -> do
+      clearStaleActiveTurnMarker executor config
       case classify turn of
         Nothing -> idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
         Just observation -> observeWithExecutor executor config events observation
+
+handleMissingActiveTurn
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> ActiveTurn
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+handleMissingActiveTurn executor config events replay activeTurn =
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      idle executor config replay (missingActiveTurnReason activeTurn)
+    ExecuteActions -> do
+      marker <- updateStaleActiveTurnMarker executor config replay activeTurn
+      if marker.staleMarkerCount >= staleActiveTurnThreshold
+        then do
+          clearStaleActiveTurnMarker executor config
+          case activeTurnBlockedObservation replay.replayState activeTurn of
+            Just observation -> observeWithExecutor executor config events observation
+            Nothing -> idle executor config replay (missingActiveTurnReason activeTurn)
+        else idle executor config replay (missingActiveTurnReason activeTurn)
+
+staleActiveTurnThreshold :: Int
+staleActiveTurnThreshold = 3
+
+updateStaleActiveTurnMarker
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> EventReplayResult
+  -> ActiveTurn
+  -> m StaleActiveTurnMarker
+updateStaleActiveTurnMarker executor config replay activeTurn = do
+  previous <- readStaleActiveTurnMarker executor config
+  let fingerprint = activeTurnStateFingerprint replay.replayState activeTurn
+      reason = missingActiveTurnReason activeTurn
+      matchesActiveTurn = maybe False (`markerMatchesActiveTurn` (activeTurn, fingerprint)) previous
+      count =
+        if matchesActiveTurn
+          then maybe 1 (\prior -> prior.staleMarkerCount + 1) previous
+          else 1
+      firstSeenAt =
+        if matchesActiveTurn
+          then maybe "unknown" (\prior -> prior.staleMarkerFirstSeenAt) previous
+          else "unknown"
+      marker =
+        StaleActiveTurnMarker
+          { staleMarkerDomain = Text.pack (show (someDomain replay.replayState))
+          , staleMarkerThreadId = unThreadId activeTurn.activeThreadId
+          , staleMarkerTurnId = unTurnId activeTurn.activeTurnId
+          , staleMarkerStateFingerprint = fingerprint
+          , staleMarkerReason = reason
+          , staleMarkerFirstSeenAt = firstSeenAt
+          , staleMarkerLastSeenAt = "unknown"
+          , staleMarkerCount = count
+          }
+  runtimeWriteJsonValue (actionRuntime executor) (staleActiveTurnMarkerPath config) (toJSON marker)
+  pure marker
+
+missingActiveTurnReason :: ActiveTurn -> Text
+missingActiveTurnReason activeTurn =
+  "active turn not found: " <> unTurnId activeTurn.activeTurnId
+
+markerMatchesActiveTurn :: StaleActiveTurnMarker -> (ActiveTurn, Text) -> Bool
+markerMatchesActiveTurn marker (activeTurn, fingerprint) =
+  marker.staleMarkerThreadId == unThreadId activeTurn.activeThreadId
+    && marker.staleMarkerTurnId == unTurnId activeTurn.activeTurnId
+    && marker.staleMarkerStateFingerprint == fingerprint
+
+readStaleActiveTurnMarker :: Monad m => ActionExecutor m -> DaemonLoopConfig -> m (Maybe StaleActiveTurnMarker)
+readStaleActiveTurnMarker executor config = do
+  value <- runtimeReadJsonValue (actionRuntime executor) (staleActiveTurnMarkerPath config)
+  pure case value of
+    Right Null -> Nothing
+    Right jsonValue ->
+      case fromJSON jsonValue of
+        Success marker -> Just marker
+        Error _ -> Nothing
+    Left _ -> Nothing
+
+clearStaleActiveTurnMarker :: Monad m => ActionExecutor m -> DaemonLoopConfig -> m ()
+clearStaleActiveTurnMarker executor config =
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions -> pure ()
+    ExecuteActions -> runtimeWriteJsonValue (actionRuntime executor) (staleActiveTurnMarkerPath config) Null
+
+staleActiveTurnMarkerPath :: DaemonLoopConfig -> FilePath
+staleActiveTurnMarkerPath config =
+  config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "stale-active-turn.json"
+
+activeTurnStateFingerprint :: SomeWatcherState -> ActiveTurn -> Text
+activeTurnStateFingerprint state activeTurn =
+  Text.intercalate
+    ":"
+    [ Text.pack (show (someDomain state))
+    , Text.pack (show (somePhase state))
+    , unThreadId activeTurn.activeThreadId
+    , unTurnId activeTurn.activeTurnId
+    ]
+
+activeTurnBlockedObservation :: SomeWatcherState -> ActiveTurn -> Maybe DaemonObservation
+activeTurnBlockedObservation state activeTurn =
+  let reason = BlockedReason ("active turn not found after 3 consecutive checks: " <> unTurnId activeTurn.activeTurnId)
+   in case state of
+        SomeWatcherState PlanningTurnActive {} ->
+          Just (DaemonIssuePlanningObservation (ObservedPlanningBlocked reason))
+        SomeWatcherState IssueTriageActive {} ->
+          Just (DaemonIssueImplementObservation (ObservedIssueImplementBlocked reason))
+        SomeWatcherState IssueInPlanMode {} ->
+          Just (DaemonIssueImplementObservation (ObservedIssueImplementBlocked reason))
+        SomeWatcherState IssueImplementing {} ->
+          Just (DaemonIssueImplementObservation (ObservedIssueImplementBlocked reason))
+        SomeWatcherState PrFixingReviews {} ->
+          Just (DaemonPrReviewObservation (ObservedPrReviewBlocked reason))
+        SomeWatcherState PrReviewingClean {} ->
+          Just (DaemonPrReviewObservation (ObservedPrReviewBlocked reason))
+        _ ->
+          Nothing
 
 observeReviewThreads
   :: Monad m
@@ -192,7 +367,7 @@ observeExistingPullRequest executor config events replay issueConfig = do
     Left reason -> pure (Left (DaemonLoopExternalFailure reason))
     Right openPullRequests ->
       case find ((== issueConfig.issueBranch) . ghPullRequestHeadRefName) openPullRequests of
-        Nothing -> retryCreatePullRequest executor config replay issueConfig
+        Nothing -> retryCreatePullRequest executor config events replay issueConfig
         Just pullRequest ->
           observeWithExecutor
             executor
@@ -204,34 +379,52 @@ retryCreatePullRequest
   :: Monad m
   => ActionExecutor m
   -> DaemonLoopConfig
+  -> [WatcherEvent]
   -> EventReplayResult
   -> IssueConfig
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
-retryCreatePullRequest executor config replay issueConfig = do
-  case config.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions -> pure ()
-    ExecuteActions ->
-      mapM_ writeCompatibility (compatibilityStateWrites config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+retryCreatePullRequest executor config events replay issueConfig = do
   let retryPlan =
         compileEffectPlan
           config.loopDaemonOptions.daemonRuntimeConfig
           [ SomeEffect (CreatePullRequest issueConfig)
-          , SomeEffect SleepUntilNextPoll
           ]
   reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode retryPlan
-  pure
-    ( Right
-        DaemonLoopTickResult
-          { loopReplayResult = replay
-          , loopObservation = Nothing
-          , loopObservedTick = Nothing
-          , loopIdleReason = Just ("waiting for pull request for branch " <> unBranchName issueConfig.issueBranch)
-          , loopActionReports = reports
-          }
-    )
- where
-  writeCompatibility write =
-    runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      pure
+        ( Right
+            DaemonLoopTickResult
+              { loopReplayResult = replay
+              , loopObservation = Nothing
+              , loopObservedTick = Nothing
+              , loopIdleReason = Just ("would create pull request for branch " <> unBranchName issueConfig.issueBranch)
+              , loopActionReports = reports
+              }
+        )
+    ExecuteActions ->
+      case reports of
+        [report] ->
+          case report.actionExecutionResult of
+            CommandActionResult commandReport
+              | not commandReport.ok ->
+                  pure (Left (DaemonLoopDaemonFailure (DaemonActionFailed report.actionExecutionAction commandReport)))
+              | otherwise ->
+                  case parseGhPrCreateResult commandReport.stdout of
+                    Left reason ->
+                      pure (Left (DaemonLoopDaemonFailure (DaemonActionResultInvalid report.actionExecutionAction reason)))
+                    Right (GhPullRequestCreated prNumber) ->
+                      prependActionReport report <$> observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestCreated prNumber))
+                    Right (GhPullRequestReused prNumber) ->
+                      prependActionReport report <$> observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestReused prNumber))
+            _ ->
+              pure (Left (DaemonLoopDaemonFailure (DaemonActionResultInvalid report.actionExecutionAction "PR creation did not return a command report")))
+        _ ->
+          pure (Left (DaemonLoopExternalFailure "unexpected PR creation action report count"))
+
+prependActionReport :: ActionExecutionReport -> Either DaemonLoopFailure DaemonLoopTickResult -> Either DaemonLoopFailure DaemonLoopTickResult
+prependActionReport report =
+  fmap \tick -> tick {loopActionReports = report : tick.loopActionReports}
 
 classifyIssueImplementationObservation :: [WatcherEvent] -> Maybe PrNumber -> AppServerTurn -> Maybe IssueImplementObservation
 classifyIssueImplementationObservation events maybePr turn =
@@ -270,8 +463,24 @@ observeIssuePullRequestMerged executor config events replay issueConfig prNumber
   case pullRequest of
     Left reason -> pure (Left (DaemonLoopExternalFailure reason))
     Right remote
-      | Text.toUpper remote.remotePullRequestState == "MERGED" ->
-          observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
+      | Text.toUpper remote.remotePullRequestState == "MERGED" -> do
+          issue <- runGhIssueView executor.actionRuntime issueConfig.issueRepo issueConfig.issueNumber
+          case issue of
+            Left reason ->
+              observeWithExecutor
+                executor
+                config
+                events
+                (DaemonIssueImplementObservation (ObservedIssueImplementBlocked (BlockedReason ("PR merged but GitHub issue close state could not be verified: " <> reason))))
+            Right remoteIssue
+              | remoteIssue.remoteIssueClosed || Text.toUpper remoteIssue.remoteIssueState == "CLOSED" ->
+                  observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
+              | otherwise ->
+                  observeWithExecutor
+                    executor
+                    config
+                    events
+                    (DaemonIssueImplementObservation (ObservedIssueImplementBlocked (BlockedReason "PR merged but GitHub issue remains open")))
       | otherwise ->
           idle executor config replay ("waiting for PR merge before completing issue implementer: #" <> Text.pack (show (unPrNumber prNumber)))
 

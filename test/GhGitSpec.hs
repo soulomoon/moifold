@@ -4,6 +4,7 @@
 module GhGitSpec
   ( prop_ghGitParsesGitOutputs
   , prop_ghGitParsesIssueAndPrLists
+  , prop_ghGitParsesPrCreateAndChecks
   , prop_ghGitParsesRemoteIssueView
   , prop_ghGitParsesRemotePrView
   , prop_ghGitParsesReviewThreadsGraphql
@@ -70,6 +71,7 @@ prop_ghGitParsesRemotePrView =
               , "headRefOid" .= ("head-sha" :: Text)
               , "mergeCommit" .= object ["oid" .= ("merge-sha" :: Text)]
               , "mergedAt" .= ("2026-04-21T00:00:00Z" :: Text)
+              , "mergeStateStatus" .= ("CLEAN" :: Text)
               ]
           )
    in parseGhPrView prJson
@@ -80,7 +82,26 @@ prop_ghGitParsesRemotePrView =
             , remotePullRequestHeadRefOid = Just (CommitSha "head-sha")
             , remotePullRequestMergeCommit = Just (CommitSha "merge-sha")
             , remotePullRequestMergedAt = Just "2026-04-21T00:00:00Z"
+            , remotePullRequestMergeStateStatus = Just "CLEAN"
             }
+
+prop_ghGitParsesPrCreateAndChecks :: Bool
+prop_ghGitParsesPrCreateAndChecks =
+  let createdJson = jsonText (object ["status" .= ("created" :: Text), "prNumber" .= (7 :: Int)])
+      reusedJson = jsonText (object ["status" .= ("reused" :: Text), "prNumber" .= (8 :: Int)])
+      checksJson =
+        jsonText
+          ( toJSON
+              [ object
+                  [ "name" .= ("ci/test" :: Text)
+                  , "state" .= ("SUCCESS" :: Text)
+                  , "bucket" .= ("pass" :: Text)
+                  ]
+              ]
+          )
+   in parseGhPrCreateResult createdJson == Right (GhPullRequestCreated (PrNumber 7))
+        && parseGhPrCreateResult reusedJson == Right (GhPullRequestReused (PrNumber 8))
+        && parseGhPrChecks checksJson == Right [GhPullRequestCheck "ci/test" "SUCCESS" (Just "pass")]
 
 prop_ghGitParsesReviewThreadsGraphql :: Bool
 prop_ghGitParsesReviewThreadsGraphql =

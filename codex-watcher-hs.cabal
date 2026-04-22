@@ -67,7 +67,6 @@ library
     CodexWatcher.ReplayCli
     CodexWatcher.Runtime
     CodexWatcher.Runtime.Json
-    CodexWatcher.RuntimeStatus
     CodexWatcher.RuntimeOwner
     CodexWatcher.RuntimeOwnerCli
     CodexWatcher.RuntimeDefaults
@@ -129,5 +128,6 @@ test-suite watcher-core-test
     process >=1.6 && <1.7,
     QuickCheck >=2.14 && <3,
     text >=2.0 && <3,
+    time >=1.12 && <1.15,
     unix >=2.8 && <2.9
   default-language: GHC2021

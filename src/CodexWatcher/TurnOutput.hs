@@ -113,7 +113,12 @@ reviewerTurnOutputSchema =
 
 structuredTurnOutcomeInstructions :: Text
 structuredTurnOutcomeInstructions =
-  "Return only JSON with an outcome field. Use outcome=blocked with reason when you cannot proceed, outcome=incomplete with reason when follow-up is required, and outcome=complete with summary when the turn is done."
+  Text.unlines
+    [ "Return only JSON with an outcome field. Plain prose completion is not accepted."
+    , "Use outcome=blocked with a reason when you cannot proceed safely."
+    , "Use outcome=incomplete with a reason when follow-up is required."
+    , "Use outcome=complete with a summary when the turn is done."
+    ]
 
 plannerTurnInput :: Text
 plannerTurnInput =

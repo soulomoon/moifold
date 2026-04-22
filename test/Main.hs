@@ -23,6 +23,7 @@ import CodexWatcher.EventLog
 import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
+import CodexWatcher.IssueFanoutCli (readyIssueStatusFromRuntime)
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
@@ -33,7 +34,7 @@ import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
 import CodexWatcher.RuntimeDefaults
 import CodexWatcher.RuntimeOwner
-import CodexWatcher.RuntimeStatus
+import CodexWatcher.RuntimeOwnerCli (claimRuntimeOwner)
 import CodexWatcher.RunnerGuard
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
@@ -41,6 +42,8 @@ import CodexWatcher.Supervisor
 import CodexWatcher.TurnClassifier
 import CodexWatcher.TurnOutput
 import CodexWatcher.Types
+import CodexWatcher.WatcherRuntimeStatus
+import Control.Exception (try)
 import Control.Monad (when)
 import Data.Aeson
   ( Value (..)
@@ -58,9 +61,11 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
+import Data.Time.Clock (addUTCTime, getCurrentTime)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
 import System.FilePath ((</>))
-import System.Exit (exitFailure)
+import System.Exit (ExitCode (..), exitFailure)
+import System.Posix.Process (getProcessID)
 import Test.QuickCheck
 import AppServerSpec
   ( prop_appServerClientFallsBackForUnmaterializedThreadRead
@@ -91,6 +96,7 @@ import HealthcheckSpec
 import GhGitSpec
   ( prop_ghGitParsesGitOutputs
   , prop_ghGitParsesIssueAndPrLists
+  , prop_ghGitParsesPrCreateAndChecks
   , prop_ghGitParsesRemoteIssueView
   , prop_ghGitParsesRemotePrView
   , prop_ghGitParsesReviewThreadsGraphql
@@ -102,6 +108,7 @@ import RuntimeSpec
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrChecksUsesRequiredStructuredFields
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
@@ -171,6 +178,16 @@ instance Arbitrary BlockedPlanningIssue where
 
 instance Arbitrary PlanningGraph where
   arbitrary = PlanningGraph <$> listOf arbitrary <*> listOf arbitrary <*> listOf arbitrary
+
+validPlanningGraphForConfig :: PlannerConfig -> PlanningGraph
+validPlanningGraphForConfig config =
+  PlanningGraph [validReadyIssueForConfig config] [] []
+
+validReadyIssueForConfig :: PlannerConfig -> IssueNumber
+validReadyIssueForConfig config =
+  case plannerScopeIssues config of
+    issue : _ -> issue
+    [] -> IssueNumber 1
 
 instance Arbitrary IssueConfig where
   arbitrary = IssueConfig <$> arbitrary <*> arbitrary <*> arbitrary
@@ -629,8 +646,10 @@ prop_eventLogIssuePlanningIssueCreationReturnsReady config plannerThread planner
           _ -> False
     Left _ -> False
 
-prop_eventLogIssuePlanningGraphWaitsForReadyIssues :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
-prop_eventLogIssuePlanningGraphWaitsForReadyIssues config plannerThread plannerTurn graph =
+prop_eventLogIssuePlanningGraphWaitsForReadyIssues :: PlannerConfig -> ThreadId -> TurnId -> Bool
+prop_eventLogIssuePlanningGraphWaitsForReadyIssues config plannerThread plannerTurn =
+  let graph = validPlanningGraphForConfig config
+   in
   case replayEventLog
     [ IssuePlanningInitialized config
     , IssuePlanningTurnStarted plannerThread plannerTurn
@@ -647,8 +666,10 @@ prop_eventLogIssuePlanningGraphWaitsForReadyIssues config plannerThread plannerT
           _ -> False
     Left _ -> False
 
-prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
-prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning config plannerThread plannerTurn graph =
+prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning :: PlannerConfig -> ThreadId -> TurnId -> Bool
+prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning config plannerThread plannerTurn =
+  let graph = validPlanningGraphForConfig config
+   in
   case replayEventLog
     [ IssuePlanningInitialized config
     , IssuePlanningTurnStarted plannerThread plannerTurn
@@ -698,9 +719,10 @@ prop_issuePlanningWatcherCreatesIssuesBeforeReplanning config threadId turnId re
             Left _ -> False
         Left _ -> False
 
-prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits :: PlannerConfig -> ThreadId -> TurnId -> PlanningGraph -> Bool
-prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits config threadId turnId graph =
+prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits :: PlannerConfig -> ThreadId -> TurnId -> Bool
+prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits config threadId turnId =
   let ready = SomeWatcherState (PlanningReady config)
+      graph = validPlanningGraphForConfig config
    in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
         Right started ->
           case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningGraphUpdated graph) of
@@ -710,10 +732,25 @@ prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits config threadId turnId
                 && hasEffect RecordPlanningGraphTag graphed.issuePlanningTickEffects
                 && SomeEffect SleepUntilNextPoll `elem` graphed.issuePlanningTickEffects
                 && case issuePlanningObserve graphed.issuePlanningTickState ObservedPlanningReadyIssuesFixed of
-                  Right fixed ->
-                    issuePlanningTickEvent fixed == IssuePlanningReadyIssuesFixed
-                      && somePhase fixed.issuePlanningTickState == Initialized
-                  Left _ -> False
+                    Right fixed ->
+                      issuePlanningTickEvent fixed == IssuePlanningReadyIssuesFixed
+                        && somePhase fixed.issuePlanningTickState == Initialized
+                    Left _ -> False
+            Left _ -> False
+        Left _ -> False
+
+prop_issuePlanningWatcherBlocksOutOfScopeGraph :: ThreadId -> TurnId -> Bool
+prop_issuePlanningWatcherBlocksOutOfScopeGraph threadId turnId =
+  let config = PlannerConfig (RepoName "owner/name") 8 [IssueNumber 12]
+      ready = SomeWatcherState (PlanningReady config)
+      graph = PlanningGraph [IssueNumber 26] [] []
+   in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
+        Right started ->
+          case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningGraphUpdated graph) of
+            Right graphed ->
+              issuePlanningTickEvent graphed == WatcherBlocked (BlockedReason "planning graph references issue #26 outside configured scope")
+                && somePhase graphed.issuePlanningTickState == Blocked
+                && hasEffect RecordBlockedTag graphed.issuePlanningTickEffects
             Left _ -> False
         Left _ -> False
 
@@ -982,7 +1019,7 @@ prop_eventLogRepairDropsStalePlanningReadyIssuesFixed =
       plannerThread = ThreadId "planner-thread"
       firstTurn = TurnId "planner-turn-1"
       secondTurn = TurnId "planner-turn-2"
-      graph = PlanningGraph [IssueNumber 26] [] []
+      graph = PlanningGraph [IssueNumber 12] [] []
       invalidEvents =
         [ IssuePlanningInitialized config
         , IssuePlanningTurnStarted plannerThread firstTurn
@@ -1219,11 +1256,11 @@ prop_turnClassifierMapsDomainOutputs =
   let reviewerCommit = CommitSha "abc123"
       cleanReviewOutput = reviewerStateOutput "clean" reviewerCommit reviewerPromptVersion 0 (Just "LGTM") [] Nothing
    in
-  classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "stable issue set")) == Just ObservedPlanningTurnCompleted
+  classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "stable issue set")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without structured outcome"))
     && classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "already fixed")) == Just ObservedTriageAlreadyFixed
-    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "plan written")) == Just (ObservedPlanCompleted Nothing)
-    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "ready for review")) == Just (ObservedImplementationCompleted (PrNumber 7))
-    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "resolved")) == Just (ObservedWorkerOutcome WorkerCompleted)
+    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "plan written")) == Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without structured outcome"))
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "ready for review")) == Just (ObservedImplementationIncomplete "ready for review")
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "resolved")) == Just (ObservedWorkerOutcome (WorkerIncomplete "worker turn completed without structured outcome"))
     && classifyPrReviewReviewerTurn reviewerCommit (AppServerTurn (TurnId "reviewer") "completed" (Just cleanReviewOutput)) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence reviewerCommit "LGTM")))
 
 prop_turnClassifierPrefersStructuredOutputs :: Bool
@@ -1361,7 +1398,7 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           reviewerPrompt
           [ "dedicated English-only PR reviewer"
           , "add inline GitHub PR review comments"
-          , "do not submit an approval review"
+          , "Do not edit files, commit, push, resolve review threads, or submit an approval review"
           ]
         && promptContainsAll
           issuePrompt
@@ -1385,11 +1422,36 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           , "/tmp/state/issue26/issue-state.json"
           , "This turn is running in Codex Plan mode"
           ]
+        && all
+          promptHasAgentPrincipleFrame
+          [ workerPrompt
+          , reviewerPrompt
+          , issuePrompt
+          , plannerPrompt
+          , planModePrompt
+          , plannerTurnInput
+          , issueTriageTurnInput
+          , issuePlanTurnInput
+          , issueImplementationTurnInput
+          , prReviewWorkerTurnInput
+          ]
         && "{{" `Text.isInfixOf` workerPrompt == False
         && "{{" `Text.isInfixOf` reviewerPrompt == False
         && "{{" `Text.isInfixOf` issuePrompt == False
         && "{{" `Text.isInfixOf` plannerPrompt == False
         && "{{" `Text.isInfixOf` planModePrompt == False
+
+prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple :: Bool
+prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
+  promptContainsAll
+    structuredTurnOutcomeInstructions
+    [ "Return only JSON with an outcome field"
+    , "Plain prose completion is not accepted"
+    , "outcome=blocked with a reason"
+    , "outcome=incomplete with a reason"
+    , "outcome=complete with a summary"
+    ]
+    && reviewerPromptVersion == "haskell-pro-style-v3-agent-principle"
 
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions :: Bool
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
@@ -1412,6 +1474,18 @@ prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
 promptContainsAll :: Text -> [Text] -> Bool
 promptContainsAll prompt =
   all (`Text.isInfixOf` prompt)
+
+promptHasAgentPrincipleFrame :: Text -> Bool
+promptHasAgentPrincipleFrame prompt =
+  promptContainsAll
+    prompt
+    [ "Role:"
+    , "Mission:"
+    , "Operating principles:"
+    , "Hard constraints:"
+    , "Output contract:"
+    , "Prioritize correctness, safety, usefulness, efficiency, and clarity."
+    ]
 
 collaborationDeveloperInstructions :: Value -> Maybe Text
 collaborationDeveloperInstructions params = do
@@ -1485,6 +1559,61 @@ prop_runtimeOwnerJsonAndParsing =
     && parseRuntimeOwner "node" /= Right HaskellRuntime
     && parseRuntimeOwner "unknown" /= Right HaskellRuntime
     && runtimeOwnerJson HaskellRuntime == object ["owner" .= ("haskell" :: Text)]
+
+runtimeOwnerLeaseParsingCoversLegacyAndLease :: IO Bool
+runtimeOwnerLeaseParsingCoversLegacyAndLease = do
+  let stateDir = "/tmp/codex-watcher-hs-runtime-owner"
+      ownerPath = stateDir </> "runtime-owner.json"
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  LazyByteString.writeFile ownerPath (encode (runtimeOwnerJson HaskellRuntime))
+  legacy <- readRuntimeOwnerMarker stateDir
+  now <- getCurrentTime
+  let lease =
+        RuntimeLease
+          { runtimeLeaseOwner = HaskellRuntime
+          , runtimeLeasePid = "123456"
+          , runtimeLeaseHost = "test-host"
+          , runtimeLeaseClaimedAt = now
+          , runtimeLeaseExpiresAt = addUTCTime 60 now
+          , runtimeLeaseEventLogHeadHash = "head"
+          }
+  LazyByteString.writeFile ownerPath (encode (runtimeLeaseJson lease))
+  leased <- readRuntimeOwnerMarker stateDir
+  removePathForcibly stateDir
+  results <-
+    sequence
+      [ assert "runtime owner parses legacy marker" (legacy == Right (Just (RuntimeOwnerLegacy HaskellRuntime)))
+      , assert "runtime owner parses lease marker" (case leased of Right (Just (RuntimeOwnerLeased parsed)) -> parsed.runtimeLeasePid == "123456" && parsed.runtimeLeaseEventLogHeadHash == "head"; _ -> False)
+      ]
+  pure (and results)
+
+runtimeOwnerClaimRejectsValidLease :: IO Bool
+runtimeOwnerClaimRejectsValidLease = do
+  let stateDir = "/tmp/codex-watcher-hs-runtime-owner-claim"
+      ownerPath = stateDir </> "runtime-owner.json"
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  now <- getCurrentTime
+  let lease =
+        RuntimeLease
+          { runtimeLeaseOwner = HaskellRuntime
+          , runtimeLeasePid = "999999999"
+          , runtimeLeaseHost = "test-host"
+          , runtimeLeaseClaimedAt = now
+          , runtimeLeaseExpiresAt = addUTCTime 60 now
+          , runtimeLeaseEventLogHeadHash = "head"
+          }
+  LazyByteString.writeFile ownerPath (encode (runtimeLeaseJson lease))
+  claimResult <- try (claimRuntimeOwner stateDir) :: IO (Either ExitCode ())
+  removePathForcibly stateDir
+  results <-
+    sequence
+      [ assert "runtime owner claim rejects valid lease" (case claimResult of Left (ExitFailure _) -> True; _ -> False)
+      ]
+  pure (and results)
 
 prop_supervisorRendersRestartAndLogrotate :: Bool
 prop_supervisorRendersRestartAndLogrotate =
@@ -1641,37 +1770,65 @@ runtimeStatusHelperCoversCommonCases = do
   let stateDir = "/tmp/codex-watcher-hs-runtime-status"
       configPath = stateDir </> "config.json"
       eventsPath = stateDir </> "events.jsonl"
+      pidPath = stateDir </> "watcher.pid"
       plannerConfig = PlannerConfig (RepoName "owner/name") 8 []
       stoppedEvents =
         [ IssuePlanningInitialized plannerConfig
         , WatcherStopped (StopReason "done")
         ]
-      status running missing replayStatus =
-        watcherRuntimeStatus configPath eventsPath (pure running) (pure missing) replayStatus
-      terminalPolicy state =
-        pure $
-          if someDomain state == IssuePlanning && isTerminalPhase (somePhase state)
-            then Just Terminal
-            else Nothing
+      blockedEvents =
+        [ IssuePlanningInitialized plannerConfig
+        , WatcherBlocked (BlockedReason "blocked")
+        ]
+      completeEvents =
+        [ IssuePlanningInitialized plannerConfig
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
+        , IssuePlanningTurnCompleted
+        ]
+      status missingIsTerminal terminalIsTerminal =
+        watcherRuntimeStatus
+          WatcherRuntimeStatusConfig
+            { watcherRuntimeExpectedDomain = IssuePlanning
+            , watcherRuntimeConfigPath = configPath
+            , watcherRuntimeEventsPath = eventsPath
+            , watcherRuntimePidPath = pidPath
+            , watcherRuntimeMissingIsTerminal = pure missingIsTerminal
+            , watcherRuntimeReplayTerminalIsTerminal = \replay ->
+                pure $
+                  terminalIsTerminal
+                    && someDomain replay.replayState == IssuePlanning
+                    && isTerminalPhase (somePhase replay.replayState)
+            }
   exists <- doesDirectoryExist stateDir
   when exists (removePathForcibly stateDir)
-  missing <- status False Missing terminalPolicy
+  missing <- status False True
   createDirectoryIfMissing True stateDir
   writeFile configPath "{}"
-  activeStopped <- status False Missing terminalPolicy
-  activeRunning <- status True Missing terminalPolicy
+  activeStopped <- status False True
+  pid <- getProcessID
+  writeFile pidPath (show pid <> "\n")
+  activeRunning <- status False True
   writeFile eventsPath "not-json\n"
-  invalidRunning <- status True Missing terminalPolicy
+  invalidRunning <- status False True
   LazyByteString.writeFile eventsPath (mconcat (fmap (\event -> encode event <> "\n") stoppedEvents))
-  terminal <- status False Missing terminalPolicy
+  terminal <- status False True
+  LazyByteString.writeFile eventsPath (mconcat (fmap (\event -> encode event <> "\n") blockedEvents))
+  terminalBlocked <- status False True
+  LazyByteString.writeFile eventsPath (mconcat (fmap (\event -> encode event <> "\n") completeEvents))
+  terminalComplete <- status False True
+  terminalPolicyFalse <- status False False
   removePathForcibly stateDir
   results <-
     sequence
-      [ assert "runtime status reports missing watcher" (missing == Missing)
-      , assert "runtime status reports stopped without event log" (activeStopped == ActiveStopped)
-      , assert "runtime status reports running without event log" (activeRunning == ActiveRunning)
-      , assert "runtime status treats invalid event log as active when pid runs" (invalidRunning == ActiveRunning)
-      , assert "runtime status reports terminal replay" (terminal == Terminal)
+      [ assert "runtime status reports missing watcher" (missing == WatcherMissing)
+      , assert "runtime status reports stopped without event log" (activeStopped == WatcherActiveStopped)
+      , assert "runtime status reports running without event log" (activeRunning == WatcherActiveRunning)
+      , assert "runtime status treats invalid event log as active when pid runs" (invalidRunning == WatcherActiveRunning)
+      , assert "runtime status reports terminal replay" (terminal == WatcherTerminal (TerminalStopped "done"))
+      , assert "runtime status reports blocked terminal reason" (terminalBlocked == WatcherTerminal (TerminalBlocked "blocked"))
+      , assert "runtime status reports complete terminal" (terminalComplete == WatcherTerminal TerminalComplete)
+      , assert "only complete runtime status maps ready issue terminal" (readyIssueStatusFromRuntime terminalBlocked == ReadyIssueActiveStopped && readyIssueStatusFromRuntime terminalComplete == ReadyIssueTerminal)
+      , assert "runtime status keeps rejected terminal replay active while pid runs" (terminalPolicyFalse == WatcherActiveRunning)
       ]
   pure (and results)
 
@@ -1863,9 +2020,54 @@ fakeActionExecutorWith commandResponse appServerResponse = do
           }
   pure (executor, readIORef calls)
 
+fakeActionExecutorWithJsonStore :: (RuntimeCommand -> CommandReport) -> (AppServerRequest -> Value) -> IO (ActionExecutor IO, IO [FakeActionCall])
+fakeActionExecutorWithJsonStore commandResponse appServerResponse = do
+  calls <- newIORef []
+  jsonStore <- newIORef []
+  let record call = modifyIORef' calls (<> [call])
+      readStoredJson path = lookup path <$> readIORef jsonStore
+      writeStoredJson path value =
+        modifyIORef' jsonStore \entries -> (path, value) : filter ((/= path) . fst) entries
+      runtime =
+        RuntimeInterpreter
+          { runtimeRunCommand = \command -> do
+              record (FakeCommand command)
+              pure (commandResponse command)
+          , runtimeReadJsonValue = \path -> do
+              record (FakeReadJson path)
+              stored <- readStoredJson path
+              pure (maybe (Left "not found") Right stored)
+          , runtimeWriteJsonValue = \path value -> do
+              record (FakeWriteJson path value)
+              writeStoredJson path value
+          , runtimeAppendJsonLine = \path value -> record (FakeAppendJsonLine path value)
+          }
+      appServer =
+        AppServerInterpreter
+          { appServerSendRequest = \request -> do
+              record (FakeAppServer request)
+              pure (appServerResponse request)
+          }
+      executor =
+        ActionExecutor
+          { actionRuntime = runtime
+          , actionAppServer = appServer
+          , actionSleepUntilNextPoll = record FakeSleep
+          , actionStopDaemon = record FakeStop
+          }
+  pure (executor, readIORef calls)
+
 defaultFakeCommand :: RuntimeCommand -> CommandReport
 defaultFakeCommand _command =
   CommandReport {ok = True, status = Just 0, stdout = "ok", stderr = "", errorMessage = Nothing}
+
+jsonCommandReport :: Value -> CommandReport
+jsonCommandReport value =
+  CommandReport {ok = True, status = Just 0, stdout = jsonText value, stderr = "", errorMessage = Nothing}
+
+failedCommandReport :: Text -> CommandReport
+failedCommandReport message =
+  CommandReport {ok = False, status = Just 1, stdout = "", stderr = message, errorMessage = Just message}
 
 defaultFakeAppServer :: AppServerRequest -> Value
 defaultFakeAppServer request
@@ -1961,6 +2163,31 @@ daemonTickDryRunReplaysEventsAndDoesNotExecute = do
       putStrLn ("FAIL daemon tick: " <> Text.unpack (formatDaemonFailure failure))
       pure False
 
+daemonTickExecuteStopsOnCommandFailure :: IO Bool
+daemonTickExecuteStopsOnCommandFailure = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GitPush {} -> failedCommandReport "push failed"
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 95
+      branch = BranchName "codex/example"
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
+      nextEffects =
+        [ SomeEffect (PushBranch branch)
+        , SomeEffect SleepUntilNextPoll
+        ]
+  result <- runDaemonTickWithEvents executor runtimeConfig ExecuteActions events nextEffects
+  calls <- getCalls
+  results <-
+    sequence
+      [ assert "daemon execute stops on failed command" (case result of Left DaemonActionFailed {} -> True; _ -> False)
+      , assert "daemon execute does not continue after failed command" (calls == [FakeCommand (GitPush "/tmp/work" branch)])
+      ]
+  pure (and results)
+
 observedDaemonTickDryRunDoesNotMutate :: IO Bool
 observedDaemonTickDryRunDoesNotMutate = do
   (executor, getCalls) <- fakeActionExecutor
@@ -2008,7 +2235,7 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
       let expectedEvent = IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
       results <-
         sequence
-          [ assert "observed execute appends event first" (take 1 calls == [FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)])
+          [ assert "observed execute runs external action before appending event" (case calls of FakeAppServer {} : FakeAppendJsonLine "/tmp/events.jsonl" appended : _ -> appended == toJSON expectedEvent; _ -> False)
           , assert "observed execute writes compatibility state" (length [() | FakeWriteJson {} <- calls] == length tick.daemonObservedCompatibilityWrites)
           , assert "observed execute runs effect actions" (any isFakeAppServer calls)
           , assert "observed execute reaches plan mode" (somePhase tick.daemonObservedState == PlanMode)
@@ -2021,6 +2248,176 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
   isFakeAppServer = \case
     FakeAppServer {} -> True
     _ -> False
+
+observedDaemonTickExecuteCommandFailureDoesNotAppendEvent :: IO Bool
+observedDaemonTickExecuteCommandFailureDoesNotAppendEvent = do
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GitPush {} -> failedCommandReport "push failed"
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 115
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        ]
+      observation = DaemonIssueImplementObservation (ObservedPlanCompleted Nothing)
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  results <-
+    sequence
+      [ assert "observed execute fails failed command before event commit" (case result of Left DaemonActionFailed {} -> True; _ -> False)
+      , assert "observed execute does not append event after command failure" (not (any isAppend calls))
+      , assert "observed execute does not continue to PR creation after push failure" (FakeCommand (GhCreatePullRequest "/tmp/work" issueConfig) `notElem` calls)
+      ]
+  pure (and results)
+ where
+  isAppend = \case
+    FakeAppendJsonLine {} -> True
+    _ -> False
+
+observedDaemonTickPreMergeGateRechecksWhenHeadChanged :: IO Bool
+observedDaemonTickPreMergeGateRechecksWhenHeadChanged = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumber = PrNumber 6
+      prConfig = PrConfig repo prNumber (BranchName "codex/example")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhPrView {} ->
+            jsonCommandReport
+              ( object
+                  [ "state" .= ("OPEN" :: Text)
+                  , "headRefOid" .= ("def456" :: Text)
+                  , "mergeStateStatus" .= ("CLEAN" :: Text)
+                  ]
+              )
+          GhReviewThreads {} -> jsonCommandReport emptyReviewThreadsJson
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 116
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")
+        , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) (TurnId "reviewer-turn")
+        ]
+      observation = DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerClean cleanEvidence))
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "pre-merge gate rewrites head change to reviewer incomplete" (daemonObservedEvent tick == PrReviewReviewIncomplete "pre-merge PR head changed from reviewed commit abc123 to def456")
+          , assert "pre-merge gate does not merge changed head" (not (any isMerge calls))
+          , assert "pre-merge gate returns to checking reviews" (somePhase tick.daemonObservedState == CheckingReviews)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL pre-merge head-change gate: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+ where
+  isMerge = \case
+    FakeCommand GhPrCommentReviewAndMerge {} -> True
+    _ -> False
+
+observedDaemonTickPreMergeGateMergesWhenClean :: IO Bool
+observedDaemonTickPreMergeGateMergesWhenClean = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumber = PrNumber 6
+      prConfig = PrConfig repo prNumber (BranchName "codex/example")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhPrView {} ->
+            jsonCommandReport
+              ( object
+                  [ "state" .= ("OPEN" :: Text)
+                  , "headRefOid" .= ("abc123" :: Text)
+                  , "mergeStateStatus" .= ("CLEAN" :: Text)
+                  ]
+              )
+          GhReviewThreads {} -> jsonCommandReport emptyReviewThreadsJson
+          GhPrChecks {} ->
+            jsonCommandReport
+              ( toJSON
+                  [ object
+                      [ "name" .= ("ci/test" :: Text)
+                      , "state" .= ("SUCCESS" :: Text)
+                      , "bucket" .= ("pass" :: Text)
+                      ]
+                  ]
+              )
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 117
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")
+        , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) (TurnId "reviewer-turn")
+        ]
+      observation = DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerClean cleanEvidence))
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "pre-merge gate keeps clean review event" (daemonObservedEvent tick == PrReviewCleanFound cleanEvidence)
+          , assert "pre-merge gate reads required checks" (FakeCommand (GhPrChecks repo prNumber) `elem` calls)
+          , assert "pre-merge gate merges after passing checks" (any isMerge calls)
+          , assert "pre-merge gate reaches merging state" (somePhase tick.daemonObservedState == Merging)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL pre-merge clean gate: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+ where
+  isMerge = \case
+    FakeCommand GhPrCommentReviewAndMerge {} -> True
+    _ -> False
+
+emptyReviewThreadsJson :: Value
+emptyReviewThreadsJson =
+  object
+    [ "data"
+        .= object
+          [ "repository"
+              .= object
+                [ "pullRequest"
+                    .= object
+                      [ "reviewThreads"
+                          .= object
+                            [ "nodes" .= ([] :: [Value])
+                            ]
+                      ]
+                ]
+          ]
+    ]
 
 automaticDaemonLoopPlanningDryRunStartsSyntheticTurn :: IO Bool
 automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
@@ -2255,7 +2652,7 @@ automaticDaemonLoopImplementationCompletionSequencesHandoff = do
                     .= [ object
                           [ "id" .= ("turn-impl" :: Text)
                           , "status" .= ("completed" :: Text)
-                          , "output" .= ("ready for review" :: Text)
+                          , "output" .= ("{\"outcome\":\"complete\",\"reason\":\"ready for review\"}" :: Text)
                           ]
                        ]
                 ]
@@ -2294,12 +2691,121 @@ automaticDaemonLoopImplementationCompletionSequencesHandoff = do
       ]
   pure (and results)
 
+automaticIssueMergeRequiresClosedIssue :: IO Bool
+automaticIssueMergeRequiresClosedIssue = do
+  closed <- runIssueMergeCheck True True
+  open <- runIssueMergeCheck True False
+  unreadable <- runIssueMergeCheck False False
+  results <-
+    sequence
+      [ assert "merged PR with closed issue completes issue implementer" (closed == Just (IssuePullRequestMergedEvent (PrNumber 7), Complete))
+      , assert "merged PR with open issue blocks issue implementer" (open == Just (WatcherBlocked (BlockedReason "PR merged but GitHub issue remains open"), Blocked))
+      , assert
+          "merged PR with unreadable issue blocks issue implementer"
+          ( unreadable
+              == Just
+                ( WatcherBlocked (BlockedReason "PR merged but GitHub issue close state could not be verified: api down api down")
+                , Blocked
+                )
+          )
+      ]
+  pure (and results)
+ where
+  runIssueMergeCheck issueReadable issueClosed = do
+    (executor, _getCalls) <-
+      fakeActionExecutorWith
+        ( \case
+            GhPrView {} -> jsonCommandReport (object ["state" .= ("MERGED" :: Text)])
+            GhIssueView {}
+              | issueReadable ->
+                  jsonCommandReport (object ["state" .= (if issueClosed then "CLOSED" :: Text else "OPEN"), "closed" .= issueClosed])
+              | otherwise ->
+                  failedCommandReport "api down"
+            command -> defaultFakeCommand command
+        )
+        defaultFakeAppServer
+    let repo = RepoName "soulomoon/mlf2"
+        runtimeConfig = effectRuntimeConfig repo "/tmp/work" 155
+        options =
+          DaemonOptions
+            { daemonEventLogPath = "/tmp/events.jsonl"
+            , daemonRuntimeConfig = runtimeConfig
+            , daemonExecutionMode = DryRunActions
+            }
+        loopConfig = DaemonLoopConfig options Nothing
+        issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+        events =
+          [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+          , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+          , IssuePlanCompletedEvent Nothing
+          , IssuePullRequestReusedEvent (PrNumber 7)
+          , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
+          , IssueReviewHandoffInitializedEvent (PrNumber 7)
+          , IssueReviewHandoffStartedEvent (PrNumber 7)
+          ]
+    result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+    pure case result of
+      Right tick -> (\observed -> (observed.daemonObservedEvent, somePhase observed.daemonObservedState)) <$> tick.loopObservedTick
+      Left _ -> Nothing
+
+automaticStaleActiveTurnBlocksAfterThreeMisses :: IO Bool
+automaticStaleActiveTurnBlocksAfterThreeMisses = do
+  (executor, getCalls) <-
+    fakeActionExecutorWithJsonStore
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then object ["turns" .= ([] :: [Value])]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 156
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events =
+        [ IssuePlanningInitialized (PlannerConfig repo 1 [])
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "missing-turn")
+        ]
+      runOnce = runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  first <- runOnce
+  second <- runOnce
+  third <- runOnce
+  calls <- getCalls
+  let eventOf result =
+        case result of
+          Right tick -> daemonObservedEvent <$> tick.loopObservedTick
+          Left _ -> Nothing
+      markerWrites =
+        [ value
+        | FakeWriteJson path value <- calls
+        , path == "/tmp/work/.watcher/stale-active-turn.json"
+        ]
+  results <-
+    sequence
+      [ assert "first missing active turn idles" (eventOf first == Nothing)
+      , assert "second missing active turn idles" (eventOf second == Nothing)
+      , assert
+          "third missing active turn blocks"
+          ( eventOf third
+              == Just (WatcherBlocked (BlockedReason "active turn not found after 3 consecutive checks: missing-turn"))
+          )
+      , assert "stale active turn marker is persisted" (not (null markerWrites))
+      , assert "stale active turn marker is cleared on block" (last markerWrites == Null)
+      ]
+  pure (and results)
+
 automaticDaemonLoopRetriesPrCreateWhileWaitingForPr :: IO Bool
 automaticDaemonLoopRetriesPrCreateWhileWaitingForPr = do
   (executor, getCalls) <-
     fakeActionExecutorWith
       ( \case
           GhPrListOpen {} -> CommandReport {ok = True, status = Just 0, stdout = "[]", stderr = "", errorMessage = Nothing}
+          command@GhCreatePullRequest {} -> (defaultFakeCommand command) {stdout = "{\"status\":\"created\",\"prNumber\":7}"}
           command -> defaultFakeCommand command
       )
       defaultFakeAppServer
@@ -2324,7 +2830,7 @@ automaticDaemonLoopRetriesPrCreateWhileWaitingForPr = do
     Right tick -> do
       results <-
         sequence
-          [ assert "missing PR retry keeps issue implementer non-terminal" (maybe True (const False) tick.loopObservedTick)
+          [ assert "missing PR retry records created PR" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssuePullRequestCreatedEvent (PrNumber 7)))
           , assert "missing PR retry checks open PRs" (FakeCommand (GhPrListOpen repo) `elem` calls)
           , assert "missing PR retry re-runs create PR" (FakeCommand (GhCreatePullRequest "/tmp/work" issueConfig) `elem` calls)
           , assert "missing PR retry sleeps after create attempt" (FakeSleep `elem` calls)
@@ -2472,6 +2978,7 @@ main = do
       , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
       , quickCheckResult prop_issuePlanningWatcherCreatesIssuesBeforeReplanning
       , quickCheckResult prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits
+      , quickCheckResult prop_issuePlanningWatcherBlocksOutOfScopeGraph
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
       , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
@@ -2501,17 +3008,19 @@ main = do
       , quickCheckResult prop_prReviewWatcherWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_prReviewWatcherCleanReviewerMovesToMerging
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
-      , quickCheckResult prop_runtimeGitPushDryRunNeverForces
-      , quickCheckResult prop_runtimeGitPushNeverForces
-      , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
-      , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
+        , quickCheckResult prop_runtimeGitPushDryRunNeverForces
+        , quickCheckResult prop_runtimeGitPushNeverForces
+        , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
+        , quickCheckResult prop_runtimeGhPrChecksUsesRequiredStructuredFields
+        , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
       , quickCheckResult prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
-      , quickCheckResult prop_ghGitParsesRemoteIssueView
-      , quickCheckResult prop_ghGitParsesRemotePrView
-      , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
+        , quickCheckResult prop_ghGitParsesRemoteIssueView
+        , quickCheckResult prop_ghGitParsesRemotePrView
+        , quickCheckResult prop_ghGitParsesPrCreateAndChecks
+        , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
       , quickCheckResult prop_ghGitParsesGitOutputs
       , quickCheckResult prop_appServerInitializeRequestMatchesJsonRpc
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
@@ -2537,6 +3046,7 @@ main = do
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
       , quickCheckResult prop_threadDeveloperPromptTemplatesPortNodeProtocols
+      , quickCheckResult prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple
       , quickCheckResult prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
@@ -2559,14 +3069,20 @@ main = do
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
+  daemonTickCommandFailureOk <- daemonTickExecuteStopsOnCommandFailure
   observedDaemonDryRunOk <- observedDaemonTickDryRunDoesNotMutate
   observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
+  observedDaemonFailureOk <- observedDaemonTickExecuteCommandFailureDoesNotAppendEvent
+  preMergeHeadChangedOk <- observedDaemonTickPreMergeGateRechecksWhenHeadChanged
+  preMergeCleanOk <- observedDaemonTickPreMergeGateMergesWhenClean
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningIssueCreationOk <- automaticDaemonLoopPlanningIssueCreationRequestsReplanning
   automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphWaitsAndRecords
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
+  automaticIssueMergeClosedOk <- automaticIssueMergeRequiresClosedIssue
+  automaticStaleTurnOk <- automaticStaleActiveTurnBlocksAfterThreeMisses
   automaticPrRetryOk <- automaticDaemonLoopRetriesPrCreateWhileWaitingForPr
   automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
@@ -2574,6 +3090,8 @@ main = do
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
+  runtimeOwnerLeaseOk <- runtimeOwnerLeaseParsingCoversLegacyAndLease
+  runtimeOwnerClaimOk <- runtimeOwnerClaimRejectsValidLease
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
   if
     all isSuccess results
@@ -2584,14 +3102,20 @@ main = do
       && actionExecutorDryRunOk
       && actionExecutorExecuteOk
       && daemonTickOk
+      && daemonTickCommandFailureOk
       && observedDaemonDryRunOk
       && observedDaemonExecuteOk
+      && observedDaemonFailureOk
+      && preMergeHeadChangedOk
+      && preMergeCleanOk
       && automaticPlanningDryRunOk
       && automaticPlanningIssueCreationOk
       && automaticPlanningGraphOk
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
       && automaticImplementationHandoffOk
+      && automaticIssueMergeClosedOk
+      && automaticStaleTurnOk
       && automaticPrRetryOk
       && automaticTerminalStopOk
       && runnerGuardOk
@@ -2599,6 +3123,8 @@ main = do
       && runnerGuardWaitingRestartOk
       && runnerGuardRepairOk
       && runtimeStatusOk
+      && runtimeOwnerLeaseOk
+      && runtimeOwnerClaimOk
       && observeParsingOk
     then pure ()
     else exitFailure

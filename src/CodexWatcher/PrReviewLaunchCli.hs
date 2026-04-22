@@ -31,7 +31,7 @@ import CodexWatcher.WatcherRuntimeStatus
 import Control.Monad (when)
 import Data.Aeson (Value, object, (.=))
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.Exit (die)
 import System.FilePath (takeDirectory, (</>))
 
@@ -49,19 +49,27 @@ data PrReviewWatcherLaunchPlan = PrReviewWatcherLaunchPlan
   }
   deriving stock (Eq, Show)
 
-ensurePrReviewWatcherForHandoff :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> IssueConfig -> PrNumber -> IO ()
+ensurePrReviewWatcherForHandoff :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> IssueConfig -> PrNumber -> IO (Maybe BlockedReason)
 ensurePrReviewWatcherForHandoff cli endpoint executionMode issueConfig prNumber = do
   let launch = prReviewWatcherLaunchPlan (prReviewWatchersRootForIssueStateDir cli.loopCliStateDir) cli.loopCliWorkdir issueConfig prNumber
   status <- prReviewWatcherRuntimeStatus launch.reviewLaunchStateDir
   case status of
-    WatcherMissing ->
+    WatcherMissing -> do
       launchPrReviewWatcher executionMode (Just endpoint) cli.loopCliPollSeconds cli.loopCliStartChildren launch
-    WatcherActiveStopped ->
+      pure Nothing
+    WatcherActiveStopped -> do
       startPrReviewWatcherChildIfEnabled cli.loopCliStartChildren endpoint cli.loopCliPollSeconds launch
-    WatcherActiveRunning ->
+      pure Nothing
+    WatcherActiveRunning -> do
       putStrLn ("PR review watcher already running for #" <> show (unPrNumber prNumber))
-    WatcherTerminal ->
+      pure Nothing
+    WatcherTerminal TerminalComplete -> do
       putStrLn ("PR review watcher already terminal for #" <> show (unPrNumber prNumber))
+      pure Nothing
+    WatcherTerminal (TerminalBlocked reason) ->
+      pure (Just (BlockedReason ("child PR review watcher blocked: " <> reason)))
+    WatcherTerminal (TerminalStopped reason) ->
+      pure (Just (BlockedReason ("child PR review watcher stopped: " <> reason)))
 
 prReviewWatchersRootForIssueStateDir :: FilePath -> FilePath
 prReviewWatchersRootForIssueStateDir issueStateDir =
@@ -124,8 +132,10 @@ launchPrReviewWatcher DryRunActions maybeEndpoint pollSeconds startChildren laun
   maybe (pure ()) (\endpoint -> when startChildren (printPrReviewWatcherChildLaunch endpoint pollSeconds launch)) maybeEndpoint
 launchPrReviewWatcher ExecuteActions maybeEndpoint pollSeconds startChildren launch = do
   ensurePrReviewWatcherLaunchWritable launch
+  writePrReviewWatcherLaunchPending startChildren launch
   preparedLaunch <- preparePrReviewWatcherLaunch maybeEndpoint launch
   writePrReviewWatcherLaunch preparedLaunch
+  writePrReviewWatcherLaunchFinalized startChildren preparedLaunch
   maybe (pure ()) (\endpoint -> when startChildren (startPrReviewWatcherChild endpoint pollSeconds preparedLaunch)) maybeEndpoint
 
 preparePrReviewWatcherLaunch :: Maybe AppServerEndpoint -> PrReviewWatcherLaunchPlan -> IO PrReviewWatcherLaunchPlan
@@ -155,7 +165,7 @@ prReviewThreadStartOptions launch role =
 
 writePrReviewWatcherLaunch :: PrReviewWatcherLaunchPlan -> IO ()
 writePrReviewWatcherLaunch launch = do
-  ensurePrReviewWatcherLaunchWritable launch
+  ensurePrReviewWatcherLaunchStateEmpty launch
   createDirectoryIfMissing True launch.reviewLaunchStateDir
   writeJsonValue launch.reviewLaunchConfigPath launch.reviewLaunchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.reviewLaunchEventsPath launch.reviewLaunchInitialEvent
@@ -165,10 +175,64 @@ writePrReviewWatcherLaunch launch = do
 
 ensurePrReviewWatcherLaunchWritable :: PrReviewWatcherLaunchPlan -> IO ()
 ensurePrReviewWatcherLaunchWritable launch = do
+  ensurePrReviewWatcherLaunchStateEmpty launch
+  pendingExists <- doesFileExist (launchPendingManifestPath launch.reviewLaunchStateDir)
+  when pendingExists $
+    die
+      ( "refusing to overwrite pending PR review watcher launch state: "
+          <> launch.reviewLaunchStateDir
+          <> "; inspect or remove "
+          <> launchPendingManifestPath launch.reviewLaunchStateDir
+          <> " before retrying"
+      )
+
+ensurePrReviewWatcherLaunchStateEmpty :: PrReviewWatcherLaunchPlan -> IO ()
+ensurePrReviewWatcherLaunchStateEmpty launch = do
   configExists <- doesFileExist launch.reviewLaunchConfigPath
   eventsExists <- doesFileExist launch.reviewLaunchEventsPath
-  when (configExists || eventsExists) $
+  finalizedExists <- doesFileExist (launchFinalizedManifestPath launch.reviewLaunchStateDir)
+  when (configExists || eventsExists || finalizedExists) $
     die ("refusing to overwrite existing PR review watcher state: " <> launch.reviewLaunchStateDir)
+
+writePrReviewWatcherLaunchPending :: Bool -> PrReviewWatcherLaunchPlan -> IO ()
+writePrReviewWatcherLaunchPending startChildren launch =
+  writeJsonValue
+    (launchPendingManifestPath launch.reviewLaunchStateDir)
+    (prReviewLaunchManifest "pending" startChildren launch)
+
+writePrReviewWatcherLaunchFinalized :: Bool -> PrReviewWatcherLaunchPlan -> IO ()
+writePrReviewWatcherLaunchFinalized startChildren launch = do
+  writeJsonValue
+    (launchFinalizedManifestPath launch.reviewLaunchStateDir)
+    (prReviewLaunchManifest "finalized" startChildren launch)
+  pendingExists <- doesFileExist (launchPendingManifestPath launch.reviewLaunchStateDir)
+  when pendingExists (removeFile (launchPendingManifestPath launch.reviewLaunchStateDir))
+
+prReviewLaunchManifest :: Text.Text -> Bool -> PrReviewWatcherLaunchPlan -> Value
+prReviewLaunchManifest status startChildren launch =
+  object
+    [ "status" .= status
+    , "launchKind" .= ("pr-review" :: Text.Text)
+    , "repo" .= unRepoName launch.reviewLaunchPrConfig.prRepo
+    , "prNumber" .= unPrNumber launch.reviewLaunchPrConfig.prNumber
+    , "workdir" .= launch.reviewLaunchWorkdir
+    , "stateDir" .= launch.reviewLaunchStateDir
+    , "configPath" .= launch.reviewLaunchConfigPath
+    , "eventsPath" .= launch.reviewLaunchEventsPath
+    , "intendedThreadRoles" .= (["worker", "reviewer"] :: [Text.Text])
+    , "workerThreadId" .= unThreadId launch.reviewLaunchWorkerThreadId
+    , "reviewerThreadId" .= unThreadId launch.reviewLaunchReviewerThreadId
+    , "childLaunch" .= if startChildren then ("start" :: Text.Text) else "disabled"
+    , "createdAt" .= ("unknown" :: Text.Text)
+    ]
+
+launchPendingManifestPath :: FilePath -> FilePath
+launchPendingManifestPath stateDir =
+  stateDir </> "launch-pending.json"
+
+launchFinalizedManifestPath :: FilePath -> FilePath
+launchFinalizedManifestPath stateDir =
+  stateDir </> "launch-finalized.json"
 
 printPrReviewWatcherLaunch :: PrReviewWatcherLaunchPlan -> IO ()
 printPrReviewWatcherLaunch launch =
@@ -240,5 +304,5 @@ prReviewWatcherRuntimeStatus stateDir = do
       , watcherRuntimeEventsPath = eventsPath
       , watcherRuntimePidPath = pidPath
       , watcherRuntimeMissingIsTerminal = pure False
-      , watcherRuntimeReplayTerminalIsTerminal = \_replay -> pure True
+      , watcherRuntimeReplayTerminalIsTerminal = \replay -> pure (somePhase replay.replayState == Complete)
       }

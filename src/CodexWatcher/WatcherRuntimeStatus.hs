@@ -1,9 +1,12 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module CodexWatcher.WatcherRuntimeStatus
-  ( WatcherRuntimeStatus (..)
+  ( WatcherTerminalReason (..)
+  , WatcherRuntimeStatus (..)
   , WatcherRuntimeStatusConfig (..)
   , statusIsActiveRunning
   , statusIsActiveStopped
@@ -14,15 +17,22 @@ module CodexWatcher.WatcherRuntimeStatus
 
 import CodexWatcher.ChildDaemon (readPidFile, isPidRunning)
 import CodexWatcher.EventLog (EventReplayResult (..), loadEventLogFile, replayEventLog)
-import CodexWatcher.Types (Domain, isTerminalPhase, someDomain, somePhase)
+import CodexWatcher.Types (BlockedReason (..), Domain, SomeWatcherState (..), StopReason (..), WatcherState (..), isTerminalPhase, someDomain, somePhase)
+import Data.Text (Text)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
+
+data WatcherTerminalReason
+  = TerminalComplete
+  | TerminalBlocked Text
+  | TerminalStopped Text
+  deriving stock (Eq, Show, Generic)
 
 data WatcherRuntimeStatus
   = WatcherMissing
   | WatcherActiveStopped
   | WatcherActiveRunning
-  | WatcherTerminal
+  | WatcherTerminal WatcherTerminalReason
   deriving stock (Eq, Show, Generic)
 
 data WatcherRuntimeStatusConfig = WatcherRuntimeStatusConfig
@@ -41,7 +51,7 @@ watcherRuntimeStatus config = do
   if not configExists && not eventsExists
     then do
       terminal <- config.watcherRuntimeMissingIsTerminal
-      pure (if terminal then WatcherTerminal else WatcherMissing)
+      pure (if terminal then WatcherTerminal TerminalComplete else WatcherMissing)
     else do
       running <- pidRunning config.watcherRuntimePidPath
       if not eventsExists
@@ -59,7 +69,7 @@ watcherRuntimeStatus config = do
                   | someDomain replay.replayState == config.watcherRuntimeExpectedDomain
                   , isTerminalPhase (somePhase replay.replayState) -> do
                       terminal <- config.watcherRuntimeReplayTerminalIsTerminal replay
-                      pure (if terminal then WatcherTerminal else WatcherActiveRunning)
+                      pure (if terminal then WatcherTerminal (terminalReason replay.replayState) else runningStatus running)
                   | running ->
                       pure WatcherActiveRunning
                   | otherwise ->
@@ -89,5 +99,11 @@ statusIsActiveRunning WatcherActiveRunning = True
 statusIsActiveRunning _ = False
 
 statusIsTerminal :: WatcherRuntimeStatus -> Bool
-statusIsTerminal WatcherTerminal = True
+statusIsTerminal WatcherTerminal {} = True
 statusIsTerminal _ = False
+
+terminalReason :: SomeWatcherState -> WatcherTerminalReason
+terminalReason (SomeWatcherState CompleteState {}) = TerminalComplete
+terminalReason (SomeWatcherState (BlockedState reason)) = TerminalBlocked reason.unBlockedReason
+terminalReason (SomeWatcherState (StoppedState reason)) = TerminalStopped reason.unStopReason
+terminalReason _ = TerminalStopped "terminal state"
