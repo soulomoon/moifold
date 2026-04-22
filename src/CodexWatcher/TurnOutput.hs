@@ -36,7 +36,9 @@ import CodexWatcher.PromptTemplates
   , reviewerTemplate
   , validationProtocolTemplate
   )
+import CodexWatcher.IssueText (issueNumbersText)
 import CodexWatcher.Types
+import CodexWatcher.RuntimeDefaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -153,8 +155,8 @@ renderPrReviewWorkerThreadDeveloperInstructions workdir stateDir config =
     , ("prUrl", prUrl config.prRepo config.prNumber)
     , ("workdir", Text.pack workdir)
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.prBranch)
-    , ("workerModel", "gpt-5.4")
-    , ("workerEffort", "xhigh")
+    , ("workerModel", defaultModel)
+    , ("workerEffort", defaultEffort)
     , ("validationProtocol", validationProtocol (stateDir </> "agent-state.json"))
     , ("publishProtocol", publishProtocol (stateDir </> "agent-state.json") config.prBranch)
     , ("completionContract", completionContract (stateDir </> "agent-state.json"))
@@ -169,8 +171,8 @@ renderPrReviewReviewerThreadDeveloperInstructions workdir config =
     , ("prUrl", prUrl config.prRepo config.prNumber)
     , ("workdir", Text.pack workdir)
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.prBranch)
-    , ("reviewerModel", "gpt-5.4")
-    , ("reviewerEffort", "xhigh")
+    , ("reviewerModel", defaultModel)
+    , ("reviewerEffort", defaultEffort)
     ]
 
 issueImplementerThreadDeveloperInstructions :: FilePath -> FilePath -> IssueConfig -> Text
@@ -183,8 +185,8 @@ issueImplementerThreadDeveloperInstructions workdir stateDir config =
     , ("workdir", Text.pack workdir)
     , ("baseBranch", "origin/HEAD")
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)
-    , ("workerModel", "gpt-5.4")
-    , ("workerEffort", "xhigh")
+    , ("workerModel", defaultModel)
+    , ("workerEffort", defaultEffort)
     , ("issueStatePath", Text.pack (stateDir </> "issue-state.json"))
     , ("issuePlanPath", Text.pack (stateDir </> "issue-plan.md"))
     , ("gitUserName", "codex-watcher")
@@ -196,8 +198,8 @@ issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues =
   renderTemplate
     issuePlanningThreadDeveloperTemplate
     [ ("repoFullName", unRepoName repo)
-    , ("plannerModel", "gpt-5.4")
-    , ("plannerEffort", "xhigh")
+    , ("plannerModel", defaultModel)
+    , ("plannerEffort", defaultEffort)
     , ("issueSnapshotPath", Text.pack (stateDir </> "issue-snapshot.json"))
     , ("scopeInstructions", issuePlanningScopeInstructions scopeIssues)
     ]
@@ -212,8 +214,8 @@ issuePlanModeDeveloperInstructions workdir stateDir config =
     , ("workdir", Text.pack workdir)
     , ("baseBranch", "origin/HEAD")
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)
-    , ("workerModel", "gpt-5.4")
-    , ("planEffort", "xhigh")
+    , ("workerModel", defaultModel)
+    , ("planEffort", defaultEffort)
     , ("issueStatePath", Text.pack (stateDir </> "issue-state.json"))
     , ("issuePlanPath", Text.pack (stateDir </> "issue-plan.md"))
     ]
@@ -277,10 +279,6 @@ issuePlanningScopeInstructions scopeIssues =
     , "- Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees."
     , "- If a scoped root issue needs decomposition, propose concrete GitHub sub-issues under that root, then let the watcher re-enter planning."
     ]
-
-issueNumbersText :: [IssueNumber] -> Text
-issueNumbersText numbers =
-  Text.intercalate ", " (fmap (Text.pack . show . unIssueNumber) numbers)
 
 stringField :: Value
 stringField =

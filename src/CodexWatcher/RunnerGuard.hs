@@ -28,15 +28,15 @@ import CodexWatcher.AppServerClient
   , sendOneAppServerRequest
   )
 import CodexWatcher.AppServerProtocol
-  ( ThreadStartOptions (..)
-  , TurnStartOptions (..)
-  , threadNameSetRequest
+  ( threadNameSetRequest
   , threadReadRequest
   , threadStartRequest
   , turnStartRequest
   )
 import CodexWatcher.EventLog (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName, loadEventLogFile, replayEventLog)
-import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (KillZero), commandText, runRuntimeCommand)
+import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
+import CodexWatcher.JsonPath (renderedTextAtPath)
+import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions, defaultTurnStartOptions)
 import CodexWatcher.TurnClassifier (TurnCompletion (..), classifyTurnCompletion)
 import CodexWatcher.Types
 import Control.Applicative ((<|>))
@@ -51,8 +51,6 @@ import Data.Aeson
   , (.!=)
   , (.=)
   )
-import Data.Aeson.Key qualified as Key
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -62,6 +60,7 @@ import System.Directory (doesFileExist, getModificationTime)
 
 data RunnerGuardConfig = RunnerGuardConfig
   { guardRepo :: RepoName
+  , guardDomain :: Domain
   , guardEventsPath :: FilePath
   , guardStateDir :: FilePath
   , guardWatcherPidFile :: FilePath
@@ -126,7 +125,7 @@ instance ToJSON RunnerGuardRepair where
 
 checkRunnerGuard :: RunnerGuardConfig -> IO (Maybe RunnerGuardProblem)
 checkRunnerGuard config = do
-  complete <- issuePlanningEventLogComplete config.guardEventsPath
+  complete <- watcherEventLogTerminal config.guardDomain config.guardEventsPath
   if complete
     then pure Nothing
     else do
@@ -140,13 +139,7 @@ startRunnerGuardRepairThread config problem' = do
     sendOrFail
       ( threadStartRequest
           1
-          ThreadStartOptions
-            { threadCwd = config.guardRepairCwd
-            , threadApprovalPolicy = "never"
-            , threadSandbox = "danger-full-access"
-            , threadModel = "gpt-5.4"
-            , threadDeveloperInstructions = repairDeveloperInstructions
-            }
+          (defaultThreadStartOptions config.guardRepairCwd repairDeveloperInstructions)
       )
   threadId <- either (failText . formatAppServerClientFailure) pure (parseThreadStartThreadId threadResponse)
   _ <-
@@ -156,17 +149,7 @@ startRunnerGuardRepairThread config problem' = do
     sendOrFail
       ( turnStartRequest
           3
-          TurnStartOptions
-            { turnThreadId = threadId
-            , turnCwd = config.guardRepairCwd
-            , turnEffort = "xhigh"
-            , turnModel = "gpt-5.4"
-            , turnApprovalPolicy = "never"
-            , turnSandboxPolicy = "danger-full-access"
-            , turnInput = runnerGuardRepairPrompt config problem'
-            , turnOutputSchema = Nothing
-            , turnCollaborationMode = Nothing
-            }
+          (defaultTurnStartOptions threadId config.guardRepairCwd (runnerGuardRepairPrompt config problem'))
       )
   turnId <- either (failText . formatAppServerClientFailure) pure (parseTurnStartTurnId turnResponse)
   pure RunnerGuardRepair {runnerGuardRepairThreadId = threadId, runnerGuardRepairTurnId = turnId}
@@ -186,7 +169,7 @@ repairDeveloperInstructions =
 runnerGuardRepairPrompt :: RunnerGuardConfig -> RunnerGuardProblem -> Text
 runnerGuardRepairPrompt config problem' =
   Text.unlines
-    [ "Runner guard detected a problem in the issue planning watcher."
+    [ "Runner guard detected a problem in the " <> guardDomainText config <> " watcher."
     , ""
     , "Problem summary:"
     , problem'.runnerGuardProblemSummary
@@ -202,7 +185,7 @@ runnerGuardRepairPrompt config problem' =
     , "2. Fix the code or operational state that caused the guard problem."
     , "3. Run: cabal test all && cabal build all && git diff --check"
     , "4. Commit and push any code changes."
-    , "5. Restart the issue planning watcher with this exact command:"
+    , "5. Restart the watcher with this exact command:"
     , config.guardRestartWatcherCommand
     , "6. Start the runner guard again with this exact command:"
     , config.guardRestartGuardCommand
@@ -215,39 +198,47 @@ runnerGuardRepairPrompt config problem' =
 
 checkWatcherPid :: FilePath -> IO (Maybe RunnerGuardProblem)
 checkWatcherPid pidPath = do
-  exists <- doesFileExist pidPath
-  if not exists
-    then pure (Just (restartProblem "issue planning watcher pid file is missing" ["pid file: " <> Text.pack pidPath]))
-    else do
-      pidText <- Text.strip . Text.pack <$> readFile pidPath
-      if Text.null pidText
-        then pure (Just (restartProblem "issue planning watcher pid file is empty" ["pid file: " <> Text.pack pidPath]))
-        else do
-          report <- runRuntimeCommand (KillZero pidText)
-          pure
-            if report.ok
-              then Nothing
-              else Just (restartProblem "issue planning watcher process is not running" ["pid file: " <> Text.pack pidPath, "pid: " <> pidText, "kill -0 output: " <> commandText report])
+  maybePid <- readPidFile pidPath
+  case maybePid of
+    Nothing ->
+      pure (Just (restartProblem "watcher pid file is missing or empty" ["pid file: " <> Text.pack pidPath]))
+    Just pidText -> do
+      running <- isPidRunning pidText
+      pure
+        if running
+          then Nothing
+          else Just (restartProblem "watcher process is not running" ["pid file: " <> Text.pack pidPath, "pid: " <> pidText])
 
 checkEventLogAndActiveTurn :: RunnerGuardConfig -> IO (Maybe RunnerGuardProblem)
 checkEventLogAndActiveTurn config = do
   exists <- doesFileExist config.guardEventsPath
   if not exists
-    then pure (Just (repairProblem "issue planning event log is missing" ["events: " <> Text.pack config.guardEventsPath]))
+    then pure (Just (repairProblem "watcher event log is missing" ["events: " <> Text.pack config.guardEventsPath]))
     else do
       loaded <- loadEventLogFile config.guardEventsPath
       case loaded of
         Left error' ->
-          pure (Just (repairProblem "issue planning event log cannot be decoded" [Text.pack error']))
+          pure (Just (repairProblem "watcher event log cannot be decoded" [Text.pack error']))
         Right events ->
           case replayEventLog events of
             Left failure ->
               pure (Just (eventReplayProblem failure))
             Right replay ->
-              checkReplayState config events replay.replayState
+              if someDomain replay.replayState /= config.guardDomain
+                then
+                  pure
+                    ( Just
+                        ( repairProblem
+                            "watcher event log domain does not match guard domain"
+                            [ "expected: " <> guardDomainText config
+                            , "actual: " <> Text.pack (show (someDomain replay.replayState))
+                            ]
+                        )
+                    )
+                else checkReplayState config events replay.replayState
 
-issuePlanningEventLogComplete :: FilePath -> IO Bool
-issuePlanningEventLogComplete eventsPath = do
+watcherEventLogTerminal :: Domain -> FilePath -> IO Bool
+watcherEventLogTerminal expectedDomain eventsPath = do
   exists <- doesFileExist eventsPath
   if not exists
     then pure False
@@ -259,60 +250,80 @@ issuePlanningEventLogComplete eventsPath = do
           case replayEventLog events of
             Left _ -> pure False
             Right replay ->
-              pure (someDomain replay.replayState == IssuePlanning && somePhase replay.replayState == Complete)
+              pure (someDomain replay.replayState == expectedDomain && somePhase replay.replayState == Complete)
 
 checkReplayState :: RunnerGuardConfig -> [WatcherEvent] -> SomeWatcherState -> IO (Maybe RunnerGuardProblem)
 checkReplayState config events = \case
   SomeWatcherState (BlockedState reason) ->
-    pure (Just (repairProblem "issue planning watcher is blocked" ["reason: " <> unBlockedReason reason]))
+    pure (Just (repairProblem "watcher is blocked" ["reason: " <> unBlockedReason reason]))
   SomeWatcherState (StoppedState reason) ->
-    pure (Just (repairProblem "issue planning watcher is stopped" ["reason: " <> unStopReason reason]))
+    pure (Just (repairProblem "watcher is stopped" ["reason: " <> unStopReason reason]))
   SomeWatcherState (PlanningReady {}) ->
-    staleProblem config "issue planning watcher has not started a planner turn" ["last event: " <> lastEventName events]
+    staleProblem config "planning watcher has not started a planner turn" ["last event: " <> lastEventName events]
   SomeWatcherState (PlanningTurnActive _ activeTurn) ->
-    checkActivePlannerTurn config activeTurn
+    checkActiveTurn config "planner" activeTurn
   SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
+    pure Nothing
+  SomeWatcherState (IssueNeedsTriage {}) ->
+    staleProblem config "issue implementer has not started triage" ["last event: " <> lastEventName events]
+  SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->
+    checkActiveTurn config "issue triage worker" activeTurn
+  SomeWatcherState (IssuePlanReady {}) ->
+    staleProblem config "issue implementer has not started plan turn" ["last event: " <> lastEventName events]
+  SomeWatcherState (IssueInPlanMode _ (WorkerActive activeTurn)) ->
+    checkActiveTurn config "issue plan worker" activeTurn
+  SomeWatcherState (IssueImplementationReady {}) ->
+    staleProblem config "issue implementer has not started implementation or PR detection" ["last event: " <> lastEventName events]
+  SomeWatcherState (IssueImplementing _ _ (WorkerActive activeTurn)) ->
+    checkActiveTurn config "issue implementation worker" activeTurn
+  SomeWatcherState (IssueWaitingForPrMerge {}) ->
+    pure Nothing
+  SomeWatcherState (PrCheckingReviews {}) ->
+    staleProblem config "PR review watcher has not checked review threads" ["last event: " <> lastEventName events]
+  SomeWatcherState (PrFixingReviews _ _ (WorkerActive activeTurn) _) ->
+    checkActiveTurn config "PR review worker" activeTurn
+  SomeWatcherState (PrReviewingClean _ _ _ (ReviewerActive activeTurn)) ->
+    checkActiveTurn config "PR reviewer" activeTurn
+  SomeWatcherState (PrMerging {}) ->
     pure Nothing
   SomeWatcherState (CompleteState {}) ->
     pure Nothing
-  state ->
-    pure (Just (repairProblem "issue planning guard saw an unexpected watcher domain/state" ["state: " <> Text.pack (show state)]))
 
-checkActivePlannerTurn :: RunnerGuardConfig -> ActiveTurn -> IO (Maybe RunnerGuardProblem)
-checkActivePlannerTurn config activeTurn = do
+checkActiveTurn :: RunnerGuardConfig -> Text -> ActiveTurn -> IO (Maybe RunnerGuardProblem)
+checkActiveTurn config role activeTurn = do
   response <- sendOneAppServerRequest config.guardAppServerEndpoint defaultAppServerClientOptions (threadReadRequest 1 activeTurn.activeThreadId True)
   case response of
     Left failure ->
-      pure (Just (repairProblem "guard cannot read planner app-server thread" ["thread: " <> unThreadId activeTurn.activeThreadId, formatAppServerClientFailure failure]))
+      pure (Just (repairProblem ("guard cannot read " <> role <> " app-server thread") ["thread: " <> unThreadId activeTurn.activeThreadId, formatAppServerClientFailure failure]))
     Right value ->
       case threadSystemError value of
         Just status ->
-          pure (Just (repairProblem "planner app-server thread is in systemError" ["thread: " <> unThreadId activeTurn.activeThreadId, "status: " <> status]))
+          pure (Just (repairProblem (role <> " app-server thread is in systemError") ["thread: " <> unThreadId activeTurn.activeThreadId, "status: " <> status]))
         Nothing ->
           case parseThreadReadTurns value of
             Left failure ->
-              pure (Just (repairProblem "guard cannot parse planner app-server turns" [formatAppServerClientFailure failure]))
+              pure (Just (repairProblem ("guard cannot parse " <> role <> " app-server turns") [formatAppServerClientFailure failure]))
             Right turns ->
               case latestTurnById activeTurn.activeTurnId turns of
                 Nothing ->
-                  pure (Just (repairProblem "active planner turn is missing from app-server thread" ["turn: " <> unTurnId activeTurn.activeTurnId, "thread: " <> unThreadId activeTurn.activeThreadId]))
+                  pure (Just (repairProblem ("active " <> role <> " turn is missing from app-server thread") ["turn: " <> unTurnId activeTurn.activeTurnId, "thread: " <> unThreadId activeTurn.activeThreadId]))
                 Just turn ->
-                  checkTurn config turn
+                  checkTurn config role turn
 
-checkTurn :: RunnerGuardConfig -> AppServerTurn -> IO (Maybe RunnerGuardProblem)
-checkTurn config turn =
+checkTurn :: RunnerGuardConfig -> Text -> AppServerTurn -> IO (Maybe RunnerGuardProblem)
+checkTurn config role turn =
   case classifyTurnCompletion turn of
     TurnStillRunning ->
-      staleProblem config "active planner turn is stale" ["turn: " <> unTurnId turn.appServerTurnId, "status: " <> turn.appServerTurnStatus]
+      staleProblem config ("active " <> role <> " turn is stale") ["turn: " <> unTurnId turn.appServerTurnId, "status: " <> turn.appServerTurnStatus]
     TurnFailed reason ->
-      pure (Just (repairProblem "active planner turn failed" ["turn: " <> unTurnId turn.appServerTurnId, "reason: " <> reason]))
+      pure (Just (repairProblem ("active " <> role <> " turn failed") ["turn: " <> unTurnId turn.appServerTurnId, "reason: " <> reason]))
     TurnCompleted Nothing ->
-      pure (Just (repairProblem "active planner turn completed without output" ["turn: " <> unTurnId turn.appServerTurnId]))
+      pure (Just (repairProblem ("active " <> role <> " turn completed without output") ["turn: " <> unTurnId turn.appServerTurnId]))
     TurnCompleted (Just output)
       | Text.null (Text.strip output) ->
-          pure (Just (repairProblem "active planner turn completed with blank output" ["turn: " <> unTurnId turn.appServerTurnId]))
+          pure (Just (repairProblem ("active " <> role <> " turn completed with blank output") ["turn: " <> unTurnId turn.appServerTurnId]))
       | otherwise ->
-          staleProblem config "completed planner turn has not been observed by watcher" ["turn: " <> unTurnId turn.appServerTurnId, "status: " <> turn.appServerTurnStatus]
+          staleProblem config ("completed " <> role <> " turn has not been observed by watcher") ["turn: " <> unTurnId turn.appServerTurnId, "status: " <> turn.appServerTurnStatus]
 
 staleProblem :: RunnerGuardConfig -> Text -> [Text] -> IO (Maybe RunnerGuardProblem)
 staleProblem config summary' details = do
@@ -330,22 +341,16 @@ eventLogAgeSeconds path = do
 
 threadSystemError :: Value -> Maybe Text
 threadSystemError value =
-  let status = textPath ["thread", "status", "type"] value <|> textPath ["status", "type"] value <|> textPath ["thread", "status"] value <|> textPath ["status"] value
+  let status = renderedTextAtPath ["thread", "status", "type"] value <|> renderedTextAtPath ["status", "type"] value <|> renderedTextAtPath ["thread", "status"] value <|> renderedTextAtPath ["status"] value
    in case Text.toLower . Text.strip <$> status of
         Just "systemerror" -> status
         Just "system_error" -> status
         _ -> Nothing
 
-textPath :: [Text] -> Value -> Maybe Text
-textPath [] (String text) = Just text
-textPath [] value = Just (Text.pack (show value))
-textPath (key : rest) (Object objectValue) = KeyMap.lookup (Key.fromText key) objectValue >>= textPath rest
-textPath _ _ = Nothing
-
 eventReplayProblem :: ReplayFailure -> RunnerGuardProblem
 eventReplayProblem failure =
   repairProblem
-    "issue planning event log replay failed"
+    "watcher event log replay failed"
     [ "event index: " <> Text.pack (show failure.eventIndex)
     , "event: " <> eventName failure.event
     , "reason: " <> failure.reason
@@ -361,7 +366,7 @@ combineProblems problems =
           if any ((== LaunchRepairThread) . runnerGuardProblemAction) problems
             then LaunchRepairThread
             else RestartWatcher
-      , runnerGuardProblemSummary = "multiple issue planning guard problems"
+      , runnerGuardProblemSummary = "multiple runner guard problems"
       , runnerGuardProblemDetails =
           concatMap
             (\problem' -> problem'.runnerGuardProblemSummary : problem'.runnerGuardProblemDetails)
@@ -391,6 +396,10 @@ lastEventName events = eventName (last events)
 bulletList :: [Text] -> Text
 bulletList [] = "- none"
 bulletList items = Text.unlines (fmap ("- " <>) items)
+
+guardDomainText :: RunnerGuardConfig -> Text
+guardDomainText config =
+  Text.pack (show config.guardDomain)
 
 failText :: Text -> IO a
 failText = fail . Text.unpack

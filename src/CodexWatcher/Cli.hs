@@ -8,16 +8,14 @@
 module CodexWatcher.Cli
   ( CliCommand (..)
   , CliDomain (..)
-  , GuardIssuePlanningCli (..)
+  , GuardWatcherCli (..)
   , HealthcheckCli (..)
   , IssueFanoutCli (..)
   , LoopCli (..)
   , ObserveOnceCli (..)
   , RepairInvalidStateCli (..)
-  , RehearsalCli (..)
   , RenderServiceCli (..)
   , StopDaemonCli (..)
-  , ValidateMigrationCli (..)
   , cliCommandParserInfo
   , cliDomainName
   , cliDomainToDomain
@@ -26,7 +24,6 @@ module CodexWatcher.Cli
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
-import CodexWatcher.Migration (RuntimeOwner, parseRuntimeOwner)
 import CodexWatcher.Types
   ( CommitSha (..)
   , Domain (..)
@@ -50,20 +47,15 @@ data CliDomain
   deriving stock (Eq, Show, Generic)
 
 data CliCommand
-  = CliReplay FilePath
-  | CliReplayPrReview FilePath
-  | CliReplayIssueImplement FilePath
-  | CliReplayEvents FilePath
+  = CliReplayEvents FilePath
   | CliHealthcheck HealthcheckCli
-  | CliMarkRuntimeOwner FilePath RuntimeOwner
+  | CliClaimRuntimeOwner FilePath
   | CliStopDaemon StopDaemonCli
   | CliRenderService RenderServiceCli
-  | CliRehearseMigration RehearsalCli
-  | CliValidateMigration ValidateMigrationCli
   | CliIssueFanout IssueFanoutCli
   | CliObserveOnce ObserveOnceCli
   | CliRunLoop LoopCli
-  | CliGuardIssuePlanning GuardIssuePlanningCli
+  | CliGuardWatcher GuardWatcherCli
   | CliRepairInvalidState RepairInvalidStateCli
   deriving stock (Eq, Show, Generic)
 
@@ -97,36 +89,6 @@ data RenderServiceCli = RenderServiceCli
   , renderServiceCliRotateCount :: Int
   , renderServiceCliImplementersRoot :: Maybe FilePath
   , renderServiceCliStartChildren :: Bool
-  }
-  deriving stock (Eq, Show, Generic)
-
-data RehearsalCli = RehearsalCli
-  { rehearsalCliSourceStateDir :: FilePath
-  , rehearsalCliRehearsalRoot :: Maybe FilePath
-  , rehearsalCliTargetStateDir :: Maybe FilePath
-  , rehearsalCliDomain :: CliDomain
-  , rehearsalCliEventsPath :: Maybe FilePath
-  , rehearsalCliName :: Maybe Text
-  , rehearsalCliRepo :: RepoName
-  , rehearsalCliWorkdir :: FilePath
-  , rehearsalCliEndpoint :: AppServerEndpoint
-  , rehearsalCliExecutable :: Maybe FilePath
-  , rehearsalCliPlannerThread :: Maybe ThreadId
-  , rehearsalCliPollSeconds :: Int
-  , rehearsalCliLogDir :: Maybe FilePath
-  , rehearsalCliRestartSeconds :: Int
-  , rehearsalCliRotateCount :: Int
-  , rehearsalCliImplementersRoot :: Maybe FilePath
-  , rehearsalCliStartChildren :: Bool
-  , rehearsalCliExecute :: Bool
-  }
-  deriving stock (Eq, Show, Generic)
-
-data ValidateMigrationCli = ValidateMigrationCli
-  { validateMigrationCliSourceStateDir :: FilePath
-  , validateMigrationCliTargetStateDir :: FilePath
-  , validateMigrationCliDomain :: CliDomain
-  , validateMigrationCliEventsPath :: Maybe FilePath
   }
   deriving stock (Eq, Show, Generic)
 
@@ -201,7 +163,7 @@ data LoopCli = LoopCli
   }
   deriving stock (Eq, Show, Generic)
 
-data GuardIssuePlanningCli = GuardIssuePlanningCli
+data GuardWatcherCli = GuardWatcherCli
   { guardCliLoop :: LoopCli
   , guardCliPidFile :: Maybe FilePath
   , guardCliPollSeconds :: Int
@@ -226,7 +188,7 @@ cliCommandParserInfo =
   info
     (helper <*> cliCommandParser)
     ( fullDesc
-        <> progDesc "Typed Haskell watcher migration runtime"
+        <> progDesc "Typed Haskell watcher runtime"
         <> header "codex-watcher-hs"
     )
 
@@ -237,22 +199,19 @@ parserPrefs =
 cliCommandParser :: Parser CliCommand
 cliCommandParser =
   hsubparser
-    ( command "replay" (info (CliReplay <$> stateDirArgument "NODE_WATCHER_STATE_DIR") (progDesc "Replay a legacy Node watcher state directory"))
-        <> command "replay-pr-review" (info (CliReplayPrReview <$> stateDirArgument "NODE_PR_REVIEW_STATE_DIR") (progDesc "Replay a legacy Node PR review watcher state directory"))
-        <> command "replay-issue-implement" (info (CliReplayIssueImplement <$> stateDirArgument "NODE_ISSUE_IMPLEMENT_STATE_DIR") (progDesc "Replay a legacy Node issue implementer state directory"))
-        <> command "replay-events" (info (CliReplayEvents <$> eventsPathArgument) (progDesc "Replay a canonical watcher events.jsonl file"))
+    ( command "replay-events" (info (CliReplayEvents <$> eventsPathArgument) (progDesc "Replay a canonical watcher events.jsonl file"))
         <> command "healthcheck" (info (CliHealthcheck <$> healthcheckParser) (progDesc "Run the read-only watcher healthcheck"))
-        <> command "mark-runtime-owner" (info markRuntimeOwnerParser (progDesc "Write runtime-owner.json for a watcher state directory"))
+        <> command "claim-runtime-owner" (info claimRuntimeOwnerParser (progDesc "Claim Haskell execute ownership for a watcher state directory"))
         <> command "stop-daemon" (info (CliStopDaemon <$> stopDaemonParser) (progDesc "Send TERM to a Haskell watcher daemon"))
         <> command "render-service" (info (CliRenderService <$> renderServiceParser) (progDesc "Render a systemd unit and logrotate config"))
-        <> command "rehearse-migration" (info (CliRehearseMigration <$> rehearsalParser) (progDesc "Prepare and render a side-by-side Haskell migration rehearsal"))
-        <> command "validate-migration" (info (CliValidateMigration <$> validateMigrationParser) (progDesc "Validate copied watcher state before migration cutover"))
         <> command "issue-fanout" (info (CliIssueFanout <$> issueFanoutParser) (progDesc "Plan or create issue implementer child watcher state"))
         <> command "observe-once" (info (CliObserveOnce <$> observeOnceParser) (progDesc "Apply one explicit typed watcher observation"))
         <> command "run-pr-review" (info (CliRunLoop <$> loopParser CliPrReview) (progDesc "Run one or more PR review watcher loop iterations"))
         <> command "run-issue-implement" (info (CliRunLoop <$> loopParser CliIssueImplement) (progDesc "Run one or more issue implementation watcher loop iterations"))
         <> command "run-issue-planning" (info (CliRunLoop <$> loopParser CliIssuePlanning) (progDesc "Run one or more issue planning watcher loop iterations"))
-        <> command "guard-issue-planning" (info (CliGuardIssuePlanning <$> guardIssuePlanningParser) (progDesc "Guard an issue planning watcher and launch a repair thread on failure"))
+        <> command "guard-issue-planning" (info (CliGuardWatcher <$> guardIssuePlanningParser) (progDesc "Guard an issue planning watcher and launch a repair thread on failure"))
+        <> command "guard-issue-implement" (info (CliGuardWatcher <$> guardWatcherParser CliIssueImplement) (progDesc "Guard an issue implementer watcher and launch a repair thread on failure"))
+        <> command "guard-pr-review" (info (CliGuardWatcher <$> guardWatcherParser CliPrReview) (progDesc "Guard a PR review watcher and launch a repair thread on failure"))
         <> command "repair-invalid-state" (info (CliRepairInvalidState <$> repairInvalidStateParser) (progDesc "Plan or apply a deterministic repair for an invalid watcher event log"))
     )
 
@@ -269,11 +228,9 @@ healthcheckParser =
     <*> optional repoOption
     <*> optionalEndpointParser
 
-markRuntimeOwnerParser :: Parser CliCommand
-markRuntimeOwnerParser =
-  CliMarkRuntimeOwner
-    <$> stateDirOption
-    <*> option runtimeOwnerReader (long "owner" <> metavar "node|haskell" <> help "Runtime owner to write")
+claimRuntimeOwnerParser :: Parser CliCommand
+claimRuntimeOwnerParser =
+  CliClaimRuntimeOwner <$> stateDirOption
 
 stopDaemonParser :: Parser StopDaemonCli
 stopDaemonParser =
@@ -300,36 +257,6 @@ renderServiceParser =
     <*> intOptionDefault "rotate" 14 "COUNT" "logrotate retention count"
     <*> optional (strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root"))
     <*> switch (long "start-children" <> help "Start issue implementer children after planning fanout")
-
-rehearsalParser :: Parser RehearsalCli
-rehearsalParser =
-  RehearsalCli
-    <$> strOption (long "source-state-dir" <> metavar "PATH" <> help "Existing watcher state directory to rehearse from")
-    <*> optional (strOption (long "rehearsal-root" <> metavar "PATH" <> help "Root for copied rehearsal state"))
-    <*> optional (strOption (long "target-state-dir" <> metavar "PATH" <> help "Exact copied rehearsal state directory"))
-    <*> domainOption
-    <*> optional eventsPathOption
-    <*> optional (textOption "name" "NAME" "Service name for rendered rehearsal service")
-    <*> repoOption
-    <*> workdirOption
-    <*> requiredEndpointParser
-    <*> optional (strOption (long "executable" <> metavar "PATH" <> help "Executable path to embed in the service"))
-    <*> optional plannerThreadOption
-    <*> intOptionDefault "poll-seconds" 30 "SECONDS" "Polling interval for daemon loop"
-    <*> optional (strOption (long "log-dir" <> metavar "PATH" <> help "Directory for daemon logs"))
-    <*> intOptionDefault "restart-seconds" 10 "SECONDS" "systemd restart delay"
-    <*> intOptionDefault "rotate" 14 "COUNT" "logrotate retention count"
-    <*> optional (strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root"))
-    <*> switch (long "start-children" <> help "Start issue implementer children after planning fanout")
-    <*> switch (long "execute" <> help "Copy source watcher state and mark the copy Haskell-owned")
-
-validateMigrationParser :: Parser ValidateMigrationCli
-validateMigrationParser =
-  ValidateMigrationCli
-    <$> strOption (long "source-state-dir" <> metavar "PATH" <> help "Original watcher state directory")
-    <*> strOption (long "target-state-dir" <> metavar "PATH" <> help "Copied Haskell rehearsal state directory")
-    <*> domainOption
-    <*> optional eventsPathOption
 
 issueFanoutParser :: Parser IssueFanoutCli
 issueFanoutParser =
@@ -402,10 +329,14 @@ loopParser domain =
     <*> switch (long "start-children" <> help "Print or start child watcher loop commands after planning fanout")
     <*> optional (intOption "child-poll-seconds" "SECONDS" "Child polling interval override")
 
-guardIssuePlanningParser :: Parser GuardIssuePlanningCli
+guardIssuePlanningParser :: Parser GuardWatcherCli
 guardIssuePlanningParser =
-  GuardIssuePlanningCli
-    <$> loopParser CliIssuePlanning
+  guardWatcherParser CliIssuePlanning
+
+guardWatcherParser :: CliDomain -> Parser GuardWatcherCli
+guardWatcherParser domain =
+  GuardWatcherCli
+    <$> loopParser domain
     <*> optional (strOption (long "guard-pid-file" <> metavar "PATH" <> help "Runner guard pid file"))
     <*> intOptionDefault "guard-poll-seconds" 60 "SECONDS" "Runner guard polling interval"
     <*> intOptionDefault "stale-seconds" 1800 "SECONDS" "Maximum event-log idle time before guard triggers repair"
@@ -441,10 +372,6 @@ eventsPathArgument =
 stateDirOption :: Parser FilePath
 stateDirOption =
   strOption (long "state-dir" <> metavar "PATH" <> help "Watcher state directory")
-
-stateDirArgument :: String -> Parser FilePath
-stateDirArgument metavarName =
-  argument str (metavar metavarName)
 
 workdirOption :: Parser FilePath
 workdirOption =
@@ -505,13 +432,6 @@ domainReader =
     "issue-implement" -> Right CliIssueImplement
     "issue-planning" -> Right CliIssuePlanning
     other -> Left ("unsupported watcher domain: " <> other)
-
-runtimeOwnerReader :: ReadM RuntimeOwner
-runtimeOwnerReader =
-  eitherReader \input ->
-    case parseRuntimeOwner (Text.pack input) of
-      Right owner -> Right owner
-      Left errorMessage -> Left (Text.unpack errorMessage)
 
 intReader :: ReadM Int
 intReader =

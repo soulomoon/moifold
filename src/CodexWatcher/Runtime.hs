@@ -25,6 +25,8 @@ module CodexWatcher.Runtime
 
 import CodexWatcher.Types
   ( BranchName (..)
+  , CleanReviewEvidence (..)
+  , CommitSha (..)
   , IssueCreationRequest (..)
   , IssueConfig (..)
   , IssueNumber (..)
@@ -41,12 +43,13 @@ import Data.Aeson
   , encode
   )
 import Data.ByteString qualified as ByteString
-import Data.ByteString.Lazy.Char8 qualified as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Generics (Generic)
 import System.Exit (ExitCode (..))
-import System.Process qualified as Process
+import System.Process.Typed qualified as Process.Typed
 
 data RuntimeCommand
   = CommandVersion String
@@ -61,6 +64,7 @@ data RuntimeCommand
   | GhCreatePullRequest FilePath IssueConfig
   | GhResolveReviewThread ReviewThreadId
   | GhPrMerge RepoName PrNumber Text
+  | GhPrCommentReviewAndMerge RepoName PrNumber CleanReviewEvidence Text
   | GitBranchCurrent FilePath
   | GitRevParseHead FilePath
   | GitStatusPorcelain FilePath
@@ -207,6 +211,18 @@ renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
     ]
     Nothing
     ""
+renderRuntimeCommand (GhPrCommentReviewAndMerge repo prNumber evidence mergeMethod) =
+  RuntimeCommandSpec
+    "bash"
+    [ "-lc"
+    , Text.unpack commentReviewAndMergeScript
+    , "codex-watcher-gh-pr-comment-review-and-merge"
+    , show (unPrNumber prNumber)
+    , Text.unpack (unRepoName repo)
+    , mergeFlag mergeMethod
+    ]
+    Nothing
+    (cleanReviewBody evidence)
 renderRuntimeCommand (GitBranchCurrent workdir) =
   RuntimeCommandSpec "git" ["branch", "--show-current"] (Just workdir) ""
 renderRuntimeCommand (GitRevParseHead workdir) =
@@ -317,6 +333,27 @@ reviewThreadsQuery :: String
 reviewThreadsQuery =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,body,path,line,author{login}}}}}}}}"
 
+commentReviewAndMergeScript :: Text
+commentReviewAndMergeScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "pr_number=\"$1\""
+    , "repo=\"$2\""
+    , "merge_flag=\"$3\""
+    , "gh pr review \"$pr_number\" --repo \"$repo\" --comment --body-file -"
+    , "gh pr merge \"$pr_number\" --repo \"$repo\" \"$merge_flag\""
+    ]
+
+cleanReviewBody :: CleanReviewEvidence -> Text
+cleanReviewBody evidence =
+  Text.unlines
+    [ cleanReviewComment evidence
+    , ""
+    , "Reviewed commit: `" <> unCommitSha (cleanReviewCommit evidence) <> "`"
+    , ""
+    , "Submitted by Haskell PR review watcher before merge."
+    ]
+
 runRuntimeCommand :: RuntimeCommand -> IO CommandReport
 runRuntimeCommand = runProcessSpec . renderRuntimeCommand
 
@@ -327,9 +364,8 @@ commandSummary command' args' cwd' =
 runProcessSpec :: RuntimeCommandSpec -> IO CommandReport
 runProcessSpec spec = do
   result <-
-    try
-      (Process.readCreateProcessWithExitCode (Process.proc spec.command spec.args) {Process.cwd = spec.cwd} (Text.unpack spec.stdin))
-      :: IO (Either IOException (ExitCode, String, String))
+    try (Process.Typed.readProcess (processConfigFromSpec spec))
+      :: IO (Either IOException (ExitCode, LazyByteString.ByteString, LazyByteString.ByteString))
   pure case result of
     Left error' ->
       CommandReport
@@ -343,10 +379,19 @@ runProcessSpec spec = do
       CommandReport
         { ok = exitCode == ExitSuccess
         , status = exitStatus exitCode
-        , stdout = redact (Text.strip (Text.pack stdout'))
-        , stderr = redact (Text.strip (Text.pack stderr'))
+        , stdout = redact (Text.strip (Text.Encoding.decodeUtf8 (LazyByteString.toStrict stdout')))
+        , stderr = redact (Text.strip (Text.Encoding.decodeUtf8 (LazyByteString.toStrict stderr')))
         , errorMessage = Nothing
         }
+
+processConfigFromSpec :: RuntimeCommandSpec -> Process.Typed.ProcessConfig () () ()
+processConfigFromSpec spec =
+  setCwd spec.cwd $
+    Process.Typed.setStdin (Process.Typed.byteStringInput (LazyByteString.fromStrict (Text.Encoding.encodeUtf8 spec.stdin))) $
+      Process.Typed.proc spec.command spec.args
+ where
+  setCwd Nothing = id
+  setCwd (Just cwd') = Process.Typed.setWorkingDir cwd'
 
 readJsonValue :: FilePath -> IO (Either Text Value)
 readJsonValue path = do

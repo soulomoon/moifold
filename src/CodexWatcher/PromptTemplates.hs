@@ -216,7 +216,7 @@ prReviewReviewerThreadDeveloperTemplate =
         , "- If you find actionable implementation problems, style issues, refactoring opportunities, or simplification opportunities, add inline GitHub PR review comments that create unresolved review threads. A top-level-only PR comment is not enough."
         , "- Style/refactor/simplify comments must still be concrete, local, and worth addressing; avoid subjective preference-only feedback."
         , "- Prefer precise inline review comments on changed lines. Do not create duplicate comments for issues already covered by existing review history."
-        , "- If there are no actionable issues or suggestions, do not submit an approval review. Record a clean `LGTM` state; the watcher script will merge the PR directly."
+        , "- If there are no actionable issues or suggestions, do not submit an approval review. Record a clean `LGTM` state; the watcher script will submit a non-approval COMMENT review and then merge the PR."
         , "- Do not use dynamic client-only tools such as js_repl."
         , "- Use English for every message in this thread."
         ]
@@ -323,7 +323,7 @@ reviewerTemplate =
         , "4. Style/refactor/simplify comments must be concrete, local, and worth addressing; avoid subjective preference-only feedback."
         , "5. Prefer precise inline review comments on changed lines. Do not create duplicate comments for issues already covered by existing review history."
         , "6. Do not edit files, commit, push, or resolve review threads."
-        , "7. If no actionable issues or suggestions are found, do not submit an approval review. The watcher will merge the PR directly after a clean review."
+        , "7. If no actionable issues or suggestions are found, do not submit an approval review. The watcher will submit a non-approval COMMENT review and then merge the PR after a clean review."
         , "8. Do not use dynamic client-only tools such as js_repl."
         , ""
         , "Write {{reviewerStatePath}} with this JSON shape, and also return exactly the same JSON object as the final answer:"

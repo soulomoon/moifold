@@ -17,6 +17,7 @@ module CodexWatcher.EffectInterpreter
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.Runtime
+import CodexWatcher.RuntimeDefaults (defaultPlanCollaborationMode)
 import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput, reviewerTurnOutputSchema)
 import CodexWatcher.Types
 import Data.Aeson
@@ -114,8 +115,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "planning-state.json") (toJSON graph)]
     RecordBlocked reason ->
       unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "block-state.json") (blockedStateJson reason)]
-    MergePullRequest prNumber _evidence ->
-      unchanged [PlannedCommand (GhPrMerge config.effectRuntimeRepo prNumber config.effectRuntimeMergeMethod)]
+    MergePullRequest prNumber evidence ->
+      unchanged [PlannedCommand (GhPrCommentReviewAndMerge config.effectRuntimeRepo prNumber evidence config.effectRuntimeMergeMethod)]
     StopDaemon ->
       unchanged [PlannedStopDaemon]
     SleepUntilNextPoll ->
@@ -158,11 +159,7 @@ issuePlanTurnRuntimeConfig config issueConfig =
   config.effectRuntimeIssuePlanTurn
     { turnRuntimeCollaborationMode =
         Just
-          ( planCollaborationMode
-              (issuePlanModeDeveloperInstructions config.effectRuntimeWorkdir config.effectRuntimeStateDir issueConfig)
-              "gpt-5.4"
-              "xhigh"
-          )
+          (defaultPlanCollaborationMode (issuePlanModeDeveloperInstructions config.effectRuntimeWorkdir config.effectRuntimeStateDir issueConfig))
     }
 
 blockedStateJson :: BlockedReason -> Value

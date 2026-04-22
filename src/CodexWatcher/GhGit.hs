@@ -32,24 +32,22 @@ module CodexWatcher.GhGit
   ) where
 
 import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Json (decodeJsonText, parseCommandJson)
+import CodexWatcher.JsonPath (decodeAtPath, decodeValue, valueText)
 import CodexWatcher.Types
 import Data.Aeson
   ( FromJSON (..)
   , Object
   , Value (..)
-  , eitherDecodeStrict'
   , withObject
   , (.:)
   , (.:?)
   , (.!=)
   )
-import Data.Aeson qualified as Aeson
-import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as AesonTypes
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Generics (Generic)
 
 data GhIssue = GhIssue
@@ -244,35 +242,9 @@ runGitWorktreeStatus interpreter workdir branch = do
       , gitRemoteHeadSha = parseLsRemoteBranch remoteReport.stdout
       }
 
-parseCommandJson :: (Text -> Either Text a) -> CommandReport -> Either Text a
-parseCommandJson parser report
-  | report.ok = parser report.stdout
-  | otherwise = Left (commandText report)
-
-decodeJsonText :: FromJSON a => Text -> Text -> Either Text a
-decodeJsonText label text =
-  case eitherDecodeStrict' (Text.Encoding.encodeUtf8 text) of
-    Left errorMessage -> Left (label <> " JSON decode failed: " <> Text.pack errorMessage)
-    Right value -> Right value
-
 reviewThreadNodes :: Value -> Either Text [ReviewThread]
 reviewThreadNodes value =
   decodeAtPath ["data", "repository", "pullRequest", "reviewThreads", "nodes"] value
-
-decodeAtPath :: FromJSON a => [Text] -> Value -> Either Text a
-decodeAtPath path value =
-  maybe (Left ("missing JSON path: " <> Text.intercalate "." path)) decodeValue (lookupPath path value)
-
-decodeValue :: FromJSON a => Value -> Either Text a
-decodeValue value =
-  case Aeson.fromJSON value of
-    Aeson.Error errorMessage -> Left (Text.pack errorMessage)
-    Aeson.Success parsed -> Right parsed
-
-lookupPath :: [Text] -> Value -> Maybe Value
-lookupPath [] value = Just value
-lookupPath (key : rest) (Object objectValue) = KeyMap.lookup (Key.fromText key) objectValue >>= lookupPath rest
-lookupPath _ _ = Nothing
 
 parseMergeCommit :: Object -> AesonTypes.Parser (Maybe CommitSha)
 parseMergeCommit objectValue = do
@@ -302,13 +274,7 @@ parseComments objectValue = do
 
 decodeComments :: Value -> [ReviewComment]
 decodeComments value =
-  case Aeson.fromJSON value of
-    Aeson.Success comments -> comments
-    Aeson.Error {} -> []
-
-valueText :: Value -> Maybe Text
-valueText (String text) = Just text
-valueText _ = Nothing
+  either (const []) id (decodeValue value)
 
 nonEmptyStripped :: Text -> Maybe Text
 nonEmptyStripped text

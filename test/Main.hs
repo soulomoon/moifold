@@ -11,24 +11,23 @@ module Main (main) where
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
-import CodexWatcher.Cli
+import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.EventLogRepair
-import CodexWatcher.GhGit
-import CodexWatcher.Healthcheck
+import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
-import CodexWatcher.Migration
-import CodexWatcher.MigrationRehearsal
 import CodexWatcher.Protocol
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
+import CodexWatcher.RuntimeDefaults
+import CodexWatcher.RuntimeOwner
 import CodexWatcher.RunnerGuard
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
@@ -50,7 +49,6 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.IORef
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -58,6 +56,52 @@ import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePat
 import System.FilePath ((</>))
 import System.Exit (exitFailure)
 import Test.QuickCheck
+import AppServerSpec
+  ( prop_appServerClientFallsBackForUnmaterializedThreadRead
+  , prop_appServerClientInitializesSingleRequestSessions
+  , prop_appServerClientMatchesSuccessResponse
+  , prop_appServerClientParsesNestedThreadReadTurns
+  , prop_appServerClientParsesThreadReadTurns
+  , prop_appServerClientParsesThreadStartThreadId
+  , prop_appServerClientParsesTurnStartTurnId
+  , prop_appServerClientRejectsMismatchedResponseIds
+  , prop_appServerClientRejectsUnsupportedJsonRpcVersion
+  , prop_appServerClientSkipsNotifications
+  , prop_appServerClientSurfacesJsonRpcErrors
+  , prop_appServerInitializeRequestMatchesJsonRpc
+  , prop_appServerThreadReadAndInterruptUseThreadIds
+  , prop_appServerThreadStartKeepsNodeNullFields
+  , prop_appServerTurnStartPlanModeEncodesCollaborationMode
+  )
+import CliSpec
+  ( prop_cliParsesGenericRunnerGuardDomains
+  , prop_cliParsesHealthcheckAndRunLoop
+  , prop_cliRejectsBadDomain
+  )
+import HealthcheckSpec
+  ( prop_healthcheckDaemonRequiredStatuses
+  , prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
+  )
+import GhGitSpec
+  ( prop_ghGitParsesGitOutputs
+  , prop_ghGitParsesIssueAndPrLists
+  , prop_ghGitParsesRemoteIssueView
+  , prop_ghGitParsesRemotePrView
+  , prop_ghGitParsesReviewThreadsGraphql
+  )
+import JsonPathSpec (prop_jsonPathHelpersDecodeNestedValues)
+import RuntimeSpec
+  ( prop_runtimeCommandSpecsHaveExecutable
+  , prop_runtimeDefaultsCentralizeThreadAndTurnOptions
+  , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
+  , prop_runtimeGhIssueCreateWithParentLinksSubIssue
+  , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrViewUsesStructuredFields
+  , prop_runtimeGitPushDryRunNeverForces
+  , prop_runtimeGitPushNeverForces
+  , prop_runtimeKillZeroOnlyChecksPid
+  , runtimeProcessSpecCapturesStreamsAndExit
+  )
 
 instance Arbitrary RepoName where
   arbitrary = RepoName . Text.pack <$> listOf1 (elements (['a' .. 'z'] <> ['/', '-']))
@@ -475,6 +519,47 @@ prop_issueImplementWatcherBlockedStops config prNumber workerThread implementati
             && any effectIsRecordBlocked tick.issueImplementTickEffects
             && SomeEffect StopDaemon `elem` tick.issueImplementTickEffects
         Left _ -> False
+
+prop_issueImplementationCompatibilityWritesPrUrl :: Bool
+prop_issueImplementationCompatibilityWritesPrUrl =
+  let config = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 26) (BranchName "codex/replacement-issue-26")
+      prNumber = PrNumber 31
+      threadId = ThreadId "issue-worker-26"
+      activeTurn = ActiveTurn threadId (TurnId "implement-turn")
+      states =
+        [ SomeWatcherState (IssueImplementationReady config (Just prNumber) (WorkerIdle threadId))
+        , SomeWatcherState (IssueImplementing config (Just prNumber) (WorkerActive activeTurn))
+        , SomeWatcherState (IssueWaitingForPrMerge config prNumber)
+        ]
+   in all issueStateHasPrUrl states
+ where
+  issueStateHasPrUrl state =
+    case [value | CompatibilityWrite path value <- compatibilityStateWrites "/tmp/state" state, path == "/tmp/state/issue-state.json"] of
+      [value] ->
+        lookupValue "pr_number" value == Just (toJSON (31 :: Int))
+          && lookupValue "pr_url" value == Just (String "https://github.com/soulomoon/mlf2/pull/31")
+      _ -> False
+
+prop_prReviewCompatibilityClearsCheckerState :: Bool
+prop_prReviewCompatibilityClearsCheckerState =
+  let config = PrConfig (RepoName "soulomoon/mlf2") (PrNumber 32) (BranchName "codex/replacement-issue-27")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      states =
+        [ SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+        , SomeWatcherState (PrReviewingClean config commit (WorkerIdle workerThread) (ReviewerActive (ActiveTurn reviewerThread (TurnId "reviewer-turn"))))
+        , SomeWatcherState (PrMerging config (CleanReviewEvidence commit "LGTM"))
+        ]
+   in all checkerStateIsClear states
+ where
+  checkerStateIsClear state =
+    case [value | CompatibilityWrite path value <- compatibilityStateWrites "/tmp/state" state, path == "/tmp/state/checker-state.json"] of
+      [value] ->
+        lookupValue "has_unresolved" value == Just (Bool False)
+          && lookupValue "unresolved_count" value == Just (toJSON (0 :: Int))
+          && lookupValue "unresolved_thread_ids" value == Just (toJSON ([] :: [Text]))
+      _ -> False
 
 prop_eventLogFullIssuePlanningPathReturnsReady :: PlannerConfig -> ThreadId -> TurnId -> Bool
 prop_eventLogFullIssuePlanningPathReturnsReady config plannerThread plannerTurn =
@@ -1065,114 +1150,6 @@ prop_prReviewWatcherCleanReviewerMovesToMerging config workerThread reviewerThre
             && any effectIsMerge tick.prReviewTickEffects
         Left _ -> False
 
-runtimeCommandExamples :: [RuntimeCommand]
-runtimeCommandExamples =
-  [ CommandVersion "git"
-  , GhAuthStatus
-  , GhApiUser
-  , GhIssueListOpen (RepoName "soulomoon/mlf2")
-  , GhIssueView (RepoName "soulomoon/mlf2") (IssueNumber 42) ["state", "closed", "url"]
-  , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body" Nothing)
-  , GhPrListOpen (RepoName "soulomoon/mlf2")
-  , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
-  , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
-  , GhCreatePullRequest "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
-  , GhResolveReviewThread (ReviewThreadId "PRRT_test")
-  , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
-  , GitBranchCurrent "/tmp/work"
-  , GitRevParseHead "/tmp/work"
-  , GitStatusPorcelain "/tmp/work"
-  , GitLsRemoteBranch "/tmp/work" (BranchName "codex/example")
-  , GitPushDryRun "/tmp/work" (BranchName "codex/example")
-  , GitPush "/tmp/work" (BranchName "codex/example")
-  , KillZero "123"
-  , RawCommand "cabal" ["--version"] Nothing
-  ]
-
-prop_runtimeCommandSpecsHaveExecutable :: Bool
-prop_runtimeCommandSpecsHaveExecutable =
-  all (not . null . (.command) . renderRuntimeCommand) runtimeCommandExamples
-
-prop_runtimeGitPushDryRunNeverForces :: BranchName -> Bool
-prop_runtimeGitPushDryRunNeverForces branch =
-  let spec = renderRuntimeCommand (GitPushDryRun "/tmp/work" branch)
-   in spec.command == "git"
-        && spec.cwd == Just "/tmp/work"
-        && "--dry-run" `elem` spec.args
-        && "--force" `notElem` spec.args
-        && "--force-with-lease" `notElem` spec.args
-
-prop_runtimeGitPushNeverForces :: BranchName -> Bool
-prop_runtimeGitPushNeverForces branch =
-  let spec = renderRuntimeCommand (GitPush "/tmp/work" branch)
-   in spec.command == "git"
-        && spec.cwd == Just "/tmp/work"
-        && spec.args == ["push", "origin", Text.unpack (unBranchName branch)]
-        && "--force" `notElem` spec.args
-        && "--force-with-lease" `notElem` spec.args
-
-prop_runtimeGhPrViewUsesStructuredFields :: RepoName -> PrNumber -> Bool
-prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
-  let spec = renderRuntimeCommand (GhPrView repo prNumber ["state", "url", "headRefOid"])
-   in spec.command == "gh"
-        && spec.args
-          == [ "pr"
-             , "view"
-             , show (unPrNumber prNumber)
-             , "--repo"
-             , Text.unpack (unRepoName repo)
-             , "--json"
-             , "state,url,headRefOid"
-             ]
-
-prop_runtimeGhIssueCreateUsesRepoTitleAndBody :: RepoName -> IssueCreationRequest -> Bool
-prop_runtimeGhIssueCreateUsesRepoTitleAndBody repo requestWithMaybeParent =
-  let request = requestWithMaybeParent {issueCreationParent = Nothing}
-      spec = renderRuntimeCommand (GhIssueCreate repo request)
-   in spec.command == "gh"
-        && spec.args
-          == [ "issue"
-             , "create"
-             , "--repo"
-             , Text.unpack (unRepoName repo)
-             , "--title"
-             , Text.unpack (issueCreationTitle request)
-             , "--body"
-             , Text.unpack (issueCreationBody request)
-             ]
-
-prop_runtimeGhIssueCreateWithParentLinksSubIssue :: RepoName -> IssueCreationRequest -> IssueNumber -> Bool
-prop_runtimeGhIssueCreateWithParentLinksSubIssue repo requestWithoutParent parentIssue =
-  let request = requestWithoutParent {issueCreationParent = Just parentIssue}
-      spec = renderRuntimeCommand (GhIssueCreate repo request)
-      script = Text.pack (spec.args !! 1)
-   in spec.command == "bash"
-        && take 2 spec.args == ["-lc", Text.unpack script]
-        && "sub_issues" `Text.isInfixOf` script
-        && "sub_issue_id" `Text.isInfixOf` script
-        && "-F \"sub_issue_id=$sub_issue_id\"" `Text.isInfixOf` script
-        && spec.args
-          == [ "-lc"
-             , Text.unpack script
-             , "codex-watcher-gh-sub-issue-create"
-             , Text.unpack (unRepoName repo)
-             , Text.unpack (issueCreationTitle request)
-             , Text.unpack (issueCreationBody request)
-             , show (unIssueNumber parentIssue)
-             ]
-
-prop_runtimeKillZeroOnlyChecksPid :: ThreadId -> Bool
-prop_runtimeKillZeroOnlyChecksPid threadId =
-  let pidText = unThreadId threadId
-      spec = renderRuntimeCommand (KillZero pidText)
-      termSpec = renderRuntimeCommand (KillTerm pidText)
-   in spec.command == "kill"
-        && spec.args == ["-0", Text.unpack pidText]
-        && spec.cwd == Nothing
-        && termSpec.command == "kill"
-        && termSpec.args == ["-TERM", Text.unpack pidText]
-        && termSpec.cwd == Nothing
-
 jsonText :: Value -> Text
 jsonText =
   Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode
@@ -1190,343 +1167,6 @@ reviewerStateOutput status commit promptVersion commentCount lgtmComment finding
         , "blocked_reason" .= blockedReason
         ]
     )
-
-prop_ghGitParsesIssueAndPrLists :: Bool
-prop_ghGitParsesIssueAndPrLists =
-  let issuesJson =
-        jsonText
-          (toJSON [object ["number" .= (42 :: Int), "title" .= ("Fix bug" :: Text)]])
-      prsJson =
-        jsonText
-          ( toJSON
-              [ object
-                  [ "number" .= (7 :: Int)
-                  , "title" .= ("Implement fix" :: Text)
-                  , "headRefName" .= ("codex/issue-42" :: Text)
-                  , "headRefOid" .= ("abc123" :: Text)
-                  ]
-              ]
-          )
-   in parseGhIssueList issuesJson == Right [GhIssue (IssueNumber 42) "Fix bug"]
-        && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123"))]
-
-prop_ghGitParsesRemoteIssueView :: Bool
-prop_ghGitParsesRemoteIssueView =
-  let closedIssueJson =
-        jsonText
-          ( object
-              [ "state" .= ("CLOSED" :: Text)
-              , "closed" .= True
-              , "url" .= ("https://github.com/owner/name/issues/42" :: Text)
-              ]
-          )
-      legacyIssueJson =
-        jsonText
-          ( object
-              [ "state" .= ("CLOSED" :: Text)
-              ]
-          )
-   in parseGhIssueView closedIssueJson
-        == Right (RemoteIssue "CLOSED" True (Just "https://github.com/owner/name/issues/42"))
-        && parseGhIssueView legacyIssueJson == Right (RemoteIssue "CLOSED" True Nothing)
-
-prop_ghGitParsesRemotePrView :: Bool
-prop_ghGitParsesRemotePrView =
-  let prJson =
-        jsonText
-          ( object
-              [ "state" .= ("MERGED" :: Text)
-              , "url" .= ("https://github.com/owner/name/pull/7" :: Text)
-              , "headRefOid" .= ("head-sha" :: Text)
-              , "mergeCommit" .= object ["oid" .= ("merge-sha" :: Text)]
-              , "mergedAt" .= ("2026-04-21T00:00:00Z" :: Text)
-              ]
-          )
-   in parseGhPrView prJson
-        == Right
-          RemotePullRequest
-            { remotePullRequestState = "MERGED"
-            , remotePullRequestUrl = Just "https://github.com/owner/name/pull/7"
-            , remotePullRequestHeadRefOid = Just (CommitSha "head-sha")
-            , remotePullRequestMergeCommit = Just (CommitSha "merge-sha")
-            , remotePullRequestMergedAt = Just "2026-04-21T00:00:00Z"
-            }
-
-prop_ghGitParsesReviewThreadsGraphql :: Bool
-prop_ghGitParsesReviewThreadsGraphql =
-  let payload =
-        jsonText
-          ( object
-              [ "data"
-                  .= object
-                    [ "repository"
-                        .= object
-                          [ "pullRequest"
-                              .= object
-                                [ "reviewThreads"
-                                    .= object
-                                      [ "nodes"
-                                          .= [ object
-                                                [ "id" .= ("thread-unresolved" :: Text)
-                                                , "isResolved" .= False
-                                                , "isOutdated" .= False
-                                                , "path" .= ("src/File.hs" :: Text)
-                                                , "line" .= (12 :: Int)
-                                                , "startLine" .= (10 :: Int)
-                                                , "comments"
-                                                    .= object
-                                                      [ "nodes"
-                                                          .= [ object
-                                                                [ "id" .= ("comment-1" :: Text)
-                                                                , "body" .= ("please fix" :: Text)
-                                                                , "author" .= object ["login" .= ("reviewer" :: Text)]
-                                                                ]
-                                                              ]
-                                                         ]
-                                                ]
-                                             , object
-                                                [ "id" .= ("thread-resolved" :: Text)
-                                                , "isResolved" .= True
-                                                , "isOutdated" .= False
-                                                , "comments" .= object ["nodes" .= ([] :: [Value])]
-                                                ]
-                                             ]
-                                      ]
-                                ]
-                          ]
-                    ]
-              ]
-          )
-   in case parseGhReviewThreads payload of
-        Right report ->
-          fmap reviewThreadId report.unresolvedReviewThreads == [ReviewThreadId "thread-unresolved"]
-            && length report.reviewThreads == 2
-            && maybe False ((== Just "reviewer") . reviewCommentAuthorLogin) (listToMaybe report.reviewThreads >>= listToMaybe . reviewThreadComments)
-        Left _ -> False
-
-prop_ghGitParsesGitOutputs :: Bool
-prop_ghGitParsesGitOutputs =
-  parseGitBranch "codex/example\n" == Just (BranchName "codex/example")
-    && parseGitSha "abc123\n" == Just (CommitSha "abc123")
-    && parseLsRemoteBranch "abc123\trefs/heads/codex/example\n" == Just (CommitSha "abc123")
-    && parseGitBranch "\n" == Nothing
-
-prop_appServerInitializeRequestMatchesJsonRpc :: Bool
-prop_appServerInitializeRequestMatchesJsonRpc =
-  toJSON (initializeRequest 1 "codex-script" "0.1.0")
-    == object
-      [ "jsonrpc" .= ("2.0" :: Text)
-      , "id" .= (1 :: Int)
-      , "method" .= ("initialize" :: Text)
-      , "params" .= object
-          [ "clientInfo" .= object ["name" .= ("codex-script" :: Text), "version" .= ("0.1.0" :: Text)]
-          , "capabilities" .= object ["experimentalApi" .= True]
-          ]
-      ]
-
-prop_appServerThreadStartKeepsNodeNullFields :: Bool
-prop_appServerThreadStartKeepsNodeNullFields =
-  let request =
-        threadStartRequest
-          2
-          ThreadStartOptions
-            { threadCwd = "/workspace/repo"
-            , threadApprovalPolicy = "never"
-            , threadSandbox = "danger-full-access"
-            , threadModel = "gpt-5.4"
-            , threadDeveloperInstructions = "developer"
-            }
-   in request.requestMethod == "thread/start"
-        && all
-          (\key -> lookupValue key request.requestParams == Just Null)
-          ["modelProvider", "baseInstructions", "config", "personality", "serviceTier", "serviceName"]
-        && lookupValue "ephemeral" request.requestParams == Just (Bool False)
-
-prop_appServerTurnStartPlanModeEncodesCollaborationMode :: ThreadId -> Bool
-prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
-  let collaborationMode = planCollaborationMode "plan only" "gpt-5.4" "xhigh"
-      request =
-        turnStartRequest
-          3
-          TurnStartOptions
-            { turnThreadId = threadId
-            , turnCwd = "/workspace/repo"
-            , turnEffort = "xhigh"
-            , turnModel = "gpt-5.4"
-            , turnApprovalPolicy = "never"
-            , turnSandboxPolicy = "danger-full-access"
-            , turnInput = "write the plan"
-            , turnOutputSchema = Just structuredTurnOutputSchema
-            , turnCollaborationMode = Just collaborationMode
-            }
-   in request.requestMethod == "turn/start"
-        && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
-        && lookupValue "collaborationMode" request.requestParams == Just collaborationMode
-        && lookupValue "sandboxPolicy" request.requestParams == Just (object ["type" .= ("dangerFullAccess" :: Text)])
-        && lookupValue "summary" request.requestParams == Just Null
-        && lookupValue "input" request.requestParams == Just (toJSON [object ["type" .= ("text" :: Text), "text" .= ("write the plan" :: Text)]])
-        && lookupValue "outputSchema" request.requestParams == Just structuredTurnOutputSchema
-
-prop_appServerThreadReadAndInterruptUseThreadIds :: ThreadId -> TurnId -> Bool
-prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
-  let readRequest = threadReadRequest 4 threadId True
-      interruptRequest = turnInterruptRequest 5 threadId turnId
-   in readRequest.requestMethod == "thread/read"
-        && lookupValue "threadId" readRequest.requestParams == Just (String (unThreadId threadId))
-        && lookupValue "includeTurns" readRequest.requestParams == Just (Bool True)
-        && interruptRequest.requestMethod == "turn/interrupt"
-        && lookupValue "threadId" interruptRequest.requestParams == Just (String (unThreadId threadId))
-        && lookupValue "turnId" interruptRequest.requestParams == Just (String (unTurnId turnId))
-
-prop_appServerClientInitializesSingleRequestSessions :: ThreadId -> Bool
-prop_appServerClientInitializesSingleRequestSessions threadId =
-  let request = threadReadRequest 4 threadId True
-      session = appServerRequestSession request
-   in fmap requestMethod session == ["initialize", "thread/read"]
-        && fmap requestId session == [0, 4]
-        && appServerRequestSession (initializeRequest 10 "client" "1") == [initializeRequest 10 "client" "1"]
-
-prop_appServerClientMatchesSuccessResponse :: Bool
-prop_appServerClientMatchesSuccessResponse =
-  let request = initializeRequest 80 "codex-watcher-hs" "0.1.0"
-      result = object ["server" .= ("ready" :: Text)]
-      response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (80 :: Int), "result" .= result]
-   in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
-        Right (Just value) -> value == result
-        _ -> False
-
-prop_appServerClientSkipsNotifications :: Bool
-prop_appServerClientSkipsNotifications =
-  let request = initializeRequest 81 "codex-watcher-hs" "0.1.0"
-      notification = object ["jsonrpc" .= ("2.0" :: Text), "method" .= ("turn/update" :: Text), "params" .= object ["status" .= ("running" :: Text)]]
-   in case decodeAppServerIncomingValue notification >>= matchAppServerIncoming request of
-        Right Nothing -> True
-        _ -> False
-
-prop_appServerClientRejectsMismatchedResponseIds :: Bool
-prop_appServerClientRejectsMismatchedResponseIds =
-  let request = initializeRequest 82 "codex-watcher-hs" "0.1.0"
-      response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (83 :: Int), "result" .= object []]
-   in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
-        Left (AppServerResponseIdMismatch 82 83) -> True
-        _ -> False
-
-prop_appServerClientSurfacesJsonRpcErrors :: Bool
-prop_appServerClientSurfacesJsonRpcErrors =
-  let request = initializeRequest 84 "codex-watcher-hs" "0.1.0"
-      response =
-        object
-          [ "jsonrpc" .= ("2.0" :: Text)
-          , "id" .= (84 :: Int)
-          , "error" .= object ["code" .= (-32000 :: Int), "message" .= ("boom" :: Text)]
-          ]
-   in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
-        Left (AppServerJsonRpcFailure 84 errorValue) ->
-          jsonRpcErrorCode errorValue == -32000 && jsonRpcErrorMessage errorValue == "boom"
-        _ -> False
-
-prop_appServerClientFallsBackForUnmaterializedThreadRead :: ThreadId -> Bool
-prop_appServerClientFallsBackForUnmaterializedThreadRead threadId =
-  let request = threadReadRequest 86 threadId True
-      failure =
-        AppServerJsonRpcFailure
-          86
-          JsonRpcError
-            { jsonRpcErrorCode = -32000
-            , jsonRpcErrorMessage = "thread " <> unThreadId threadId <> " is not materialized yet; includeTurns is unavailable before first user message"
-            , jsonRpcErrorData = Nothing
-            }
-      nonThreadRequest = initializeRequest 86 "codex-watcher-hs" "0.1.0"
-   in threadReadBeforeMaterializedFallback request failure == Just (object ["turns" .= ([] :: [Value])])
-        && threadReadBeforeMaterializedFallback nonThreadRequest failure == Nothing
-
-prop_appServerClientRejectsUnsupportedJsonRpcVersion :: Bool
-prop_appServerClientRejectsUnsupportedJsonRpcVersion =
-  let response = object ["jsonrpc" .= ("1.0" :: Text), "id" .= (85 :: Int), "result" .= object []]
-   in case decodeAppServerIncomingValue response of
-        Left AppServerDecodeFailure {} -> True
-        _ -> False
-
-prop_appServerClientParsesThreadReadTurns :: Bool
-prop_appServerClientParsesThreadReadTurns =
-  let response =
-        object
-          [ "turns"
-              .= [ object
-                    [ "id" .= ("turn-old" :: Text)
-                    , "status" .= ("completed" :: Text)
-                    , "output" .= ("old output" :: Text)
-                    ]
-                 , object
-                    [ "turnId" .= ("turn-target" :: Text)
-                    , "status" .= ("running" :: Text)
-                    , "result" .= object ["text" .= ("target output" :: Text)]
-                    ]
-                 , object
-                    [ "turnId" .= ("turn-target" :: Text)
-                    , "status" .= ("completed" :: Text)
-                    , "result" .= object ["text" .= ("latest output" :: Text)]
-                    ]
-                 , object
-                    [ "turnId" .= ("turn-structured" :: Text)
-                    , "status" .= ("completed" :: Text)
-                    , "output" .= object ["outcome" .= ("blocked" :: Text), "reason" .= ("schema blocker" :: Text)]
-                    ]
-                 , object
-                    [ "id" .= ("turn-agent-item" :: Text)
-                    , "status" .= ("completed" :: Text)
-                    , "items"
-                        .= [ object
-                              [ "type" .= ("userMessage" :: Text)
-                              , "content" .= [object ["type" .= ("text" :: Text), "text" .= ("prompt" :: Text)]]
-                              ]
-                           , object
-                              [ "type" .= ("agentMessage" :: Text)
-                              , "phase" .= ("final_answer" :: Text)
-                              , "text" .= ("{\"outcome\":\"complete\",\"summary\":\"ok\"}" :: Text)
-                              ]
-                           ]
-                    ]
-                 ]
-          ]
-   in case parseThreadReadTurns response of
-        Right turns ->
-          latestTurnById (TurnId "turn-target") turns
-            == Just (AppServerTurn (TurnId "turn-target") "completed" (Just "latest output"))
-            && ( (parseStructuredTurnOutcome =<< (appServerTurnOutput =<< latestTurnById (TurnId "turn-structured") turns))
-                   == Just (StructuredBlocked "schema blocker")
-               )
-            && ( (parseStructuredTurnOutcome =<< (appServerTurnOutput =<< latestTurnById (TurnId "turn-agent-item") turns))
-                   == Just (StructuredComplete "ok")
-               )
-        Left _ -> False
-
-prop_appServerClientParsesTurnStartTurnId :: Bool
-prop_appServerClientParsesTurnStartTurnId =
-  parseTurnStartTurnId (object ["turn" .= object ["id" .= ("turn-created" :: Text)]])
-    == Right (TurnId "turn-created")
-
-prop_appServerClientParsesThreadStartThreadId :: Bool
-prop_appServerClientParsesThreadStartThreadId =
-  parseThreadStartThreadId (object ["thread" .= object ["id" .= ("thread-created" :: Text)]])
-    == Right (ThreadId "thread-created")
-
-prop_appServerClientParsesNestedThreadReadTurns :: Bool
-prop_appServerClientParsesNestedThreadReadTurns =
-  parseThreadReadTurns
-    ( object
-        [ "thread"
-            .= object
-              [ "turns"
-                  .= [ object
-                        [ "id" .= ("turn-nested" :: Text)
-                        , "status" .= ("completed" :: Text)
-                        ]
-                     ]
-              ]
-        ]
-    )
-    == Right [AppServerTurn (TurnId "turn-nested") "completed" Nothing]
 
 prop_turnClassifierCompletionStates :: Bool
 prop_turnClassifierCompletionStates =
@@ -1589,7 +1229,7 @@ effectRuntimeConfig repo workdir requestId =
     , effectRuntimePlannerTurn = turnRuntime "planner prompt" Nothing
     , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
     , effectRuntimeIssueTriageTurn = turnRuntime "issue triage prompt" Nothing
-    , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" (Just (planCollaborationMode "issue plan mode" "gpt-5.4" "xhigh"))
+    , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" (Just (defaultPlanCollaborationMode "issue plan mode"))
     , effectRuntimeIssueImplementationTurn = turnRuntime "issue implementation prompt" Nothing
     , effectRuntimeReviewerTurn = turnRuntime "reviewer prompt" Nothing
     }
@@ -1597,10 +1237,10 @@ effectRuntimeConfig repo workdir requestId =
   turnRuntime input collaborationMode =
     TurnRuntimeConfig
       { turnRuntimeCwd = workdir
-      , turnRuntimeModel = "gpt-5.4"
-      , turnRuntimeEffort = "xhigh"
-      , turnRuntimeApprovalPolicy = "never"
-      , turnRuntimeSandboxPolicy = "danger-full-access"
+      , turnRuntimeModel = defaultModel
+      , turnRuntimeEffort = defaultEffort
+      , turnRuntimeApprovalPolicy = defaultApprovalPolicy
+      , turnRuntimeSandboxPolicy = defaultSandboxPolicy
       , turnRuntimeInput = input
       , turnRuntimeOutputSchema = Nothing
       , turnRuntimeCollaborationMode = collaborationMode
@@ -1781,7 +1421,7 @@ prop_effectInterpreterMergeUsesConfiguredRepoAndMethod prNumber cleanEvidence =
   let repo = RepoName "soulomoon/mlf2"
       config = (effectRuntimeConfig repo "/tmp/work" 40) {effectRuntimeMergeMethod = "squash"}
       compiled = compileEffectPlan config [SomeEffect (MergePullRequest prNumber cleanEvidence)]
-   in compiled.compiledActions == [PlannedCommand (GhPrMerge repo prNumber "squash")]
+   in compiled.compiledActions == [PlannedCommand (GhPrCommentReviewAndMerge repo prNumber cleanEvidence "squash")]
 
 prop_actionExecutorDryRunPreservesActionOrder :: Bool
 prop_actionExecutorDryRunPreservesActionOrder =
@@ -1799,222 +1439,12 @@ prop_actionExecutorDryRunPreservesActionOrder =
         && all ((== DryRunActions) . actionExecutionMode) reports
         && all ((== DryRunActionResult) . actionExecutionResult) reports
 
-prop_migrationRuntimeOwnerJsonAndParsing :: Bool
-prop_migrationRuntimeOwnerJsonAndParsing =
-  parseRuntimeOwner "node" == Right NodeRuntime
-    && parseRuntimeOwner "HASKELL" == Right HaskellRuntime
-    && parseRuntimeOwner "unknown" /= Right NodeRuntime
+prop_runtimeOwnerJsonAndParsing :: Bool
+prop_runtimeOwnerJsonAndParsing =
+  parseRuntimeOwner "HASKELL" == Right HaskellRuntime
+    && parseRuntimeOwner "node" /= Right HaskellRuntime
+    && parseRuntimeOwner "unknown" /= Right HaskellRuntime
     && runtimeOwnerJson HaskellRuntime == object ["owner" .= ("haskell" :: Text)]
-
-prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork :: Bool
-prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork =
-  warnIssueImplementDirtyWorkdir True False
-    && not (warnIssueImplementDirtyWorkdir True True)
-    && not (warnIssueImplementDirtyWorkdir False False)
-    && warnPrReviewDirtyWorkdir True False False
-    && not (warnPrReviewDirtyWorkdir True True False)
-    && not (warnPrReviewDirtyWorkdir True False True)
-
-prop_cliParsesHealthcheckAndRunLoop :: Bool
-prop_cliParsesHealthcheckAndRunLoop =
-  parseCliCommand ["healthcheck", "--state-root", "/tmp/state", "--repo", "owner/name"]
-    == Right
-      ( CliHealthcheck
-          HealthcheckCli
-            { healthcheckCliStateRoot = "/tmp/state"
-            , healthcheckCliRepo = Just (RepoName "owner/name")
-            , healthcheckCliEndpoint = Nothing
-            }
-      )
-    && parseCliCommand
-      [ "run-issue-planning"
-      , "--events"
-      , "/tmp/events.jsonl"
-      , "--state-dir"
-      , "/tmp/state"
-      , "--repo"
-      , "owner/name"
-      , "--app-server-host"
-      , "127.0.0.1"
-      , "--app-server-port"
-      , "3000"
-      , "--thread-id"
-      , "planner-thread"
-      , "--scope-issue"
-      , "12"
-      , "--loop"
-      , "--iterations"
-      , "2"
-      ]
-      == Right
-        ( CliRunLoop
-            LoopCli
-              { loopCliDomain = CliIssuePlanning
-              , loopCliEventsPath = "/tmp/events.jsonl"
-              , loopCliStateDir = "/tmp/state"
-              , loopCliRepo = RepoName "owner/name"
-              , loopCliWorkdir = "."
-              , loopCliEndpoint = AppServerEndpoint "127.0.0.1" 3000 "/"
-              , loopCliPollSeconds = 30
-              , loopCliExecute = False
-              , loopCliLoop = True
-              , loopCliIterations = Just 2
-              , loopCliPidFile = Nothing
-              , loopCliPlannerThread = Just (ThreadId "planner-thread")
-              , loopCliScopeIssues = [IssueNumber 12]
-              , loopCliImplementersRoot = Nothing
-              , loopCliOpenIssues = Nothing
-              , loopCliActiveIssues = Nothing
-              , loopCliImplementerWorkdirRoot = Nothing
-              , loopCliWorkdirRoot = Nothing
-              , loopCliBranchPrefix = "codex/issue-"
-              , loopCliThreadPrefix = "issue-worker-"
-              , loopCliStartChildren = False
-              , loopCliChildPollSeconds = Nothing
-              }
-        )
-    && parseCliCommand
-      [ "guard-issue-planning"
-      , "--events"
-      , "/tmp/events.jsonl"
-      , "--state-dir"
-      , "/tmp/state"
-      , "--repo"
-      , "owner/name"
-      , "--app-server-host"
-      , "127.0.0.1"
-      , "--app-server-port"
-      , "3000"
-      , "--thread-id"
-      , "planner-thread"
-      , "--execute"
-      , "--loop"
-      , "--guard-pid-file"
-      , "/tmp/state/runner-guard.pid"
-      , "--guard-poll-seconds"
-      , "15"
-      , "--stale-seconds"
-      , "120"
-      , "--repair-cwd"
-      , "/tmp/repo"
-      ]
-      == Right
-        ( CliGuardIssuePlanning
-            GuardIssuePlanningCli
-              { guardCliLoop =
-                  LoopCli
-                    { loopCliDomain = CliIssuePlanning
-                    , loopCliEventsPath = "/tmp/events.jsonl"
-                    , loopCliStateDir = "/tmp/state"
-                    , loopCliRepo = RepoName "owner/name"
-                    , loopCliWorkdir = "."
-                    , loopCliEndpoint = AppServerEndpoint "127.0.0.1" 3000 "/"
-                    , loopCliPollSeconds = 30
-                    , loopCliExecute = True
-                    , loopCliLoop = True
-                    , loopCliIterations = Nothing
-                    , loopCliPidFile = Nothing
-                    , loopCliPlannerThread = Just (ThreadId "planner-thread")
-                    , loopCliScopeIssues = []
-                    , loopCliImplementersRoot = Nothing
-                    , loopCliOpenIssues = Nothing
-                    , loopCliActiveIssues = Nothing
-                    , loopCliImplementerWorkdirRoot = Nothing
-                    , loopCliWorkdirRoot = Nothing
-                    , loopCliBranchPrefix = "codex/issue-"
-                    , loopCliThreadPrefix = "issue-worker-"
-                    , loopCliStartChildren = False
-                    , loopCliChildPollSeconds = Nothing
-                    }
-              , guardCliPidFile = Just "/tmp/state/runner-guard.pid"
-              , guardCliPollSeconds = 15
-              , guardCliStaleSeconds = 120
-              , guardCliRepairCwd = Just "/tmp/repo"
-              }
-        )
-    && parseCliCommand
-      [ "validate-migration"
-      , "--source-state-dir"
-      , "/tmp/source"
-      , "--target-state-dir"
-      , "/tmp/target"
-      , "--domain"
-      , "pr-review"
-      ]
-      == Right
-        ( CliValidateMigration
-            ValidateMigrationCli
-              { validateMigrationCliSourceStateDir = "/tmp/source"
-              , validateMigrationCliTargetStateDir = "/tmp/target"
-              , validateMigrationCliDomain = CliPrReview
-              , validateMigrationCliEventsPath = Nothing
-              }
-        )
-
-prop_cliRejectsBadDomain :: Bool
-prop_cliRejectsBadDomain =
-  case parseCliCommand ["stop-daemon", "--state-dir", "/tmp/state", "--domain", "unknown"] of
-    Left _ -> True
-    Right _ -> False
-
-prop_migrationRehearsalPlanSkipsRuntimeFiles :: Bool
-prop_migrationRehearsalPlanSkipsRuntimeFiles =
-  defaultRehearsalTarget "/tmp/rehearsal" "/workspace/artifacts/source-state" == "/tmp/rehearsal/source-state"
-    && not (shouldCopyStateEntry "runtime-owner.json")
-    && not (shouldCopyStateEntry "watcher.pid")
-    && not (shouldCopyStateEntry "issue-watcher.pid")
-    && shouldCopyStateEntry "events.jsonl"
-    && renderBackoutCommands "/tmp/rehearsal/source-state" "pr-review"
-      == [ "codex-watcher-hs stop-daemon --state-dir \"/tmp/rehearsal/source-state\" --domain pr-review"
-         ]
-
-prop_migrationReadinessRequiresHaskellTarget :: Bool
-prop_migrationReadinessRequiresHaskellTarget =
-  let ready =
-        migrationReadinessReport
-          "/tmp/target"
-          "issue-planning"
-          MigrationReadinessInput
-            { readinessSourceOwner = Just NodeRuntime
-            , readinessTargetOwner = Just HaskellRuntime
-            , readinessOwnerProblems = []
-            , readinessReplayDomain = Just IssuePlanning
-            , readinessExpectedDomain = IssuePlanning
-            , readinessReplayProblem = Nothing
-            , readinessTargetPidExists = False
-            }
-      badTarget =
-        migrationReadinessReport
-          "/tmp/target"
-          "issue-planning"
-          MigrationReadinessInput
-            { readinessSourceOwner = Just NodeRuntime
-            , readinessTargetOwner = Just NodeRuntime
-            , readinessOwnerProblems = []
-            , readinessReplayDomain = Just IssuePlanning
-            , readinessExpectedDomain = IssuePlanning
-            , readinessReplayProblem = Nothing
-            , readinessTargetPidExists = False
-            }
-      wrongDomain =
-        migrationReadinessReport
-          "/tmp/target"
-          "issue-planning"
-          MigrationReadinessInput
-            { readinessSourceOwner = Just NodeRuntime
-            , readinessTargetOwner = Just HaskellRuntime
-            , readinessOwnerProblems = []
-            , readinessReplayDomain = Just PrReview
-            , readinessExpectedDomain = IssuePlanning
-            , readinessReplayProblem = Nothing
-            , readinessTargetPidExists = False
-            }
-   in migrationReady ready
-        && migrationBackout ready == renderBackoutCommands "/tmp/target" "issue-planning"
-        && not (migrationReady badTarget)
-        && "target runtime-owner.json must be haskell, got node" `elem` migrationProblems badTarget
-        && not (migrationReady wrongDomain)
-        && any ("does not match expected" `Text.isInfixOf`) (migrationProblems wrongDomain)
 
 prop_supervisorRendersRestartAndLogrotate :: Bool
 prop_supervisorRendersRestartAndLogrotate =
@@ -2050,6 +1480,7 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
+          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2076,6 +1507,7 @@ runnerGuardRestartsMissingPidForIncompletePlanning = do
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
+          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2109,6 +1541,7 @@ runnerGuardRestartsMissingPidForWaitingPlanning = do
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
+          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2141,6 +1574,7 @@ runnerGuardRepairsInvalidPlanningEventLog = do
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
+          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2417,17 +1851,7 @@ actionExecutorExecuteCallsInjectedInterpreters = do
   pure (and results)
  where
   turnStartOptionsForTest threadId =
-    TurnStartOptions
-      { turnThreadId = threadId
-      , turnCwd = "/tmp/work"
-      , turnEffort = "xhigh"
-      , turnModel = "gpt-5.4"
-      , turnApprovalPolicy = "never"
-      , turnSandboxPolicy = "danger-full-access"
-      , turnInput = "worker prompt"
-      , turnOutputSchema = Nothing
-      , turnCollaborationMode = Nothing
-      }
+    defaultTurnStartOptions threadId "/tmp/work" "worker prompt"
 
 daemonTickDryRunReplaysEventsAndDoesNotExecute :: IO Bool
 daemonTickDryRunReplaysEventsAndDoesNotExecute = do
@@ -2831,6 +2255,46 @@ automaticDaemonLoopRetriesPrCreateWhileWaitingForPr = do
       putStrLn ("FAIL automatic PR retry: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+automaticDaemonLoopTerminalStateStops :: IO Bool
+automaticDaemonLoopTerminalStateStops = do
+  (executor, getCalls) <- fakeActionExecutor
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 170
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/example")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")
+        , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence
+        , PrReviewMergeCompleted (MergeCommit (CommitSha "def456"))
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "automatic terminal state reports complete idle reason" (tick.loopIdleReason == Just "watcher is complete")
+          , assert "automatic terminal state writes compatibility state" (any isFakeWriteJson calls)
+          , assert "automatic terminal state stops daemon" (FakeStop `elem` calls)
+          , assert "automatic terminal state does not sleep" (FakeSleep `notElem` calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic terminal stop: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isFakeWriteJson = \case
+    FakeWriteJson {} -> True
+    _ -> False
+
 main :: IO ()
 main = do
   results <-
@@ -2865,6 +2329,8 @@ main = do
       , quickCheckResult prop_issueImplementWatcherIncompleteRestartsImplementation
       , quickCheckResult prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn
       , quickCheckResult prop_issueImplementWatcherBlockedStops
+      , quickCheckResult prop_issueImplementationCompatibilityWritesPrUrl
+      , quickCheckResult prop_prReviewCompatibilityClearsCheckerState
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningGraphWaitsForReadyIssues
@@ -2907,6 +2373,7 @@ main = do
       , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
       , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
+      , quickCheckResult prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
       , quickCheckResult prop_ghGitParsesRemoteIssueView
@@ -2916,6 +2383,8 @@ main = do
       , quickCheckResult prop_appServerInitializeRequestMatchesJsonRpc
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
       , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
+      , quickCheckResult prop_runtimeDefaultsCentralizeThreadAndTurnOptions
+      , quickCheckResult prop_jsonPathHelpersDecodeNestedValues
       , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds
       , quickCheckResult prop_appServerClientInitializesSingleRequestSessions
       , quickCheckResult prop_appServerClientMatchesSuccessResponse
@@ -2942,17 +2411,18 @@ main = do
       , quickCheckResult prop_effectInterpreterCreateIssueUsesConfiguredEffect
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
-      , quickCheckResult prop_migrationRuntimeOwnerJsonAndParsing
+      , quickCheckResult prop_runtimeOwnerJsonAndParsing
       , quickCheckResult prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
+      , quickCheckResult prop_healthcheckDaemonRequiredStatuses
       , quickCheckResult prop_cliParsesHealthcheckAndRunLoop
       , quickCheckResult prop_cliRejectsBadDomain
-      , quickCheckResult prop_migrationRehearsalPlanSkipsRuntimeFiles
-      , quickCheckResult prop_migrationReadinessRequiresHaskellTarget
+      , quickCheckResult prop_cliParsesGenericRunnerGuardDomains
       , quickCheckResult prop_supervisorRendersRestartAndLogrotate
       ]
   goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases
   bootstrapOk <- goldenBootstrapCases
+  runtimeProcessOk <- runtimeProcessSpecCapturesStreamsAndExit
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
@@ -2965,6 +2435,7 @@ main = do
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
   automaticPrRetryOk <- automaticDaemonLoopRetriesPrCreateWhileWaitingForPr
+  automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
@@ -2974,6 +2445,7 @@ main = do
       && goldenOk
       && eventLogOk
       && bootstrapOk
+      && runtimeProcessOk
       && actionExecutorDryRunOk
       && actionExecutorExecuteOk
       && daemonTickOk
@@ -2986,6 +2458,7 @@ main = do
       && automaticActiveTurnOk
       && automaticImplementationHandoffOk
       && automaticPrRetryOk
+      && automaticTerminalStopOk
       && runnerGuardOk
       && runnerGuardRestartOk
       && runnerGuardWaitingRestartOk

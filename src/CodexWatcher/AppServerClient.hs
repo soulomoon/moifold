@@ -33,10 +33,10 @@ module CodexWatcher.AppServerClient
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerProtocol (AppServerRequest (..), initializeRequest)
+import CodexWatcher.JsonPath (lookupPath)
 import CodexWatcher.Types (ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
-import Control.Exception (IOException, bracket, try)
-import Data.Bits ((.&.), (.|.), shiftL, shiftR, xor)
+import Control.Exception (AsyncException, SomeException, displayException, fromException, throwIO, try)
 import Data.Aeson
   ( FromJSON (..)
   , Object
@@ -53,8 +53,6 @@ import Data.Aeson
 import Data.Aeson.Types (Parser, parseEither)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
-import Data.ByteString qualified as ByteString
-import Data.ByteString.Char8 qualified as ByteString.Char8
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (toList)
 import Data.Maybe (mapMaybe)
@@ -62,21 +60,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Generics (Generic)
-import Data.Word (Word64, Word8)
-import Network.Socket
-  ( AddrInfo (..)
-  , HostName
-  , PortNumber
-  , Socket
-  , SocketType (Stream)
-  , close
-  , connect
-  , defaultHints
-  , getAddrInfo
-  , socket
-  , withSocketsDo
-  )
-import Network.Socket.ByteString qualified as SocketByteString
+import Network.WebSockets qualified as WebSockets
 import System.Timeout (timeout)
 
 data AppServerEndpoint = AppServerEndpoint
@@ -98,7 +82,7 @@ defaultAppServerClientOptions =
     }
 
 newtype AppServerConnection = AppServerConnection
-  { unAppServerConnection :: Socket
+  { unAppServerConnection :: WebSockets.Connection
   }
 
 data JsonRpcError = JsonRpcError
@@ -158,13 +142,13 @@ data AppServerClientFailure
 
 connectAppServer :: AppServerEndpoint -> (AppServerConnection -> IO a) -> IO a
 connectAppServer endpoint action =
-  withSocketsDo $
-    bracket (openAppServerConnection endpoint) (close . unAppServerConnection) action
+  WebSockets.runClient endpoint.appServerHost endpoint.appServerPort (normalizedPath endpoint.appServerPath) \connection ->
+    action (AppServerConnection connection)
 
 sendOneAppServerRequest :: AppServerEndpoint -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 sendOneAppServerRequest endpoint options request =
-  try (connectAppServer endpoint \connection -> sendAppServerRequestSession connection options (appServerRequestSession request)) >>= \case
-    Left (exception :: IOException) -> pure (Left (AppServerTransportFailure (Text.pack (show exception))))
+  transportTry (connectAppServer endpoint \connection -> sendAppServerRequestSession connection options (appServerRequestSession request)) >>= \case
+    Left message -> pure (Left (AppServerTransportFailure message))
     Right result -> pure result
 
 appServerRequestSession :: AppServerRequest -> [AppServerRequest]
@@ -185,10 +169,19 @@ sendAppServerRequestSession connection options (request : rest) = do
 
 sendAppServerRequest :: AppServerConnection -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 sendAppServerRequest connection options request = do
-  sendResult <- try (sendWebSocketText connection.unAppServerConnection (encode request)) :: IO (Either IOException ())
-  case sendResult of
-    Left exception -> pure (Left (AppServerTransportFailure (Text.pack (show exception))))
+  transportTry (WebSockets.sendTextData connection.unAppServerConnection (encode request :: LazyByteString.ByteString)) >>= \case
+    Left message -> pure (Left (AppServerTransportFailure message))
     Right () -> receiveMatchedResponse connection options request
+
+transportTry :: IO a -> IO (Either Text a)
+transportTry action =
+  try action >>= \case
+    Left (exception :: SomeException) ->
+      case fromException exception of
+        Just (asyncException :: AsyncException) -> throwIO asyncException
+        Nothing -> pure (Left (Text.pack (displayException exception)))
+    Right value ->
+      pure (Right value)
 
 appServerInterpreterFromEndpoint :: AppServerEndpoint -> AppServerClientOptions -> AppServerInterpreter IO
 appServerInterpreterFromEndpoint endpoint options =
@@ -426,170 +419,13 @@ nestedRequiredText path objectValue =
     Just (String text) -> pure text
     _ -> fail ("missing text field: " <> Text.unpack (Text.intercalate "." path))
 
-lookupPath :: [Text] -> Value -> Maybe Value
-lookupPath [] value = Just value
-lookupPath (key : rest) (Object objectValue) = KeyMap.lookup (Key.fromText key) objectValue >>= lookupPath rest
-lookupPath _ _ = Nothing
-
-openAppServerConnection :: AppServerEndpoint -> IO AppServerConnection
-openAppServerConnection endpoint = do
-  addrInfo <- resolveEndpoint endpoint.appServerHost (fromIntegral endpoint.appServerPort)
-  sock <- socket (addrFamily addrInfo) Stream (addrProtocol addrInfo)
-  connect sock (addrAddress addrInfo)
-  SocketByteString.sendAll sock (handshakeRequest endpoint)
-  response <- readHttpHeaders sock ByteString.empty
-  if isSwitchingProtocols response
-    then pure (AppServerConnection sock)
-    else fail ("app-server WebSocket handshake failed: " <> ByteString.Char8.unpack response)
-
-resolveEndpoint :: HostName -> PortNumber -> IO AddrInfo
-resolveEndpoint host port = do
-  addrInfos <- getAddrInfo (Just defaultHints) (Just host) (Just (show port))
-  case addrInfos of
-    first : _ -> pure first
-    [] -> fail ("could not resolve app-server host: " <> host)
-
-handshakeRequest :: AppServerEndpoint -> ByteString.ByteString
-handshakeRequest endpoint =
-  ByteString.Char8.pack $
-    "GET "
-      <> normalizedPath endpoint.appServerPath
-      <> " HTTP/1.1\r\n"
-      <> "Host: "
-      <> endpoint.appServerHost
-      <> ":"
-      <> show endpoint.appServerPort
-      <> "\r\n"
-      <> "Upgrade: websocket\r\n"
-      <> "Connection: Upgrade\r\n"
-      <> "Sec-WebSocket-Version: 13\r\n"
-      <> "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-      <> "\r\n"
-
 normalizedPath :: String -> String
 normalizedPath "" = "/"
 normalizedPath path@('/' : _) = path
 normalizedPath path = "/" <> path
 
-readHttpHeaders :: Socket -> ByteString.ByteString -> IO ByteString.ByteString
-readHttpHeaders sock accumulated
-  | "\r\n\r\n" `ByteString.isInfixOf` accumulated = pure accumulated
-  | otherwise = do
-      chunk <- SocketByteString.recv sock 4096
-      if ByteString.null chunk
-        then pure accumulated
-        else readHttpHeaders sock (accumulated <> chunk)
-
-isSwitchingProtocols :: ByteString.ByteString -> Bool
-isSwitchingProtocols response =
-  case ByteString.Char8.lines response of
-    statusLine : _ -> " 101 " `ByteString.Char8.isInfixOf` statusLine || ByteString.Char8.isSuffixOf " 101" statusLine
-    [] -> False
-
-sendWebSocketText :: Socket -> LazyByteString.ByteString -> IO ()
-sendWebSocketText sock lazyPayload =
-  SocketByteString.sendAll sock (frameHeader <> maskedPayload)
- where
-  payload = LazyByteString.toStrict lazyPayload
-  payloadLength = ByteString.length payload
-  maskKey = ByteString.pack [0x12, 0x34, 0x56, 0x78]
-  (lengthByte, extendedLength) = encodedPayloadLength payloadLength
-  frameHeader = ByteString.pack [0x81, 0x80 .|. lengthByte] <> extendedLength <> maskKey
-  maskedPayload = maskPayload maskKey payload
-
-encodedPayloadLength :: Int -> (Word8, ByteString.ByteString)
-encodedPayloadLength payloadLength
-  | payloadLength <= 125 =
-      (fromIntegral payloadLength, ByteString.empty)
-  | payloadLength <= 65535 =
-      (126, word16Bytes payloadLength)
-  | otherwise =
-      (127, word64Bytes (fromIntegral payloadLength))
-
-receiveWebSocketMessage :: Socket -> IO (Either AppServerClientFailure LazyByteString.ByteString)
-receiveWebSocketMessage sock =
-  try (receiveFrame sock) >>= \case
-    Left (exception :: IOException) -> pure (Left (AppServerTransportFailure (Text.pack (show exception))))
-    Right result -> pure result
-
-receiveFrame :: Socket -> IO (Either AppServerClientFailure LazyByteString.ByteString)
-receiveFrame sock = do
-  header <- recvExactly sock 2
-  let firstByte = ByteString.index header 0
-      secondByte = ByteString.index header 1
-      opcode = firstByte .&. 0x0f
-      isMasked = secondByte .&. 0x80 /= 0
-      initialLength = secondByte .&. 0x7f
-  payloadLength <- readPayloadLength sock initialLength
-  maskKey <- if isMasked then recvExactly sock 4 else pure ByteString.empty
-  payload <- recvExactly sock payloadLength
-  let decodedPayload = if isMasked then maskPayload maskKey payload else payload
-  case opcode of
-    0x1 -> pure (Right (LazyByteString.fromStrict decodedPayload))
-    0x2 -> pure (Right (LazyByteString.fromStrict decodedPayload))
-    0x8 -> pure (Left (AppServerTransportFailure "app-server closed WebSocket connection"))
-    0x9 -> do
-      sendPong sock decodedPayload
-      receiveFrame sock
-    0xA ->
-      receiveFrame sock
-    _ ->
-      pure (Left (AppServerTransportFailure ("unsupported WebSocket opcode: " <> Text.pack (show opcode))))
-
-readPayloadLength :: Socket -> Word8 -> IO Int
-readPayloadLength sock initialLength
-  | initialLength < 126 = pure (fromIntegral initialLength)
-  | initialLength == 126 = word16FromBytes <$> recvExactly sock 2
-  | otherwise = fromIntegral . word64FromBytes <$> recvExactly sock 8
-
-recvExactly :: Socket -> Int -> IO ByteString.ByteString
-recvExactly sock byteCount = go byteCount ByteString.empty
- where
-  go remaining accumulated
-    | remaining <= 0 = pure accumulated
-    | otherwise = do
-        chunk <- SocketByteString.recv sock remaining
-        if ByteString.null chunk
-          then fail "unexpected end of WebSocket stream"
-          else go (remaining - ByteString.length chunk) (accumulated <> chunk)
-
-sendPong :: Socket -> ByteString.ByteString -> IO ()
-sendPong sock payload =
-  SocketByteString.sendAll sock (ByteString.pack [0x8A, 0x80 .|. fromIntegral (ByteString.length payload)] <> maskKey <> maskPayload maskKey payload)
- where
-  maskKey = ByteString.pack [0x87, 0x65, 0x43, 0x21]
-
-maskPayload :: ByteString.ByteString -> ByteString.ByteString -> ByteString.ByteString
-maskPayload maskKey payload =
-  ByteString.pack (zipWith xor (ByteString.unpack payload) (cycle (ByteString.unpack maskKey)))
-
-word16Bytes :: Int -> ByteString.ByteString
-word16Bytes value =
-  ByteString.pack
-    [ fromIntegral (value `shiftR` 8)
-    , fromIntegral value
-    ]
-
-word16FromBytes :: ByteString.ByteString -> Int
-word16FromBytes bytes =
-  (fromIntegral (ByteString.index bytes 0) `shiftL` 8) + fromIntegral (ByteString.index bytes 1)
-
-word64Bytes :: Word64 -> ByteString.ByteString
-word64Bytes value =
-  ByteString.pack
-    [ fromIntegral (value `shiftR` 56)
-    , fromIntegral (value `shiftR` 48)
-    , fromIntegral (value `shiftR` 40)
-    , fromIntegral (value `shiftR` 32)
-    , fromIntegral (value `shiftR` 24)
-    , fromIntegral (value `shiftR` 16)
-    , fromIntegral (value `shiftR` 8)
-    , fromIntegral value
-    ]
-
-word64FromBytes :: ByteString.ByteString -> Word64
-word64FromBytes bytes =
-  foldl
-    (\accumulator index -> (accumulator `shiftL` 8) + fromIntegral (ByteString.index bytes index))
-    0
-    [0 .. 7]
+receiveWebSocketMessage :: WebSockets.Connection -> IO (Either AppServerClientFailure LazyByteString.ByteString)
+receiveWebSocketMessage connection =
+  transportTry (WebSockets.receiveData connection :: IO LazyByteString.ByteString) >>= \case
+    Left message -> pure (Left (AppServerTransportFailure message))
+    Right bytes -> pure (Right bytes)

@@ -129,11 +129,11 @@ runFromState executor config events replay =
     SomeWatcherState (PrMerging prConfig _evidence) ->
       observeMergeCompletion executor config events replay prConfig
     SomeWatcherState (BlockedState {}) ->
-      idle executor config replay "watcher is blocked"
+      terminalStop executor config replay "watcher is blocked"
     SomeWatcherState (CompleteState {}) ->
-      idle executor config replay "watcher is complete"
+      terminalStop executor config replay "watcher is complete"
     SomeWatcherState (StoppedState {}) ->
-      idle executor config replay "watcher is stopped"
+      terminalStop executor config replay "watcher is stopped"
 
 observeActiveTurn
   :: Monad m
@@ -421,6 +421,34 @@ idle executor config replay reason = do
     )
  where
   writeIdleCompatibility write =
+    runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)
+
+terminalStop
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> EventReplayResult
+  -> Text
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+terminalStop executor config replay reason = do
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions -> pure ()
+    ExecuteActions ->
+      mapM_ writeTerminalCompatibility (compatibilityStateWrites config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+  let stopPlan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig [SomeEffect StopDaemon]
+  reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode stopPlan
+  pure
+    ( Right
+        DaemonLoopTickResult
+          { loopReplayResult = replay
+          , loopObservation = Nothing
+          , loopObservedTick = Nothing
+          , loopIdleReason = Just reason
+          , loopActionReports = reports
+          }
+    )
+ where
+  writeTerminalCompatibility write =
     runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)
 
 formatDaemonLoopFailure :: DaemonLoopFailure -> Text

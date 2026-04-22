@@ -15,6 +15,7 @@ import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
+import Data.Text qualified as Text
 import System.FilePath ((</>))
 
 data CompatibilityWrite = CompatibilityWrite
@@ -69,6 +70,7 @@ compatibilityStateWrites stateDir state =
       ]
     SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "checking" Nothing Nothing)
+      , write "checker-state.json" (checkerStateClearJson config)
       ]
     SomeWatcherState (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThread)) ->
       [ write "watcher-state.json" (prWatcherStateJson config (activeThreadId activeTurn) reviewerThread "worker_active" (Just (reviewedCommit evidence)) Nothing)
@@ -76,9 +78,11 @@ compatibilityStateWrites stateDir state =
       ]
     SomeWatcherState (PrReviewingClean config commit (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread (activeThreadId activeTurn) "reviewer_active" (Just commit) (Just commit))
+      , write "checker-state.json" (checkerStateClearJson config)
       ]
     SomeWatcherState (PrMerging config evidence) ->
       [ write "watcher-state.json" (prWatcherStateJson config (ThreadId "") (ThreadId "") "clean" (Just (cleanReviewCommit evidence)) (Just (cleanReviewCommit evidence)))
+      , write "checker-state.json" (checkerStateClearJson config)
       , write "reviewer-state.json" (reviewerStateJson evidence)
       ]
     SomeWatcherState (BlockedState reason) ->
@@ -117,8 +121,13 @@ issueStateJson config statusValue maybePr maybeBlockedReason =
     , "branch" .= unBranchName (issueBranch config)
     , "issue_status" .= statusValue
     , "pr_number" .= fmap unPrNumber maybePr
+    , "pr_url" .= fmap (issuePrUrl config) maybePr
     , "blocked_reason" .= fmap unBlockedReason maybeBlockedReason
     ]
+
+issuePrUrl :: IssueConfig -> PrNumber -> Text
+issuePrUrl config prNumber =
+  "https://github.com/" <> unRepoName (issueRepo config) <> "/pull/" <> Text.pack (show (unPrNumber prNumber))
 
 prWatcherStateJson :: PrConfig -> ThreadId -> ThreadId -> Text -> Maybe CommitSha -> Maybe CommitSha -> Value
 prWatcherStateJson config workerThread reviewerThread turnStatus maybeReviewTarget maybeReviewerTarget =
@@ -141,6 +150,16 @@ checkerStateJson config threads =
     , "has_unresolved" .= True
     , "unresolved_count" .= length (nonEmptyToList threads)
     , "unresolved_thread_ids" .= fmap unReviewThreadId (nonEmptyToList threads)
+    ]
+
+checkerStateClearJson :: PrConfig -> Value
+checkerStateClearJson config =
+  object
+    [ "repo" .= unRepoName (prRepo config)
+    , "pr_number" .= unPrNumber (prNumber config)
+    , "has_unresolved" .= False
+    , "unresolved_count" .= (0 :: Int)
+    , "unresolved_thread_ids" .= ([] :: [Text])
     ]
 
 reviewerStateJson :: CleanReviewEvidence -> Value

@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CodexWatcher.Migration
+module CodexWatcher.RuntimeOwner
   ( RuntimeOwner (..)
   , parseRuntimeOwner
   , readRuntimeOwner
@@ -14,8 +14,8 @@ module CodexWatcher.Migration
   ) where
 
 import CodexWatcher.Runtime
+import CodexWatcher.JsonPath (lookupPath)
 import Data.Aeson (Value (..), object, (.=))
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Generics (Generic)
@@ -23,21 +23,18 @@ import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 
 data RuntimeOwner
-  = NodeRuntime
-  | HaskellRuntime
+  = HaskellRuntime
   deriving stock (Eq, Show, Generic)
 
 runtimeOwnerText :: RuntimeOwner -> Text
 runtimeOwnerText = \case
-  NodeRuntime -> "node"
   HaskellRuntime -> "haskell"
 
 parseRuntimeOwner :: Text -> Either Text RuntimeOwner
 parseRuntimeOwner owner =
   case Text.toLower (Text.strip owner) of
-    "node" -> Right NodeRuntime
     "haskell" -> Right HaskellRuntime
-    other -> Left ("unsupported runtime owner: " <> other)
+    other -> Left ("unsupported runtime owner: " <> other <> "; expected haskell")
 
 runtimeOwnerJson :: RuntimeOwner -> Value
 runtimeOwnerJson owner =
@@ -59,8 +56,8 @@ readRuntimeOwner stateDir = do
 
 runtimeOwnerFromJson :: Value -> Either Text (Maybe RuntimeOwner)
 runtimeOwnerFromJson Null = Right Nothing
-runtimeOwnerFromJson (Object objectValue) =
-  case KeyMap.lookup "owner" objectValue of
+runtimeOwnerFromJson value@(Object _) =
+  case lookupPath ["owner"] value of
     Nothing -> Right Nothing
     Just (String owner) -> Just <$> parseRuntimeOwner owner
     Just _ -> Left "runtime owner field must be a string"
