@@ -29,6 +29,7 @@ data Effect (mutability :: Mutability) where
   PushBranch :: BranchName -> Effect 'CanMutateLocal
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub
+  UpdatePullRequestBody :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
   RecordPlanningGraph :: PlanningGraph -> Effect 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal
@@ -60,6 +61,8 @@ instance Eq SomeEffect where
   SomeEffect (CreateIssue leftRepo leftRequest) == SomeEffect (CreateIssue rightRepo rightRequest) =
     leftRepo == rightRepo && leftRequest == rightRequest
   SomeEffect (CreatePullRequest left) == SomeEffect (CreatePullRequest right) = left == right
+  SomeEffect (UpdatePullRequestBody leftConfig leftPr) == SomeEffect (UpdatePullRequestBody rightConfig rightPr) =
+    leftConfig == rightConfig && leftPr == rightPr
   SomeEffect (ResolveReviewThread left) == SomeEffect (ResolveReviewThread right) = left == right
   SomeEffect (RecordPlanningGraph left) == SomeEffect (RecordPlanningGraph right) = left == right
   SomeEffect (RecordBlocked left) == SomeEffect (RecordBlocked right) = left == right
@@ -84,6 +87,7 @@ effectMutability StartReviewerTurn {} = CanStartTurn
 effectMutability PushBranch {} = CanMutateLocal
 effectMutability CreateIssue {} = CanMutateGitHub
 effectMutability CreatePullRequest {} = CanMutateGitHub
+effectMutability UpdatePullRequestBody {} = CanMutateGitHub
 effectMutability ResolveReviewThread {} = CanMutateGitHub
 effectMutability RecordPlanningGraph {} = CanMutateLocal
 effectMutability RecordBlocked {} = CanMutateLocal

@@ -114,6 +114,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhIssueCreate repo request)]
     CreatePullRequest issueConfig ->
       unchanged [PlannedCommand (GhCreatePullRequest config.effectRuntimeWorkdir issueConfig)]
+    UpdatePullRequestBody issueConfig prNumber ->
+      unchanged [PlannedCommand (GhUpdatePullRequestBody config.effectRuntimeWorkdir issueConfig prNumber (config.effectRuntimeStateDir </> "issue-plan.md"))]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
     RecordPlanningGraph graph ->

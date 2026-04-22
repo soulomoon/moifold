@@ -27,6 +27,7 @@ data IssueImplementObservation
   | ObservedPlanCompleted (Maybe TurnId)
   | ObservedPullRequestCreated PrNumber
   | ObservedPullRequestReused PrNumber
+  | ObservedPullRequestBodyUpdated PrNumber
   | ObservedImplementationTurnStarted TurnId
   | ObservedImplementationIncomplete Text
   | ObservedImplementationBlocked BlockedReason
@@ -73,6 +74,10 @@ issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedPul
   Right (tick (IssuePullRequestCreatedEvent prNumber) (step state (IssuePullRequestReady prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedPullRequestReused prNumber) =
   Right (tick (IssuePullRequestReusedEvent prNumber) (step state (IssuePullRequestReady prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestBodyUpdated prNumber) =
+  Right (tick (IssuePullRequestBodyUpdatedEvent prNumber) (step state (IssuePullRequestBodyUpdated prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedPullRequestBodyUpdated prNumber) =
+  Right (tick (IssuePullRequestBodyUpdatedEvent prNumber) (step state (IssuePullRequestBodyUpdated prNumber)))
 issueImplementObserve (SomeWatcherState state@(IssueImplementationReady _config _maybePr (WorkerIdle threadId))) (ObservedImplementationTurnStarted turnId) =
   Right (tick (IssueImplementationTurnStartedEvent turnId) (step state (StartIssueImplementationTurn (ActiveTurn threadId turnId))))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedImplementationIncomplete reason) =

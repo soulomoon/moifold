@@ -28,6 +28,7 @@ import CodexWatcher.IssueFanoutCli (readyIssueStatusFromRuntime)
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Observation
 import CodexWatcher.ObserveCli (parseDaemonObservation)
 import CodexWatcher.Protocol
@@ -62,7 +63,8 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
-import Data.Time.Clock (addUTCTime, getCurrentTime)
+import Data.Time.Calendar (fromGregorian)
+import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime, secondsToDiffTime)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
 import System.FilePath ((</>))
 import System.Exit (ExitCode (..), exitFailure)
@@ -108,6 +110,7 @@ import RuntimeSpec
   , prop_runtimeDefaultsCentralizeThreadAndTurnOptions
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
+  , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredStructuredFields
@@ -138,6 +141,9 @@ instance Arbitrary BranchName where
 
 instance Arbitrary ReviewThreadId where
   arbitrary = ReviewThreadId . Text.pack <$> listOf1 (elements ['a' .. 'z'])
+
+instance Arbitrary a => Arbitrary (NonEmpty a) where
+  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
 
 instance Arbitrary CommitSha where
   arbitrary = CommitSha . Text.pack <$> vectorOf 12 (elements (['a' .. 'f'] <> ['0' .. '9']))
@@ -216,6 +222,7 @@ data EffectTag
   | PushBranchTag
   | CreateIssueTag
   | CreatePullRequestTag
+  | UpdatePullRequestBodyTag
   | ResolveReviewThreadTag
   | RecordPlanningGraphTag
   | RecordBlockedTag
@@ -238,6 +245,7 @@ effectTag = \case
   SomeEffect PushBranch {} -> PushBranchTag
   SomeEffect CreateIssue {} -> CreateIssueTag
   SomeEffect CreatePullRequest {} -> CreatePullRequestTag
+  SomeEffect UpdatePullRequestBody {} -> UpdatePullRequestBodyTag
   SomeEffect ResolveReviewThread {} -> ResolveReviewThreadTag
   SomeEffect RecordPlanningGraph {} -> RecordPlanningGraphTag
   SomeEffect RecordBlocked {} -> RecordBlockedTag
@@ -347,7 +355,7 @@ prop_issuePlanCompletionCreatesPrBeforeImplementation config planningTurn implem
       phaseOf state == Implementing
         && hasEffect PushBranchTag effects
         && hasEffect CreatePullRequestTag effects
-        && hasEffect StartIssueImplementationWorkerTurnTag effects
+        && lacksEffect StartIssueImplementationWorkerTurnTag effects
 
 prop_issueTriageAlreadyFixedCompletesWithoutPlan :: IssueConfig -> ActiveTurn -> Bool
 prop_issueTriageAlreadyFixedCompletesWithoutPlan config triageTurn =
@@ -462,6 +470,9 @@ prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn i
     [ IssueImplementInitialized config workerThread
     , IssuePlanTurnStartedEvent planTurn
     , IssuePlanCompletedEvent (Just implementationTurn)
+    , IssuePullRequestCreatedEvent prNumber
+    , IssuePullRequestBodyUpdatedEvent prNumber
+    , IssueImplementationTurnStartedEvent implementationTurn
     , IssueReviewHandoffInitializedEvent prNumber
     , IssueReviewHandoffStartedEvent prNumber
     , IssuePullRequestMergedEvent prNumber
@@ -487,6 +498,17 @@ prop_eventLogCannotCreatePrBeforeIssuePlan config workerThread triageTurn prNumb
         , IssueTriageTurnStartedEvent triageTurn
         , IssueTriageNeedsImplementationEvent
         , IssuePullRequestCreatedEvent prNumber
+        ]
+    )
+
+prop_eventLogCannotUpdatePrBodyBeforePr :: IssueConfig -> ThreadId -> TurnId -> PrNumber -> Bool
+prop_eventLogCannotUpdatePrBodyBeforePr config workerThread planTurn prNumber =
+  expectLeft
+    ( replayEventLog
+        [ IssueImplementInitialized config workerThread
+        , IssuePlanTurnStartedEvent planTurn
+        , IssuePlanCompletedEvent Nothing
+        , IssuePullRequestBodyUpdatedEvent prNumber
         ]
     )
 
@@ -552,7 +574,7 @@ prop_issueImplementWatcherPlanCompletionPublishesBeforeImplementation config wor
           && somePhase tick.issueImplementTickState == Implementing
           && hasEffect PushBranchTag tick.issueImplementTickEffects
           && hasEffect CreatePullRequestTag tick.issueImplementTickEffects
-          && hasEffect StartIssueImplementationWorkerTurnTag tick.issueImplementTickEffects
+          && lacksEffect StartIssueImplementationWorkerTurnTag tick.issueImplementTickEffects
 
 prop_issueImplementWatcherIncompleteRestartsImplementation :: IssueConfig -> PrNumber -> ThreadId -> TurnId -> Bool
 prop_issueImplementWatcherIncompleteRestartsImplementation config prNumber workerThread implementationTurn =
@@ -892,6 +914,7 @@ canonicalEventExamples =
   , IssuePlanCompletedEvent (Just implementationTurn)
   , IssuePullRequestCreatedEvent prNumber
   , IssuePullRequestReusedEvent prNumber
+  , IssuePullRequestBodyUpdatedEvent prNumber
   , IssueImplementationTurnStartedEvent implementationTurn
   , IssueImplementationIncompleteEvent "implementation incomplete"
   , IssueImplementationBlockedEvent blockedReason
@@ -1358,11 +1381,17 @@ prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planni
               (effectRuntimeConfig (issueRepo config) "/tmp/work" 10)
               effects
           actions = compiled.compiledActions
-       in length actions == 3
+       in length actions == 2
             && actionIsCommand (== GitPush "/tmp/work" (issueBranch config)) (actions !! 0)
             && actionIsCommand (== GhCreatePullRequest "/tmp/work" config) (actions !! 1)
-            && actionIsTurnStartWithInput (activeThreadId implementationTurn) "issue implementation prompt" (actions !! 2)
-            && compiled.compiledNextRequestId == 11
+            && compiled.compiledNextRequestId == 10
+
+prop_effectInterpreterPrBodyUpdateUsesIssuePlan :: IssueConfig -> PrNumber -> Bool
+prop_effectInterpreterPrBodyUpdateUsesIssuePlan issueConfig prNumber =
+  let config = effectRuntimeConfig issueConfig.issueRepo "/tmp/work" 11
+      compiled = compileEffectPlan config [SomeEffect (UpdatePullRequestBody issueConfig prNumber)]
+   in compiled.compiledActions == [PlannedCommand (GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md")]
+        && compiled.compiledNextRequestId == 11
 
 prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts :: ThreadId -> Bool
 prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
@@ -2047,7 +2076,11 @@ fakeActionExecutor =
   fakeActionExecutorWith defaultFakeCommand defaultFakeAppServer
 
 fakeActionExecutorWith :: (RuntimeCommand -> CommandReport) -> (AppServerRequest -> Value) -> IO (ActionExecutor IO, IO [FakeActionCall])
-fakeActionExecutorWith commandResponse appServerResponse = do
+fakeActionExecutorWith =
+  fakeActionExecutorWithLogger Log.noopWatcherLogger
+
+fakeActionExecutorWithLogger :: Log.WatcherLogger IO -> (RuntimeCommand -> CommandReport) -> (AppServerRequest -> Value) -> IO (ActionExecutor IO, IO [FakeActionCall])
+fakeActionExecutorWithLogger logger commandResponse appServerResponse = do
   calls <- newIORef []
   let record call = modifyIORef' calls (<> [call])
       runtime =
@@ -2073,6 +2106,7 @@ fakeActionExecutorWith commandResponse appServerResponse = do
           , actionAppServer = appServer
           , actionSleepUntilNextPoll = record FakeSleep
           , actionStopDaemon = record FakeStop
+          , actionLogger = logger
           }
   pure (executor, readIORef calls)
 
@@ -2110,8 +2144,15 @@ fakeActionExecutorWithJsonStore commandResponse appServerResponse = do
           , actionAppServer = appServer
           , actionSleepUntilNextPoll = record FakeSleep
           , actionStopDaemon = record FakeStop
+          , actionLogger = Log.noopWatcherLogger
           }
   pure (executor, readIORef calls)
+
+collectWatcherLogs :: IO (Log.WatcherLogger IO, IO [Log.WatcherLog])
+collectWatcherLogs = do
+  logs <- newIORef []
+  let logger = Log.watcherLoggerFromFunction \entry -> modifyIORef' logs (<> [entry])
+  pure (logger, readIORef logs)
 
 defaultFakeCommand :: RuntimeCommand -> CommandReport
 defaultFakeCommand _command =
@@ -2189,6 +2230,89 @@ actionExecutorExecuteCallsInjectedInterpreters = do
  where
   turnStartOptionsForTest threadId =
     defaultTurnStartOptions threadId "/tmp/work" "worker prompt"
+
+watcherLogRenderingIncludesTimestampSeverityAndRedacts :: IO Bool
+watcherLogRenderingIncludesTimestampSeverityAndRedacts = do
+  let timestamp = UTCTime (fromGregorian 2026 4 23) (secondsToDiffTime 42)
+      entry =
+        Log.watcherLog
+          Log.Info
+          "runtime_lease"
+          "runtime owner lease validated"
+          [ "domain" .= ("issue-implement" :: Text)
+          , "stdout" .= ("ok token=ghp_secret-token" :: Text)
+          , "long" .= Text.replicate 2100 "x"
+          ]
+      rendered = Log.watcherLogJson timestamp entry
+      renderedLine = Text.Encoding.decodeUtf8 (LazyByteString.toStrict (Log.watcherLogJsonLine timestamp entry))
+      context = lookupValue "context" rendered
+      stdoutValue = context >>= lookupValue "stdout"
+      longValue = context >>= lookupValue "long"
+  results <-
+    sequence
+      [ assert "watcher log includes timestamp" (lookupValue "timestamp" rendered /= Nothing)
+      , assert "watcher log includes severity" (lookupValue "severity" rendered == Just (String "info"))
+      , assert "watcher log includes event name" (lookupValue "event" rendered == Just (String "runtime_lease"))
+      , assert "watcher log includes context" (context /= Nothing)
+      , assert "watcher log redacts credentials" (stdoutValue == Just (String "ok <redacted-token>") && not ("ghp_secret" `Text.isInfixOf` renderedLine))
+      , assert "watcher log caps long text" (case longValue of Just (String text) -> "<truncated>" `Text.isInfixOf` text && Text.length text < 2100; _ -> False)
+      ]
+  pure (and results)
+
+actionExecutorLogsDryRunWhenLoggerInjected :: IO Bool
+actionExecutorLogsDryRunWhenLoggerInjected = do
+  (logger, getLogs) <- collectWatcherLogs
+  (executor, getCalls) <- fakeActionExecutorWithLogger logger defaultFakeCommand defaultFakeAppServer
+  let compiled =
+        compileEffectPlan
+          (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 72)
+          [ SomeEffect (PushBranch (BranchName "codex/example"))
+          , SomeEffect SleepUntilNextPoll
+          ]
+  reports <- executeCompiledEffectPlan executor DryRunActions compiled
+  calls <- getCalls
+  logs <- getLogs
+  results <-
+    sequence
+      [ assert "dry-run logging keeps interpreters untouched" (null calls)
+      , assert "dry-run logging reports every planned action" (length reports == 2 && length (filter ((== "action_dry_run") . Log.watcherLogEvent) logs) == 2)
+      , assert "dry-run logging uses debug level" (all ((== Log.Debug) . Log.watcherLogLevel) logs)
+      ]
+  pure (and results)
+
+actionExecutorLogsCommandFailure :: IO Bool
+actionExecutorLogsCommandFailure = do
+  (logger, getLogs) <- collectWatcherLogs
+  (executor, _getCalls) <-
+    fakeActionExecutorWithLogger
+      logger
+      ( \case
+          GitPush {} -> failedCommandReport "push failed ghp_secret-token"
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let compiled =
+        compileEffectPlan
+          (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 73)
+          [SomeEffect (PushBranch (BranchName "codex/example"))]
+  reports <- executeCompiledEffectPlan executor ExecuteActions compiled
+  logs <- getLogs
+  let renderedLogs = Text.pack (show logs)
+      commandFailed =
+        case reports of
+          [report] ->
+            case report.actionExecutionResult of
+              CommandActionResult commandReport -> not commandReport.ok
+              _ -> False
+          _ -> False
+  results <-
+    sequence
+      [ assert "command failure still returns report" commandFailed
+      , assert "command failure logs action start" ("action_started" `elem` fmap Log.watcherLogEvent logs)
+      , assert "command failure logs error result" (any (\entry -> Log.watcherLogEvent entry == "action_finished" && Log.watcherLogLevel entry == Log.Error) logs)
+      , assert "command failure log redacts command output" (not ("ghp_secret" `Text.isInfixOf` renderedLogs) && "<redacted-token>" `Text.isInfixOf` renderedLogs)
+      ]
+  pure (and results)
 
 daemonTickDryRunReplaysEventsAndDoesNotExecute :: IO Bool
 daemonTickDryRunReplaysEventsAndDoesNotExecute = do
@@ -2968,6 +3092,137 @@ automaticDaemonLoopRetriesPrCreateWhileWaitingForPr = do
       putStrLn ("FAIL automatic PR retry: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation :: IO Bool
+automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation =
+  automaticDaemonLoopUpdatesPrBodyBeforeImplementation "new PR" IssuePullRequestCreatedEvent
+
+automaticDaemonLoopUpdatesReusedPrBodyBeforeImplementation :: IO Bool
+automaticDaemonLoopUpdatesReusedPrBodyBeforeImplementation =
+  automaticDaemonLoopUpdatesPrBodyBeforeImplementation "reused PR" IssuePullRequestReusedEvent
+
+automaticDaemonLoopUpdatesPrBodyBeforeImplementation :: String -> (PrNumber -> WatcherEvent) -> IO Bool
+automaticDaemonLoopUpdatesPrBodyBeforeImplementation caseName prEvent = do
+  (executor, getCalls) <- fakeActionExecutor
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 161
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent Nothing
+        , prEvent prNumber
+        ]
+      expectedCommand = GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md"
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert (caseName <> " body update emits event") ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssuePullRequestBodyUpdatedEvent prNumber))
+          , assert (caseName <> " body update runs gh pr edit command") (FakeCommand expectedCommand `elem` calls)
+          , assert (caseName <> " body update does not start implementation yet") (not (any isTurnStartCall calls))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic PR body update (" <> caseName <> "): " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isTurnStartCall = \case
+    FakeAppServer request -> request.requestMethod == "turn/start"
+    _ -> False
+
+automaticDaemonLoopStartsImplementationAfterPrBodyUpdate :: IO Bool
+automaticDaemonLoopStartsImplementationAfterPrBodyUpdate = do
+  (executor, getCalls) <- fakeActionExecutor
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 162
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent Nothing
+        , IssuePullRequestCreatedEvent prNumber
+        , IssuePullRequestBodyUpdatedEvent prNumber
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "body-updated PR starts implementation" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssueImplementationTurnStartedEvent (TurnId "turn-started")))
+          , assert "body-updated PR does not update body again" (FakeCommand (GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md") `notElem` calls)
+          , assert "body-updated PR starts app-server turn" (any isTurnStartCall calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic implementation start after PR body update: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isTurnStartCall = \case
+    FakeAppServer request -> request.requestMethod == "turn/start"
+    _ -> False
+
+automaticDaemonLoopMissingPlanFailsPrBodyUpdate :: IO Bool
+automaticDaemonLoopMissingPlanFailsPrBodyUpdate = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhUpdatePullRequestBody {} -> failedCommandReport "issue plan file missing or empty: /tmp/work/.watcher/issue-plan.md"
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 163
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent Nothing
+        , IssuePullRequestCreatedEvent prNumber
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  results <-
+    sequence
+      [ assert "missing plan fails PR body update" (case result of Left (DaemonLoopDaemonFailure (DaemonActionFailed (PlannedCommand GhUpdatePullRequestBody {}) _report)) -> True; _ -> False)
+      , assert "missing plan does not append body-updated event" (not (any isBodyUpdatedAppend calls))
+      , assert "missing plan does not start implementation" (not (any isTurnStartCall calls))
+      ]
+  pure (and results)
+ where
+  isBodyUpdatedAppend = \case
+    FakeAppendJsonLine _ value -> lookupValue "type" value == Just (String "issue_pr_body_updated")
+    _ -> False
+  isTurnStartCall = \case
+    FakeAppServer request -> request.requestMethod == "turn/start"
+    _ -> False
+
 automaticDaemonLoopTerminalStateStops :: IO Bool
 automaticDaemonLoopTerminalStateStops = do
   (executor, getCalls) <- fakeActionExecutor
@@ -3007,6 +3262,44 @@ automaticDaemonLoopTerminalStateStops = do
   isFakeWriteJson = \case
     FakeWriteJson {} -> True
     _ -> False
+
+automaticDaemonLoopEmitsBoundaryLogs :: IO Bool
+automaticDaemonLoopEmitsBoundaryLogs = do
+  (logger, getLogs) <- collectWatcherLogs
+  (executor, _getCalls) <- fakeActionExecutorWithLogger logger defaultFakeCommand defaultFakeAppServer
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 171
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/example")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")
+        , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence
+        , PrReviewMergeCompleted (MergeCommit (CommitSha "def456"))
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  logs <- getLogs
+  let eventsLogged = fmap Log.watcherLogEvent logs
+  case result of
+    Right _tick -> do
+      results <-
+        sequence
+          [ assert "loop logs tick start" ("loop_tick_started" `elem` eventsLogged)
+          , assert "loop logs replay success" ("loop_replay_succeeded" `elem` eventsLogged)
+          , assert "loop logs terminal outcome" ("loop_terminal" `elem` eventsLogged)
+          , assert "loop logs tick finish" ("loop_tick_finished" `elem` eventsLogged)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic loop logging: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
 
 observeOnceParsingCoversDomainsAndDefaults :: IO Bool
 observeOnceParsingCoversDomainsAndDefaults = do
@@ -3088,6 +3381,7 @@ main = do
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
       , quickCheckResult prop_eventLogCannotCreatePrBeforeIssuePlan
+      , quickCheckResult prop_eventLogCannotUpdatePrBodyBeforePr
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforeImplementationTurn
       , quickCheckResult prop_eventLogIssueAlreadyFixedCompletes
       , quickCheckResult prop_eventLogIssueIncompleteCanContinueToComplete
@@ -3143,6 +3437,7 @@ main = do
       , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
       , quickCheckResult prop_runtimeGhPrCreateKeepsStdoutJsonOnly
+      , quickCheckResult prop_runtimeGhPrBodyUpdateUsesPlanFile
       , quickCheckResult prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
@@ -3173,6 +3468,7 @@ main = do
       , quickCheckResult prop_turnClassifierPrefersStructuredOutputs
       , quickCheckResult prop_turnClassifierBlocksMissingOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
+      , quickCheckResult prop_effectInterpreterPrBodyUpdateUsesIssuePlan
       , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
       , quickCheckResult prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas
       , quickCheckResult prop_threadDeveloperPromptTemplatesPortNodeProtocols
@@ -3199,6 +3495,9 @@ main = do
   runtimeProcessOk <- runtimeProcessSpecCapturesStreamsAndExit
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
+  watcherLogRenderingOk <- watcherLogRenderingIncludesTimestampSeverityAndRedacts
+  actionExecutorLogDryRunOk <- actionExecutorLogsDryRunWhenLoggerInjected
+  actionExecutorLogFailureOk <- actionExecutorLogsCommandFailure
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
   daemonTickCommandFailureOk <- daemonTickExecuteStopsOnCommandFailure
   observedDaemonDryRunOk <- observedDaemonTickDryRunDoesNotMutate
@@ -3216,7 +3515,12 @@ main = do
   automaticIssueMergeClosedOk <- automaticIssueMergeRequiresClosedIssue
   automaticStaleTurnOk <- automaticStaleActiveTurnBlocksAfterThreeMisses
   automaticPrRetryOk <- automaticDaemonLoopRetriesPrCreateWhileWaitingForPr
+  automaticNewPrBodyOk <- automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation
+  automaticReusedPrBodyOk <- automaticDaemonLoopUpdatesReusedPrBodyBeforeImplementation
+  automaticBodyThenImplementationOk <- automaticDaemonLoopStartsImplementationAfterPrBodyUpdate
+  automaticMissingPlanBodyOk <- automaticDaemonLoopMissingPlanFailsPrBodyUpdate
   automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
+  automaticLoopLoggingOk <- automaticDaemonLoopEmitsBoundaryLogs
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
@@ -3233,6 +3537,9 @@ main = do
       && runtimeProcessOk
       && actionExecutorDryRunOk
       && actionExecutorExecuteOk
+      && watcherLogRenderingOk
+      && actionExecutorLogDryRunOk
+      && actionExecutorLogFailureOk
       && daemonTickOk
       && daemonTickCommandFailureOk
       && observedDaemonDryRunOk
@@ -3250,7 +3557,12 @@ main = do
       && automaticIssueMergeClosedOk
       && automaticStaleTurnOk
       && automaticPrRetryOk
+      && automaticNewPrBodyOk
+      && automaticReusedPrBodyOk
+      && automaticBodyThenImplementationOk
+      && automaticMissingPlanBodyOk
       && automaticTerminalStopOk
+      && automaticLoopLoggingOk
       && runnerGuardOk
       && runnerGuardRestartOk
       && runnerGuardWaitingRestartOk

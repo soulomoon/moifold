@@ -7,6 +7,7 @@ module RuntimeSpec
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
+  , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredStructuredFields
   , prop_runtimeGhPrViewUsesStructuredFields
@@ -35,6 +36,7 @@ runtimeCommandExamples =
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
   , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
   , GhCreatePullRequest "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
+  , GhUpdatePullRequestBody "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example")) (PrNumber 7) "/tmp/work/.watcher/issue-plan.md"
   , GhResolveReviewThread (ReviewThreadId "PRRT_test")
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
   , GhPrCommentReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
@@ -157,6 +159,27 @@ prop_runtimeGhPrCreateKeepsStdoutJsonOnly config =
         && "git push -u origin \"$branch\" >/dev/null" `Text.isInfixOf` script
         && "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\"" `Text.isInfixOf` script
         && "printf '{\"status\":\"reused\",\"prNumber\":%s}\\n' \"$existing\"" `Text.isInfixOf` script
+
+prop_runtimeGhPrBodyUpdateUsesPlanFile :: IssueConfig -> PrNumber -> Bool
+prop_runtimeGhPrBodyUpdateUsesPlanFile config prNumber =
+  let planPath = "/tmp/work/.watcher/issue-plan.md"
+      spec = renderRuntimeCommand (GhUpdatePullRequestBody "/tmp/work" config prNumber planPath)
+      script = Text.pack (spec.args !! 1)
+   in spec.command == "bash"
+        && spec.cwd == Just "/tmp/work"
+        && "if [ ! -s \"$plan_path\" ]; then" `Text.isInfixOf` script
+        && "cat \"$plan_path\"" `Text.isInfixOf` script
+        && "gh pr edit \"$pr\" --repo \"$repo\" --body-file \"$body_file\" >/dev/null" `Text.isInfixOf` script
+        && "printf '{\"status\":\"updated\",\"prNumber\":%s}\\n' \"$pr\"" `Text.isInfixOf` script
+        && spec.args
+          == [ "-lc"
+             , Text.unpack script
+             , "codex-watcher-gh-pr-body-update"
+             , Text.unpack (unRepoName (issueRepo config))
+             , show (unPrNumber prNumber)
+             , show (unIssueNumber (issueNumber config))
+             , planPath
+             ]
 
 prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
 prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge prNumber evidence =

@@ -56,6 +56,7 @@ data WatcherEvent
   | IssuePlanCompletedEvent (Maybe TurnId)
   | IssuePullRequestCreatedEvent PrNumber
   | IssuePullRequestReusedEvent PrNumber
+  | IssuePullRequestBodyUpdatedEvent PrNumber
   | IssueImplementationTurnStartedEvent TurnId
   | IssueImplementationIncompleteEvent Text
   | IssueImplementationBlockedEvent BlockedReason
@@ -150,6 +151,8 @@ instance ToJSON WatcherEvent where
       IssuePullRequestCreatedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssuePullRequestReusedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssuePullRequestBodyUpdatedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssueImplementationTurnStartedEvent implementationTurnId ->
         eventType event <> ["implementationTurnId" .= unTurnId implementationTurnId]
@@ -252,6 +255,9 @@ instance FromJSON WatcherEvent where
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_pr_reused" ->
         IssuePullRequestReusedEvent
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
+      "issue_pr_body_updated" ->
+        IssuePullRequestBodyUpdatedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_implementation_turn_started" ->
         IssueImplementationTurnStartedEvent
@@ -391,6 +397,16 @@ applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker))
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
+applyEvent (SomeWatcherState state@(IssueImplementationReady _config maybePr _worker)) event@(IssuePullRequestBodyUpdatedEvent prNumber)
+  | maybePr == Just prNumber =
+      fromDecision (step state (IssuePullRequestBodyUpdated prNumber))
+  | otherwise =
+      Left ("event " <> eventName event <> " does not match a known PR")
+applyEvent (SomeWatcherState state@(IssueImplementing _config maybePr _worker)) event@(IssuePullRequestBodyUpdatedEvent prNumber)
+  | maybePr == Just prNumber =
+      fromDecision (step state (IssuePullRequestBodyUpdated prNumber))
+  | otherwise =
+      Left ("event " <> eventName event <> " does not match a known PR")
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr (WorkerIdle threadId))) (IssueImplementationTurnStartedEvent turnId) =
   fromDecision (step state (StartIssueImplementationTurn (ActiveTurn threadId turnId)))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationIncompleteEvent _reason) =
@@ -613,6 +629,7 @@ eventName = \case
   IssuePlanCompletedEvent {} -> "issue_plan_completed"
   IssuePullRequestCreatedEvent {} -> "issue_pr_created"
   IssuePullRequestReusedEvent {} -> "issue_pr_reused"
+  IssuePullRequestBodyUpdatedEvent {} -> "issue_pr_body_updated"
   IssueImplementationTurnStartedEvent {} -> "issue_implementation_turn_started"
   IssueImplementationIncompleteEvent {} -> "issue_implementation_incomplete"
   IssueImplementationBlockedEvent {} -> "issue_implementation_blocked"

@@ -29,11 +29,13 @@ import CodexWatcher.EventLog
 import CodexWatcher.GhGit
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Logging qualified as Log
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol (ReviewerOutcome (..))
 import CodexWatcher.Runtime
 import CodexWatcher.Types
 import Data.Aeson (toJSON)
+import Data.Aeson ((.=))
 import Data.List (find, partition)
 import Data.Maybe (maybeToList)
 import Data.Text (Text)
@@ -101,22 +103,40 @@ runDaemonTickWithEvents
   -> m (Either DaemonFailure DaemonTickResult)
 runDaemonTickWithEvents executor runtimeConfig executionMode events nextEffects =
   case replayEventLogFromEvents events of
-    Left failure -> pure (Left failure)
+    Left failure -> do
+      logDaemonFailure executor "daemon_replay_failed" "daemon tick replay failed" failure
+      pure (Left failure)
     Right replay -> do
+      logReplaySucceeded executor "daemon_replay_succeeded" events replay
       let compiledEffects = compileEffectPlan runtimeConfig nextEffects
       actionReportsResult <-
         case executionMode of
           DryRunActions -> Right <$> executeCompiledEffectPlan executor DryRunActions compiledEffects
           ExecuteActions -> executeCheckedActions executor compiledEffects.compiledActions
-      pure case actionReportsResult of
-        Left failure -> Left failure
-        Right actionReports ->
-          Right
-            DaemonTickResult
-              { daemonReplayResult = replay
-              , daemonCompiledEffects = compiledEffects
-              , daemonActionReports = actionReports
-              }
+      case actionReportsResult of
+        Left failure -> do
+          logDaemonFailure executor "daemon_tick_failed" "daemon tick failed" failure
+          pure (Left failure)
+        Right actionReports -> do
+          Log.logWatcher
+            executor.actionLogger
+            ( Log.watcherLog
+                Log.Info
+                "daemon_tick_finished"
+                "daemon tick finished"
+                [ "domain" .= Text.pack (show (someDomain replay.replayState))
+                , "phase" .= Text.pack (show (somePhase replay.replayState))
+                , "actions" .= length actionReports
+                ]
+            )
+          pure
+            ( Right
+                DaemonTickResult
+                  { daemonReplayResult = replay
+                  , daemonCompiledEffects = compiledEffects
+                  , daemonActionReports = actionReports
+                  }
+            )
 
 runObservedDaemonTickFromFile :: ActionExecutor IO -> DaemonOptions -> DaemonObservation -> IO (Either DaemonFailure DaemonObservedTickResult)
 runObservedDaemonTickFromFile executor options observation = do
@@ -139,10 +159,35 @@ runObservedDaemonTickWithEvents
   -> m (Either DaemonFailure DaemonObservedTickResult)
 runObservedDaemonTickWithEvents executor options events observation =
   case replayEventLogFromEvents events of
-    Left failure -> pure (Left failure)
-    Right replay ->
+    Left failure -> do
+      logDaemonFailure executor "observed_replay_failed" "observed daemon replay failed" failure
+      pure (Left failure)
+    Right replay -> do
+      logReplaySucceeded executor "observed_replay_succeeded" events replay
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Info
+            "observation_received"
+            "daemon observation received"
+            [ "observation" .= Text.pack (show observation)
+            , "domain" .= Text.pack (show (someDomain replay.replayState))
+            , "phase" .= Text.pack (show (somePhase replay.replayState))
+            ]
+        )
       case observeDaemonState replay.replayState observation of
-        Left reason -> pure (Left (DaemonObservationRejected reason))
+        Left reason -> do
+          Log.logWatcher
+            executor.actionLogger
+            ( Log.watcherLog
+                Log.Warn
+                "observation_rejected"
+                "daemon observation rejected"
+                [ "reason" .= reason
+                , "observation" .= Text.pack (show observation)
+                ]
+            )
+          pure (Left (DaemonObservationRejected reason))
         Right observed -> do
           case options.daemonExecutionMode of
             DryRunActions -> runObservedDaemonDryRun executor options replay observed
@@ -267,8 +312,34 @@ runObservedDaemonExecute executor options events replay observed0 = do
           case prepareObservedCommit options events observed compiledEffects postCommitActions preReports of
             Left failure -> pure (Left failure)
             Right prepared -> do
-              mapM_ (appendWatcherEvent executor.actionRuntime options.daemonEventLogPath) prepared.preparedEvents
-              mapM_ (writeCompatibility executor.actionRuntime) prepared.preparedCompatibilityWrites
+              mapM_
+                ( \event -> do
+                    appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
+                    Log.logWatcher
+                      executor.actionLogger
+                      ( Log.watcherLog
+                          Log.Info
+                          "event_committed"
+                          "watcher event committed"
+                          [ "event" .= Text.pack (show event)
+                          , "eventsPath" .= options.daemonEventLogPath
+                          ]
+                      )
+                )
+                prepared.preparedEvents
+              mapM_
+                ( \write -> do
+                    writeCompatibility executor.actionRuntime write
+                    Log.logWatcher
+                      executor.actionLogger
+                      ( Log.watcherLog
+                          Log.Debug
+                          "compatibility_written"
+                          "compatibility state written"
+                          ["path" .= compatibilityWritePath write]
+                      )
+                )
+                prepared.preparedCompatibilityWrites
               postReportsResult <- executeCheckedActions executor prepared.preparedPostActions
               pure case postReportsResult of
                 Left failure -> Left failure
@@ -450,3 +521,28 @@ failedCheckNames checks =
 normalizeCheckStatus :: Text -> Text
 normalizeCheckStatus =
   Text.toLower . Text.strip
+
+logReplaySucceeded :: ActionExecutor m -> Text -> [WatcherEvent] -> EventReplayResult -> m ()
+logReplaySucceeded executor event events replay =
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Debug
+        event
+        "watcher event log replay succeeded"
+        [ "eventCount" .= length events
+        , "domain" .= Text.pack (show (someDomain replay.replayState))
+        , "phase" .= Text.pack (show (somePhase replay.replayState))
+        ]
+    )
+
+logDaemonFailure :: ActionExecutor m -> Text -> Text -> DaemonFailure -> m ()
+logDaemonFailure executor event message failure =
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Error
+        event
+        message
+        ["failure" .= formatDaemonFailure failure]
+    )

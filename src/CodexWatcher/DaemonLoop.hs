@@ -26,6 +26,7 @@ import CodexWatcher.EventLog
 import CodexWatcher.GhGit
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Logging qualified as Log
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime (CommandReport (..), runtimeReadJsonValue, runtimeWriteJsonValue)
 import CodexWatcher.TurnClassifier
@@ -111,7 +112,18 @@ runAutomaticDaemonLoopOnceFromFile :: ActionExecutor IO -> DaemonLoopConfig -> I
 runAutomaticDaemonLoopOnceFromFile executor config = do
   loaded <- loadEventLogFile config.loopDaemonOptions.daemonEventLogPath
   case loaded of
-    Left errorMessage -> pure (Left (DaemonLoopDaemonFailure (DaemonEventLogDecodeFailed (Text.pack errorMessage))))
+    Left errorMessage -> do
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Error
+            "loop_event_log_decode_failed"
+            "automatic loop could not decode event log"
+            [ "eventsPath" .= config.loopDaemonOptions.daemonEventLogPath
+            , "error" .= Text.pack errorMessage
+            ]
+        )
+      pure (Left (DaemonLoopDaemonFailure (DaemonEventLogDecodeFailed (Text.pack errorMessage))))
     Right events -> runAutomaticDaemonLoopOnceWithEvents executor config events
 
 runAutomaticDaemonLoopOnceWithEvents
@@ -120,10 +132,36 @@ runAutomaticDaemonLoopOnceWithEvents
   -> DaemonLoopConfig
   -> [WatcherEvent]
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
-runAutomaticDaemonLoopOnceWithEvents executor config events =
+runAutomaticDaemonLoopOnceWithEvents executor config events = do
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Info
+        "loop_tick_started"
+        "automatic loop tick started"
+        [ "eventsPath" .= config.loopDaemonOptions.daemonEventLogPath
+        , "eventCount" .= length events
+        ]
+    )
   case replayEventLog events of
-    Left failure -> pure (Left (DaemonLoopDaemonFailure (DaemonReplayFailed failure)))
-    Right replay -> runFromState executor config events replay
+    Left failure -> do
+      let result = Left (DaemonLoopDaemonFailure (DaemonReplayFailed failure))
+      logLoopResult executor result
+      pure result
+    Right replay -> do
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Debug
+            "loop_replay_succeeded"
+            "automatic loop event replay succeeded"
+            [ "domain" .= Text.pack (show (someDomain replay.replayState))
+            , "phase" .= Text.pack (show (somePhase replay.replayState))
+            ]
+        )
+      result <- runFromState executor config events replay
+      logLoopResult executor result
+      pure result
 
 runFromState
   :: Monad m
@@ -153,8 +191,11 @@ runFromState executor config events replay = do
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssuePlanTurn)
     SomeWatcherState (IssueImplementationReady issueConfig Nothing _worker) ->
       observeExistingPullRequest executor config events replay issueConfig
-    SomeWatcherState (IssueImplementationReady _issueConfig (Just _prNumber) (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events StartIssueImplementationWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
+    SomeWatcherState (IssueImplementationReady issueConfig (Just prNumber) (WorkerIdle workerThread))
+      | hasIssuePullRequestBodyUpdated prNumber events ->
+          prestartAndObserve executor config events StartIssueImplementationWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
+      | otherwise ->
+          updatePullRequestBody executor config events replay issueConfig prNumber
     SomeWatcherState (IssueImplementing _issueConfig maybePr (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueImplementationObservation events maybePr)
     SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber) ->
@@ -282,6 +323,17 @@ handleMissingActiveTurn executor config events replay activeTurn =
       idle executor config replay (missingActiveTurnReason activeTurn)
     ExecuteActions -> do
       marker <- updateStaleActiveTurnMarker executor config replay activeTurn
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Warn
+            "stale_active_turn_seen"
+            "active turn was not found"
+            [ "turnId" .= unTurnId activeTurn.activeTurnId
+            , "threadId" .= unThreadId activeTurn.activeThreadId
+            , "count" .= marker.staleMarkerCount
+            ]
+        )
       if marker.staleMarkerCount >= staleActiveTurnThreshold
         then do
           clearStaleActiveTurnMarker executor config
@@ -479,6 +531,53 @@ retryCreatePullRequest executor config events replay issueConfig = do
         _ ->
           pure (Left (DaemonLoopExternalFailure "unexpected PR creation action report count"))
 
+updatePullRequestBody
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> IssueConfig
+  -> PrNumber
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+updatePullRequestBody executor config events replay issueConfig prNumber = do
+  let updatePlan =
+        compileEffectPlan
+          config.loopDaemonOptions.daemonRuntimeConfig
+          [SomeEffect (UpdatePullRequestBody issueConfig prNumber)]
+  reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode updatePlan
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      pure
+        ( Right
+            DaemonLoopTickResult
+              { loopReplayResult = replay
+              , loopObservation = Nothing
+              , loopObservedTick = Nothing
+              , loopIdleReason = Just ("would update pull request body for PR #" <> Text.pack (show (unPrNumber prNumber)))
+              , loopActionReports = reports
+              }
+        )
+    ExecuteActions ->
+      case reports of
+        [report] ->
+          case report.actionExecutionResult of
+            CommandActionResult commandReport
+              | not commandReport.ok ->
+                  pure (Left (DaemonLoopDaemonFailure (DaemonActionFailed report.actionExecutionAction commandReport)))
+              | otherwise ->
+                  prependActionReport report <$> observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestBodyUpdated prNumber))
+            _ ->
+              pure (Left (DaemonLoopDaemonFailure (DaemonActionResultInvalid report.actionExecutionAction "PR body update did not return a command report")))
+        _ ->
+          pure (Left (DaemonLoopExternalFailure "unexpected PR body update action report count"))
+
+hasIssuePullRequestBodyUpdated :: PrNumber -> [WatcherEvent] -> Bool
+hasIssuePullRequestBodyUpdated prNumber =
+  any \case
+    IssuePullRequestBodyUpdatedEvent updatedPrNumber -> updatedPrNumber == prNumber
+    _ -> False
+
 prependActionReport :: ActionExecutionReport -> Either DaemonLoopFailure DaemonLoopTickResult -> Either DaemonLoopFailure DaemonLoopTickResult
 prependActionReport report =
   fmap \tick -> tick {loopActionReports = report : tick.loopActionReports}
@@ -648,6 +747,14 @@ observeWithExecutor
   -> DaemonObservation
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 observeWithExecutor executor config events observation = do
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Info
+        "observation_classified"
+        "automatic loop classified an observation"
+        ["observation" .= Text.pack (show observation)]
+    )
   observed <- runObservedDaemonTickWithEvents executor config.loopDaemonOptions events observation
   pure case observed of
     Left failure -> Left (DaemonLoopDaemonFailure failure)
@@ -669,6 +776,17 @@ idle
   -> Text
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 idle executor config replay reason = do
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Debug
+        "loop_idle"
+        "automatic loop tick is idle"
+        [ "reason" .= reason
+        , "domain" .= Text.pack (show (someDomain replay.replayState))
+        , "phase" .= Text.pack (show (somePhase replay.replayState))
+        ]
+    )
   case config.loopDaemonOptions.daemonExecutionMode of
     DryRunActions -> pure ()
     ExecuteActions ->
@@ -697,6 +815,17 @@ terminalStop
   -> Text
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 terminalStop executor config replay reason = do
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Info
+        "loop_terminal"
+        "automatic loop reached terminal state"
+        [ "reason" .= reason
+        , "domain" .= Text.pack (show (someDomain replay.replayState))
+        , "phase" .= Text.pack (show (somePhase replay.replayState))
+        ]
+    )
   case config.loopDaemonOptions.daemonExecutionMode of
     DryRunActions -> pure ()
     ExecuteActions ->
@@ -724,3 +853,29 @@ formatDaemonLoopFailure = \case
   DaemonLoopAppServerFailure failure -> formatAppServerClientFailure failure
   DaemonLoopMissingPlannerThread -> "issue planning loop requires a planner thread id"
   DaemonLoopUnexpectedStartPlan reason -> "unexpected start-turn plan: " <> reason
+
+logLoopResult :: ActionExecutor m -> Either DaemonLoopFailure DaemonLoopTickResult -> m ()
+logLoopResult executor = \case
+  Left failure ->
+    Log.logWatcher
+      executor.actionLogger
+      ( Log.watcherLog
+          Log.Error
+          "loop_tick_failed"
+          "automatic loop tick failed"
+          ["failure" .= formatDaemonLoopFailure failure]
+      )
+  Right tick ->
+    Log.logWatcher
+      executor.actionLogger
+      ( Log.watcherLog
+          Log.Info
+          "loop_tick_finished"
+          "automatic loop tick finished"
+          [ "domain" .= Text.pack (show (someDomain tick.loopReplayResult.replayState))
+          , "phase" .= Text.pack (show (somePhase tick.loopReplayResult.replayState))
+          , "observation" .= fmap (Text.pack . show) tick.loopObservation
+          , "idleReason" .= tick.loopIdleReason
+          , "actions" .= length tick.loopActionReports
+          ]
+      )

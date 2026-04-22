@@ -26,6 +26,7 @@ import CodexWatcher.IssueFanoutCli
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Logging qualified as Log
 import CodexWatcher.PrReviewLaunchCli
 import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime (ioRuntimeInterpreter, writeJsonValue)
@@ -35,6 +36,7 @@ import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, when)
+import Data.Aeson ((.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing)
@@ -58,11 +60,6 @@ runAutomaticLoop cli = do
           { loopDaemonOptions = options
           , loopPlannerThreadId = cli.loopCliPlannerThread
           }
-      executor =
-        ioActionExecutor
-          (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions)
-          (threadDelay (cli.loopCliPollSeconds * 1000000))
-          (writeIORef stopRequested True)
       shouldLoop = cli.loopCliLoop
       maxIterations =
         if shouldLoop
@@ -74,22 +71,51 @@ runAutomaticLoop cli = do
           Nothing
             | shouldLoop -> Just (defaultCliPidPath cli.loopCliDomain cli.loopCliStateDir)
             | otherwise -> Nothing
-      postTick = automaticLoopAfterTick cli endpoint executionMode
   validateLoopDomain cli.loopCliDomain cli.loopCliPlannerThread
   validateRuntimeOwnerForExecution cli.loopCliStateDir executionMode
+  logger <- automaticLoopLogger executionMode cli.loopCliStateDir
+  let executor =
+        ioActionExecutorWithLogger
+          logger
+          (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions)
+          (threadDelay (cli.loopCliPollSeconds * 1000000))
+          (writeIORef stopRequested True)
+      postTick = automaticLoopAfterTick executor cli endpoint executionMode
+  Log.logWatcher
+    logger
+    ( Log.watcherLog
+        Log.Info
+        "runtime_lease_validated"
+        "runtime owner lease validation succeeded"
+        ["stateDir" .= cli.loopCliStateDir]
+    )
   runWithOptionalPidFile maybePidFile (runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations 1)
 
-automaticLoopAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
-automaticLoopAfterTick cli endpoint executionMode tick = do
+automaticLoopLogger :: ActionExecutionMode -> FilePath -> IO (Log.WatcherLogger IO)
+automaticLoopLogger DryRunActions _stateDir =
+  pure Log.noopWatcherLogger
+automaticLoopLogger ExecuteActions stateDir =
+  pure (Log.jsonLineWatcherLogger (stateDir </> "watcher.log.jsonl"))
+
+automaticLoopAfterTick :: ActionExecutor IO -> LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
+automaticLoopAfterTick executor cli endpoint executionMode tick = do
   issueImplementReviewHandoffAfterTick cli endpoint executionMode tick
-  issuePlanningFanoutAfterTick cli endpoint executionMode tick
+  issuePlanningFanoutAfterTick executor cli endpoint executionMode tick
 
 runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO Bool) -> Bool -> Int -> Int -> IO ()
 runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
   renewRuntimeOwnerForExecution
     loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
     loopConfig.loopDaemonOptions.daemonExecutionMode
-  reconcileLoopCompatibility loopConfig
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Debug
+        "runtime_lease_renewed"
+        "runtime owner lease renewed"
+        ["stateDir" .= loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir]
+    )
+  reconcileLoopCompatibility executor loopConfig
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
     Left failure -> do
@@ -112,8 +138,8 @@ recordInvalidReplayBlockState loopConfig = \case
     writeJsonValue (stateDir </> "block-state.json") (repairFailureBlockStateJson replayFailure)
   _ -> pure ()
 
-reconcileLoopCompatibility :: DaemonLoopConfig -> IO ()
-reconcileLoopCompatibility loopConfig =
+reconcileLoopCompatibility :: ActionExecutor IO -> DaemonLoopConfig -> IO ()
+reconcileLoopCompatibility executor loopConfig =
   case loopConfig.loopDaemonOptions.daemonExecutionMode of
     DryRunActions -> pure ()
     ExecuteActions -> do
@@ -124,9 +150,21 @@ reconcileLoopCompatibility loopConfig =
           case replayEventLog events of
             Left _ -> pure ()
             Right replay ->
-              mapM_
-                (writeCompatibility ioRuntimeInterpreter)
-                (compatibilityStateWrites loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+              let writes = compatibilityStateWrites loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState
+               in do
+                    mapM_
+                      (writeCompatibility ioRuntimeInterpreter)
+                      writes
+                    Log.logWatcher
+                      executor.actionLogger
+                      ( Log.watcherLog
+                          Log.Debug
+                          "compatibility_reconciled"
+                          "compatibility state reconciled from event log"
+                          [ "stateDir" .= loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
+                          , "writes" .= length writes
+                          ]
+                      )
 
 issueImplementReviewHandoffAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
 issueImplementReviewHandoffAfterTick cli endpoint executionMode tick =
@@ -182,8 +220,8 @@ issueWaitingForPrMerge (SomeWatcherState (IssueWaitingForPrMerge issueConfig prN
 issueWaitingForPrMerge _ =
   Nothing
 
-issuePlanningFanoutAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
-issuePlanningFanoutAfterTick cli endpoint executionMode tick =
+issuePlanningFanoutAfterTick :: ActionExecutor IO -> LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
+issuePlanningFanoutAfterTick executor cli endpoint executionMode tick =
   case (cli.loopCliDomain, cli.loopCliImplementersRoot) of
     (CliIssuePlanning, Just implementersRoot) -> do
       completedFromObserved <- maintainObservedPlanningState implementersRoot
@@ -197,16 +235,16 @@ issuePlanningFanoutAfterTick cli endpoint executionMode tick =
         | issuePlanningCompletionEvent observedTick.daemonObservedEvent -> do
             plannerConfig <- maybe (die "issue planning fanout requires a planner config in the observed state") pure (plannerConfigFromState observedTick.daemonObservedState)
             readyIssues <- resolveFanoutReadyIssues observedTick.daemonObservedEvent
-            maintainReadyIssueImplementers cli endpoint executionMode implementersRoot observedTick.daemonObservedState plannerConfig readyIssues
+            maintainReadyIssueImplementers executor cli endpoint executionMode implementersRoot observedTick.daemonObservedState plannerConfig readyIssues
       _ -> pure False
   maintainReplayPlanningState implementersRoot =
     case tick.loopReplayResult.replayState of
       SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig graph) ->
-        maintainReadyIssueImplementers cli endpoint executionMode implementersRoot tick.loopReplayResult.replayState plannerConfig graph.planningReadyIssues
+        maintainReadyIssueImplementers executor cli endpoint executionMode implementersRoot tick.loopReplayResult.replayState plannerConfig graph.planningReadyIssues
       _ -> pure False
 
-maintainReadyIssueImplementers :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> FilePath -> SomeWatcherState -> PlannerConfig -> [IssueNumber] -> IO Bool
-maintainReadyIssueImplementers cli endpoint executionMode implementersRoot planningState plannerConfig readyIssues = do
+maintainReadyIssueImplementers :: ActionExecutor IO -> LoopCli -> AppServerEndpoint -> ActionExecutionMode -> FilePath -> SomeWatcherState -> PlannerConfig -> [IssueNumber] -> IO Bool
+maintainReadyIssueImplementers executor cli endpoint executionMode implementersRoot planningState plannerConfig readyIssues = do
   let fanoutConfig =
         (defaultIssuePlanningFanoutConfig implementersRoot)
           { fanoutWorkdirRoot = cli.loopCliImplementerWorkdirRoot <|> cli.loopCliWorkdirRoot
@@ -231,9 +269,29 @@ maintainReadyIssueImplementers cli endpoint executionMode implementersRoot plann
   validation <- validateReadyIssueFanout plannerConfig (zip readyIssues statuses) (launches <> stoppedActiveLaunches)
   case validation of
     Just reason -> do
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Warn
+            "fanout_validation_failed"
+            "ready issue fanout validation failed"
+            ["reason" .= reason.unBlockedReason]
+        )
       blockPlanningFanout executionMode cli planningState reason
       pure False
     Nothing -> do
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Info
+            "fanout_decision"
+            "ready issue fanout decision computed"
+            [ "readyIssues" .= fmap unIssueNumber readyIssues
+            , "launches" .= length launches
+            , "restarts" .= length stoppedActiveLaunches
+            , "allReadyIssuesTerminal" .= allReadyIssuesTerminal
+            ]
+        )
       childLaunch <-
         issueImplementerChildLaunchMode
           cli.loopCliStartChildren
@@ -243,6 +301,16 @@ maintainReadyIssueImplementers cli endpoint executionMode implementersRoot plann
           (Just endpoint)
       runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
       mapM_ (startIssueImplementerChild childLaunch) stoppedActiveLaunches
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Info
+            "child_launch_decision"
+            "issue implementer child launch decision applied"
+            [ "launches" .= length launches
+            , "restarts" .= length stoppedActiveLaunches
+            ]
+        )
       putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
       putStrLn ("planner fanout launches: " <> show (length launches))
       putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))

@@ -46,6 +46,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   StartReadyIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePlanCompleted :: Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePullRequestReady :: PrNumber -> Event 'IssueImplement 'Implementing
+  IssuePullRequestBodyUpdated :: PrNumber -> Event 'IssueImplement 'Implementing
   StartIssueImplementationTurn :: ActiveTurn -> Event 'IssueImplement 'Implementing
   IssueImplementationIncomplete :: Event 'IssueImplement 'Implementing
   IssueReviewHandoffInitialized :: PrNumber -> Event 'IssueImplement 'Implementing
@@ -133,10 +134,9 @@ step (IssueInPlanMode config (WorkerActive activeTurn)) (IssuePlanCompleted Noth
     ]
 step (IssueInPlanMode config (WorkerActive _activeTurn)) (IssuePlanCompleted (Just nextTurn)) =
   Decision
-    (IssueImplementing config Nothing (WorkerActive nextTurn))
+    (IssueImplementationReady config Nothing (WorkerIdle (activeThreadId nextTurn)))
     [ SomeEffect (PushBranch (issueBranch config))
     , SomeEffect (CreatePullRequest config)
-    , SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId nextTurn))
     ]
 step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted Nothing) =
   Decision
@@ -146,10 +146,9 @@ step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted Nothing)
     ]
 step (IssuePlanReady config (WorkerIdle _threadId)) (IssuePlanCompleted (Just nextTurn)) =
   Decision
-    (IssueImplementing config Nothing (WorkerActive nextTurn))
+    (IssueImplementationReady config Nothing (WorkerIdle (activeThreadId nextTurn)))
     [ SomeEffect (PushBranch (issueBranch config))
     , SomeEffect (CreatePullRequest config)
-    , SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId nextTurn))
     ]
 step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady prNumber) =
   Decision
@@ -159,6 +158,16 @@ step (IssueImplementing config _maybePr worker) (IssuePullRequestReady prNumber)
   Decision
     (IssueImplementing config (Just prNumber) worker)
     [SomeEffect SleepUntilNextPoll]
+step state@(IssueImplementationReady _config maybePr _worker) (IssuePullRequestBodyUpdated prNumber)
+  | prMatchesKnownStrict maybePr prNumber =
+      Decision state [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked maybePr prNumber
+step state@(IssueImplementing _config maybePr _worker) (IssuePullRequestBodyUpdated prNumber)
+  | prMatchesKnownStrict maybePr prNumber =
+      Decision state [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked maybePr prNumber
 step (IssueImplementationReady config maybePr (WorkerIdle threadId)) (StartIssueImplementationTurn activeTurn) =
   Decision
     (IssueImplementing config maybePr (WorkerActive activeTurn))
@@ -257,6 +266,10 @@ effectsForTerminalState = \case
 prMatchesKnown :: Maybe PrNumber -> PrNumber -> Bool
 prMatchesKnown Nothing _ = True
 prMatchesKnown (Just expected) actual = expected == actual
+
+prMatchesKnownStrict :: Maybe PrNumber -> PrNumber -> Bool
+prMatchesKnownStrict Nothing _ = False
+prMatchesKnownStrict (Just expected) actual = expected == actual
 
 prMismatchBlocked :: Maybe PrNumber -> PrNumber -> Decision 'IssueImplement
 prMismatchBlocked expected actual =

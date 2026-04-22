@@ -65,6 +65,7 @@ data RuntimeCommand
   | GhPrChecks RepoName PrNumber
   | GhReviewThreads PrConfig
   | GhCreatePullRequest FilePath IssueConfig
+  | GhUpdatePullRequestBody FilePath IssueConfig PrNumber FilePath
   | GhResolveReviewThread ReviewThreadId
   | GhPrMerge RepoName PrNumber Text
   | GhPrCommentReviewAndMerge RepoName PrNumber CleanReviewEvidence Text
@@ -204,6 +205,19 @@ renderRuntimeCommand (GhCreatePullRequest workdir config) =
     ]
     (Just workdir)
     ""
+renderRuntimeCommand (GhUpdatePullRequestBody workdir config prNumber planPath) =
+  RuntimeCommandSpec
+    "bash"
+    [ "-lc"
+    , Text.unpack updatePullRequestBodyScript
+    , "codex-watcher-gh-pr-body-update"
+    , Text.unpack (unRepoName (issueRepo config))
+    , show (unPrNumber prNumber)
+    , show (unIssueNumber (issueNumber config))
+    , planPath
+    ]
+    (Just workdir)
+    ""
 renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
   RuntimeCommandSpec
     "gh"
@@ -334,6 +348,30 @@ createPullRequestScript =
     , "url=$(gh pr create --repo \"$repo\" --head \"$branch\" --title \"Implement #$issue\" --body \"$body\")"
     , "number=\"${url##*/}\""
     , "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\""
+    ]
+
+updatePullRequestBodyScript :: Text
+updatePullRequestBodyScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "repo=\"$1\""
+    , "pr=\"$2\""
+    , "issue=\"$3\""
+    , "plan_path=\"$4\""
+    , "if [ ! -s \"$plan_path\" ]; then"
+    , "  printf 'issue plan file missing or empty: %s\\n' \"$plan_path\" >&2"
+    , "  exit 1"
+    , "fi"
+    , "body_file=$(mktemp)"
+    , "trap 'rm -f \"$body_file\"' EXIT"
+    , "{"
+    , "  printf 'Implements #%s.\\n\\n' \"$issue\""
+    , "  printf '## Implementation Plan\\n\\n'"
+    , "  cat \"$plan_path\""
+    , "  printf '\\n\\n---\\nCreated by codex-watcher after the issue planning turn. Implementation commits will be pushed to this PR.\\n'"
+    , "} > \"$body_file\""
+    , "gh pr edit \"$pr\" --repo \"$repo\" --body-file \"$body_file\" >/dev/null"
+    , "printf '{\"status\":\"updated\",\"prNumber\":%s}\\n' \"$pr\""
     ]
 
 repoOwnerName :: RepoName -> (Text, Text)
