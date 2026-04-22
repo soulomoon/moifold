@@ -7,6 +7,7 @@ module Main (main) where
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
 import CodexWatcher.Daemon
+import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.EventLog
 import CodexWatcher.GhGit
@@ -20,6 +21,9 @@ import CodexWatcher.Protocol
 import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
+import Control.Applicative ((<|>))
+import Control.Concurrent (threadDelay)
+import Control.Monad (unless, when)
 import Data.Aeson (Value (..))
 import Data.Text qualified as Text
 import System.Environment (getArgs)
@@ -36,6 +40,9 @@ main =
     "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
     "mark-runtime-owner" : rest -> markRuntimeOwner rest
     "observe-once" : rest -> observeOnce rest
+    "run-pr-review" : rest -> runAutomaticLoop "pr-review" rest
+    "run-issue-implement" : rest -> runAutomaticLoop "issue-implement" rest
+    "run-issue-planning" : rest -> runAutomaticLoop "issue-planning" rest
     [] -> do
       putStrLn "codex-watcher-hs"
       putStrLn "usage: codex-watcher-hs replay <node-watcher-state-dir>"
@@ -45,10 +52,11 @@ main =
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
+      putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop]"
       putStrLn "type-level domains:"
       print [IssuePlanning, IssueImplement, PrReview]
       putStrLn ("example repo newtype is available: " <> Text.unpack (unRepoName (RepoName "soulomoon/mlf2")))
-    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl> | healthcheck [--state-root <path>] [--repo owner/name] | mark-runtime-owner --state-dir <path> --owner node|haskell | observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name>"
+    _ -> die "usage: codex-watcher-hs replay <node-watcher-state-dir> | replay-events <events.jsonl> | healthcheck [--state-root <path>] [--repo owner/name] | mark-runtime-owner --state-dir <path> --owner node|haskell | observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> | run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port"
 
 parseHealthcheckOptions :: [String] -> HealthcheckOptions
 parseHealthcheckOptions args =
@@ -86,6 +94,7 @@ observeOnce args = do
           , daemonRuntimeConfig = defaultEffectRuntimeConfig repo workdir stateDir
           , daemonExecutionMode = if hasFlag "--execute" args then ExecuteActions else DryRunActions
           }
+  validateRuntimeOwnerForExecution stateDir options.daemonExecutionMode
   result <- runObservedDaemonTickFromFile executor options observation
   case result of
     Left failure -> die (Text.unpack (formatDaemonFailure failure))
@@ -106,6 +115,114 @@ observeOnceExecutor args
       pure (ioActionExecutor (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions) (pure ()) (pure ()))
   | otherwise =
       pure (ioActionExecutor (AppServerInterpreter (\_ -> pure Null)) (pure ()) (pure ()))
+
+runAutomaticLoop :: String -> [String] -> IO ()
+runAutomaticLoop domain args = do
+  eventsPath <- requiredFlag "--events" args
+  stateDir <- requiredFlag "--state-dir" args
+  repo <- RepoName . Text.pack <$> requiredFlag "--repo" args
+  host <- requiredFlag "--app-server-host" args
+  port <- requiredIntFlag "--app-server-port" args
+  let workdir = maybe "." id (lookupFlag "--workdir" args)
+      path = maybe "/" id (lookupFlag "--app-server-path" args)
+      endpoint = AppServerEndpoint host port path
+      pollSeconds = maybe 30 id (lookupFlag "--poll-seconds" args >>= readMaybe)
+      executionMode = if hasFlag "--execute" args then ExecuteActions else DryRunActions
+      options =
+        DaemonOptions
+          { daemonEventLogPath = eventsPath
+          , daemonRuntimeConfig = defaultEffectRuntimeConfig repo workdir stateDir
+          , daemonExecutionMode = executionMode
+          }
+      plannerThread =
+        case lookupFlag "--planner-thread-id" args <|> lookupFlag "--thread-id" args of
+          Nothing -> Nothing
+          Just value -> Just (ThreadId (Text.pack value))
+      loopConfig =
+        DaemonLoopConfig
+          { loopDaemonOptions = options
+          , loopPlannerThreadId = plannerThread
+          }
+      executor =
+        ioActionExecutor
+          (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions)
+          (threadDelay (pollSeconds * 1000000))
+          (pure ())
+      shouldLoop = hasFlag "--loop" args
+      maxIterations =
+        if shouldLoop
+          then maybe maxBound id (lookupFlag "--iterations" args >>= readMaybe)
+          else 1
+  validateLoopDomain domain plannerThread
+  validateRuntimeOwnerForExecution stateDir executionMode
+  runLoopIterations executor loopConfig domain shouldLoop maxIterations 1
+
+runLoopIterations :: ActionExecutor IO -> DaemonLoopConfig -> String -> Bool -> Int -> Int -> IO ()
+runLoopIterations executor loopConfig domain shouldLoop maxIterations iteration = do
+  result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
+  case result of
+    Left failure -> die (Text.unpack (formatDaemonLoopFailure failure))
+    Right tick -> do
+      validateLoopResultDomain domain tick
+      printLoopTick domain iteration tick
+  when (shouldLoop && iteration < maxIterations) $
+    runLoopIterations executor loopConfig domain shouldLoop maxIterations (iteration + 1)
+
+printLoopTick :: String -> Int -> DaemonLoopTickResult -> IO ()
+printLoopTick domain iteration tick = do
+  putStrLn ("domain: " <> domain)
+  putStrLn ("iteration: " <> show iteration)
+  putStrLn ("phase: " <> show (somePhase tick.loopReplayResult.replayState))
+  case tick.loopObservation of
+    Nothing ->
+      putStrLn ("idle: " <> Text.unpack (maybe "no observation" id tick.loopIdleReason))
+    Just observation ->
+      putStrLn ("observation: " <> show observation)
+  case tick.loopObservedTick of
+    Nothing -> pure ()
+    Just observed -> do
+      putStrLn ("event: " <> show observed.daemonObservedEvent)
+      putStrLn ("next phase: " <> show (somePhase observed.daemonObservedState))
+      putStrLn ("compatibility writes: " <> show (length observed.daemonObservedCompatibilityWrites))
+  putStrLn ("actions: " <> show (length tick.loopActionReports))
+
+validateLoopDomain :: String -> Maybe ThreadId -> IO ()
+validateLoopDomain domain plannerThread = do
+  unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
+    die ("unsupported automatic loop domain: " <> domain)
+  when (domain == "issue-planning" && plannerThread == Nothing) $
+    die "run-issue-planning requires --planner-thread-id <thread-id>"
+
+validateLoopResultDomain :: String -> DaemonLoopTickResult -> IO ()
+validateLoopResultDomain domain tick =
+  unless (someDomain tick.loopReplayResult.replayState == expectedLoopDomain domain) $
+    die
+      ( "event log domain "
+          <> show (someDomain tick.loopReplayResult.replayState)
+          <> " does not match command domain "
+          <> domain
+      )
+
+expectedLoopDomain :: String -> Domain
+expectedLoopDomain "pr-review" = PrReview
+expectedLoopDomain "issue-implement" = IssueImplement
+expectedLoopDomain _ = IssuePlanning
+
+validateRuntimeOwnerForExecution :: FilePath -> ActionExecutionMode -> IO ()
+validateRuntimeOwnerForExecution stateDir executionMode =
+  case executionMode of
+    DryRunActions -> pure ()
+    ExecuteActions -> do
+      ownerResult <- readRuntimeOwner stateDir
+      case ownerResult of
+        Left errorMessage ->
+          die ("runtime owner marker is invalid: " <> Text.unpack errorMessage)
+        Right (Just HaskellRuntime) ->
+          pure ()
+        Right (Just NodeRuntime) ->
+          die "refusing to execute because runtime-owner.json is node; mark owner haskell before migration"
+        Right Nothing ->
+          die "refusing to execute because runtime-owner.json is missing; mark owner haskell before migration"
 
 parseDaemonObservation :: [String] -> IO DaemonObservation
 parseDaemonObservation args = do

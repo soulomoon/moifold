@@ -22,6 +22,7 @@ module CodexWatcher.AppServerClient
   , formatAppServerClientFailure
   , latestTurnById
   , matchAppServerIncoming
+  , parseTurnStartTurnId
   , parseThreadReadTurns
   , sendAppServerRequest
   , sendOneAppServerRequest
@@ -224,10 +225,16 @@ parseThreadReadTurns value =
     Left errorMessage -> Left (AppServerDecodeFailure (Text.pack errorMessage))
     Right turns -> Right turns
 
+parseTurnStartTurnId :: Value -> Either AppServerClientFailure TurnId
+parseTurnStartTurnId value =
+  case parseEither turnStartTurnIdParser value of
+    Left errorMessage -> Left (AppServerDecodeFailure (Text.pack errorMessage))
+    Right turnId -> Right turnId
+
 latestTurnById :: TurnId -> [AppServerTurn] -> Maybe AppServerTurn
 latestTurnById turnId =
-  foldr
-    ( \turn found ->
+  foldl
+    ( \found turn ->
         if appServerTurnId turn == turnId
           then Just turn
           else found
@@ -260,7 +267,18 @@ validateJsonRpcVersion objectValue = do
 
 threadReadTurnsParser :: Value -> Parser [AppServerTurn]
 threadReadTurnsParser = withObject "ThreadReadResult" \objectValue ->
-  objectValue .:? "turns" .!= []
+  case KeyMap.lookup "turns" objectValue <|> lookupPath ["thread", "turns"] (Object objectValue) of
+    Just turnsValue -> parseJSON turnsValue
+    Nothing -> pure []
+
+turnStartTurnIdParser :: Value -> Parser TurnId
+turnStartTurnIdParser = withObject "TurnStartResult" \objectValue ->
+  TurnId
+    <$> ( objectValue .: "turnId"
+            <|> objectValue .: "id"
+            <|> nestedRequiredText ["turn", "turnId"] objectValue
+            <|> nestedRequiredText ["turn", "id"] objectValue
+        )
 
 turnIdField :: Object -> Parser Text
 turnIdField objectValue =
@@ -279,6 +297,12 @@ nestedText path objectValue =
   pure case lookupPath path (Object objectValue) of
     Just (String text) -> Just text
     _ -> Nothing
+
+nestedRequiredText :: [Text] -> Object -> Parser Text
+nestedRequiredText path objectValue =
+  case lookupPath path (Object objectValue) of
+    Just (String text) -> pure text
+    _ -> fail ("missing text field: " <> Text.unpack (Text.intercalate "." path))
 
 lookupPath :: [Text] -> Value -> Maybe Value
 lookupPath [] value = Just value

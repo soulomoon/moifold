@@ -33,6 +33,7 @@ library
     CodexWatcher.AppServerProtocol
     CodexWatcher.CompatibilityState
     CodexWatcher.Daemon
+    CodexWatcher.DaemonLoop
     CodexWatcher.EffectInterpreter
     CodexWatcher.Effects
     CodexWatcher.EventLog
@@ -49,6 +50,7 @@ library
     CodexWatcher.Snapshot
     CodexWatcher.StateMachine
     CodexWatcher.Types
+    CodexWatcher.TurnClassifier
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,

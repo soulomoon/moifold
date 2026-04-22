@@ -12,6 +12,7 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
 import CodexWatcher.Daemon
+import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
@@ -25,6 +26,7 @@ import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
+import CodexWatcher.TurnClassifier
 import CodexWatcher.Types
 import Data.Aeson
   ( Value (..)
@@ -983,13 +985,54 @@ prop_appServerClientParsesThreadReadTurns =
                     , "status" .= ("running" :: Text)
                     , "result" .= object ["text" .= ("target output" :: Text)]
                     ]
+                 , object
+                    [ "turnId" .= ("turn-target" :: Text)
+                    , "status" .= ("completed" :: Text)
+                    , "result" .= object ["text" .= ("latest output" :: Text)]
+                    ]
                  ]
           ]
    in case parseThreadReadTurns response of
         Right turns ->
           latestTurnById (TurnId "turn-target") turns
-            == Just (AppServerTurn (TurnId "turn-target") "running" (Just "target output"))
+            == Just (AppServerTurn (TurnId "turn-target") "completed" (Just "latest output"))
         Left _ -> False
+
+prop_appServerClientParsesTurnStartTurnId :: Bool
+prop_appServerClientParsesTurnStartTurnId =
+  parseTurnStartTurnId (object ["turn" .= object ["id" .= ("turn-created" :: Text)]])
+    == Right (TurnId "turn-created")
+
+prop_appServerClientParsesNestedThreadReadTurns :: Bool
+prop_appServerClientParsesNestedThreadReadTurns =
+  parseThreadReadTurns
+    ( object
+        [ "thread"
+            .= object
+              [ "turns"
+                  .= [ object
+                        [ "id" .= ("turn-nested" :: Text)
+                        , "status" .= ("completed" :: Text)
+                        ]
+                     ]
+              ]
+        ]
+    )
+    == Right [AppServerTurn (TurnId "turn-nested") "completed" Nothing]
+
+prop_turnClassifierCompletionStates :: Bool
+prop_turnClassifierCompletionStates =
+  classifyTurnCompletion (AppServerTurn (TurnId "running") "running" Nothing) == TurnStillRunning
+    && classifyTurnCompletion (AppServerTurn (TurnId "done") "completed" (Just "complete")) == TurnCompleted (Just "complete")
+    && classifyTurnCompletion (AppServerTurn (TurnId "failed") "failed" (Just "blocked by CI")) == TurnFailed "blocked by CI"
+
+prop_turnClassifierMapsDomainOutputs :: Bool
+prop_turnClassifierMapsDomainOutputs =
+  classifyIssueTriageTurn (AppServerTurn (TurnId "triage") "completed" (Just "already fixed")) == Just ObservedTriageAlreadyFixed
+    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "plan written")) == Just (ObservedPlanCompleted Nothing)
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "ready for review")) == Just (ObservedImplementationCompleted (PrNumber 7))
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "resolved")) == Just (ObservedWorkerOutcome WorkerCompleted)
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just "LGTM clean")) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM clean")))
 
 effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
 effectRuntimeConfig repo workdir requestId =
@@ -1201,14 +1244,18 @@ data FakeActionCall
   deriving stock (Eq, Show)
 
 fakeActionExecutor :: IO (ActionExecutor IO, IO [FakeActionCall])
-fakeActionExecutor = do
+fakeActionExecutor =
+  fakeActionExecutorWith defaultFakeCommand defaultFakeAppServer
+
+fakeActionExecutorWith :: (RuntimeCommand -> CommandReport) -> (AppServerRequest -> Value) -> IO (ActionExecutor IO, IO [FakeActionCall])
+fakeActionExecutorWith commandResponse appServerResponse = do
   calls <- newIORef []
   let record call = modifyIORef' calls (<> [call])
       runtime =
         RuntimeInterpreter
           { runtimeRunCommand = \command -> do
               record (FakeCommand command)
-              pure CommandReport {ok = True, status = Just 0, stdout = "ok", stderr = "", errorMessage = Nothing}
+              pure (commandResponse command)
           , runtimeReadJsonValue = \path -> do
               record (FakeReadJson path)
               pure (Left "not implemented in fake")
@@ -1219,7 +1266,7 @@ fakeActionExecutor = do
         AppServerInterpreter
           { appServerSendRequest = \request -> do
               record (FakeAppServer request)
-              pure (object ["ok" .= True])
+              pure (appServerResponse request)
           }
       executor =
         ActionExecutor
@@ -1229,6 +1276,17 @@ fakeActionExecutor = do
           , actionStopDaemon = record FakeStop
           }
   pure (executor, readIORef calls)
+
+defaultFakeCommand :: RuntimeCommand -> CommandReport
+defaultFakeCommand _command =
+  CommandReport {ok = True, status = Just 0, stdout = "ok", stderr = "", errorMessage = Nothing}
+
+defaultFakeAppServer :: AppServerRequest -> Value
+defaultFakeAppServer request
+  | request.requestMethod == "turn/start" =
+      object ["turnId" .= ("turn-started" :: Text)]
+  | otherwise =
+      object ["ok" .= True]
 
 actionExecutorDryRunDoesNotCallInterpreters :: IO Bool
 actionExecutorDryRunDoesNotCallInterpreters = do
@@ -1387,6 +1445,163 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
     FakeAppServer {} -> True
     _ -> False
 
+automaticDaemonLoopPlanningDryRunStartsSyntheticTurn :: IO Bool
+automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
+  (executor, getCalls) <- fakeActionExecutor
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 120
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8)]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+      results <-
+        sequence
+          [ assert "automatic planning dry-run emits a planning start" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "dry-run-planner-turn-120")))
+          , assert "automatic planning dry-run does not call interpreters" (null calls)
+          , assert "automatic planning dry-run reports start action" (length tick.loopActionReports == 1)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic planning dry-run: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
+automaticDaemonLoopExecutePrestartsTurnOnce :: IO Bool
+automaticDaemonLoopExecutePrestartsTurnOnce = do
+  (executor, getCalls) <- fakeActionExecutor
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 130
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+      events = [IssueImplementInitialized issueConfig (ThreadId "worker-thread")]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let expectedEvent = IssueTriageTurnStartedEvent (TurnId "turn-started")
+      results <-
+        sequence
+          [ assert "automatic execute prestarts app-server turn once" (length [() | FakeAppServer request <- calls, request.requestMethod == "turn/start"] == 1)
+          , assert "automatic execute appends returned turn event" (FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent) `elem` calls)
+          , assert "automatic execute reaches triage active" (maybe False ((== Triage) . somePhase . daemonObservedState) tick.loopObservedTick)
+          , assert "automatic execute reports cached start action" (length tick.loopActionReports == 1)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic execute prestart: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
+automaticDaemonLoopActiveTurnCompletionObservesOutput :: IO Bool
+automaticDaemonLoopActiveTurnCompletionObservesOutput = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-triage" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= ("already fixed" :: Text)
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 140
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssueTriageTurnStartedEvent (TurnId "turn-triage")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "automatic active turn reads app-server thread" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
+          , assert "automatic active turn emits already-fixed event" (maybe False ((== IssueTriageAlreadyFixedEvent) . daemonObservedEvent) tick.loopObservedTick)
+          , assert "automatic active turn reaches complete" (maybe False ((== Complete) . somePhase . daemonObservedState) tick.loopObservedTick)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic active turn completion: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
+automaticDaemonLoopImplementationCompletionSequencesHandoff :: IO Bool
+automaticDaemonLoopImplementationCompletionSequencesHandoff = do
+  (executor, _getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-impl" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= ("ready for review" :: Text)
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 150
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      baseEvents =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent Nothing
+        , IssuePullRequestReusedEvent prNumber
+        , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
+        ]
+      observedEventFor events = do
+        result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+        pure $ case result of
+          Right tick -> daemonObservedEvent <$> tick.loopObservedTick
+          Left _ -> Nothing
+  firstEvent <- observedEventFor baseEvents
+  secondEvent <- observedEventFor (baseEvents <> [IssueReviewHandoffInitializedEvent prNumber])
+  thirdEvent <- observedEventFor (baseEvents <> [IssueReviewHandoffInitializedEvent prNumber, IssueReviewHandoffStartedEvent prNumber])
+  results <-
+    sequence
+      [ assert "automatic implementation completion initializes handoff first" (firstEvent == Just (IssueReviewHandoffInitializedEvent prNumber))
+      , assert "automatic implementation completion starts handoff second" (secondEvent == Just (IssueReviewHandoffStartedEvent prNumber))
+      , assert "automatic implementation completion completes after handoff" (thirdEvent == Just (IssueImplementationCompletedEvent prNumber))
+      ]
+  pure (and results)
+
 main :: IO ()
 main = do
   results <-
@@ -1457,6 +1672,10 @@ main = do
       , quickCheckResult prop_appServerClientSurfacesJsonRpcErrors
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_appServerClientParsesThreadReadTurns
+      , quickCheckResult prop_appServerClientParsesTurnStartTurnId
+      , quickCheckResult prop_appServerClientParsesNestedThreadReadTurns
+      , quickCheckResult prop_turnClassifierCompletionStates
+      , quickCheckResult prop_turnClassifierMapsDomainOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
@@ -1471,6 +1690,10 @@ main = do
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
   observedDaemonDryRunOk <- observedDaemonTickDryRunDoesNotMutate
   observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
+  automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
+  automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
+  automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
+  automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
   if
     all isSuccess results
       && goldenOk
@@ -1480,5 +1703,9 @@ main = do
       && daemonTickOk
       && observedDaemonDryRunOk
       && observedDaemonExecuteOk
+      && automaticPlanningDryRunOk
+      && automaticExecutePrestartOk
+      && automaticActiveTurnOk
+      && automaticImplementationHandoffOk
     then pure ()
     else exitFailure

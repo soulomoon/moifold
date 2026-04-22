@@ -61,7 +61,22 @@ bin=$(cabal list-bin codex-watcher-hs)
   --turn-id turn-next
 ```
 
-The command replays the log, applies the observation through the typed watcher policy, reports the canonical event, compatibility writes, and planned actions, and defaults to `DryRunActions`. Use `--execute --app-server-host <host> --app-server-port <port>` only during a controlled migration rehearsal.
+The command replays the log, applies the observation through the typed watcher policy, reports the canonical event, compatibility writes, and planned actions, and defaults to `DryRunActions`. Use `--execute --app-server-host <host> --app-server-port <port>` only during a controlled migration rehearsal after marking the copied watcher state as Haskell-owned.
+
+Run one automatic typed daemon iteration:
+
+```bash
+bin=$(cabal list-bin codex-watcher-hs)
+"$bin" run-issue-implement \
+  --events /path/to/events.jsonl \
+  --state-dir /path/to/state \
+  --repo owner/name \
+  --workdir /path/to/checkout \
+  --app-server-host 127.0.0.1 \
+  --app-server-port 3000
+```
+
+The automatic commands are `run-pr-review`, `run-issue-implement`, and `run-issue-planning`. They replay the event log, fetch the next observation from `gh`, `git`, and/or app-server `thread/read`, classify turn output into typed watcher observations, and report the next canonical event and planned actions. They default to a dry run; add `--execute` to append the event, write Node-compatible state files, and run the compiled effects. Execute mode requires `runtime-owner.json` to contain `{"owner":"haskell"}`. Use `--loop --iterations N` for bounded daemon polling, or `--loop` for continuous polling. `run-issue-planning` also requires `--planner-thread-id`.
 
 Mark migration ownership for a watcher state directory:
 

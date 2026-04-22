@@ -22,6 +22,7 @@ import Data.Text qualified as Text
 data IssuePlanningObservation
   = ObservedPlanningTurnStarted ThreadId TurnId
   | ObservedPlanningTurnCompleted
+  | ObservedPlanningBlocked BlockedReason
   deriving stock (Eq, Show)
 
 data IssuePlanningTick = IssuePlanningTick
@@ -36,6 +37,10 @@ issuePlanningObserve (SomeWatcherState state@PlanningReady {}) (ObservedPlanning
   Right (tick (IssuePlanningTurnStarted threadId turnId) (step state (StartPlanningTurn (ActiveTurn threadId turnId))))
 issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) ObservedPlanningTurnCompleted =
   Right (tick IssuePlanningTurnCompleted (step state PlannerTurnCompleted))
+issuePlanningObserve (SomeWatcherState state@PlanningReady {}) (ObservedPlanningBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPlanningBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issuePlanningObserve state observation =
   Left
     ( "issue planning observation "

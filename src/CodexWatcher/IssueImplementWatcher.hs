@@ -33,6 +33,7 @@ data IssueImplementObservation
   | ObservedReviewHandoffInitialized PrNumber
   | ObservedReviewHandoffStarted PrNumber
   | ObservedImplementationCompleted PrNumber
+  | ObservedIssueImplementBlocked BlockedReason
   deriving stock (Eq, Show)
 
 data IssueImplementTick = IssueImplementTick
@@ -87,6 +88,18 @@ issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (Obse
   Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedImplementationCompleted prNumber) =
   Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueNeedsTriage {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueTriageActive {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssuePlanReady {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueInPlanMode {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve state observation =
   Left
     ( "issue implementation observation "
