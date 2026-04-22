@@ -117,13 +117,13 @@ step _ (IssueTriageBlocked reason) =
 step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
-    [SomeEffect (StartIssuePlanWorkerTurn threadId)]
+    [SomeEffect (StartIssuePlanWorkerTurn config threadId)]
 step state@IssueTriageActive {} (StartIssuePlanTurn _activeTurn) =
   Decision state []
 step (IssuePlanReady config (WorkerIdle threadId)) (StartReadyIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config (WorkerActive activeTurn))
-    [SomeEffect (StartIssuePlanWorkerTurn threadId)]
+    [SomeEffect (StartIssuePlanWorkerTurn config threadId)]
 step (IssueInPlanMode config (WorkerActive activeTurn)) (IssuePlanCompleted Nothing) =
   Decision
     (IssueImplementationReady config Nothing (WorkerIdle (activeThreadId activeTurn)))

@@ -23,7 +23,7 @@ data Effect (mutability :: Mutability) where
   StartPlannerTurn :: ThreadId -> Effect 'CanStartTurn
   StartWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartIssueTriageWorkerTurn :: ThreadId -> Effect 'CanStartTurn
-  StartIssuePlanWorkerTurn :: ThreadId -> Effect 'CanStartTurn
+  StartIssuePlanWorkerTurn :: IssueConfig -> ThreadId -> Effect 'CanStartTurn
   StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartReviewerTurn :: PrConfig -> CommitSha -> ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal

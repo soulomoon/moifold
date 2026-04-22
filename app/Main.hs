@@ -564,10 +564,10 @@ issueImplementerThreadStartOptions launch =
     , threadSandbox = "danger-full-access"
     , threadModel = "gpt-5.4"
     , threadDeveloperInstructions =
-        "Issue implementation watcher for "
-          <> unRepoName launch.launchIssueConfig.issueRepo
-          <> "#"
-          <> Text.pack (show (unIssueNumber (launchIssueNumber launch)))
+        issueImplementerThreadDeveloperInstructions
+          (maybe "." id launch.launchWorkdir)
+          launch.launchStateDir
+          launch.launchIssueConfig
     }
 
 writeIssueImplementerLaunch :: IssueImplementerLaunchPlan -> IO ()
@@ -785,7 +785,7 @@ prReviewThreadStartOptions launch role =
     , threadSandbox = "danger-full-access"
     , threadModel = "gpt-5.4"
     , threadDeveloperInstructions =
-        prReviewThreadDeveloperInstructions launch.reviewLaunchWorkdir launch.reviewLaunchPrConfig role
+        prReviewThreadDeveloperInstructions launch.reviewLaunchWorkdir launch.reviewLaunchStateDir launch.reviewLaunchPrConfig role
     }
 
 writePrReviewWatcherLaunch :: PrReviewWatcherLaunchPlan -> IO ()
@@ -1521,7 +1521,7 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
           { turnRuntimeCollaborationMode =
               Just
                 ( planCollaborationMode
-                    (plannerPlanModeSummary scopeIssues)
+                    (issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues)
                     "gpt-5.4"
                     "xhigh"
                 )
@@ -1531,7 +1531,7 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
     , effectRuntimeIssuePlanTurn =
         (turnConfig issuePlanTurnInput)
           { turnRuntimeCollaborationMode =
-              Just (planCollaborationMode "Plan the implementation. Do not edit files in this turn." "gpt-5.4" "xhigh")
+              Just (planCollaborationMode "Issue-specific plan-mode instructions are generated when the plan turn starts." "gpt-5.4" "xhigh")
           }
     , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput
     , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit."
@@ -1557,14 +1557,6 @@ plannerTurnInputForScope scopeIssues =
     <> " Target scope: only these root issues and their existing or newly created GitHub sub-issues are in scope: "
     <> issueNumbersText scopeIssues
     <> ". Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees. If a scoped root issue needs decomposition, create concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only scoped root issues and descendants that belong to these issue trees."
-
-plannerPlanModeSummary :: [IssueNumber] -> Text.Text
-plannerPlanModeSummary [] =
-  "Plan issue decomposition, dependencies, subissue creation, and implementer fanout. Do not edit files in this turn."
-plannerPlanModeSummary scopeIssues =
-  "Plan scoped issues "
-    <> issueNumbersText scopeIssues
-    <> " and their sub-issues only. Do not edit files in this turn."
 
 reviewThreadsReportFromCli :: ObserveOnceCli -> IO ReviewThreadsReport
 reviewThreadsReportFromCli cli =

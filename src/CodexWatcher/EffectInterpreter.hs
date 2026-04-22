@@ -17,7 +17,7 @@ module CodexWatcher.EffectInterpreter
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.Runtime
-import CodexWatcher.TurnOutput (reviewerTurnInput, reviewerTurnOutputSchema)
+import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput, reviewerTurnOutputSchema)
 import CodexWatcher.Types
 import Data.Aeson
   ( Value
@@ -96,8 +96,8 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest config.effectRuntimeWorkerTurn threadId
     StartIssueTriageWorkerTurn threadId ->
       oneAppServerRequest config.effectRuntimeIssueTriageTurn threadId
-    StartIssuePlanWorkerTurn threadId ->
-      oneAppServerRequest config.effectRuntimeIssuePlanTurn threadId
+    StartIssuePlanWorkerTurn issueConfig threadId ->
+      oneAppServerRequest (issuePlanTurnRuntimeConfig config issueConfig) threadId
     StartIssueImplementationWorkerTurn threadId ->
       oneAppServerRequest config.effectRuntimeIssueImplementationTurn threadId
     StartReviewerTurn prConfig reviewTargetSha threadId ->
@@ -151,6 +151,18 @@ reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
           prConfig
           reviewTargetSha
     , turnRuntimeOutputSchema = Just reviewerTurnOutputSchema
+    }
+
+issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> TurnRuntimeConfig
+issuePlanTurnRuntimeConfig config issueConfig =
+  config.effectRuntimeIssuePlanTurn
+    { turnRuntimeCollaborationMode =
+        Just
+          ( planCollaborationMode
+              (issuePlanModeDeveloperInstructions config.effectRuntimeWorkdir config.effectRuntimeStateDir issueConfig)
+              "gpt-5.4"
+              "xhigh"
+          )
     }
 
 blockedStateJson :: BlockedReason -> Value

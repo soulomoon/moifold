@@ -63,7 +63,7 @@ data StartTurnKind
   = StartPlannerTurnKind
   | StartWorkerTurnKind
   | StartIssueTriageWorkerTurnKind
-  | StartIssuePlanWorkerTurnKind
+  | StartIssuePlanWorkerTurnKind IssueConfig
   | StartIssueImplementationWorkerTurnKind
   | StartReviewerTurnKind PrConfig CommitSha
   deriving stock (Eq, Show)
@@ -108,8 +108,8 @@ runFromState executor config events replay =
       prestartAndObserve executor config events StartIssueTriageWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedTriageTurnStarted)
     SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueTriageTurn)
-    SomeWatcherState (IssuePlanReady _ (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events StartIssuePlanWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
+    SomeWatcherState (IssuePlanReady issueConfig (WorkerIdle workerThread)) ->
+      prestartAndObserve executor config events (StartIssuePlanWorkerTurnKind issueConfig) workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
     SomeWatcherState (IssueInPlanMode _ (WorkerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssuePlanTurn)
     SomeWatcherState (IssueImplementationReady issueConfig Nothing _worker) ->
@@ -348,7 +348,7 @@ startTurnEffect kind threadId =
     StartPlannerTurnKind -> SomeEffect (StartPlannerTurn threadId)
     StartWorkerTurnKind -> SomeEffect (StartWorkerTurn threadId)
     StartIssueTriageWorkerTurnKind -> SomeEffect (StartIssueTriageWorkerTurn threadId)
-    StartIssuePlanWorkerTurnKind -> SomeEffect (StartIssuePlanWorkerTurn threadId)
+    StartIssuePlanWorkerTurnKind issueConfig -> SomeEffect (StartIssuePlanWorkerTurn issueConfig threadId)
     StartIssueImplementationWorkerTurnKind -> SomeEffect (StartIssueImplementationWorkerTurn threadId)
     StartReviewerTurnKind prConfig reviewTargetSha -> SomeEffect (StartReviewerTurn prConfig reviewTargetSha threadId)
 
@@ -361,7 +361,7 @@ kindText = \case
   StartPlannerTurnKind -> "planner-turn"
   StartWorkerTurnKind -> "worker-turn"
   StartIssueTriageWorkerTurnKind -> "issue-triage-turn"
-  StartIssuePlanWorkerTurnKind -> "issue-plan-turn"
+  StartIssuePlanWorkerTurnKind {} -> "issue-plan-turn"
   StartIssueImplementationWorkerTurnKind -> "issue-implementation-turn"
   StartReviewerTurnKind {} -> "reviewer-turn"
 

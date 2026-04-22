@@ -1643,11 +1643,12 @@ prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker config planni
 
 prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts :: ThreadId -> Bool
 prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
-  let compiled =
+  let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 26) (BranchName "codex/issue-26")
+      compiled =
         compileEffectPlan
           (effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 16)
           [ SomeEffect (StartIssueTriageWorkerTurn threadId)
-          , SomeEffect (StartIssuePlanWorkerTurn threadId)
+          , SomeEffect (StartIssuePlanWorkerTurn issueConfig threadId)
           , SomeEffect (StartIssueImplementationWorkerTurn threadId)
           , SomeEffect (StartWorkerTurn threadId)
           ]
@@ -1658,6 +1659,87 @@ prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
         && actionIsTurnStartWithInput threadId "issue implementation prompt" (actions !! 2)
         && actionIsTurnStartWithInput threadId "worker prompt" (actions !! 3)
         && compiled.compiledNextRequestId == 20
+
+prop_threadDeveloperPromptTemplatesPortNodeProtocols :: Bool
+prop_threadDeveloperPromptTemplatesPortNodeProtocols =
+  let prConfig = PrConfig (RepoName "soulomoon/mlf2") (PrNumber 29) (BranchName "codex/issue-26")
+      issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 26) (BranchName "codex/issue-26")
+      workerPrompt = prReviewThreadDeveloperInstructions "/tmp/work" "/tmp/state/pr29" prConfig "worker"
+      reviewerPrompt = prReviewThreadDeveloperInstructions "/tmp/work" "/tmp/state/pr29" prConfig "reviewer"
+      issuePrompt = issueImplementerThreadDeveloperInstructions "/tmp/work" "/tmp/state/issue26" issueConfig
+      plannerPrompt = issuePlanningThreadDeveloperInstructions "/tmp/state/planner" (RepoName "soulomoon/mlf2") [IssueNumber 12]
+      planModePrompt = issuePlanModeDeveloperInstructions "/tmp/work" "/tmp/state/issue26" issueConfig
+   in promptContainsAll
+        workerPrompt
+        [ "Publishing protocol, required for this environment:"
+        , "gh auth setup-git"
+        , "Completion contract:"
+        , "remaining_unresolved_thread_ids"
+        , "/tmp/state/pr29/agent-state.json"
+        ]
+        && promptContainsAll
+          reviewerPrompt
+          [ "dedicated English-only PR reviewer"
+          , "add inline GitHub PR review comments"
+          , "do not submit an approval review"
+          ]
+        && promptContainsAll
+          issuePrompt
+          [ "dedicated English-only issue implementer"
+          , "First triage whether the issue is already solved"
+          , "/tmp/state/issue26/issue-plan.md"
+          , "gh auth setup-git"
+          , "PR review watcher handles review threads after handoff"
+          ]
+        && promptContainsAll
+          plannerPrompt
+          [ "dedicated English-only issue planning coordinator"
+          , "only classify the listed root issues"
+          , "concrete body with scope, acceptance criteria"
+          , "12"
+          ]
+        && promptContainsAll
+          planModePrompt
+          [ "dedicated English-only issue planner"
+          , "Do not edit implementation files"
+          , "/tmp/state/issue26/issue-state.json"
+          , "This turn is running in Codex Plan mode"
+          ]
+        && "{{" `Text.isInfixOf` workerPrompt == False
+        && "{{" `Text.isInfixOf` reviewerPrompt == False
+        && "{{" `Text.isInfixOf` issuePrompt == False
+        && "{{" `Text.isInfixOf` plannerPrompt == False
+        && "{{" `Text.isInfixOf` planModePrompt == False
+
+prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions :: Bool
+prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
+  let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 26) (BranchName "codex/issue-26")
+      threadId = ThreadId "issue-worker-26"
+      compiled =
+        compileEffectPlan
+          (effectRuntimeConfig issueConfig.issueRepo "/tmp/work" 40)
+          [SomeEffect (StartIssuePlanWorkerTurn issueConfig threadId)]
+   in case compiled.compiledActions of
+        [PlannedAppServerRequest request] ->
+          lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
+            && maybe
+              False
+              (\instructions -> promptContainsAll instructions ["dedicated English-only issue planner", "#26", "/tmp/work", "/tmp/work/.watcher/issue-plan.md"])
+              (collaborationDeveloperInstructions request.requestParams)
+            && compiled.compiledNextRequestId == 41
+        _ -> False
+
+promptContainsAll :: Text -> [Text] -> Bool
+promptContainsAll prompt =
+  all (`Text.isInfixOf` prompt)
+
+collaborationDeveloperInstructions :: Value -> Maybe Text
+collaborationDeveloperInstructions params = do
+  collaboration <- lookupValue "collaborationMode" params
+  settings <- lookupValue "settings" collaboration
+  case lookupValue "developer_instructions" settings of
+    Just (String instructions) -> Just instructions
+    _ -> Nothing
 
 prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds :: ThreadId -> ThreadId -> Bool
 prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerThread =
@@ -2852,6 +2934,8 @@ main = do
       , quickCheckResult prop_turnClassifierBlocksMissingOutputs
       , quickCheckResult prop_effectInterpreterIssuePlanCompletionOrdersPublishBeforeWorker
       , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
+      , quickCheckResult prop_threadDeveloperPromptTemplatesPortNodeProtocols
+      , quickCheckResult prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
       , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
       , quickCheckResult prop_effectInterpreterRecordPlanningGraphWritesState

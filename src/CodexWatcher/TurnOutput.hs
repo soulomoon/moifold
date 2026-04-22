@@ -2,8 +2,11 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module CodexWatcher.TurnOutput
-  ( issueImplementationTurnInput
+  ( issueImplementerThreadDeveloperInstructions
+  , issueImplementationTurnInput
+  , issuePlanModeDeveloperInstructions
   , issuePlanTurnInput
+  , issuePlanningThreadDeveloperInstructions
   , issueTriageTurnInput
   , prReviewWorkerTurnInput
   , prReviewThreadDeveloperInstructions
@@ -16,20 +19,28 @@ module CodexWatcher.TurnOutput
   ) where
 
 import CodexWatcher.PromptTemplates
-  ( issueImplementationTemplate
+  ( completionContractTemplate
+  , issueImplementationTemplate
+  , issueImplementThreadDeveloperTemplate
+  , issuePlanModeDeveloperTemplate
   , issuePlanTemplate
+  , issuePlanningThreadDeveloperTemplate
   , issueTriageTemplate
   , plannerTemplate
+  , prReviewReviewerThreadDeveloperTemplate
+  , prReviewWorkerThreadDeveloperTemplate
   , prReviewWorkerTemplate
-  , prReviewThreadDeveloperTemplate
+  , publishProtocolTemplate
   , renderTemplate
   , reviewerPromptVersion
   , reviewerTemplate
+  , validationProtocolTemplate
   )
 import CodexWatcher.Types
 import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
+import System.FilePath ((</>))
 
 structuredTurnOutputSchema :: Value
 structuredTurnOutputSchema =
@@ -126,17 +137,85 @@ prReviewWorkerTurnInput :: Text
 prReviewWorkerTurnInput =
   renderTemplate prReviewWorkerTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
 
-prReviewThreadDeveloperInstructions :: FilePath -> PrConfig -> Text -> Text
-prReviewThreadDeveloperInstructions workdir config role =
+prReviewThreadDeveloperInstructions :: FilePath -> FilePath -> PrConfig -> Text -> Text
+prReviewThreadDeveloperInstructions workdir stateDir config role
+  | role == "reviewer" =
+      renderPrReviewReviewerThreadDeveloperInstructions workdir config
+  | otherwise =
+      renderPrReviewWorkerThreadDeveloperInstructions workdir stateDir config
+
+renderPrReviewWorkerThreadDeveloperInstructions :: FilePath -> FilePath -> PrConfig -> Text
+renderPrReviewWorkerThreadDeveloperInstructions workdir stateDir config =
   renderTemplate
-    prReviewThreadDeveloperTemplate
-    [ ("role", role)
-    , ("repoFullName", unRepoName config.prRepo)
+    prReviewWorkerThreadDeveloperTemplate
+    [ ("repoFullName", unRepoName config.prRepo)
     , ("prNumber", Text.pack (show (unPrNumber config.prNumber)))
+    , ("prUrl", prUrl config.prRepo config.prNumber)
     , ("workdir", Text.pack workdir)
-    , ("branch", unBranchName config.prBranch)
-    , ("model", "gpt-5.4")
-    , ("effort", "xhigh")
+    , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.prBranch)
+    , ("workerModel", "gpt-5.4")
+    , ("workerEffort", "xhigh")
+    , ("validationProtocol", validationProtocol (stateDir </> "agent-state.json"))
+    , ("publishProtocol", publishProtocol (stateDir </> "agent-state.json") config.prBranch)
+    , ("completionContract", completionContract (stateDir </> "agent-state.json"))
+    ]
+
+renderPrReviewReviewerThreadDeveloperInstructions :: FilePath -> PrConfig -> Text
+renderPrReviewReviewerThreadDeveloperInstructions workdir config =
+  renderTemplate
+    prReviewReviewerThreadDeveloperTemplate
+    [ ("repoFullName", unRepoName config.prRepo)
+    , ("prNumber", Text.pack (show (unPrNumber config.prNumber)))
+    , ("prUrl", prUrl config.prRepo config.prNumber)
+    , ("workdir", Text.pack workdir)
+    , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.prBranch)
+    , ("reviewerModel", "gpt-5.4")
+    , ("reviewerEffort", "xhigh")
+    ]
+
+issueImplementerThreadDeveloperInstructions :: FilePath -> FilePath -> IssueConfig -> Text
+issueImplementerThreadDeveloperInstructions workdir stateDir config =
+  renderTemplate
+    issueImplementThreadDeveloperTemplate
+    [ ("repoFullName", unRepoName config.issueRepo)
+    , ("issueNumber", Text.pack (show (unIssueNumber config.issueNumber)))
+    , ("issueUrl", issueUrl config.issueRepo config.issueNumber)
+    , ("workdir", Text.pack workdir)
+    , ("baseBranch", "origin/HEAD")
+    , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)
+    , ("workerModel", "gpt-5.4")
+    , ("workerEffort", "xhigh")
+    , ("issueStatePath", Text.pack (stateDir </> "issue-state.json"))
+    , ("issuePlanPath", Text.pack (stateDir </> "issue-plan.md"))
+    , ("gitUserName", "codex-watcher")
+    , ("gitUserEmail", "codex-watcher@users.noreply.github.com")
+    ]
+
+issuePlanningThreadDeveloperInstructions :: FilePath -> RepoName -> [IssueNumber] -> Text
+issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues =
+  renderTemplate
+    issuePlanningThreadDeveloperTemplate
+    [ ("repoFullName", unRepoName repo)
+    , ("plannerModel", "gpt-5.4")
+    , ("plannerEffort", "xhigh")
+    , ("issueSnapshotPath", Text.pack (stateDir </> "issue-snapshot.json"))
+    , ("scopeInstructions", issuePlanningScopeInstructions scopeIssues)
+    ]
+
+issuePlanModeDeveloperInstructions :: FilePath -> FilePath -> IssueConfig -> Text
+issuePlanModeDeveloperInstructions workdir stateDir config =
+  renderTemplate
+    issuePlanModeDeveloperTemplate
+    [ ("repoFullName", unRepoName config.issueRepo)
+    , ("issueNumber", Text.pack (show (unIssueNumber config.issueNumber)))
+    , ("issueUrl", issueUrl config.issueRepo config.issueNumber)
+    , ("workdir", Text.pack workdir)
+    , ("baseBranch", "origin/HEAD")
+    , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)
+    , ("workerModel", "gpt-5.4")
+    , ("planEffort", "xhigh")
+    , ("issueStatePath", Text.pack (stateDir </> "issue-state.json"))
+    , ("issuePlanPath", Text.pack (stateDir </> "issue-plan.md"))
     ]
 
 reviewerTurnInput :: FilePath -> FilePath -> PrConfig -> CommitSha -> Text
@@ -151,6 +230,57 @@ reviewerTurnInput workdir reviewerStatePath config reviewTargetSha =
     , ("reviewerPromptVersion", reviewerPromptVersion)
     , ("reviewerStatePath", Text.pack reviewerStatePath)
     ]
+
+validationProtocol :: FilePath -> Text
+validationProtocol agentStatePath =
+  renderTemplate
+    validationProtocolTemplate
+    [("agentStatePath", Text.pack agentStatePath)]
+
+publishProtocol :: FilePath -> BranchName -> Text
+publishProtocol agentStatePath branch =
+  renderTemplate
+    publishProtocolTemplate
+    [ ("agentStatePath", Text.pack agentStatePath)
+    , ("gitUserName", "codex-watcher")
+    , ("gitUserEmail", "codex-watcher@users.noreply.github.com")
+    , ("prHeadBranch", unBranchName branch)
+    ]
+
+completionContract :: FilePath -> Text
+completionContract agentStatePath =
+  renderTemplate
+    completionContractTemplate
+    [("agentStatePath", Text.pack agentStatePath)]
+
+prUrl :: RepoName -> PrNumber -> Text
+prUrl repo number =
+  "https://github.com/" <> unRepoName repo <> "/pull/" <> Text.pack (show (unPrNumber number))
+
+issueUrl :: RepoName -> IssueNumber -> Text
+issueUrl repo number =
+  "https://github.com/" <> unRepoName repo <> "/issues/" <> Text.pack (show (unIssueNumber number))
+
+branchOrUnknownUseTools :: BranchName -> Text
+branchOrUnknownUseTools branch =
+  let value = Text.strip (unBranchName branch)
+   in if Text.null value then "unknown; inspect repository remotes" else value
+
+issuePlanningScopeInstructions :: [IssueNumber] -> Text
+issuePlanningScopeInstructions [] =
+  ""
+issuePlanningScopeInstructions scopeIssues =
+  Text.unlines
+    [ ""
+    , "Target scope:"
+    , "- Only these root issues and their existing or newly created GitHub sub-issues are in scope: " <> issueNumbersText scopeIssues <> "."
+    , "- Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees."
+    , "- If a scoped root issue needs decomposition, propose concrete GitHub sub-issues under that root, then let the watcher re-enter planning."
+    ]
+
+issueNumbersText :: [IssueNumber] -> Text
+issueNumbersText numbers =
+  Text.intercalate ", " (fmap (Text.pack . show . unIssueNumber) numbers)
 
 stringField :: Value
 stringField =

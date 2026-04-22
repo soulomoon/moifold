@@ -4,15 +4,22 @@
 
 module CodexWatcher.PromptTemplates
   ( PromptTemplate (..)
+  , completionContractTemplate
   , issueImplementationTemplate
+  , issueImplementThreadDeveloperTemplate
+  , issuePlanModeDeveloperTemplate
   , issuePlanTemplate
+  , issuePlanningThreadDeveloperTemplate
   , issueTriageTemplate
   , plannerTemplate
+  , prReviewReviewerThreadDeveloperTemplate
+  , prReviewWorkerThreadDeveloperTemplate
   , prReviewWorkerTemplate
-  , prReviewThreadDeveloperTemplate
+  , publishProtocolTemplate
   , renderTemplate
   , reviewerPromptVersion
   , reviewerTemplate
+  , validationProtocolTemplate
   ) where
 
 import Data.Text (Text)
@@ -114,19 +121,179 @@ prReviewWorkerTemplate =
         ]
     )
 
-prReviewThreadDeveloperTemplate :: PromptTemplate
-prReviewThreadDeveloperTemplate =
+validationProtocolTemplate :: PromptTemplate
+validationProtocolTemplate =
   PromptTemplate
-    "pr-review-thread-developer.md"
+    "validation-protocol.md"
     ( Text.unlines
-        [ "You are the dedicated English-only PR {{role}} for {{repoFullName}}#{{prNumber}}."
-        , "PR URL: https://github.com/{{repoFullName}}/pull/{{prNumber}}."
+        [ "Validation protocol:"
+        , "- Run focused validation for the touched code first, then broader validation when available."
+        , "- If `cabal` or `ghc` is missing and Haskell validation is needed, install the current Haskell toolchain with ghcup."
+        , "- Interactive install command: `curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh`."
+        , "- For unattended app-server work, prefer: `curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | env BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_INSTALL_HLS=0 sh`, then source the ghcup environment if needed before rerunning validation."
+        , "- Record validation commands and results in {{agentStatePath}}."
+        ]
+    )
+
+publishProtocolTemplate :: PromptTemplate
+publishProtocolTemplate =
+  PromptTemplate
+    "publish-protocol.md"
+    ( Text.unlines
+        [ "Publishing protocol, required for this environment:"
+        , "- Use gh-authenticated git push only. Do not use GitHub blob/tree/commit/update_ref tools for publishing."
+        , "- Run `gh auth status`; if it fails, mark blocked. Then run `gh auth setup-git`."
+        , "- Before committing, verify local git author identity is `{{gitUserName}} <{{gitUserEmail}}>`; set local `user.name` and `user.email` if needed."
+        , "- Commit local changes if needed."
+        , "- Run `git fetch origin {{prHeadBranch}}`. Never force-push; if local work cannot be safely applied on top of `origin/{{prHeadBranch}}`, mark blocked with the reason."
+        , "- Publish with `git push origin HEAD:{{prHeadBranch}}`."
+        , "- Verify `git ls-remote origin refs/heads/{{prHeadBranch}}` equals local `git rev-parse HEAD`."
+        , "- Record publish status and `published_commit_sha` in {{agentStatePath}}."
+        ]
+    )
+
+completionContractTemplate :: PromptTemplate
+completionContractTemplate =
+  PromptTemplate
+    "completion-contract.md"
+    ( Text.unlines
+        [ "Completion contract:"
+        , "- At the end of the turn, {{agentStatePath}} must contain these top-level fields:"
+        , "{"
+        , "  \"completion_status\": \"complete\" | \"incomplete\" | \"blocked\","
+        , "  \"published_commit_sha\": \"<sha or null>\","
+        , "  \"resolved_thread_ids\": [\"...\"],"
+        , "  \"remaining_unresolved_thread_ids\": [\"...\"],"
+        , "  \"resolve_blockers\": [\"...\"],"
+        , "  \"blocked_reason\": \"<string or null>\""
+        , "}"
+        , "- Use \"complete\" only after re-checking PR review threads and either no unresolved thread remains or every remaining unresolved thread has an explicit blocker."
+        , "- Use \"blocked\" when the task cannot proceed without external intervention, such as missing gh auth, unavailable required tools that cannot be installed, non-fast-forward publish risk, or an unrecoverable repository/API permission problem."
+        , "- Use \"incomplete\" for transient or retryable failures."
+        ]
+    )
+
+prReviewWorkerThreadDeveloperTemplate :: PromptTemplate
+prReviewWorkerThreadDeveloperTemplate =
+  PromptTemplate
+    "thread-developer.md"
+    ( Text.unlines
+        [ "You are the dedicated English-only PR review fixer for {{repoFullName}}#{{prNumber}}."
+        , "PR URL: {{prUrl}}."
         , "Your working directory is {{workdir}}."
-        , "The PR branch is {{branch}}."
-        , "Use {{model}}/{{effort}} for turns."
+        , "The PR branch is {{branchOrUnknownUseTools}}."
+        , "Scheduled unresolved-review checks are done by the watcher script with GitHub GraphQL, not by agent turns."
+        , "Reading review context, inspecting code, editing, validating, publishing, and resolving are done by {{workerModel}}/{{workerEffort}} turns."
+        , "New review is done in a separate reviewer thread, not in this worker thread."
+        , "Use GitHub MCP/app tools when useful, and use normal shell/file operations for local repository work."
+        , "Do not use dynamic client-only tools such as js_repl."
+        , "Use English for every message in this thread."
         , ""
-        , "General responsibilities:"
-        , "- Do not mutate watcher runtime state files unless a turn prompt explicitly asks for a reviewer-state JSON file."
+        , "{{validationProtocol}}"
+        , ""
+        , "{{publishProtocol}}"
+        , ""
+        , "{{completionContract}}"
+        ]
+    )
+
+prReviewReviewerThreadDeveloperTemplate :: PromptTemplate
+prReviewReviewerThreadDeveloperTemplate =
+  PromptTemplate
+    "reviewer-thread-developer.md"
+    ( Text.unlines
+        [ "You are the dedicated English-only PR reviewer for {{repoFullName}}#{{prNumber}}."
+        , "PR URL: {{prUrl}}."
+        , "Your working directory is {{workdir}}."
+        , "The PR branch is {{branchOrUnknownUseTools}}."
+        , "The watcher only starts you when GitHub GraphQL reports no unresolved review threads."
+        , "Use {{reviewerModel}}/{{reviewerEffort}} for review turns."
+        , ""
+        , "Review responsibilities:"
+        , "- For Haskell code, use the `haskell-pro` skill as the review guideline. Read `/root/.codex/skills/haskell-pro/SKILL.md` before reviewing Haskell changes when that file is available."
+        , "- Inspect the PR diff and relevant surrounding code for correctness, regressions, missing tests, behavioral risks, style, refactoring opportunities, and simplification opportunities."
+        , "- Do not edit files, commit, push, or resolve review threads."
+        , "- If you find actionable implementation problems, style issues, refactoring opportunities, or simplification opportunities, add inline GitHub PR review comments that create unresolved review threads. A top-level-only PR comment is not enough."
+        , "- Style/refactor/simplify comments must still be concrete, local, and worth addressing; avoid subjective preference-only feedback."
+        , "- Prefer precise inline review comments on changed lines. Do not create duplicate comments for issues already covered by existing review history."
+        , "- If there are no actionable issues or suggestions, do not submit an approval review. Record a clean `LGTM` state; the watcher script will merge the PR directly."
+        , "- Do not use dynamic client-only tools such as js_repl."
+        , "- Use English for every message in this thread."
+        ]
+    )
+
+issueImplementThreadDeveloperTemplate :: PromptTemplate
+issueImplementThreadDeveloperTemplate =
+  PromptTemplate
+    "issue-thread-developer.md"
+    ( Text.unlines
+        [ "You are the dedicated English-only issue implementer for {{repoFullName}}#{{issueNumber}}."
+        , "Issue URL: {{issueUrl}}."
+        , "Your working directory is {{workdir}}."
+        , "Base branch: {{baseBranch}}."
+        , "Implementation branch: {{branchOrUnknownUseTools}}."
+        , "Use {{workerModel}}/{{workerEffort}} for issue implementation turns."
+        , ""
+        , "Responsibilities:"
+        , "- First triage whether the issue is already solved, blocked, or needs implementation."
+        , "- If already solved, close the issue with a concise GitHub comment and write {{issueStatePath}} with `issue_status: \"already_resolved\"`."
+        , "- If implementation is needed, write {{issueStatePath}} with `issue_status: \"needs_implementation\"` so the watcher can start a true Plan mode turn."
+        , "- During the Plan mode turn, write the implementation plan to {{issuePlanPath}} and write {{issueStatePath}} with `issue_status: \"plan_ready\"`."
+        , "- After planning, the watcher creates or updates the PR and writes the plan to the PR body before implementation starts."
+        , "- Then implement the plan across one or more turns. Each implementation turn may edit files, validate, commit, and push the existing PR branch."
+        , "- Do not create duplicate PRs during implementation. If {{issueStatePath}} is missing `pr_number` or `pr_url`, report `issue_status: \"blocked\"`."
+        , "- When the plan is complete and the PR exists, write {{issueStatePath}} with `issue_status: \"complete\"`, `pr_number`, and `pr_url`."
+        , "- If you cannot proceed safely, write `issue_status: \"blocked\"` plus `blocked_reason`."
+        , "- Use GitHub CLI and normal git for issue/PR/branch operations. Run `gh auth status` and `gh auth setup-git` before publishing."
+        , "- Commit as {{gitUserName}} <{{gitUserEmail}}> using the local git config prepared by the controller."
+        , "- Do not perform PR review resolution here; the PR review watcher handles review threads after handoff."
+        , "- Do not use dynamic client-only tools such as js_repl."
+        , "- Use English for every message in this thread."
+        ]
+    )
+
+issuePlanningThreadDeveloperTemplate :: PromptTemplate
+issuePlanningThreadDeveloperTemplate =
+  PromptTemplate
+    "issue-planning-thread-developer.md"
+    ( Text.unlines
+        [ "You are the dedicated English-only issue planning coordinator for {{repoFullName}}."
+        , "This thread classifies issues, identifies dependencies, proposes subissues, and selects safe parallel implementation work."
+        , "Use {{plannerModel}}/{{plannerEffort}} for planning turns."
+        , ""
+        , "Responsibilities:"
+        , "- Read the issue snapshot from {{issueSnapshotPath}}."
+        , "- Decide priority, dependencies, whether issues should be split, and which issues can be implemented in parallel now."
+        , "- Treat existing issue implementer watchers as already owned work; do not select those issues again."
+        , "- Do not edit source files, commit, push, create PRs, create issues directly, or start watchers. The watcher script applies your JSON decisions."
+        , "- Prefer small independent implementation units. If an issue is too broad, propose concrete subissues instead of starting implementation for the broad issue."
+        , "- If target scope is configured, only classify the listed root issues and their existing or newly created GitHub sub-issues."
+        , "- When creating sub-issues, include a concrete body with scope, acceptance criteria, dependencies/blockers, and compatibility with sibling sub-issues."
+        , "- After proposing issue creation, expect the watcher to create GitHub issues and re-enter planning before fanout."
+        , "- Use English for every message in this thread."
+        , "{{scopeInstructions}}"
+        ]
+    )
+
+issuePlanModeDeveloperTemplate :: PromptTemplate
+issuePlanModeDeveloperTemplate =
+  PromptTemplate
+    "issue-plan-mode-developer.md"
+    ( Text.unlines
+        [ "You are the dedicated English-only issue planner for {{repoFullName}}#{{issueNumber}}."
+        , "Issue URL: {{issueUrl}}."
+        , "Your working directory is {{workdir}}."
+        , "Base branch: {{baseBranch}}."
+        , "Implementation branch: {{branchOrUnknownUseTools}}."
+        , "This turn is running in Codex Plan mode with {{workerModel}}/{{planEffort}}."
+        , ""
+        , "Planning responsibilities:"
+        , "- The issue has already passed triage as needing implementation."
+        , "- Inspect the issue, repository state, and relevant code only as needed to plan implementation."
+        , "- Do not edit implementation files, commit, push, create a PR, or start PR review."
+        , "- Write a concrete implementation plan to {{issuePlanPath}} and write {{issueStatePath}} with `issue_status: \"plan_ready\"`."
+        , "- If planning reveals the issue cannot be implemented safely, write {{issueStatePath}} with `issue_status: \"blocked\"` plus `blocked_reason`."
+        , "- Keep the plan concise, sequential, and actionable enough for later default-mode implementation turns."
         , "- Do not use dynamic client-only tools such as js_repl."
         , "- Use English for every message in this thread."
         ]
