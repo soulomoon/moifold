@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -34,10 +35,12 @@ import Data.List (nub, sortOn)
 import Data.Maybe (catMaybes)
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
-import System.Environment (getArgs)
+import System.Environment (getArgs, getExecutablePath)
 import System.Exit (die)
 import System.FilePath (takeDirectory, (</>))
+import System.IO (IOMode (AppendMode), hFlush, withFile)
 import System.Posix.Process (getProcessID)
+import System.Process qualified as Process
 import Text.Read (readMaybe)
 
 main :: IO ()
@@ -62,9 +65,9 @@ main =
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
-      putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N [--open-issues 1,2] [--active-issues 3] [--execute]"
+      putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N [--open-issues 1,2] [--active-issues 3] [--execute] [--start-children]"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
-      putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop]"
+      putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop] [--implementers-root <path> --start-children]"
       putStrLn "type-level domains:"
       print [IssuePlanning, IssueImplement, PrReview]
       putStrLn ("example repo newtype is available: " <> Text.unpack (unRepoName (RepoName "soulomoon/mlf2")))
@@ -108,6 +111,9 @@ issueFanout args = do
   maxParallel <- requiredIntFlag "--max-parallel" args
   openIssues <- resolveFanoutOpenIssues args repo
   activeIssues <- resolveFanoutActiveIssues args repo implementersRoot
+  let executionMode = if hasFlag "--execute" args then ExecuteActions else DryRunActions
+      maybeEndpoint = healthcheckAppServerEndpoint args
+  childLaunch <- issueImplementerChildLaunchMode args executionMode maybeEndpoint
   let fanoutConfig =
         (defaultIssuePlanningFanoutConfig implementersRoot)
           { fanoutWorkdirRoot = lookupFlag "--workdir-root" args
@@ -116,10 +122,11 @@ issueFanout args = do
           }
       plannerConfig = PlannerConfig repo maxParallel
       launches = planIssueImplementerLaunches fanoutConfig plannerConfig activeIssues openIssues
-      maybeEndpoint = healthcheckAppServerEndpoint args
-  if hasFlag "--execute" args
-    then runIssueImplementerLaunches ExecuteActions maybeEndpoint launches
-    else runIssueImplementerLaunches DryRunActions Nothing launches
+      launchEndpoint =
+        case executionMode of
+          ExecuteActions -> maybeEndpoint
+          DryRunActions -> Nothing
+  runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
   putStrLn ("launches: " <> show (length launches))
 
 resolveFanoutOpenIssues :: [String] -> RepoName -> IO [IssueNumber]
@@ -162,13 +169,30 @@ loadIssueImplementerConfigIssue repo stateDir = do
           | configRepo == repo -> pure (Just issue)
           | otherwise -> pure Nothing
 
-runIssueImplementerLaunches :: ActionExecutionMode -> Maybe AppServerEndpoint -> [IssueImplementerLaunchPlan] -> IO ()
-runIssueImplementerLaunches DryRunActions _endpoint launches =
+data IssueImplementerChildLaunch
+  = DoNotLaunchChildren
+  | PrintChildLaunchCommands AppServerEndpoint Int
+  | StartChildLaunches AppServerEndpoint Int
+
+issueImplementerChildLaunchMode :: [String] -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
+issueImplementerChildLaunchMode args executionMode maybeEndpoint
+  | not (hasFlag "--start-children" args) = pure DoNotLaunchChildren
+  | otherwise = do
+      endpoint <- maybe (die "--start-children requires --app-server-host and --app-server-port") pure maybeEndpoint
+      let pollSeconds = maybe 30 id (lookupFlag "--child-poll-seconds" args <|> lookupFlag "--poll-seconds" args >>= readMaybe)
+      pure case executionMode of
+        DryRunActions -> PrintChildLaunchCommands endpoint pollSeconds
+        ExecuteActions -> StartChildLaunches endpoint pollSeconds
+
+runIssueImplementerLaunches :: ActionExecutionMode -> Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> [IssueImplementerLaunchPlan] -> IO ()
+runIssueImplementerLaunches DryRunActions _endpoint childLaunch launches = do
   mapM_ printIssueImplementerLaunch launches
-runIssueImplementerLaunches ExecuteActions maybeEndpoint launches = do
+  mapM_ (printIssueImplementerChildLaunch childLaunch) launches
+runIssueImplementerLaunches ExecuteActions maybeEndpoint childLaunch launches = do
   mapM_ ensureIssueImplementerLaunchWritable launches
   preparedLaunches <- traverse (uncurry (prepareIssueImplementerLaunch maybeEndpoint)) (zip [8000 ..] launches)
   mapM_ writeIssueImplementerLaunch preparedLaunches
+  mapM_ (startIssueImplementerChild childLaunch) preparedLaunches
 
 ensureIssueImplementerLaunchWritable :: IssueImplementerLaunchPlan -> IO ()
 ensureIssueImplementerLaunchWritable launch = do
@@ -228,6 +252,66 @@ printIssueImplementerLaunch launch =
 writeCompatibilityLaunch :: RuntimeInterpreter IO -> CompatibilityWrite -> IO ()
 writeCompatibilityLaunch interpreter write =
   interpreter.runtimeWriteJsonValue write.compatibilityWritePath write.compatibilityWriteValue
+
+printIssueImplementerChildLaunch :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
+printIssueImplementerChildLaunch DoNotLaunchChildren _launch =
+  pure ()
+printIssueImplementerChildLaunch (PrintChildLaunchCommands endpoint pollSeconds) launch = do
+  executable <- getExecutablePath
+  putStrLn ("child command: " <> unwords (executable : issueImplementerChildArgs endpoint pollSeconds launch))
+printIssueImplementerChildLaunch StartChildLaunches {} _launch =
+  pure ()
+
+startIssueImplementerChild :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
+startIssueImplementerChild DoNotLaunchChildren _launch =
+  pure ()
+startIssueImplementerChild (PrintChildLaunchCommands endpoint pollSeconds) launch =
+  printIssueImplementerChildLaunch (PrintChildLaunchCommands endpoint pollSeconds) launch
+startIssueImplementerChild (StartChildLaunches endpoint pollSeconds) launch = do
+  executable <- getExecutablePath
+  let stdoutPath = launch.launchStateDir </> "daemon.log"
+      stderrPath = launch.launchStateDir </> "daemon.err.log"
+      childArgs = issueImplementerChildArgs endpoint pollSeconds launch
+  withFile stdoutPath AppendMode \stdoutHandle ->
+    withFile stderrPath AppendMode \stderrHandle -> do
+      hFlush stdoutHandle
+      hFlush stderrHandle
+      (_, _, _, processHandle) <-
+        Process.createProcess
+          (Process.proc executable childArgs)
+            { Process.std_out = Process.UseHandle stdoutHandle
+            , Process.std_err = Process.UseHandle stderrHandle
+            , Process.close_fds = True
+            }
+      pid <- Process.getPid processHandle
+      putStrLn
+        ( "started issue implementer "
+            <> show (unIssueNumber (launchIssueNumber launch))
+            <> " pid "
+            <> maybe "unknown" show pid
+        )
+
+issueImplementerChildArgs :: AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> [String]
+issueImplementerChildArgs endpoint pollSeconds launch =
+  [ "run-issue-implement"
+  , "--events"
+  , launch.launchEventsPath
+  , "--state-dir"
+  , launch.launchStateDir
+  , "--repo"
+  , Text.unpack (unRepoName launch.launchIssueConfig.issueRepo)
+  , "--workdir"
+  , maybe "." id launch.launchWorkdir
+  , "--app-server-host"
+  , endpoint.appServerHost
+  , "--app-server-port"
+  , show endpoint.appServerPort
+  , "--poll-seconds"
+  , show pollSeconds
+  , "--execute"
+  , "--loop"
+  ]
+    <> if endpoint.appServerPath == "/" then [] else ["--app-server-path", endpoint.appServerPath]
 
 launchIssueNumber :: IssueImplementerLaunchPlan -> IssueNumber
 launchIssueNumber launch =
@@ -346,7 +430,8 @@ issuePlanningFanoutAfterTick args endpoint executionMode domain tick =
                 case executionMode of
                   ExecuteActions -> Just endpoint
                   DryRunActions -> Nothing
-          runIssueImplementerLaunches executionMode launchEndpoint launches
+          childLaunch <- issueImplementerChildLaunchMode args executionMode (Just endpoint)
+          runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
           putStrLn ("planner fanout launches: " <> show (length launches))
     _ -> pure ()
 
