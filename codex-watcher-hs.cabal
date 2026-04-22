@@ -40,6 +40,7 @@ library
     CodexWatcher.GhGit
     CodexWatcher.GoldenReplay
     CodexWatcher.Healthcheck
+    CodexWatcher.IssuePlanningFanout
     CodexWatcher.IssueImplementWatcher
     CodexWatcher.IssuePlanningWatcher
     CodexWatcher.Json

@@ -19,6 +19,7 @@ import CodexWatcher.EventLog
 import CodexWatcher.GhGit
 import CodexWatcher.GoldenReplay
 import CodexWatcher.IssueImplementWatcher
+import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.Migration
 import CodexWatcher.Protocol
@@ -421,6 +422,29 @@ prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive =
       active = [IssueNumber 2]
       open = [IssueNumber 1, IssueNumber 2, IssueNumber 3, IssueNumber 4]
    in selectIssueImplementationStarts config active open == [IssueNumber 1, IssueNumber 3]
+
+prop_issuePlanningFanoutBuildsLaunchPlans :: Bool
+prop_issuePlanningFanoutBuildsLaunchPlans =
+  let plannerConfig = PlannerConfig (RepoName "owner/name") 3
+      fanoutConfig =
+        (defaultIssuePlanningFanoutConfig "/tmp/implementers")
+          { fanoutWorkdirRoot = Just "/tmp/worktrees"
+          }
+      launches = planIssueImplementerLaunches fanoutConfig plannerConfig [IssueNumber 2] [IssueNumber 1, IssueNumber 2, IssueNumber 3, IssueNumber 4]
+      launchIssues = fmap (issueNumberOfConfig . launchIssueConfig) launches
+   in case launches of
+        firstLaunch : _ ->
+          launchIssues == [IssueNumber 1, IssueNumber 3]
+            && launchStateDir firstLaunch == "/tmp/implementers/owner_name__issue1"
+            && launchEventsPath firstLaunch == "/tmp/implementers/owner_name__issue1/events.jsonl"
+            && launchWorkdir firstLaunch == Just "/tmp/worktrees/owner_name__issue1"
+            && launchInitialEvent firstLaunch == IssueImplementInitialized (launchIssueConfig firstLaunch) (launchThreadId firstLaunch)
+            && length (launchCompatibilityWrites firstLaunch) == 2
+            && lookupValue "threadId" (launchConfigJson firstLaunch) == Just (String "issue-worker-1")
+            && lookupValue "branch" (launchConfigJson firstLaunch) == Just (String "codex/issue-1")
+        [] -> False
+ where
+  issueNumberOfConfig (IssueConfig _ issue _) = issue
 
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
@@ -1635,6 +1659,7 @@ main = do
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
       , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
+      , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases
