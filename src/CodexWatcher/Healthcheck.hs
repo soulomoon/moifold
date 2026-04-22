@@ -12,9 +12,11 @@ module CodexWatcher.Healthcheck
   , runHealthcheck
   ) where
 
+import CodexWatcher.AppServerClient
+import CodexWatcher.AppServerProtocol
 import CodexWatcher.EventLog
 import CodexWatcher.Runtime
-import CodexWatcher.Types (BranchName (..), Domain (..), PrNumber (..), RepoName (..), someDomain, somePhase)
+import CodexWatcher.Types (BranchName (..), Domain (..), PrNumber (..), RepoName (..), ThreadId (..), TurnId (..), someDomain, somePhase)
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad (filterM)
@@ -51,6 +53,7 @@ import System.IO.Error (isDoesNotExistError)
 data HealthcheckOptions = HealthcheckOptions
   { stateRoot :: FilePath
   , repoFilter :: Maybe Text
+  , appServerEndpoint :: Maybe AppServerEndpoint
   }
   deriving stock (Eq, Show, Generic)
 
@@ -157,6 +160,18 @@ data PidReport = PidReport
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
+data AppServerThreadReport = AppServerThreadReport
+  { skipped :: Bool
+  , ok :: Bool
+  , threadId :: Maybe Text
+  , reason :: Maybe Text
+  , turnCount :: Maybe Int
+  , latestTurnId :: Maybe Text
+  , latestTurnStatus :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON)
+
 data WatcherSummary = WatcherSummary
   { kind :: WatcherKind
   , label :: Text
@@ -180,6 +195,8 @@ data WatcherSummary = WatcherSummary
   , gitPushDryRun :: CommandReport
   , remotePr :: RemotePrReport
   , eventReplay :: EventReplayReport
+  , workerThreadInspection :: AppServerThreadReport
+  , reviewerThreadInspection :: AppServerThreadReport
   , states :: Value
   }
   deriving stock (Eq, Show, Generic)
@@ -197,7 +214,7 @@ data Problem = Problem
 runHealthcheck :: HealthcheckOptions -> IO ()
 runHealthcheck options = do
   inventory <- loadInventory options
-  summaries <- traverse summarizeItem inventory
+  summaries <- traverse (summarizeItem options) inventory
   commands <- environmentCommands
   ghAuth <- runRuntimeCommand GhAuthStatus
   ghUser <- githubUserReport
@@ -276,11 +293,11 @@ listConfigDirs root = do
           let dirs = fmap (root </>) entries
           filterM doesDirectoryExist dirs
 
-summarizeItem :: ConfigItem -> IO WatcherSummary
-summarizeItem item =
+summarizeItem :: HealthcheckOptions -> ConfigItem -> IO WatcherSummary
+summarizeItem options item =
   case item.config of
     Left error' -> summarizeBrokenItem item error'
-    Right config -> summarizeLoadedItem item config
+    Right config -> summarizeLoadedItem options item config
 
 summarizeBrokenItem :: ConfigItem -> Text -> IO WatcherSummary
 summarizeBrokenItem item error' = do
@@ -309,11 +326,13 @@ summarizeBrokenItem item error' = do
       , gitPushDryRun = skippedCommand "config failed to load"
       , remotePr = skippedRemotePr "config failed to load"
       , eventReplay = skippedEventReplay "config failed to load" Nothing
+      , workerThreadInspection = skippedAppServerThread "config failed to load" Nothing
+      , reviewerThreadInspection = skippedAppServerThread "config failed to load" Nothing
       , states = Null
       }
 
-summarizeLoadedItem :: ConfigItem -> GenericConfig -> IO WatcherSummary
-summarizeLoadedItem item config = do
+summarizeLoadedItem :: HealthcheckOptions -> ConfigItem -> GenericConfig -> IO WatcherSummary
+summarizeLoadedItem options item config = do
   let stateDir' = fromMaybe item.dir config.stateDir
       pidPath' = fallbackPidPath item.kind stateDir' config.pidPath
       eventsPath' = config.eventsPath <|> Just (stateDir' </> "events.jsonl")
@@ -327,6 +346,8 @@ summarizeLoadedItem item config = do
   gitPush <- checkGitPushDryRun config workdirReport
   remotePrReport <- checkRemotePr config
   eventReplayReport <- checkEventReplay item.kind eventsPath'
+  workerThreadReport <- checkAppServerThread options.appServerEndpoint config.threadId
+  reviewerThreadReport <- checkAppServerThread options.appServerEndpoint config.reviewerThreadId
   pure
     WatcherSummary
       { kind = item.kind
@@ -351,6 +372,8 @@ summarizeLoadedItem item config = do
       , gitPushDryRun = gitPush
       , remotePr = remotePrReport
       , eventReplay = eventReplayReport
+      , workerThreadInspection = workerThreadReport
+      , reviewerThreadInspection = reviewerThreadReport
       , states
       }
 
@@ -507,6 +530,47 @@ checkEventReplay kind (Just path') = do
                     }
 checkEventReplay _ Nothing = pure (skippedEventReplay "missing eventsPath" Nothing)
 
+checkAppServerThread :: Maybe AppServerEndpoint -> Maybe Text -> IO AppServerThreadReport
+checkAppServerThread Nothing maybeThreadId =
+  pure (skippedAppServerThread "healthcheck app-server endpoint not configured" maybeThreadId)
+checkAppServerThread (Just _endpoint) Nothing =
+  pure (skippedAppServerThread "config has no thread id" Nothing)
+checkAppServerThread (Just endpoint) (Just threadId') = do
+  result <-
+    sendOneAppServerRequest
+      endpoint
+      defaultAppServerClientOptions {appServerResponseTimeoutMicros = Just 5000000}
+      (threadReadRequest 9001 (ThreadId threadId') True)
+  pure case result of
+    Left failure ->
+      failedAppServerThread threadId' (formatAppServerClientFailure failure)
+    Right value ->
+      case parseThreadReadTurns value of
+        Left failure -> failedAppServerThread threadId' (formatAppServerClientFailure failure)
+        Right turns ->
+          let latestTurn = lastMaybe turns
+           in AppServerThreadReport
+                { skipped = False
+                , ok = True
+                , threadId = Just threadId'
+                , reason = Nothing
+                , turnCount = Just (length turns)
+                , latestTurnId = fmap (unTurnId . appServerTurnId) latestTurn
+                , latestTurnStatus = fmap appServerTurnStatus latestTurn
+                }
+
+failedAppServerThread :: Text -> Text -> AppServerThreadReport
+failedAppServerThread threadId' reason' =
+  AppServerThreadReport
+    { skipped = False
+    , ok = False
+    , threadId = Just threadId'
+    , reason = Just reason'
+    , turnCount = Nothing
+    , latestTurnId = Nothing
+    , latestTurnStatus = Nothing
+    }
+
 expectedDomain :: WatcherKind -> Domain
 expectedDomain IssuePlanningKind = IssuePlanning
 expectedDomain IssueImplementKind = IssueImplement
@@ -589,6 +653,7 @@ analyzeImplement summary
         <> [problem "warn" summary.label "workdir has uncommitted changes" Nothing | summary.workdir.dirty]
         <> [problem "warn" summary.label ("git push dry-run failed: " <> commandText summary.gitPushDryRun) Nothing | shouldWarnGitPush summary.gitPushDryRun]
         <> [problem "warn" summary.label ("issue status is " <> status <> " but daemon is not running") Nothing | Just status <- [summary.issueStatus], status `elem` activeIssueStatuses, not summary.pid.running]
+        <> appServerThreadProblems summary.label "worker" summary.workerThreadInspection
 
 analyzePrReview :: WatcherSummary -> [Problem]
 analyzePrReview summary
@@ -602,6 +667,15 @@ analyzePrReview summary
         <> [problem "warn" summary.label ("git push dry-run failed: " <> commandText summary.gitPushDryRun) Nothing | shouldWarnGitPush summary.gitPushDryRun]
         <> [problem "warn" summary.label ("cannot read remote PR state: " <> fromMaybe "unknown" summary.remotePr.errorMessage) Nothing | not summary.remotePr.skipped && not summary.remotePr.ok]
         <> [problem "error" summary.label ("events.jsonl failed Haskell replay: " <> fromMaybe "unknown" summary.eventReplay.reason) Nothing | not summary.eventReplay.skipped && not summary.eventReplay.ok]
+        <> appServerThreadProblems summary.label "worker" summary.workerThreadInspection
+        <> appServerThreadProblems summary.label "reviewer" summary.reviewerThreadInspection
+
+appServerThreadProblems :: Text -> Text -> AppServerThreadReport -> [Problem]
+appServerThreadProblems label role report =
+  [ problem "warn" label ("app-server " <> role <> " thread inspection failed: " <> fromMaybe "unknown" report.reason) Nothing
+  | not report.skipped
+  , not report.ok
+  ]
 
 workdirProblems :: WatcherSummary -> [Problem]
 workdirProblems summary =
@@ -726,13 +800,14 @@ logicReview =
            , "review/implement workdirs exist, are git checkouts, and are not dirty"
            , "gh-authenticated git push dry-run works for workdirs with branches"
            , "watcher events.jsonl can replay through the Haskell lifecycle model when present"
+           , "configured app-server threads can be read when an app-server endpoint is provided"
            , "runtime-owner marker is surfaced for migration/backout visibility when present"
            , "blocked states are surfaced instead of retried forever"
            ]
     , "notes"
         .= [ "This Haskell healthcheck is read-only." :: Text
            , "It does not mutate GitHub, app-server threads, or local checkouts."
-           , "App-server thread inspection is intentionally not implemented in this MVP."
+           , "App-server thread inspection is skipped unless --app-server-host and --app-server-port are provided."
            ]
     ]
 
@@ -780,6 +855,18 @@ skippedEventReplay reason' path' =
     , effectBatchCount = Nothing
     }
 
+skippedAppServerThread :: Text -> Maybe Text -> AppServerThreadReport
+skippedAppServerThread reason' maybeThreadId =
+  AppServerThreadReport
+    { skipped = True
+    , ok = True
+    , threadId = maybeThreadId
+    , reason = Just reason'
+    , turnCount = Nothing
+    , latestTurnId = Nothing
+    , latestTurnStatus = Nothing
+    }
+
 remotePrMerged :: Value -> Bool
 remotePrMerged (Object object') =
   KeyMap.lookup "state" object' == Just (String "MERGED")
@@ -810,6 +897,10 @@ parseRemoteSha text =
   case Text.words text of
     sha : _ -> Just sha
     [] -> Nothing
+
+lastMaybe :: [a] -> Maybe a
+lastMaybe [] = Nothing
+lastMaybe values = Just (last values)
 
 readTextFileMaybe :: FilePath -> IO (Maybe Text)
 readTextFileMaybe path = do

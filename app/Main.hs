@@ -23,11 +23,15 @@ import CodexWatcher.Snapshot
 import CodexWatcher.Types
 import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
+import Control.Exception (finally)
 import Control.Monad (unless, when)
 import Data.Aeson (Value (..))
 import Data.Text qualified as Text
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.Environment (getArgs)
 import System.Exit (die)
+import System.FilePath (takeDirectory, (</>))
+import System.Posix.Process (getProcessID)
 import Text.Read (readMaybe)
 
 main :: IO ()
@@ -49,7 +53,7 @@ main =
       putStrLn "       codex-watcher-hs replay-pr-review <node-pr-review-state-dir>"
       putStrLn "       codex-watcher-hs replay-issue-implement <node-issue-implement-state-dir>"
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
-      putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name]"
+      putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop]"
@@ -63,7 +67,16 @@ parseHealthcheckOptions args =
   HealthcheckOptions
     { stateRoot = maybe "/workspace/artifacts" id (lookupFlag "--state-root" args)
     , repoFilter = Text.pack <$> lookupFlag "--repo" args
+    , appServerEndpoint = healthcheckAppServerEndpoint args
     }
+
+healthcheckAppServerEndpoint :: [String] -> Maybe AppServerEndpoint
+healthcheckAppServerEndpoint args = do
+  host <- lookupFlag "--app-server-host" args
+  portText <- lookupFlag "--app-server-port" args
+  port <- readMaybe portText
+  let path = maybe "/" id (lookupFlag "--app-server-path" args)
+  pure (AppServerEndpoint host port path)
 
 lookupFlag :: String -> [String] -> Maybe String
 lookupFlag _ [] = Nothing
@@ -153,9 +166,12 @@ runAutomaticLoop domain args = do
         if shouldLoop
           then maybe maxBound id (lookupFlag "--iterations" args >>= readMaybe)
           else 1
+      maybePidFile =
+        lookupFlag "--pid-file" args
+          <|> if shouldLoop then Just (stateDir </> pidFileNameForDomain domain) else Nothing
   validateLoopDomain domain plannerThread
   validateRuntimeOwnerForExecution stateDir executionMode
-  runLoopIterations executor loopConfig domain shouldLoop maxIterations 1
+  runWithOptionalPidFile maybePidFile (runLoopIterations executor loopConfig domain shouldLoop maxIterations 1)
 
 runLoopIterations :: ActionExecutor IO -> DaemonLoopConfig -> String -> Bool -> Int -> Int -> IO ()
 runLoopIterations executor loopConfig domain shouldLoop maxIterations iteration = do
@@ -207,6 +223,43 @@ expectedLoopDomain :: String -> Domain
 expectedLoopDomain "pr-review" = PrReview
 expectedLoopDomain "issue-implement" = IssueImplement
 expectedLoopDomain _ = IssuePlanning
+
+pidFileNameForDomain :: String -> FilePath
+pidFileNameForDomain "pr-review" = "watcher.pid"
+pidFileNameForDomain "issue-implement" = "issue-watcher.pid"
+pidFileNameForDomain _ = "issue-planning-watcher.pid"
+
+runWithOptionalPidFile :: Maybe FilePath -> IO () -> IO ()
+runWithOptionalPidFile Nothing action = action
+runWithOptionalPidFile (Just pidPath) action = do
+  ensurePidFileAvailable pidPath
+  pidText <- Text.pack . show <$> getProcessID
+  createDirectoryIfMissing True (takeDirectory pidPath)
+  writeFile pidPath (Text.unpack pidText <> "\n")
+  action `finally` removeOwnedPidFile pidPath pidText
+
+ensurePidFileAvailable :: FilePath -> IO ()
+ensurePidFileAvailable pidPath = do
+  exists <- doesFileExist pidPath
+  when exists $ do
+    pidText <- Text.strip . Text.pack <$> readFile pidPath
+    when (not (Text.null pidText)) $ do
+      running <- isPidRunning pidText
+      when running $
+        die ("refusing to start because pid file is already running: " <> pidPath)
+
+removeOwnedPidFile :: FilePath -> Text.Text -> IO ()
+removeOwnedPidFile pidPath expectedPid = do
+  exists <- doesFileExist pidPath
+  when exists $ do
+    currentPid <- Text.strip . Text.pack <$> readFile pidPath
+    when (currentPid == expectedPid) $
+      removeFile pidPath
+
+isPidRunning :: Text.Text -> IO Bool
+isPidRunning pidText = do
+  report <- runRuntimeCommand (KillZero pidText)
+  pure report.ok
 
 validateRuntimeOwnerForExecution :: FilePath -> ActionExecutionMode -> IO ()
 validateRuntimeOwnerForExecution stateDir executionMode =
