@@ -803,9 +803,13 @@ prop_runtimeKillZeroOnlyChecksPid :: ThreadId -> Bool
 prop_runtimeKillZeroOnlyChecksPid threadId =
   let pidText = unThreadId threadId
       spec = renderRuntimeCommand (KillZero pidText)
+      termSpec = renderRuntimeCommand (KillTerm pidText)
    in spec.command == "kill"
         && spec.args == ["-0", Text.unpack pidText]
         && spec.cwd == Nothing
+        && termSpec.command == "kill"
+        && termSpec.args == ["-TERM", Text.unpack pidText]
+        && termSpec.cwd == Nothing
 
 jsonText :: Value -> Text
 jsonText =

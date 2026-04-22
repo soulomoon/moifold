@@ -52,6 +52,7 @@ main =
     ["replay-events", path] -> replayEvents path
     "healthcheck" : rest -> runHealthcheck (parseHealthcheckOptions rest)
     "mark-runtime-owner" : rest -> markRuntimeOwner rest
+    "stop-daemon" : rest -> stopDaemon rest
     "issue-fanout" : rest -> issueFanout rest
     "observe-once" : rest -> observeOnce rest
     "run-pr-review" : rest -> runAutomaticLoop "pr-review" rest
@@ -65,6 +66,7 @@ main =
       putStrLn "       codex-watcher-hs replay-events <events.jsonl>"
       putStrLn "       codex-watcher-hs healthcheck [--state-root <path>] [--repo owner/name] [--app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs mark-runtime-owner --state-dir <path> --owner node|haskell"
+      putStrLn "       codex-watcher-hs stop-daemon --pid-file <path> | --state-dir <path> --domain pr-review|issue-implement|issue-planning"
       putStrLn "       codex-watcher-hs issue-fanout --repo owner/name --implementers-root <path> --max-parallel N [--open-issues 1,2] [--active-issues 3] [--execute] [--start-children]"
       putStrLn "       codex-watcher-hs observe-once --events <events.jsonl> --state-dir <path> --repo owner/name --domain <domain> --observation <name> [--execute --app-server-host host --app-server-port port]"
       putStrLn "       codex-watcher-hs run-pr-review|run-issue-implement|run-issue-planning --events <events.jsonl> --state-dir <path> --repo owner/name --workdir <path> --app-server-host host --app-server-port port [--execute] [--loop] [--implementers-root <path> --start-children]"
@@ -103,6 +105,36 @@ markRuntimeOwner args = do
   owner <- either (die . Text.unpack) pure (parseRuntimeOwner ownerText)
   writeRuntimeOwner ioRuntimeInterpreter stateDir owner
   putStrLn ("wrote runtime owner " <> Text.unpack (runtimeOwnerText owner) <> " to " <> stateDir)
+
+stopDaemon :: [String] -> IO ()
+stopDaemon args = do
+  pidPath <- stopDaemonPidPath args
+  exists <- doesFileExist pidPath
+  if not exists
+    then putStrLn ("daemon pid file does not exist: " <> pidPath)
+    else do
+      pidText <- Text.strip . Text.pack <$> readFile pidPath
+      when (Text.null pidText) $
+        die ("daemon pid file is empty: " <> pidPath)
+      running <- isPidRunning pidText
+      if not running
+        then putStrLn ("daemon is not running for pid file: " <> pidPath)
+        else do
+          report <- runRuntimeCommand (KillTerm pidText)
+          if report.ok
+            then putStrLn ("sent TERM to daemon pid " <> Text.unpack pidText)
+            else die ("failed to stop daemon: " <> Text.unpack (commandText report))
+
+stopDaemonPidPath :: [String] -> IO FilePath
+stopDaemonPidPath args =
+  case lookupFlag "--pid-file" args of
+    Just pidPath -> pure pidPath
+    Nothing -> do
+      stateDir <- requiredFlag "--state-dir" args
+      domain <- requiredFlag "--domain" args
+      unless (domain `elem` ["pr-review", "issue-implement", "issue-planning"]) $
+        die ("unsupported daemon domain: " <> domain)
+      pure (stateDir </> pidFileNameForDomain domain)
 
 issueFanout :: [String] -> IO ()
 issueFanout args = do

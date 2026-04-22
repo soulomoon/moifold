@@ -85,7 +85,7 @@ Mark migration ownership for a watcher state directory:
 "$bin" mark-runtime-owner --state-dir /path/to/state --owner node
 ```
 
-The marker is surfaced by healthcheck and gives a simple backout handle without deleting event history or compatibility state.
+The marker is surfaced by healthcheck and gives a simple backout handle without deleting event history or compatibility state. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during rollback.
 
 Prepare issue implementer child state from a planner selection:
 

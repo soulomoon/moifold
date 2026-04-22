@@ -64,6 +64,7 @@ data RuntimeCommand
   | GitPushDryRun FilePath BranchName
   | GitPush FilePath BranchName
   | KillZero Text
+  | KillTerm Text
   | RawCommand String [String] (Maybe FilePath)
   deriving stock (Eq, Show, Generic)
 
@@ -201,6 +202,8 @@ renderRuntimeCommand (GitPush workdir branch) =
   RuntimeCommandSpec "git" ["push", "origin", Text.unpack (unBranchName branch)] (Just workdir) ""
 renderRuntimeCommand (KillZero pid) =
   RuntimeCommandSpec "kill" ["-0", Text.unpack pid] Nothing ""
+renderRuntimeCommand (KillTerm pid) =
+  RuntimeCommandSpec "kill" ["-TERM", Text.unpack pid] Nothing ""
 renderRuntimeCommand (RawCommand command' args' cwd') =
   RuntimeCommandSpec command' args' cwd' ""
 
