@@ -26,9 +26,10 @@ import Data.Aeson
   , toJSON
   , (.=)
   )
+import Data.List (mapAccumL)
 import Data.Text (Text)
-import System.FilePath ((</>))
 import GHC.Generics (Generic)
+import System.FilePath ((</>))
 
 data TurnRuntimeConfig = TurnRuntimeConfig
   { turnRuntimeCwd :: FilePath
@@ -72,15 +73,19 @@ data CompiledEffectPlan = CompiledEffectPlan
   deriving stock (Eq, Show, Generic)
 
 compileEffectPlan :: EffectRuntimeConfig -> EffectPlan -> CompiledEffectPlan
-compileEffectPlan config =
-  foldl appendCompiledEffect (CompiledEffectPlan [] config.effectRuntimeNextRequestId)
- where
-  appendCompiledEffect plan effect =
-    let (actions, nextRequestId) = compileEffect config plan.compiledNextRequestId effect
-     in CompiledEffectPlan
-          { compiledActions = plan.compiledActions <> actions
-          , compiledNextRequestId = nextRequestId
-          }
+compileEffectPlan config effects =
+  let (nextRequestId, actionBatches) =
+        mapAccumL
+          ( \requestId effect ->
+              let (actions, requestId') = compileEffect config requestId effect
+               in (requestId', actions)
+          )
+          config.effectRuntimeNextRequestId
+          effects
+   in CompiledEffectPlan
+        { compiledActions = concat actionBatches
+        , compiledNextRequestId = nextRequestId
+        }
 
 compileEffect :: EffectRuntimeConfig -> Int -> SomeEffect -> ([PlannedAction], Int)
 compileEffect config requestId (SomeEffect effect) =

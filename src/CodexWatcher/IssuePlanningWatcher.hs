@@ -14,10 +14,10 @@ module CodexWatcher.IssuePlanningWatcher
 
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
+import CodexWatcher.Observation
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.Text (Text)
-import Data.Text qualified as Text
 
 data IssuePlanningObservation
   = ObservedPlanningTurnStarted ThreadId TurnId
@@ -54,14 +54,7 @@ issuePlanningObserve (SomeWatcherState state@PlanningReady {}) (ObservedPlanning
 issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPlanningBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issuePlanningObserve state observation =
-  Left
-    ( "issue planning observation "
-        <> Text.pack (show observation)
-        <> " is invalid in "
-        <> Text.pack (show (someDomain state))
-        <> "/"
-        <> Text.pack (show (somePhase state))
-    )
+  invalidObservation "issue planning observation" state observation
 
 selectIssueImplementationStarts :: PlannerConfig -> [IssueNumber] -> [IssueNumber] -> [IssueNumber]
 selectIssueImplementationStarts config activeIssues openIssues =
@@ -70,9 +63,13 @@ selectIssueImplementationStarts config activeIssues openIssues =
   availableCapacity = max 0 (plannerMaxParallel config - length activeIssues)
 
 tick :: WatcherEvent -> Decision 'IssuePlanning -> IssuePlanningTick
-tick event (Decision state effects) =
+tick event decision =
+  fromObservedTick (observedFromDecision event decision)
+
+fromObservedTick :: ObservedTick -> IssuePlanningTick
+fromObservedTick observed =
   IssuePlanningTick
-    { issuePlanningTickEvent = event
-    , issuePlanningTickState = SomeWatcherState state
-    , issuePlanningTickEffects = effects
+    { issuePlanningTickEvent = observed.observedEvent
+    , issuePlanningTickState = observed.observedState
+    , issuePlanningTickEffects = observed.observedEffects
     }

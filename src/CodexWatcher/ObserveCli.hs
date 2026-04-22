@@ -4,6 +4,7 @@
 
 module CodexWatcher.ObserveCli
   ( observeOnce
+  , parseDaemonObservation
   ) where
 
 import CodexWatcher.ActionExecutor

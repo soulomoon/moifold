@@ -13,10 +13,10 @@ module CodexWatcher.IssueImplementWatcher
 
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
+import CodexWatcher.Observation
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.Text (Text)
-import Data.Text qualified as Text
 
 data IssueImplementObservation
   = ObservedTriageTurnStarted TurnId
@@ -110,21 +110,18 @@ issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedIss
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve state observation =
-  Left
-    ( "issue implementation observation "
-        <> Text.pack (show observation)
-        <> " is invalid in "
-        <> Text.pack (show (someDomain state))
-        <> "/"
-        <> Text.pack (show (somePhase state))
-    )
+  invalidObservation "issue implementation observation" state observation
 
 tick :: WatcherEvent -> Decision 'IssueImplement -> IssueImplementTick
-tick event (Decision state effects) =
+tick event decision =
+  fromObservedTick (observedFromDecision event decision)
+
+fromObservedTick :: ObservedTick -> IssueImplementTick
+fromObservedTick observed =
   IssueImplementTick
-    { issueImplementTickEvent = event
-    , issueImplementTickState = SomeWatcherState state
-    , issueImplementTickEffects = effects
+    { issueImplementTickEvent = observed.observedEvent
+    , issueImplementTickState = observed.observedState
+    , issueImplementTickEffects = observed.observedEffects
     }
 
 activeThreadIdFromTriage :: WatcherState 'IssueImplement 'Triage -> ThreadId

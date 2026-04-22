@@ -14,12 +14,12 @@ module CodexWatcher.PrReviewWatcher
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.GhGit
+import CodexWatcher.Observation
 import CodexWatcher.Protocol
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
-import Data.Text qualified as Text
 
 data PrReviewObservation
   = ObservedReviewThreads ReviewThreadsReport CommitSha TurnId
@@ -80,21 +80,18 @@ prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedPrReviewBl
 prReviewObserve (SomeWatcherState state@PrMerging {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 prReviewObserve state observation =
-  Left
-    ( "PR review observation "
-        <> Text.pack (show observation)
-        <> " is invalid in "
-        <> Text.pack (show (someDomain state))
-        <> "/"
-        <> Text.pack (show (somePhase state))
-    )
+  invalidObservation "PR review observation" state observation
 
 tick :: WatcherEvent -> Decision 'PrReview -> PrReviewTick
-tick event (Decision state effects) =
+tick event decision =
+  fromObservedTick (observedFromDecision event decision)
+
+fromObservedTick :: ObservedTick -> PrReviewTick
+fromObservedTick observed =
   PrReviewTick
-    { prReviewTickEvent = event
-    , prReviewTickState = SomeWatcherState state
-    , prReviewTickEffects = effects
+    { prReviewTickEvent = observed.observedEvent
+    , prReviewTickState = observed.observedState
+    , prReviewTickEffects = observed.observedEffects
     }
 
 unresolvedThreadIds :: ReviewThreadsReport -> Maybe (NonEmpty ReviewThreadId)

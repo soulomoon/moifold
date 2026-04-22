@@ -58,6 +58,7 @@ library
     CodexWatcher.IssuePlanningWatcher
     CodexWatcher.Json
     CodexWatcher.JsonPath
+    CodexWatcher.Observation
     CodexWatcher.ObserveCli
     CodexWatcher.Protocol
     CodexWatcher.PromptTemplates
@@ -66,6 +67,7 @@ library
     CodexWatcher.ReplayCli
     CodexWatcher.Runtime
     CodexWatcher.Runtime.Json
+    CodexWatcher.RuntimeStatus
     CodexWatcher.RuntimeOwner
     CodexWatcher.RuntimeOwnerCli
     CodexWatcher.RuntimeDefaults
@@ -108,7 +110,7 @@ executable codex-watcher-hs
 test-suite watcher-core-test
   import:           warnings
   type:             exitcode-stdio-1.0
-  hs-source-dirs:   test
+  hs-source-dirs:   test, app
   main-is:          Main.hs
   other-modules:
     AppServerSpec
@@ -124,6 +126,8 @@ test-suite watcher-core-test
     codex-watcher-hs,
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
+    process >=1.6 && <1.7,
     QuickCheck >=2.14 && <3,
-    text >=2.0 && <3
+    text >=2.0 && <3,
+    unix >=2.8 && <2.9
   default-language: GHC2021
