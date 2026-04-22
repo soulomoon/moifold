@@ -49,7 +49,9 @@ module CodexWatcher.Types
   , isTerminalPhase
   ) where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
+import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Control.Applicative ((<|>))
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
@@ -190,8 +192,8 @@ instance ToJSON IssueDependency where
 instance FromJSON IssueDependency where
   parseJSON = withObject "IssueDependency" $ \objectValue ->
     IssueDependency
-      <$> (parsePositiveIssueNumber =<< objectValue .: "issueNumber")
-      <*> (traverse parsePositiveIssueNumber =<< objectValue .:? "dependsOn" .!= [])
+      <$> issueNumberAlias objectValue ["issueNumber", "issue", "number"]
+      <*> issueNumberListAlias objectValue ["dependsOn", "depends_on"]
 
 data BlockedPlanningIssue = BlockedPlanningIssue
   { blockedPlanningIssue :: IssueNumber
@@ -212,8 +214,8 @@ instance FromJSON BlockedPlanningIssue where
   parseJSON = withObject "BlockedPlanningIssue" $ \objectValue -> do
     reason <- objectValue .:? "reason" .!= ""
     BlockedPlanningIssue
-      <$> (parsePositiveIssueNumber =<< objectValue .: "issueNumber")
-      <*> (traverse parsePositiveIssueNumber =<< objectValue .:? "blockedBy" .!= [])
+      <$> issueNumberAlias objectValue ["issueNumber", "issue", "number"]
+      <*> issueNumberListAlias objectValue ["blockedBy", "blocked_by"]
       <*> pure reason
 
 data PlanningGraph = PlanningGraph
@@ -232,9 +234,10 @@ instance ToJSON PlanningGraph where
       ]
 
 instance FromJSON PlanningGraph where
-  parseJSON = withObject "PlanningGraph" $ \objectValue ->
+  parseJSON = withObject "PlanningGraph" $ \objectValue -> do
+    readyIssueValues <- objectValue .:? "ready_issues" .!= ([] :: [Value])
     PlanningGraph
-      <$> (traverse parsePositiveIssueNumber =<< objectValue .:? "ready_issues" .!= [])
+      <$> traverse issueNumberValue readyIssueValues
       <*> objectValue .:? "blocked_issues" .!= []
       <*> objectValue .:? "dependencies" .!= []
 
@@ -242,6 +245,31 @@ parsePositiveIssueNumber :: Int -> Parser IssueNumber
 parsePositiveIssueNumber number
   | number > 0 = pure (IssueNumber number)
   | otherwise = fail "issue number must be positive"
+
+issueNumberValue :: Value -> Parser IssueNumber
+issueNumberValue value =
+  (parsePositiveIssueNumber =<< parseJSON value)
+    <|> withObject "IssueNumberObject" (\objectValue -> issueNumberAlias objectValue ["issueNumber", "issue", "number"]) value
+
+issueNumberAlias :: Object -> [Text] -> Parser IssueNumber
+issueNumberAlias objectValue aliases =
+  parseFirst aliases
+ where
+  parseFirst [] = fail "missing issue number"
+  parseFirst (alias : rest) =
+    case KeyMap.lookup (Key.fromText alias) objectValue of
+      Just value -> issueNumberValue value
+      Nothing -> parseFirst rest
+
+issueNumberListAlias :: Object -> [Text] -> Parser [IssueNumber]
+issueNumberListAlias objectValue aliases =
+  parseFirst aliases
+ where
+  parseFirst [] = pure []
+  parseFirst (alias : rest) =
+    case KeyMap.lookup (Key.fromText alias) objectValue of
+      Just value -> parseJSON value >>= traverse issueNumberValue
+      Nothing -> parseFirst rest
 
 data IssueConfig = IssueConfig
   { issueRepo :: RepoName
