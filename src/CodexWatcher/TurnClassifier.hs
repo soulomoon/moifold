@@ -8,6 +8,7 @@ module CodexWatcher.TurnClassifier
   ( TurnCompletion (..)
   , StructuredTurnOutcome (..)
   , classifyIssueImplementationTurn
+  , classifyIssuePlanningTurn
   , classifyIssuePlanTurn
   , classifyIssueTriageTurn
   , classifyPrReviewReviewerTurn
@@ -18,10 +19,11 @@ module CodexWatcher.TurnClassifier
 
 import CodexWatcher.AppServerClient
 import CodexWatcher.IssueImplementWatcher
+import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Protocol
 import CodexWatcher.Types
-import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
+import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?), (.!=))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -41,6 +43,15 @@ data StructuredTurnOutcome
   | StructuredProblems Text
   | StructuredClean Text
   deriving stock (Eq, Show)
+
+newtype StructuredPlanningIssueRequests = StructuredPlanningIssueRequests [IssueCreationRequest]
+  deriving stock (Eq, Show)
+
+instance FromJSON StructuredPlanningIssueRequests where
+  parseJSON = withObject "StructuredPlanningIssueRequests" \objectValue -> do
+    issues <- objectValue .:? "issues_to_create" .!= []
+    subissues <- objectValue .:? "subissues_to_create" .!= []
+    pure (StructuredPlanningIssueRequests (issues <> subissues))
 
 instance FromJSON StructuredTurnOutcome where
   parseJSON = withObject "StructuredTurnOutcome" \objectValue -> do
@@ -116,6 +127,23 @@ classifyIssueTriageTurn turn =
           Just ObservedTriageAlreadyFixed
       | otherwise ->
           Just ObservedTriageNeedsImplementation
+
+classifyIssuePlanningTurn :: AppServerTurn -> Maybe IssuePlanningObservation
+classifyIssuePlanningTurn turn =
+  case classifyTurnCompletion turn of
+    TurnStillRunning ->
+      Nothing
+    TurnFailed reason ->
+      Just (ObservedPlanningBlocked (BlockedReason reason))
+    TurnCompleted output
+      | Just (firstRequest : restRequests) <- output >>= parsePlanningIssueRequests ->
+          Just (ObservedPlanningIssuesRequested (firstRequest : restRequests))
+      | Just structured <- output >>= parseStructuredTurnOutcome ->
+          classifyStructuredIssuePlanning structured
+      | outputHasAny ["blocked", "cannot proceed"] output ->
+          Just (ObservedPlanningBlocked (BlockedReason (outputReason "planning turn reported blocked" output)))
+      | otherwise ->
+          Just ObservedPlanningTurnCompleted
 
 classifyIssuePlanTurn :: AppServerTurn -> Maybe IssueImplementObservation
 classifyIssuePlanTurn turn =
@@ -195,6 +223,22 @@ parseStructuredTurnOutcome output =
   case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
     Left _ -> Nothing
     Right structured -> Just structured
+
+parsePlanningIssueRequests :: Text -> Maybe [IssueCreationRequest]
+parsePlanningIssueRequests output =
+  case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
+    Left _ -> Nothing
+    Right (StructuredPlanningIssueRequests requests) -> Just requests
+
+classifyStructuredIssuePlanning :: StructuredTurnOutcome -> Maybe IssuePlanningObservation
+classifyStructuredIssuePlanning = \case
+  StructuredBlocked reason -> Just (ObservedPlanningBlocked (BlockedReason reason))
+  StructuredIncomplete reason -> Just (ObservedPlanningBlocked (BlockedReason reason))
+  StructuredProblems reason -> Just (ObservedPlanningBlocked (BlockedReason reason))
+  StructuredComplete _reason -> Just ObservedPlanningTurnCompleted
+  StructuredNeedsImplementation _reason -> Just ObservedPlanningTurnCompleted
+  StructuredAlreadyFixed _reason -> Just ObservedPlanningTurnCompleted
+  StructuredClean _reason -> Just ObservedPlanningTurnCompleted
 
 classifyStructuredIssueTriage :: StructuredTurnOutcome -> Maybe IssueImplementObservation
 classifyStructuredIssueTriage = \case

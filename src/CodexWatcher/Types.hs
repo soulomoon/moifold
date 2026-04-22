@@ -27,6 +27,7 @@ module CodexWatcher.Types
   , BlockedReason (..)
   , StopReason (..)
   , PlannerConfig (..)
+  , IssueCreationRequest (..)
   , IssueConfig (..)
   , PrConfig (..)
   , WorkerThread (..)
@@ -44,8 +45,10 @@ module CodexWatcher.Types
   , isTerminalPhase
   ) where
 
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
+import Data.Text qualified as Text
 
 data Domain
   = IssuePlanning
@@ -130,6 +133,28 @@ data PlannerConfig = PlannerConfig
   , plannerMaxParallel :: Int
   }
   deriving stock (Eq, Show)
+
+data IssueCreationRequest = IssueCreationRequest
+  { issueCreationTitle :: Text
+  , issueCreationBody :: Text
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON IssueCreationRequest where
+  toJSON request =
+    object
+      [ "title" .= issueCreationTitle request
+      , "body" .= issueCreationBody request
+      ]
+
+instance FromJSON IssueCreationRequest where
+  parseJSON = withObject "IssueCreationRequest" $ \objectValue -> do
+    title <- objectValue .: "title"
+    if Text.null (Text.strip title)
+      then fail "title must not be empty"
+      else do
+        body <- objectValue .:? "body" .!= ""
+        pure (IssueCreationRequest title body)
 
 data IssueConfig = IssueConfig
   { issueRepo :: RepoName

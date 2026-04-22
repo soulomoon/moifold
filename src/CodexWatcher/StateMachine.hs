@@ -32,6 +32,7 @@ type family CanBlock (phase :: Phase) :: Constraint where
 
 data Event (domain :: Domain) (phase :: Phase) where
   StartPlanningTurn :: ActiveTurn -> Event 'IssuePlanning 'Initialized
+  PlannerRequestedIssueCreation :: [IssueCreationRequest] -> Event 'IssuePlanning 'PlanMode
   PlannerTurnCompleted :: Event 'IssuePlanning 'PlanMode
 
   StartIssueTriageTurn :: ActiveTurn -> Event 'IssueImplement 'Triage
@@ -82,6 +83,10 @@ step (PlanningTurnActive config _activeTurn) PlannerTurnCompleted =
   Decision
     (PlanningReady config)
     [SomeEffect SleepUntilNextPoll]
+step (PlanningTurnActive config _activeTurn) (PlannerRequestedIssueCreation requests) =
+  Decision
+    (PlanningReady config)
+    ([SomeEffect (CreateIssue (plannerRepo config) request) | request <- requests] <> [SomeEffect SleepUntilNextPoll])
 step (IssueNeedsTriage config (WorkerIdle threadId)) (StartIssueTriageTurn activeTurn) =
   Decision
     (IssueTriageActive config (WorkerActive activeTurn))

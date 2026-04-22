@@ -96,10 +96,7 @@ runFromState executor config events replay =
         Just plannerThread -> prestartAndObserve executor config events StartPlannerTurnKind plannerThread (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
     SomeWatcherState (PlanningTurnActive _ activeTurn) ->
       observeActiveTurn executor config events replay activeTurn \turn ->
-        case classifyTurnCompletion turn of
-          TurnStillRunning -> Nothing
-          TurnCompleted _ -> Just (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
-          TurnFailed reason -> Just (DaemonIssuePlanningObservation (ObservedPlanningBlocked (BlockedReason reason)))
+        DaemonIssuePlanningObservation <$> classifyIssuePlanningTurn turn
     SomeWatcherState (IssueNeedsTriage _ (WorkerIdle workerThread)) ->
       prestartAndObserve executor config events StartWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedTriageTurnStarted)
     SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->

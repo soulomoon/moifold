@@ -93,6 +93,8 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest config.effectRuntimeReviewerTurn threadId
     PushBranch branch ->
       unchanged [PlannedCommand (GitPush config.effectRuntimeWorkdir branch)]
+    CreateIssue repo request ->
+      unchanged [PlannedCommand (GhIssueCreate repo request)]
     CreatePullRequest issueConfig ->
       unchanged [PlannedCommand (GhCreatePullRequest issueConfig)]
     ResolveReviewThread reviewThreadId ->

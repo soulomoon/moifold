@@ -33,6 +33,7 @@ import Data.Text qualified as Text
 data WatcherEvent
   = IssuePlanningInitialized PlannerConfig
   | IssuePlanningTurnStarted ThreadId TurnId
+  | IssuePlanningIssuesRequested [IssueCreationRequest]
   | IssuePlanningTurnCompleted
   | PrReviewInitialized PrConfig ThreadId ThreadId
   | PrReviewUnresolvedFound (NonEmpty ReviewThreadId) CommitSha TurnId
@@ -85,6 +86,8 @@ instance ToJSON WatcherEvent where
           <> [ "plannerThreadId" .= unThreadId plannerThreadId
              , "plannerTurnId" .= unTurnId plannerTurnId
              ]
+      IssuePlanningIssuesRequested requests ->
+        eventType event <> ["issues" .= requests]
       IssuePlanningTurnCompleted ->
         eventType event
       PrReviewInitialized config workerThreadId reviewerThreadId ->
@@ -167,6 +170,9 @@ instance FromJSON WatcherEvent where
         IssuePlanningTurnStarted
           <$> (ThreadId <$> nonEmptyTextField objectValue "plannerThreadId")
           <*> (TurnId <$> nonEmptyTextField objectValue "plannerTurnId")
+      "issue_planning_issues_requested" ->
+        IssuePlanningIssuesRequested
+          <$> (nonEmptyIssueCreationRequests =<< objectValue .: "issues")
       "issue_planning_turn_completed" ->
         pure IssuePlanningTurnCompleted
       "pr_review_initialized" ->
@@ -306,6 +312,8 @@ applyEvent _ event@IssuePlanningInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)
 applyEvent (SomeWatcherState state@PlanningReady {}) (IssuePlanningTurnStarted plannerThread turnId) =
   fromDecision (step state (StartPlanningTurn (ActiveTurn plannerThread turnId)))
+applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningIssuesRequested requests) =
+  fromDecision (step state (PlannerRequestedIssueCreation requests))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
   fromDecision (step state PlannerTurnCompleted)
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
@@ -416,6 +424,10 @@ reviewThreadIds (first : rest) = do
   rest' <- traverse (nonEmptyText "reviewThreadIds[]") rest
   pure (ReviewThreadId first' :| fmap ReviewThreadId rest')
 
+nonEmptyIssueCreationRequests :: [IssueCreationRequest] -> Parser [IssueCreationRequest]
+nonEmptyIssueCreationRequests [] = fail "issues must not be empty"
+nonEmptyIssueCreationRequests requests = pure requests
+
 nonEmptyTextField :: Object -> Key.Key -> Parser Text
 nonEmptyTextField objectValue key = objectValue .: key >>= nonEmptyText (Key.toString key)
 
@@ -476,6 +488,7 @@ eventName :: WatcherEvent -> Text
 eventName = \case
   IssuePlanningInitialized {} -> "issue_planning_initialized"
   IssuePlanningTurnStarted {} -> "issue_planning_turn_started"
+  IssuePlanningIssuesRequested {} -> "issue_planning_issues_requested"
   IssuePlanningTurnCompleted -> "issue_planning_turn_completed"
   PrReviewInitialized {} -> "pr_review_initialized"
   PrReviewUnresolvedFound {} -> "pr_review_unresolved_found"

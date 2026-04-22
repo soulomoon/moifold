@@ -9,12 +9,19 @@ The first event must initialize exactly one watcher domain. Re-initialization is
 ```json
 {"type":"issue_planning_initialized","repoFullName":"owner/name","maxParallel":8}
 {"type":"issue_planning_turn_started","plannerThreadId":"thread-id","plannerTurnId":"turn-id"}
+{"type":"issue_planning_issues_requested","issues":[{"title":"Subissue title","body":"Subissue details"}]}
 {"type":"issue_planning_turn_completed"}
 ```
 
 Valid replay path:
 
 `IssuePlanning / Initialized -> PlanMode -> Initialized`
+
+Important replay rules:
+
+- `issue_planning_issues_requested` is emitted when the planner decides new issues or subissues must be created.
+- The runtime creates those GitHub issues, records the event, and returns to `Initialized` so the next planner turn works from the refreshed issue set.
+- Implementer fanout only happens after `issue_planning_turn_completed`; it does not happen immediately after issue creation.
 
 ## Issue Implementation
 

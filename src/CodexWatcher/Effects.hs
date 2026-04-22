@@ -24,6 +24,7 @@ data Effect (mutability :: Mutability) where
   StartWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartReviewerTurn :: ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal
+  CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal
@@ -52,6 +53,7 @@ effectMutability StartPlannerTurn {} = CanStartTurn
 effectMutability StartWorkerTurn {} = CanStartTurn
 effectMutability StartReviewerTurn {} = CanStartTurn
 effectMutability PushBranch {} = CanMutateLocal
+effectMutability CreateIssue {} = CanMutateGitHub
 effectMutability CreatePullRequest {} = CanMutateGitHub
 effectMutability ResolveReviewThread {} = CanMutateGitHub
 effectMutability RecordBlocked {} = CanMutateLocal

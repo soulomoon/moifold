@@ -38,6 +38,8 @@ structuredTurnOutputSchema =
           , "summary" .= stringField
           , "comment" .= stringField
           , "evidence" .= stringField
+          , "issues_to_create" .= issueArrayField
+          , "subissues_to_create" .= issueArrayField
           ]
     ]
 
@@ -48,7 +50,7 @@ structuredTurnOutcomeInstructions =
 plannerTurnInput :: Text
 plannerTurnInput =
   structuredTurnOutcomeInstructions
-    <> " For issue planning, use outcome=complete after selecting or confirming implementable issues."
+    <> " For issue planning, use issues_to_create or subissues_to_create when new GitHub issues must be created; after issue creation the watcher will re-enter planning. Use outcome=complete only when the issue set is stable and ready for implementer fanout."
 
 issueWorkerTurnInput :: Text
 issueWorkerTurnInput =
@@ -63,3 +65,20 @@ reviewerTurnInput =
 stringField :: Value
 stringField =
   object ["type" .= ("string" :: Text)]
+
+issueArrayField :: Value
+issueArrayField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items"
+        .= object
+          [ "type" .= ("object" :: Text)
+          , "additionalProperties" .= False
+          , "required" .= (["title"] :: [Text])
+          , "properties"
+              .= object
+                [ "title" .= stringField
+                , "body" .= stringField
+                ]
+          ]
+    ]

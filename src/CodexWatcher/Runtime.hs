@@ -25,6 +25,7 @@ module CodexWatcher.Runtime
 
 import CodexWatcher.Types
   ( BranchName (..)
+  , IssueCreationRequest (..)
   , IssueConfig (..)
   , PrNumber (..)
   , PrConfig (..)
@@ -51,6 +52,7 @@ data RuntimeCommand
   | GhAuthStatus
   | GhApiUser
   | GhIssueListOpen RepoName
+  | GhIssueCreate RepoName IssueCreationRequest
   | GhPrListOpen RepoName
   | GhPrView RepoName PrNumber [Text]
   | GhReviewThreads PrConfig
@@ -113,6 +115,20 @@ renderRuntimeCommand (GhIssueListOpen repo) =
   RuntimeCommandSpec
     "gh"
     ["issue", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,labels,assignees"]
+    Nothing
+    ""
+renderRuntimeCommand (GhIssueCreate repo request) =
+  RuntimeCommandSpec
+    "gh"
+    [ "issue"
+    , "create"
+    , "--repo"
+    , Text.unpack (unRepoName repo)
+    , "--title"
+    , Text.unpack (issueCreationTitle request)
+    , "--body"
+    , Text.unpack (issueCreationBody request)
+    ]
     Nothing
     ""
 renderRuntimeCommand (GhPrListOpen repo) =
