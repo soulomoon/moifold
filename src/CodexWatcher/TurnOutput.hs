@@ -3,11 +3,15 @@
 
 module CodexWatcher.TurnOutput
   ( issueImplementerThreadDeveloperInstructions
+  , issueImplementationTurnOutputSchema
   , issueImplementationTurnInput
+  , issuePlanTurnOutputSchema
   , issuePlanModeDeveloperInstructions
   , issuePlanTurnInput
   , issuePlanningThreadDeveloperInstructions
+  , plannerTurnOutputSchema
   , prReviewWorkerTurnInput
+  , prReviewWorkerTurnOutputSchema
   , prReviewThreadDeveloperInstructions
   , plannerTurnInput
   , reviewerPromptVersion
@@ -38,33 +42,30 @@ import CodexWatcher.IssueText (issueNumbersText)
 import CodexWatcher.Types
 import CodexWatcher.RuntimeDefaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
+import Data.Aeson.Key qualified as Key
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
 
 structuredTurnOutputSchema :: Value
 structuredTurnOutputSchema =
+  issueImplementationTurnOutputSchema
+
+plannerTurnOutputSchema :: Value
+plannerTurnOutputSchema =
   object
     [ "type" .= ("object" :: Text)
     , "additionalProperties" .= False
-    , "required" .= (["outcome"] :: [Text])
+    , "required" .= (["outcome", "reason", "summary"] :: [Text])
     , "properties"
         .= object
           [ "outcome"
               .= object
                 [ "type" .= ("string" :: Text)
-                , "enum"
-                    .= ( [ "complete"
-                         , "incomplete"
-                         , "blocked"
-                         ] ::
-                          [Text]
-                       )
+                , "enum" .= (["complete", "incomplete", "blocked"] :: [Text])
                 ]
           , "reason" .= stringField
           , "summary" .= stringField
-          , "comment" .= stringField
-          , "evidence" .= stringField
           , "issues_to_create" .= issueArrayField ["title"]
           , "subissues_to_create" .= issueArrayField ["title", "body", "parentIssueNumber"]
           , "ready_issues" .= issueNumberArrayField
@@ -72,6 +73,33 @@ structuredTurnOutputSchema =
           , "dependencies" .= dependencyArrayField
           ]
     ]
+
+issuePlanTurnOutputSchema :: Value
+issuePlanTurnOutputSchema =
+  object
+    [ "type" .= ("object" :: Text)
+    , "additionalProperties" .= False
+    , "required" .= (["outcome", "reason", "summary", "plan_markdown"] :: [Text])
+    , "properties"
+        .= object
+          [ "outcome"
+              .= object
+                [ "type" .= ("string" :: Text)
+                , "enum" .= (["complete", "blocked"] :: [Text])
+                ]
+          , "reason" .= stringField
+          , "summary" .= stringField
+          , "plan_markdown" .= stringField
+          ]
+    ]
+
+issueImplementationTurnOutputSchema :: Value
+issueImplementationTurnOutputSchema =
+  turnOutcomeSchema ["complete", "incomplete", "blocked"] [("evidence", stringField)]
+
+prReviewWorkerTurnOutputSchema :: Value
+prReviewWorkerTurnOutputSchema =
+  turnOutcomeSchema ["complete", "incomplete", "blocked"] [("comment", stringField), ("evidence", stringField)]
 
 reviewerTurnOutputSchema :: Value
 reviewerTurnOutputSchema =
@@ -108,10 +136,31 @@ reviewerTurnOutputSchema =
 structuredTurnOutcomeInstructions :: Text
 structuredTurnOutcomeInstructions =
   Text.unlines
-    [ "Return only JSON with an outcome field. Plain prose completion is not accepted."
-    , "Use outcome=blocked with a reason when you cannot proceed safely."
-    , "Use outcome=incomplete with a reason when follow-up is required."
-    , "Use outcome=complete with a summary when the turn is done."
+    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
+    , "Every schema includes outcome, reason, and summary; include all additional schema-required fields such as plan_markdown."
+    , "Use outcome=blocked with a non-empty reason when you cannot proceed safely."
+    , "Use outcome=incomplete with a non-empty reason when follow-up is required."
+    , "Use outcome=complete with a non-empty summary when the turn is done; reason may be an empty string."
+    ]
+
+turnOutcomeSchema :: [Text] -> [(Text, Value)] -> Value
+turnOutcomeSchema outcomes extraProperties =
+  object
+    [ "type" .= ("object" :: Text)
+    , "additionalProperties" .= False
+    , "required" .= (["outcome", "reason", "summary"] :: [Text])
+    , "properties"
+        .= object
+          ( [ "outcome"
+                .= object
+                  [ "type" .= ("string" :: Text)
+                  , "enum" .= outcomes
+                  ]
+            , "reason" .= stringField
+            , "summary" .= stringField
+            ]
+              <> [Key.fromText key .= value | (key, value) <- extraProperties]
+          )
     ]
 
 plannerTurnInput :: Text
@@ -179,6 +228,7 @@ issueImplementerThreadDeveloperInstructions workdir stateDir config =
     , ("issueUrl", issueUrl config.issueRepo config.issueNumber)
     , ("workdir", Text.pack workdir)
     , ("baseBranch", "origin/HEAD")
+    , ("branch", unBranchName config.issueBranch)
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)
     , ("workerModel", defaultModel)
     , ("workerEffort", defaultEffort)
@@ -210,6 +260,7 @@ issuePlanModeDeveloperInstructions workdir stateDir config prNumber =
     , ("prUrl", prUrl config.issueRepo prNumber)
     , ("workdir", Text.pack workdir)
     , ("baseBranch", "origin/HEAD")
+    , ("branch", unBranchName config.issueBranch)
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)
     , ("workerModel", defaultModel)
     , ("planEffort", defaultEffort)

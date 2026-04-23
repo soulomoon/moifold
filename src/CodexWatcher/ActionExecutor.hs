@@ -50,6 +50,7 @@ data ActionExecutionResult
   = CommandActionResult CommandReport
   | AppServerActionResult Value
   | WriteJsonActionResult FilePath
+  | WriteTextActionResult FilePath
   | SleepActionResult
   | StopDaemonActionResult
   | DryRunActionResult
@@ -108,6 +109,12 @@ executePlannedAction executor ExecuteActions action =
       executor.actionRuntime.runtimeWriteJsonValue path value
       let result = executed action (WriteJsonActionResult path)
       logActionReport executor Log.Info "action_finished" "planned write-json action finished" result
+      pure result
+    PlannedWriteText path content -> do
+      logPlannedAction executor action
+      executor.actionRuntime.runtimeWriteTextFile path content
+      let result = executed action (WriteTextActionResult path)
+      logActionReport executor Log.Info "action_finished" "planned write-text action finished" result
       pure result
     PlannedSleepUntilNextPoll -> do
       logPlannedAction executor action
@@ -187,6 +194,10 @@ plannedActionContext = \case
     [ "actionKind" .= ("write_json" :: Text)
     , "path" .= path
     ]
+  PlannedWriteText path _content ->
+    [ "actionKind" .= ("write_text" :: Text)
+    , "path" .= path
+    ]
   PlannedSleepUntilNextPoll ->
     ["actionKind" .= ("sleep" :: Text)]
   PlannedStopDaemon ->
@@ -205,6 +216,9 @@ actionResultContext = \case
     [ "responseKind" .= valueKind response
     ]
   WriteJsonActionResult path ->
+    [ "path" .= path
+    ]
+  WriteTextActionResult path ->
     [ "path" .= path
     ]
   SleepActionResult ->

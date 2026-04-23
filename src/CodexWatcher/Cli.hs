@@ -125,6 +125,7 @@ data ObserveOnceCli = ObserveOnceCli
   , observeCliCommitSha :: Maybe CommitSha
   , observeCliMergeCommitSha :: Maybe CommitSha
   , observeCliReason :: Maybe Text
+  , observeCliPlanMarkdown :: Maybe Text
   , observeCliReviewThreadIds :: [ReviewThreadId]
   , observeCliComment :: Maybe Text
   }
@@ -293,6 +294,7 @@ observeOnceParser =
     <*> optional (CommitSha <$> textOption "commit-sha" "SHA" "Commit SHA")
     <*> optional (CommitSha <$> textOption "merge-commit-sha" "SHA" "Merge commit SHA")
     <*> optional (textOption "reason" "TEXT" "Blocked or incomplete reason")
+    <*> optional (textOption "plan-markdown" "MARKDOWN" "Issue implementation plan markdown")
     <*> fmap (maybe [] id) (optional (option reviewThreadIdsReader (long "review-thread-ids" <> metavar "ID,ID" <> help "Unresolved review thread ids")))
     <*> optional (textOption "comment" "TEXT" "Clean review comment")
 

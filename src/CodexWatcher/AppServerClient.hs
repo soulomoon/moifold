@@ -28,11 +28,12 @@ module CodexWatcher.AppServerClient
   , parseThreadReadTurns
   , sendAppServerRequest
   , sendOneAppServerRequest
-  , threadReadBeforeMaterializedFallback
+  , startThreadWithEndpoint
+  , startThreadWithInterpreter
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
-import CodexWatcher.AppServerProtocol (AppServerRequest (..), initializeRequest)
+import CodexWatcher.AppServerProtocol (AppServerRequest (..), ThreadStartOptions, initializeRequest, initializedNotification, threadStartRequest)
 import CodexWatcher.JsonPath (lookupPath)
 import CodexWatcher.Types (ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
@@ -43,11 +44,9 @@ import Data.Aeson
   , Value (..)
   , eitherDecode'
   , encode
-  , object
   , withObject
   , (.:)
   , (.:?)
-  , (.=)
   , (.!=)
   )
 import Data.Aeson.Types (Parser, parseEither)
@@ -151,6 +150,14 @@ sendOneAppServerRequest endpoint options request =
     Left message -> pure (Left (AppServerTransportFailure message))
     Right result -> pure result
 
+startThreadWithEndpoint :: AppServerEndpoint -> AppServerClientOptions -> Int -> ThreadStartOptions -> IO (Either AppServerClientFailure ThreadId)
+startThreadWithEndpoint endpoint options =
+  startThreadWithSender (sendOneAppServerRequest endpoint options)
+
+startThreadWithInterpreter :: Monad m => AppServerInterpreter m -> Int -> ThreadStartOptions -> m (Either AppServerClientFailure ThreadId)
+startThreadWithInterpreter interpreter =
+  startThreadWithSender (\request -> Right <$> interpreter.appServerSendRequest request)
+
 appServerRequestSession :: AppServerRequest -> [AppServerRequest]
 appServerRequestSession request
   | request.requestMethod == "initialize" = [request]
@@ -159,19 +166,56 @@ appServerRequestSession request
 sendAppServerRequestSession :: AppServerConnection -> AppServerClientOptions -> [AppServerRequest] -> IO (Either AppServerClientFailure Value)
 sendAppServerRequestSession _connection _options [] =
   pure (Right Null)
-sendAppServerRequestSession connection options [request] =
-  sendAppServerRequest connection options request
+sendAppServerRequestSession connection options [request]
+  | request.requestMethod == "initialize" =
+      sendInitializedSession connection options request (pure . Right)
+  | otherwise =
+      sendAppServerRequest connection options request
 sendAppServerRequestSession connection options (request : rest) = do
+  if request.requestMethod == "initialize"
+    then sendInitializedSession connection options request \_ -> sendAppServerRequestSession connection options rest
+    else do
+      result <- sendAppServerRequest connection options request
+      case result of
+        Left failure -> pure (Left failure)
+        Right _ -> sendAppServerRequestSession connection options rest
+
+sendInitializedSession
+  :: AppServerConnection
+  -> AppServerClientOptions
+  -> AppServerRequest
+  -> (Value -> IO (Either AppServerClientFailure Value))
+  -> IO (Either AppServerClientFailure Value)
+sendInitializedSession connection options request continue = do
   result <- sendAppServerRequest connection options request
   case result of
     Left failure -> pure (Left failure)
-    Right _ -> sendAppServerRequestSession connection options rest
+    Right value -> do
+      initializedResult <- sendAppServerNotification connection initializedNotification
+      case initializedResult of
+        Left failure -> pure (Left failure)
+        Right () -> continue value
 
 sendAppServerRequest :: AppServerConnection -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 sendAppServerRequest connection options request = do
   transportTry (WebSockets.sendTextData connection.unAppServerConnection (encode request :: LazyByteString.ByteString)) >>= \case
     Left message -> pure (Left (AppServerTransportFailure message))
     Right () -> receiveMatchedResponse connection options request
+
+sendAppServerNotification :: AppServerConnection -> Value -> IO (Either AppServerClientFailure ())
+sendAppServerNotification connection notification =
+  transportTry (WebSockets.sendTextData connection.unAppServerConnection (encode notification :: LazyByteString.ByteString)) >>= \case
+    Left message -> pure (Left (AppServerTransportFailure message))
+    Right () -> pure (Right ())
+
+startThreadWithSender
+  :: Monad m
+  => (AppServerRequest -> m (Either AppServerClientFailure Value))
+  -> Int
+  -> ThreadStartOptions
+  -> m (Either AppServerClientFailure ThreadId)
+startThreadWithSender send requestId options =
+  (>>= parseThreadStartThreadId) <$> send (threadStartRequest requestId options)
 
 transportTry :: IO a -> IO (Either Text a)
 transportTry action =
@@ -190,27 +234,8 @@ appServerInterpreterFromEndpoint endpoint options =
         result <- sendOneAppServerRequest endpoint options request
         case result of
           Right value -> pure value
-          Left failure ->
-            case threadReadBeforeMaterializedFallback request failure of
-              Just value -> pure value
-              Nothing -> fail (Text.unpack (formatAppServerClientFailure failure))
+          Left failure -> fail (Text.unpack (formatAppServerClientFailure failure))
     }
-
-threadReadBeforeMaterializedFallback :: AppServerRequest -> AppServerClientFailure -> Maybe Value
-threadReadBeforeMaterializedFallback request = \case
-  AppServerJsonRpcFailure _ errorValue
-    | request.requestMethod == "thread/read"
-    , threadReadIncludesTurns request
-    , Text.isInfixOf "not materialized yet" errorValue.jsonRpcErrorMessage
-    , Text.isInfixOf "includeTurns is unavailable" errorValue.jsonRpcErrorMessage ->
-        Just (object ["turns" .= ([] :: [Value])])
-  _ -> Nothing
-
-threadReadIncludesTurns :: AppServerRequest -> Bool
-threadReadIncludesTurns request =
-  case request.requestParams of
-    Object params -> KeyMap.lookup "includeTurns" params == Just (Bool True)
-    _ -> False
 
 receiveMatchedResponse :: AppServerConnection -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 receiveMatchedResponse connection options request =

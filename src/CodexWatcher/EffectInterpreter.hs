@@ -12,12 +12,12 @@ module CodexWatcher.EffectInterpreter
   , TurnRuntimeConfig (..)
   , compileEffect
   , compileEffectPlan
+  , issuePlanFileText
   ) where
 
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeDefaults (defaultPlanCollaborationMode)
 import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput)
 import CodexWatcher.Types
 import Data.Aeson
@@ -28,6 +28,7 @@ import Data.Aeson
   )
 import Data.List (mapAccumL)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import GHC.Generics (Generic)
 import System.FilePath ((</>))
 
@@ -49,6 +50,7 @@ data EffectRuntimeConfig = EffectRuntimeConfig
   , effectRuntimeStateDir :: FilePath
   , effectRuntimeMergeMethod :: Text
   , effectRuntimeNextRequestId :: Int
+  , effectRuntimePlannerThreadInstructions :: Text
   , effectRuntimePlannerTurn :: TurnRuntimeConfig
   , effectRuntimeWorkerTurn :: TurnRuntimeConfig
   , effectRuntimeIssuePlanTurn :: TurnRuntimeConfig
@@ -61,6 +63,7 @@ data PlannedAction
   = PlannedCommand RuntimeCommand
   | PlannedAppServerRequest AppServerRequest
   | PlannedWriteJson FilePath Value
+  | PlannedWriteText FilePath Text
   | PlannedSleepUntilNextPoll
   | PlannedStopDaemon
   deriving stock (Eq, Show, Generic)
@@ -117,6 +120,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhIssueClose issueConfig prNumber)]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
+    RecordIssuePlan issueConfig prNumber planMarkdown ->
+      unchanged [PlannedWriteText (config.effectRuntimeStateDir </> "issue-plan.md") (issuePlanFileText issueConfig prNumber planMarkdown)]
     RecordPlanningGraph graph ->
       unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "planning-state.json") (toJSON graph)]
     RecordBlocked reason ->
@@ -133,6 +138,18 @@ compileEffect config requestId (SomeEffect effect) =
     ( [PlannedAppServerRequest (turnStartRequest requestId (turnStartOptions turnConfig threadId))]
     , requestId + 1
     )
+
+issuePlanFileText :: IssueConfig -> PrNumber -> Text -> Text
+issuePlanFileText issueConfig prNumber planMarkdown =
+  Text.unlines
+    [ "---"
+    , "issue_number: " <> Text.pack (show (unIssueNumber (issueNumber issueConfig)))
+    , "pr_number: " <> Text.pack (show (unPrNumber prNumber))
+    , "branch: " <> unBranchName (issueBranch issueConfig)
+    , "---"
+    , ""
+    , Text.strip planMarkdown
+    ]
 
 turnStartOptions :: TurnRuntimeConfig -> ThreadId -> TurnStartOptions
 turnStartOptions config threadId =
@@ -157,15 +174,20 @@ reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
           (config.effectRuntimeStateDir </> "reviewer-state.json")
           prConfig
           reviewTargetSha
-    , turnRuntimeOutputSchema = Nothing
     }
 
 issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> PrNumber -> TurnRuntimeConfig
 issuePlanTurnRuntimeConfig config issueConfig prNumber =
+  let instructions =
+        issuePlanModeDeveloperInstructions
+          config.effectRuntimeWorkdir
+          config.effectRuntimeStateDir
+          issueConfig
+          prNumber
+   in
   config.effectRuntimeIssuePlanTurn
-    { turnRuntimeCollaborationMode =
-        Just
-          (defaultPlanCollaborationMode (issuePlanModeDeveloperInstructions config.effectRuntimeWorkdir config.effectRuntimeStateDir issueConfig prNumber))
+    { turnRuntimeInput = instructions <> "\n\n" <> config.effectRuntimeIssuePlanTurn.turnRuntimeInput
+    , turnRuntimeCollaborationMode = Nothing
     }
 
 blockedStateJson :: BlockedReason -> Value

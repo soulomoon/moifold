@@ -26,24 +26,19 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
     , effectRuntimeStateDir = stateDir
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = 1
+    , effectRuntimePlannerThreadInstructions = issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues
     , effectRuntimePlannerTurn =
-        (liveTurnConfig (plannerTurnInputForScope scopeIssues))
+        (turnConfig (plannerTurnInputForScope scopeIssues) (Just plannerTurnOutputSchema))
           { turnRuntimeCollaborationMode =
               Just
                 (defaultPlanCollaborationMode (issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues))
           }
-    , effectRuntimeWorkerTurn = liveTurnConfig prReviewWorkerTurnInput
-    , effectRuntimeIssuePlanTurn =
-        (liveTurnConfig issuePlanTurnInput)
-          { turnRuntimeCollaborationMode =
-              Just (defaultPlanCollaborationMode "Issue-specific plan-mode instructions are generated when the plan turn starts.")
-          }
-    , effectRuntimeIssueImplementationTurn = liveTurnConfig issueImplementationTurnInput
-    , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit." Nothing
+    , effectRuntimeWorkerTurn = turnConfig prReviewWorkerTurnInput (Just prReviewWorkerTurnOutputSchema)
+    , effectRuntimeIssuePlanTurn = turnConfig issuePlanTurnInput (Just issuePlanTurnOutputSchema)
+    , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput (Just issueImplementationTurnOutputSchema)
+    , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit." (Just reviewerTurnOutputSchema)
     }
  where
-  liveTurnConfig input =
-    turnConfig input Nothing
   turnConfig input outputSchema =
     TurnRuntimeConfig
       { turnRuntimeCwd = workdir
@@ -63,4 +58,4 @@ plannerTurnInputForScope scopeIssues =
   plannerTurnInput
     <> " Target scope: only these root issues and their existing or newly created GitHub sub-issues are in scope: "
     <> issueNumbersText scopeIssues
-    <> ". Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees. If a scoped root issue needs decomposition, create concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only scoped root issues and descendants that belong to these issue trees."
+    <> ". Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees. If a scoped root issue needs decomposition, propose concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only scoped root issues and descendants that belong to these issue trees."

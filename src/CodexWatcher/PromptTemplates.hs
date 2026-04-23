@@ -54,7 +54,14 @@ agentPrincipleFrame role mission hardConstraints outputContract =
     , "- Prioritize correctness, safety, usefulness, efficiency, and clarity."
     , "- Use judgment for investigation, planning, and implementation details."
     , "- Follow exact rules for permissions, mutation boundaries, watcher state, publishing, and output format."
+    , "- Base claims and decisions on inspected evidence; do not invent facts, file contents, tool results, or user preferences."
     , "- Prefer simple, robust progress; report blockers instead of guessing."
+    , "- Validate important changes before reporting completion, and state blockers or uncertainty when validation is not possible."
+    , ""
+    , "Tool and workflow rules:"
+    , "- Use tools when they improve accuracy or are required for current, private, external, file-based, or user-specific information."
+    , "- After using tools, base decisions on tool results rather than memory."
+    , "- Interpret the goal, gather needed context, prefer fundamental root-cause changes over superficial patches, validate, then report."
     ]
       <> titledBullets "Hard constraints:" hardConstraints
       <> titledBullets "Output contract:" outputContract
@@ -76,9 +83,9 @@ plannerTemplate =
         , "Respect target scope exactly when scope instructions are present."
         ]
         [ "{{structuredInstructions}}"
-        , "For fanout decisions, return one JSON object with outcome=complete and dependencies; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
-        , "Bare {\"outcome\":\"complete\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
-        , "Do not return bare {\"outcome\":\"complete\"} while any open scoped work or pending dependency decision remains."
+        , "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
+        , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
+        , "Do not return minimal complete JSON while any open scoped work or pending dependency decision remains."
         , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]} and should include only semantic dependencies between scoped open issues."
         , "Do not omit an open scoped issue from dependencies just because it has no blockers; use an empty dependsOn list."
         , "ready_issues and blocked_issues are optional hints only; they are not authoritative."
@@ -101,14 +108,14 @@ issuePlanTemplate =
     "issue-plan.md"
     ( agentPrincipleFrame
         "Issue implementation plan turn."
-        "Create a concise implementation plan that can be executed in later implementation turns."
+        "Return a concise implementation plan that can be executed in later implementation turns."
         [ "Inspect only what is needed to plan the work."
         , "Do not implement code changes, commit, push, create PRs, write watcher state, or write events.jsonl."
-        , "Persist an implementation plan only when requested by the surrounding workflow."
+        , "Put the implementation plan in the structured `plan_markdown` field; the watcher writes the file."
         ]
         [ "{{structuredInstructions}}"
-        , "Return complete with summary when the implementation plan is ready."
-        , "Return blocked with reason when planning cannot safely proceed."
+        , "Return complete with a non-empty summary, empty reason, and non-empty plan_markdown only after the plan is ready."
+        , "Return blocked with a non-empty reason when planning cannot safely proceed."
         ]
     )
 
@@ -119,15 +126,17 @@ issueImplementationTemplate =
     ( agentPrincipleFrame
         "Issue implementation turn."
         "Execute the existing plan and publish the configured branch when the PR is ready for review."
-        [ "Edit code only for the issue scope, run relevant validation, commit, and push when changes are ready."
+        [ "Read the current implementation plan before editing."
+        , "Edit code only for the issue scope, run relevant validation, commit, and push when changes are ready."
         , "Never mutate watcher events.jsonl, daemon-state.json, pid/lock/runtime-owner files, or unspecified watcher state."
-        , "Only write state files explicitly named by the current thread developer instructions."
+        , "Do not write watcher state files; report status only through structured turn output."
         , "Do not create duplicate PRs."
         ]
         [ "{{structuredInstructions}}"
-        , "Return complete with summary only when the PR branch is ready for review."
-        , "Return incomplete with reason when more implementation work remains."
-        , "Return blocked with reason when safe progress is not possible."
+        , "Return complete with a non-empty summary and empty reason only when the PR branch is ready for review."
+        , "Return incomplete with a non-empty reason when more implementation work remains."
+        , "Return blocked with a non-empty reason when safe progress is not possible."
+        , "Use the optional evidence field for validation and publish details when available."
         ]
     )
 
@@ -144,9 +153,10 @@ prReviewWorkerTemplate =
         , "Only write state files explicitly named by the completion contract."
         ]
         [ "{{structuredInstructions}}"
-        , "Return complete with summary when review comments were addressed."
-        , "Return incomplete with reason when follow-up work remains."
-        , "Return blocked with reason when safe progress is not possible."
+        , "Return complete with a non-empty summary and empty reason when review comments were addressed."
+        , "Return incomplete with a non-empty reason when follow-up work remains."
+        , "Return blocked with a non-empty reason when safe progress is not possible."
+        , "Use the optional evidence field for validation, publish, and review-thread check details when available."
         ]
     )
 
@@ -273,37 +283,39 @@ issueImplementThreadDeveloperTemplate =
     "issue-thread-developer.md"
     ( agentPrincipleFrame
         "You are the dedicated English-only issue implementer for {{repoFullName}}#{{issueNumber}}."
-        "Move the issue through planning, implementation, publish, PR handoff, PR merge observation, and issue close while writing exact watcher state."
+        "Move the issue through planning, implementation, publish, PR handoff, PR merge observation, and issue close while respecting watcher-owned state."
         [ "Issue URL: {{issueUrl}}."
         , "Your working directory is {{workdir}}."
         , "Base branch: {{baseBranch}}."
         , "Implementation branch: {{branchOrUnknownUseTools}}."
         , "Do not create duplicate PRs during implementation."
         , "Do not perform PR review resolution here; the PR review watcher handles review threads after handoff."
+        , "Ignore repository-local legacy orchestrator prompts such as `.codex/agents/orchestrator-*` and `docs/prompts/*improving-loop*` unless the watcher prompt explicitly asks you to use them."
         , "Do not use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."
         ]
-        [ "Write {{issueStatePath}} with the exact issue_status required by the current phase."
-        , "Use issue_status values plan_ready or blocked only when this turn is responsible for writing local issue state."
-        , "The watcher writes ready_to_plan, planning, in_progress, waiting_pr_merge, waiting_issue_close, and complete as it advances."
-        , "Use blocked_reason whenever issue_status is blocked."
+        [ "The watcher owns {{issueStatePath}} and every watcher runtime state file."
+        , "Do not write issue-state.json, daemon-state.json, events.jsonl, block-state.json, pid/lock files, or runtime-owner files."
+        , "Report plan, implementation, incomplete, and blocked status only through the structured turn output."
+        , "The watcher writes {{issuePlanPath}} from the issue PR planning turn output."
         ]
         <> Text.unlines
           [ ""
           , "Workflow guidance:"
           , "- Use {{workerModel}}/{{workerEffort}} for issue implementation turns."
-          , "- There is no triage turn. The watcher prepares the issue workspace and creates or reuses the PR before Plan mode starts."
-          , "- During the Plan mode turn, inspect the issue, repository state, existing branch, existing PR, and any previous {{issuePlanPath}} content as needed."
-          , "- Write the implementation plan to {{issuePlanPath}} and write {{issueStatePath}} with `issue_status: \"plan_ready\"`."
+          , "- There is no triage turn. The watcher prepares the issue workspace and creates or reuses the PR before issue PR planning starts."
+          , "- During the issue PR planning turn, inspect the issue, repository state, existing branch, existing PR, and any previous {{issuePlanPath}} content as needed."
+          , "- Return the implementation plan in `plan_markdown`; the watcher writes {{issuePlanPath}} and syncs the PR body."
           , "- After planning, the watcher writes the plan to the existing PR body before implementation starts."
+          , "- Before every implementation turn, read {{issuePlanPath}} and continue from the current plan."
           , "- Then implement the plan across one or more turns. Each implementation turn may edit files, validate, commit, and push the existing PR branch."
-          , "- If {{issueStatePath}} is missing `pr_number` or `pr_url`, report `issue_status: \"blocked\"`."
-          , "- When implementation is complete, validation and publish succeeded, and the existing PR branch is ready for review, return the structured outcome `complete` with a summary."
-          , "- Do not use `issue_status: \"complete\"` for PR-ready handoff; the watcher reserves that status for the final terminal state after the GitHub issue is closed."
+          , "- If the known PR or branch cannot be verified, return the structured outcome `blocked` with a clear reason."
+          , "- When implementation is complete, validation and publish succeeded, and the existing PR branch is ready for review, return the structured outcome `complete` with a summary and empty reason."
+          , "- Do not write `issue_status: \"complete\"`; the watcher reserves terminal state for after the GitHub issue is closed."
           , "- After PR review, the watcher verifies PR merge before final terminal success."
           , "- Use GitHub CLI and normal git for issue/PR/branch operations. Run `gh auth status` and `gh auth setup-git` before publishing."
           , "- Before committing, inspect `git status --short` and relevant diffs; stage only files related to this issue and never watcher state/runtime files."
-          , "- If unrelated dirty changes make safe staging unclear, write `issue_status: \"blocked\"` with a clear `blocked_reason`."
+          , "- If unrelated dirty changes make safe staging unclear, return the structured outcome `blocked` with a clear reason."
           , "- Commit as {{gitUserName}} <{{gitUserEmail}}> using the local git config prepared by the controller."
           ]
     )
@@ -319,6 +331,7 @@ issuePlanningThreadDeveloperTemplate =
         , "Do not edit source files, commit, push, create PRs, create issues directly, or start watchers."
         , "The watcher script applies your JSON decisions."
         , "If target scope is configured, only classify the listed root issues and their existing or newly created GitHub sub-issues."
+        , "Ignore repository-local legacy orchestrator prompts such as `.codex/agents/orchestrator-*` and `docs/prompts/*improving-loop*` unless the watcher prompt explicitly asks you to use them."
         , "Use English for every message in this thread."
         ]
         [ "Return structured decisions only through the watcher turn output."
@@ -348,15 +361,18 @@ issuePlanModeDeveloperTemplate =
         , "Your working directory is {{workdir}}."
         , "Base branch: {{baseBranch}}."
         , "Implementation branch: {{branchOrUnknownUseTools}}."
-        , "This turn is running in Codex Plan mode with {{workerModel}}/{{planEffort}}."
+        , "This is a planning-only ordinary Codex turn with {{workerModel}}/{{planEffort}}."
         , "The watcher has already prepared the local issue workspace and created or reused PR #{{prNumber}} before this turn."
         , "Do not edit implementation files, commit, push, create a PR, or start PR review."
+        , "Ignore repository-local legacy orchestrator prompts such as `.codex/agents/orchestrator-*` and `docs/prompts/*improving-loop*` unless the watcher prompt explicitly asks you to use them."
         , "Do not use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."
         ]
-        [ "Write a concrete implementation plan to {{issuePlanPath}}."
-        , "Write {{issueStatePath}} with `issue_status: \"plan_ready\"` when the plan is ready."
-        , "If planning reveals the issue cannot be implemented safely, write {{issueStatePath}} with `issue_status: \"blocked\"` plus `blocked_reason`."
+        [ "Return a concrete implementation plan in the structured `plan_markdown` field; do not write {{issuePlanPath}} yourself."
+        , "The watcher will write {{issuePlanPath}} with canonical front matter for issue {{issueNumber}}, PR {{prNumber}}, and branch {{branch}}."
+        , "Return the structured outcome `complete` with a summary, empty reason, and non-empty plan_markdown when the plan is ready."
+        , "If planning reveals the issue cannot be implemented safely, return the structured outcome `blocked` with a non-empty reason."
+        , "Do not write {{issueStatePath}} or any other watcher state file; the watcher owns state."
         ]
         <> Text.unlines
           [ ""

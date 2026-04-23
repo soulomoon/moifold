@@ -30,7 +30,9 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.PrReviewLaunchCli
 import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime (ioRuntimeInterpreter, writeJsonValue)
+import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
 import CodexWatcher.RuntimeOwnerCli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
+import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
 import CodexWatcher.Types
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))
@@ -56,7 +58,7 @@ runAutomaticLoop cli = do
           , daemonRuntimeConfig = defaultEffectRuntimeConfigWithPlannerScope cli.loopCliScopeIssues cli.loopCliRepo cli.loopCliWorkdir cli.loopCliStateDir
           , daemonExecutionMode = executionMode
           }
-      loopConfig =
+      baseLoopConfig =
         DaemonLoopConfig
           { loopDaemonOptions = options
           , loopPlannerThreadId = cli.loopCliPlannerThread
@@ -90,7 +92,9 @@ runAutomaticLoop cli = do
         "runtime owner lease validation succeeded"
         ["stateDir" .= cli.loopCliStateDir]
     )
-  runWithOptionalPidFile maybePidFile (runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations 1)
+  runWithOptionalPidFile maybePidFile do
+    loopConfig <- refreshStartupThreads executor cli executionMode baseLoopConfig
+    runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations 1
 
 automaticLoopLogger :: ActionExecutionMode -> FilePath -> IO (Log.WatcherLogger IO)
 automaticLoopLogger DryRunActions _stateDir =
@@ -166,6 +170,96 @@ reconcileLoopCompatibility executor loopConfig =
                           , "writes" .= length writes
                           ]
                       )
+
+refreshStartupThreads :: ActionExecutor IO -> LoopCli -> ActionExecutionMode -> DaemonLoopConfig -> IO DaemonLoopConfig
+refreshStartupThreads _executor cli _executionMode loopConfig
+  | cli.loopCliDomain == CliIssuePlanning =
+      pure loopConfig
+refreshStartupThreads _executor _cli DryRunActions loopConfig =
+  pure loopConfig
+refreshStartupThreads executor cli ExecuteActions loopConfig = do
+  loaded <- loadEventLogFile cli.loopCliEventsPath
+  case loaded of
+    Left _failure ->
+      pure loopConfig
+    Right events ->
+      case replayEventLog events of
+        Left _failure ->
+          pure loopConfig
+        Right replay ->
+          case cli.loopCliDomain of
+            CliIssueImplement ->
+              refreshIssueImplementThread replay
+            CliPrReview ->
+              refreshPrReviewThreads replay
+            CliIssuePlanning ->
+              pure loopConfig
+ where
+  runtimeConfig = loopConfig.loopDaemonOptions.daemonRuntimeConfig
+
+  refreshIssueImplementThread replay =
+    case idleIssueConfig replay.replayState of
+      Nothing ->
+        pure loopConfig
+      Just issueConfig -> do
+        let requestId = runtimeConfig.effectRuntimeNextRequestId
+            instructions = issueImplementerThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir issueConfig
+        threadId <- startFreshThread executor requestId cli.loopCliWorkdir instructions
+        appendStartupThreadRefresh (IssueWorkerThreadRefreshed threadId)
+        pure (withNextRequestId (requestId + 1) loopConfig)
+
+  refreshPrReviewThreads replay =
+    case idlePrReviewConfig replay.replayState of
+      Nothing ->
+        pure loopConfig
+      Just prConfig -> do
+        let requestId = runtimeConfig.effectRuntimeNextRequestId
+        workerThread <- startFreshThread executor requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
+        reviewerThread <- startFreshThread executor (requestId + 1) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
+        pure (withNextRequestId (requestId + 2) loopConfig)
+
+  appendStartupThreadRefresh event = do
+    events <- either die pure =<< loadEventLogFile cli.loopCliEventsPath
+    appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath event
+    replay <- either (die . formatReplayFailure) pure (replayEventLog (events <> [event]))
+    mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir replay.replayState)
+
+startFreshThread :: ActionExecutor IO -> Int -> FilePath -> Text.Text -> IO ThreadId
+startFreshThread executor requestId cwd developerInstructions = do
+  result <-
+    startThreadWithInterpreter
+      executor.actionAppServer
+      requestId
+      (defaultThreadStartOptions cwd developerInstructions)
+  case result of
+    Left failure -> die (Text.unpack (formatAppServerClientFailure failure))
+    Right threadId -> pure threadId
+
+withNextRequestId :: Int -> DaemonLoopConfig -> DaemonLoopConfig
+withNextRequestId requestId loopConfig =
+  loopConfig
+    { loopDaemonOptions =
+        loopConfig.loopDaemonOptions
+          { daemonRuntimeConfig =
+              loopConfig.loopDaemonOptions.daemonRuntimeConfig
+                { effectRuntimeNextRequestId = requestId
+                }
+          }
+    }
+
+idleIssueConfig :: SomeWatcherState -> Maybe IssueConfig
+idleIssueConfig = \case
+  SomeWatcherState (IssueReadyToPlan config _prNumber (WorkerIdle _threadId)) -> Just config
+  SomeWatcherState (IssuePlanReady config _prNumber (WorkerIdle _threadId)) -> Just config
+  SomeWatcherState (IssueImplementationReady config _maybePr (WorkerIdle _threadId)) -> Just config
+  _ -> Nothing
+
+idlePrReviewConfig :: SomeWatcherState -> Maybe PrConfig
+idlePrReviewConfig = \case
+  SomeWatcherState (PrCheckingReviews config (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
+  SomeWatcherState (PrWaitingForMergeability config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
+  _ -> Nothing
 
 issueImplementReviewHandoffAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
 issueImplementReviewHandoffAfterTick cli endpoint executionMode tick =
@@ -454,9 +548,8 @@ printLoopTick domain iteration tick = do
   putStrLn ("actions: " <> show (length tick.loopActionReports))
 
 validateLoopDomain :: CliDomain -> Maybe ThreadId -> IO ()
-validateLoopDomain domain plannerThread = do
-  when (domain == CliIssuePlanning && plannerThread == Nothing) $
-    die "run-issue-planning requires --planner-thread-id <thread-id>"
+validateLoopDomain _domain _plannerThread =
+  pure ()
 
 validateLoopResultDomain :: String -> DaemonLoopTickResult -> IO ()
 validateLoopResultDomain domain tick =

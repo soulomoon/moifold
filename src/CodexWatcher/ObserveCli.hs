@@ -83,8 +83,10 @@ observationSpecs =
   , issue "plan-turn-started" ( \cli ->
         ObservedPlanTurnStarted <$> requiredValue "--turn-id" cli.observeCliTurnId
     )
-  , issuePureFromCli "plan-completed" ( \cli ->
-        ObservedPlanCompleted cli.observeCliImplementationTurnId
+  , issue "plan-completed" ( \cli ->
+        ObservedPlanCompleted
+          <$> requiredValue "--plan-markdown" cli.observeCliPlanMarkdown
+          <*> pure cli.observeCliImplementationTurnId
     )
   , issue "pr-created" ( \cli ->
         ObservedPullRequestCreated <$> requiredValue "--pr-number" cli.observeCliPrNumber

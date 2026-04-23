@@ -147,12 +147,13 @@ preparePrReviewWatcherLaunch (Just endpoint) launch = do
 
 startPrReviewThread :: AppServerEndpoint -> Int -> PrReviewWatcherLaunchPlan -> Text.Text -> IO ThreadId
 startPrReviewThread endpoint requestId launch role = do
-  response <-
-    sendOneAppServerRequest
+  result <-
+    startThreadWithEndpoint
       endpoint
       defaultAppServerClientOptions
-      (threadStartRequest requestId (prReviewThreadStartOptions launch role))
-  case response >>= parseThreadStartThreadId of
+      requestId
+      (prReviewThreadStartOptions launch role)
+  case result of
     Left failure -> die (Text.unpack (formatAppServerClientFailure failure))
     Right threadId -> pure threadId
 

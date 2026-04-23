@@ -1,4 +1,4 @@
 {"type":"issue_implement_initialized","repoFullName":"soulomoon/mlf2","issueNumber":42,"branch":"codex/issue-42","workerThreadId":"issue-worker-42"}
 {"type":"issue_pr_created","prNumber":7,"prUrl":"https://github.com/soulomoon/mlf2/pull/7"}
 {"type":"issue_plan_turn_started","planTurnId":"turn-plan"}
-{"type":"issue_plan_completed"}
+{"type":"issue_plan_completed","planMarkdown":"Implement the issue according to the generated plan."}

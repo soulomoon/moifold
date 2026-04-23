@@ -59,6 +59,7 @@ import Data.Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.Foldable qualified as Foldable
 import Data.IORef
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
@@ -72,18 +73,19 @@ import System.Exit (ExitCode (..), exitFailure)
 import System.Posix.Process (getProcessID)
 import Test.QuickCheck
 import AppServerSpec
-  ( prop_appServerClientFallsBackForUnmaterializedThreadRead
-  , prop_appServerClientInitializesSingleRequestSessions
+  ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientMatchesSuccessResponse
   , prop_appServerClientParsesNestedThreadReadTurns
   , prop_appServerClientParsesThreadReadTurns
   , prop_appServerClientParsesThreadStartThreadId
+  , prop_appServerClientStartsThreadWithInterpreter
   , prop_appServerClientParsesTurnStartTurnId
   , prop_appServerClientRejectsMismatchedResponseIds
   , prop_appServerClientRejectsUnsupportedJsonRpcVersion
   , prop_appServerClientSkipsNotifications
   , prop_appServerClientSurfacesJsonRpcErrors
   , prop_appServerInitializeRequestMatchesJsonRpc
+  , prop_appServerInitializedNotificationMatchesJsonRpc
   , prop_appServerThreadReadAndInterruptUseThreadIds
   , prop_appServerThreadStartKeepsNodeNullFields
   , prop_appServerTurnStartPlanModeEncodesCollaborationMode
@@ -208,6 +210,22 @@ instance Arbitrary ReviewEvidence where
 instance Arbitrary CleanReviewEvidence where
   arbitrary = CleanReviewEvidence <$> arbitrary <*> pure "LGTM"
 
+sampleIssuePlanMarkdown :: Text
+sampleIssuePlanMarkdown =
+  "Implement the issue in small verified steps."
+
+sampleIssuePlanFile :: IssueConfig -> PrNumber -> Text
+sampleIssuePlanFile issueConfig prNumber =
+  Text.unlines
+    [ "---"
+    , "issue_number: " <> Text.pack (show (unIssueNumber issueConfig.issueNumber))
+    , "pr_number: " <> Text.pack (show (unPrNumber prNumber))
+    , "branch: " <> unBranchName issueConfig.issueBranch
+    , "---"
+    , ""
+    , sampleIssuePlanMarkdown
+    ]
+
 data EffectTag
   = ReadOpenIssuesTag
   | ReadOpenPullRequestsTag
@@ -223,6 +241,7 @@ data EffectTag
   | UpdatePullRequestBodyTag
   | CloseIssueTag
   | ResolveReviewThreadTag
+  | RecordIssuePlanTag
   | RecordPlanningGraphTag
   | RecordBlockedTag
   | MergePullRequestTag
@@ -246,6 +265,7 @@ effectTag = \case
   SomeEffect UpdatePullRequestBody {} -> UpdatePullRequestBodyTag
   SomeEffect CloseIssue {} -> CloseIssueTag
   SomeEffect ResolveReviewThread {} -> ResolveReviewThreadTag
+  SomeEffect RecordIssuePlan {} -> RecordIssuePlanTag
   SomeEffect RecordPlanningGraph {} -> RecordPlanningGraphTag
   SomeEffect RecordBlocked {} -> RecordBlockedTag
   SomeEffect MergePullRequest {} -> MergePullRequestTag
@@ -350,9 +370,10 @@ prop_cleanReviewWaitsForMergeability config commit workerThread reviewerActive c
 
 prop_issuePlanCompletionWaitsBeforeImplementation :: IssueConfig -> PrNumber -> ActiveTurn -> ActiveTurn -> Bool
 prop_issuePlanCompletionWaitsBeforeImplementation config prNumber planningTurn implementationTurn =
-  case step (IssueInPlanMode config prNumber (WorkerActive planningTurn)) (IssuePlanCompleted (Just implementationTurn)) of
+  case step (IssueInPlanMode config prNumber (WorkerActive planningTurn)) (IssuePlanCompleted sampleIssuePlanMarkdown (Just implementationTurn)) of
     Decision state effects ->
       phaseOf state == Implementing
+        && hasEffect RecordIssuePlanTag effects
         && hasEffect SleepUntilNextPollTag effects
         && lacksEffect PushBranchTag effects
         && lacksEffect CreatePullRequestTag effects
@@ -368,9 +389,10 @@ prop_issuePlanReadyStartsPlanTurn config prNumber workerThread planTurn =
 
 prop_issuePlanCompletionWithoutImmediateTurnWaitsOnly :: IssueConfig -> PrNumber -> ActiveTurn -> Bool
 prop_issuePlanCompletionWithoutImmediateTurnWaitsOnly config prNumber planningTurn =
-  case step (IssueInPlanMode config prNumber (WorkerActive planningTurn)) (IssuePlanCompleted Nothing) of
+  case step (IssueInPlanMode config prNumber (WorkerActive planningTurn)) (IssuePlanCompleted sampleIssuePlanMarkdown Nothing) of
     Decision state effects ->
       phaseOf state == Implementing
+        && hasEffect RecordIssuePlanTag effects
         && hasEffect SleepUntilNextPollTag effects
         && lacksEffect PushBranchTag effects
         && lacksEffect CreatePullRequestTag effects
@@ -465,7 +487,7 @@ prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn i
     [ IssueImplementInitialized config workerThread
     , IssuePullRequestCreatedEvent prNumber
     , IssuePlanTurnStartedEvent planTurn
-    , IssuePlanCompletedEvent (Just implementationTurn)
+    , IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)
     , IssuePullRequestBodyUpdatedEvent prNumber
     , IssueImplementationTurnStartedEvent implementationTurn
     , IssueImplementationCompletedEvent prNumber
@@ -486,6 +508,35 @@ prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
         , IssuePullRequestMergedEvent prNumber
         ]
     )
+
+prop_eventLogRefreshesIdleIssueWorkerThread :: IssueConfig -> ThreadId -> ThreadId -> TurnId -> Bool
+prop_eventLogRefreshesIdleIssueWorkerThread config oldThread newThread turnId =
+  replaySatisfies
+    [ IssueImplementInitialized config oldThread
+    , IssueWorkerThreadRefreshed newThread
+    , IssuePullRequestCreatedEvent (PrNumber 7)
+    , IssuePlanTurnStartedEvent turnId
+    ]
+    \replay ->
+      case replay.replayState of
+        SomeWatcherState (IssueInPlanMode _ _ (WorkerActive activeTurn)) ->
+          activeTurn.activeThreadId == newThread
+        _ ->
+          False
+
+prop_eventLogRefreshesIdlePrReviewThreads :: PrConfig -> ThreadId -> ThreadId -> ThreadId -> ThreadId -> CommitSha -> TurnId -> Bool
+prop_eventLogRefreshesIdlePrReviewThreads config oldWorker oldReviewer newWorker newReviewer commit turnId =
+  replaySatisfies
+    [ PrReviewInitialized config oldWorker oldReviewer
+    , PrReviewThreadsRefreshed newWorker newReviewer
+    , PrReviewNoUnresolvedFound commit turnId
+    ]
+    \replay ->
+      case replay.replayState of
+        SomeWatcherState (PrReviewingClean _ _ _ (ReviewerActive activeTurn)) ->
+          activeTurn.activeThreadId == newReviewer
+        _ ->
+          False
 
 prop_eventLogCreatePrBeforeIssuePlanStartsPlanReady :: IssueConfig -> ThreadId -> PrNumber -> Bool
 prop_eventLogCreatePrBeforeIssuePlanStartsPlanReady config workerThread prNumber =
@@ -514,7 +565,7 @@ prop_eventLogCannotCompleteIssueBeforeImplementationTurn config workerThread pla
         [ IssueImplementInitialized config workerThread
         , IssuePullRequestCreatedEvent prNumber
         , IssuePlanTurnStartedEvent planTurn
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         , IssuePullRequestMergedEvent prNumber
         ]
     )
@@ -526,7 +577,7 @@ prop_eventLogCannotHandoffBeforeImplementationCompletion config workerThread pla
         [ IssueImplementInitialized config workerThread
         , IssuePullRequestCreatedEvent prNumber
         , IssuePlanTurnStartedEvent planTurn
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         , IssuePullRequestBodyUpdatedEvent prNumber
         , IssueImplementationTurnStartedEvent implementationTurn
         , IssueReviewHandoffInitializedEvent prNumber
@@ -548,7 +599,7 @@ prop_eventLogIssueIncompleteCanContinueToComplete config workerThread planTurn f
         [ IssueImplementInitialized config workerThread
         , IssuePullRequestCreatedEvent prNumber
         , IssuePlanTurnStartedEvent planTurn
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         , IssuePullRequestBodyUpdatedEvent prNumber
         , IssueImplementationTurnStartedEvent firstImplementationTurn
         , IssueImplementationIncompleteEvent "incomplete"
@@ -575,9 +626,10 @@ prop_issueImplementWatcherStartsPlanMode config prNumber workerThread planTurn =
 prop_issueImplementWatcherPlanCompletionWaitsBeforeImplementation :: IssueConfig -> PrNumber -> ThreadId -> TurnId -> TurnId -> Bool
 prop_issueImplementWatcherPlanCompletionWaitsBeforeImplementation config prNumber workerThread planTurn implementationTurn =
   let state = SomeWatcherState (IssueInPlanMode config prNumber (WorkerActive (ActiveTurn workerThread planTurn)))
-   in expectRight (issueImplementObserve state (ObservedPlanCompleted (Just implementationTurn))) \tick ->
-        issueImplementTickEvent tick == IssuePlanCompletedEvent (Just implementationTurn)
+   in expectRight (issueImplementObserve state (ObservedPlanCompleted sampleIssuePlanMarkdown (Just implementationTurn))) \tick ->
+        issueImplementTickEvent tick == IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)
           && somePhase tick.issueImplementTickState == Implementing
+          && hasEffect RecordIssuePlanTag tick.issueImplementTickEffects
           && hasEffect SleepUntilNextPollTag tick.issueImplementTickEffects
           && lacksEffect PushBranchTag tick.issueImplementTickEffects
           && lacksEffect CreatePullRequestTag tick.issueImplementTickEffects
@@ -595,6 +647,24 @@ prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn :: IssueConf
 prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn config prNumber workerThread =
   let state = SomeWatcherState (IssueImplementationReady config (Just prNumber) (WorkerIdle workerThread))
    in expectLeft (issueImplementObserve state (ObservedImplementationCompleted prNumber))
+
+prop_issueImplementWatcherRejectsStaleCompletionPrAfterHandoff :: Bool
+prop_issueImplementWatcherRejectsStaleCompletionPrAfterHandoff =
+  all rejectsStaleCompletion
+    [ SomeWatcherState (IssueHandoffReady config expectedPr)
+    , SomeWatcherState (IssueHandoffInitialized config expectedPr)
+    , SomeWatcherState (IssueWaitingForPrMerge config expectedPr)
+    ]
+ where
+  config = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+  expectedPr = PrNumber 7
+  stalePr = PrNumber 8
+  rejectsStaleCompletion state =
+    expectRight (issueImplementObserve state (ObservedImplementationCompleted stalePr)) \tick ->
+      issueImplementTickEvent tick == IssueImplementationCompletedEvent stalePr
+        && somePhase tick.issueImplementTickState == Blocked
+        && hasEffect RecordBlockedTag tick.issueImplementTickEffects
+        && SomeEffect StopDaemon `elem` tick.issueImplementTickEffects
 
 prop_issueImplementWatcherMergedWaitsForIssueClose :: IssueConfig -> PrNumber -> Bool
 prop_issueImplementWatcherMergedWaitsForIssueClose config prNumber =
@@ -973,8 +1043,8 @@ canonicalEventExamples =
   , IssuePullRequestCreatedEvent prNumber
   , IssuePullRequestReusedEvent prNumber
   , IssuePlanTurnStartedEvent plannerTurn
-  , IssuePlanCompletedEvent Nothing
-  , IssuePlanCompletedEvent (Just implementationTurn)
+  , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+  , IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)
   , IssuePullRequestBodyUpdatedEvent prNumber
   , IssueImplementationTurnStartedEvent implementationTurn
   , IssueImplementationIncompleteEvent "implementation incomplete"
@@ -1087,7 +1157,7 @@ prop_eventLogRepairDropsCompletionWithoutImplementationTurn =
         [ IssueImplementInitialized issueConfig workerThread
         , IssuePullRequestCreatedEvent prNumber'
         , IssuePlanTurnStartedEvent (TurnId "turn-plan")
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         , IssueImplementationCompletedEvent prNumber'
         ]
    in expectLeft (replayEventLog legacyEvents)
@@ -1137,7 +1207,7 @@ prop_eventLogRepairRejectsValidEventLog config workerThread planTurn implementat
     [ IssueImplementInitialized config workerThread
     , IssuePullRequestCreatedEvent prNumber'
     , IssuePlanTurnStartedEvent planTurn
-    , IssuePlanCompletedEvent Nothing
+    , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
     , IssuePullRequestBodyUpdatedEvent prNumber'
     , IssueImplementationTurnStartedEvent implementationTurn
     , IssueImplementationCompletedEvent prNumber'
@@ -1356,8 +1426,8 @@ prop_turnClassifierMapsDomainOutputs =
       cleanReviewOutput = reviewerStateOutput "clean" reviewerCommit reviewerPromptVersion 0 (Just "LGTM") [] Nothing
    in
   classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "stable issue set")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without structured outcome"))
-    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "plan written")) == Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without structured outcome"))
-    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "ready for review")) == Just (ObservedImplementationIncomplete "ready for review")
+    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "plan written")) == Just (ObservedIssueImplementBlocked (BlockedReason "plan turn completed without structured plan output"))
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "ready for review")) == Just (ObservedImplementationIncomplete "implementation turn completed without structured outcome")
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "resolved")) == Just (ObservedWorkerOutcome (WorkerIncomplete "worker turn completed without structured outcome"))
     && classifyPrReviewReviewerTurn reviewerCommit (AppServerTurn (TurnId "reviewer") "completed" (Just cleanReviewOutput)) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence reviewerCommit "LGTM")))
 
@@ -1376,10 +1446,12 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-invalid-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-graph") "completed" (Just "{\"outcome\":\"complete\",\"ready_issues\":[15],\"blocked_issues\":[{\"issueNumber\":16,\"blockedBy\":[15],\"reason\":\"wait\"}],\"dependencies\":[{\"issueNumber\":16,\"dependsOn\":[15]}]}")) == Just (ObservedPlanningGraphUpdated planningGraph)
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-graph-rich") "completed" (Just "{\"outcome\":\"complete\",\"ready_issues\":[{\"number\":15,\"title\":\"ready\"}],\"blocked_issues\":[{\"number\":16,\"blocked_by\":[15],\"reason\":\"wait\"}],\"dependencies\":[{\"issue\":16,\"depends_on\":[15]}]}")) == Just (ObservedPlanningGraphUpdated planningGraph)
+    && parseStructuredTurnOutcome "{\"outcome\":\"blocked\"}" == Nothing
+    && classifyIssuePlanTurn (AppServerTurn (TurnId "plan") "completed" (Just "{\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"plan ready\",\"plan_markdown\":\"Implement the issue in small verified steps.\"}")) == Just (ObservedPlanCompleted sampleIssuePlanMarkdown Nothing)
     && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"ready\"}")) == Just (ObservedImplementationCompleted (PrNumber 7))
-    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl-clean") "completed" (Just "{\"outcome\":\"clean\",\"summary\":\"review-only\"}")) == Just (ObservedImplementationIncomplete "implementation turn used unsupported review-only outcome: clean")
-    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl-problems") "completed" (Just "{\"outcome\":\"problems\",\"summary\":\"review-only\"}")) == Just (ObservedImplementationIncomplete "implementation turn used unsupported review-only outcome: problems")
-    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"status\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl-clean") "completed" (Just "{\"outcome\":\"clean\",\"summary\":\"review-only\"}")) == Just (ObservedImplementationIncomplete "implementation turn completed without structured outcome")
+    && classifyIssueImplementationTurn (Just (PrNumber 7)) (AppServerTurn (TurnId "impl-problems") "completed" (Just "{\"outcome\":\"problems\",\"summary\":\"review-only\"}")) == Just (ObservedImplementationIncomplete "implementation turn completed without structured outcome")
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM")))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: review_status, reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, lgtm_comment, findings_summary, blocked_reason"))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-comments") "completed" (Just (reviewerStateOutput "comments_added" (CommitSha "abc123") reviewerPromptVersion 1 Nothing ["left inline comment"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (CommitSha "abc123")))
@@ -1401,9 +1473,10 @@ effectRuntimeConfig repo workdir requestId =
     , effectRuntimeStateDir = workdir </> ".watcher"
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = requestId
+    , effectRuntimePlannerThreadInstructions = "planner developer instructions"
     , effectRuntimePlannerTurn = turnRuntime "planner prompt" Nothing
     , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
-    , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" (Just (defaultPlanCollaborationMode "issue plan mode"))
+    , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" Nothing
     , effectRuntimeIssueImplementationTurn = turnRuntime "issue implementation prompt" Nothing
     , effectRuntimeReviewerTurn = turnRuntime "reviewer prompt" Nothing
     }
@@ -1435,6 +1508,18 @@ actionIsTurnStartWithInput threadId input action =
         lookupValue "input" request.requestParams == Just (toJSON [object ["type" .= ("text" :: Text), "text" .= input]])
       _ -> False
 
+actionTurnInputText :: PlannedAction -> Maybe Text
+actionTurnInputText = \case
+  PlannedAppServerRequest request -> do
+    Array items <- lookupValue "input" request.requestParams
+    Object firstItem <- case Foldable.toList items of
+      first : _ -> Just first
+      [] -> Nothing
+    case KeyMap.lookup "text" firstItem of
+      Just (String text) -> Just text
+      _ -> Nothing
+  _ -> Nothing
+
 actionTurnOutputSchema :: PlannedAction -> Maybe Value
 actionTurnOutputSchema = \case
   PlannedAppServerRequest request ->
@@ -1442,16 +1527,26 @@ actionTurnOutputSchema = \case
   _ ->
     Nothing
 
-prop_effectInterpreterIssuePlanCompletionOnlySleeps :: IssueConfig -> PrNumber -> ActiveTurn -> ActiveTurn -> Bool
-prop_effectInterpreterIssuePlanCompletionOnlySleeps config prNumber planningTurn implementationTurn =
-  case step (IssueInPlanMode config prNumber (WorkerActive planningTurn)) (IssuePlanCompleted (Just implementationTurn)) of
+actionTurnCollaborationMode :: PlannedAction -> Maybe Value
+actionTurnCollaborationMode = \case
+  PlannedAppServerRequest request ->
+    lookupValue "collaborationMode" request.requestParams
+  _ ->
+    Nothing
+
+prop_effectInterpreterIssuePlanCompletionRecordsPlan :: IssueConfig -> PrNumber -> ActiveTurn -> ActiveTurn -> Bool
+prop_effectInterpreterIssuePlanCompletionRecordsPlan config prNumber planningTurn implementationTurn =
+  case step (IssueInPlanMode config prNumber (WorkerActive planningTurn)) (IssuePlanCompleted sampleIssuePlanMarkdown (Just implementationTurn)) of
     Decision _state effects ->
       let compiled =
             compileEffectPlan
               (effectRuntimeConfig (issueRepo config) "/tmp/work" 10)
               effects
           actions = compiled.compiledActions
-       in actions == [PlannedSleepUntilNextPoll]
+       in actions
+            == [ PlannedWriteText "/tmp/work/.watcher/issue-plan.md" (sampleIssuePlanFile config prNumber)
+               , PlannedSleepUntilNextPoll
+               ]
             && compiled.compiledNextRequestId == 10
 
 prop_effectInterpreterPrBodyUpdateUsesIssuePlan :: IssueConfig -> PrNumber -> Bool
@@ -1474,13 +1569,27 @@ prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
           ]
       actions = compiled.compiledActions
    in length actions == 3
-        && actionIsTurnStartWithInput threadId "issue plan prompt" (actions !! 0)
+        && actionIsTurnStartFor threadId (actions !! 0)
+        && maybe
+          False
+          ( \input ->
+              promptContainsAll
+                input
+                [ "dedicated English-only issue planner"
+                , "#26"
+                , "Existing PR: #29"
+                , "/tmp/work/.watcher/issue-plan.md"
+                , "issue plan prompt"
+                ]
+          )
+          (actionTurnInputText (actions !! 0))
+        && actionTurnCollaborationMode (actions !! 0) == Nothing
         && actionIsTurnStartWithInput threadId "issue implementation prompt" (actions !! 1)
         && actionIsTurnStartWithInput threadId "worker prompt" (actions !! 2)
         && compiled.compiledNextRequestId == 19
 
-prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas :: Bool
-prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas =
+prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas :: Bool
+prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
   let repo = RepoName "soulomoon/mlf2"
       issueConfig = IssueConfig repo (IssueNumber 26) (BranchName "codex/issue-26")
       prConfig = PrConfig repo (PrNumber 29) (BranchName "codex/issue-26")
@@ -1499,7 +1608,36 @@ prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas =
           ]
       actions = compiled.compiledActions
    in length actions == 5
-        && all ((== Just Null) . actionTurnOutputSchema) actions
+        && map actionTurnOutputSchema actions
+          == [ Just plannerTurnOutputSchema
+             , Just issuePlanTurnOutputSchema
+             , Just issueImplementationTurnOutputSchema
+             , Just prReviewWorkerTurnOutputSchema
+             , Just reviewerTurnOutputSchema
+             ]
+
+prop_turnOutputSchemasRequireStructuredDetails :: Bool
+prop_turnOutputSchemasRequireStructuredDetails =
+  all
+    schemaRequiresOutcomeReasonSummary
+    [ plannerTurnOutputSchema
+    , issuePlanTurnOutputSchema
+    , issueImplementationTurnOutputSchema
+    , prReviewWorkerTurnOutputSchema
+    ]
+    && "plan_markdown" `elem` schemaRequiredFields issuePlanTurnOutputSchema
+
+schemaRequiresOutcomeReasonSummary :: Value -> Bool
+schemaRequiresOutcomeReasonSummary schema =
+  let requiredFields = schemaRequiredFields schema
+   in all (`elem` requiredFields) ["outcome", "reason", "summary"]
+
+schemaRequiredFields :: Value -> [Text]
+schemaRequiredFields (Object objectValue)
+  | Just (Array fields) <- KeyMap.lookup (Key.fromString "required") objectValue =
+      [field | String field <- Foldable.toList fields]
+schemaRequiredFields _ =
+  []
 
 prop_threadDeveloperPromptTemplatesPortNodeProtocols :: Bool
 prop_threadDeveloperPromptTemplatesPortNodeProtocols =
@@ -1531,11 +1669,15 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           issuePrompt
           [ "dedicated English-only issue implementer"
           , "There is no triage turn"
+          , "plan_markdown"
           , "/tmp/state/issue26/issue-plan.md"
           , "gh auth setup-git"
           , "PR review watcher handles review threads after handoff"
-          , "Do not use `issue_status: \"complete\"` for PR-ready handoff"
-          , "reserves that status for the final terminal state"
+          , "The watcher owns /tmp/state/issue26/issue-state.json"
+          , "structured turn output"
+          , "Ignore repository-local legacy orchestrator prompts"
+          , "Do not write `issue_status: \"complete\"`"
+          , "reserves terminal state for after the GitHub issue is closed"
           , "watcher verifies PR merge before final terminal success"
           , "stage only files related to this issue"
           ]
@@ -1544,6 +1686,7 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           [ "dedicated English-only issue planning coordinator"
           , "only classify the listed root issues"
           , "concrete body with scope, acceptance criteria"
+          , "Ignore repository-local legacy orchestrator prompts"
           , "12"
           ]
         && promptContainsAll
@@ -1553,7 +1696,11 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           , "https://github.com/soulomoon/mlf2/pull/31"
           , "Do not edit implementation files"
           , "/tmp/state/issue26/issue-state.json"
-          , "This turn is running in Codex Plan mode"
+          , "Do not write /tmp/state/issue26/issue-state.json"
+          , "Ignore repository-local legacy orchestrator prompts"
+          , "canonical front matter for issue 26, PR 31, and branch codex/issue-26"
+          , "planning-only ordinary Codex turn"
+          , "plan_markdown"
           ]
         && all
           promptHasAgentPrincipleFrame
@@ -1577,11 +1724,13 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple :: Bool
 prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
   promptContainsAll
     structuredTurnOutcomeInstructions
-    [ "Return only JSON with an outcome field"
+    [ "Return only JSON matching the active output schema"
+    , "Every schema includes outcome, reason, and summary"
+    , "additional schema-required fields such as plan_markdown"
     , "Plain prose completion is not accepted"
-    , "outcome=blocked with a reason"
-    , "outcome=incomplete with a reason"
-    , "outcome=complete with a summary"
+    , "outcome=blocked with a non-empty reason"
+    , "outcome=incomplete with a non-empty reason"
+    , "outcome=complete with a non-empty summary"
     ]
     && reviewerPromptVersion == "haskell-pro-style-v3-agent-principle"
 
@@ -1589,21 +1738,24 @@ prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =
   promptContainsAll
     plannerTurnInput
-    [ "For fanout decisions, return one JSON object with outcome=complete and dependencies; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
-    , "Bare {\"outcome\":\"complete\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
-    , "Do not return bare {\"outcome\":\"complete\"} while any open scoped work or pending dependency decision remains"
+    [ "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies"
+    , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"}"
+    , "Do not return minimal complete JSON while any open scoped work or pending dependency decision remains"
     ]
     && promptContainsAll
       issueImplementationTurnInput
       [ "Never mutate watcher events.jsonl"
       , "pid/lock/runtime-owner files"
-      , "Only write state files explicitly named by the current thread developer instructions"
+      , "Do not write watcher state files"
+      , "structured turn output"
+      , "optional evidence field for validation and publish details"
       ]
     && promptContainsAll
       prReviewWorkerTurnInput
       [ "Never mutate watcher events.jsonl"
       , "pid/lock/runtime-owner files"
       , "Only write state files explicitly named by the completion contract"
+      , "optional evidence field for validation, publish, and review-thread check details"
       ]
 
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions :: Bool
@@ -1615,12 +1767,24 @@ prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
           (effectRuntimeConfig issueConfig.issueRepo "/tmp/work" 40)
           [SomeEffect (StartIssuePlanWorkerTurn issueConfig (PrNumber 31) threadId)]
    in case compiled.compiledActions of
-        [PlannedAppServerRequest request] ->
+        [action@(PlannedAppServerRequest request)] ->
           lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
             && maybe
               False
-              (\instructions -> promptContainsAll instructions ["dedicated English-only issue planner", "#26", "Existing PR: #31", "https://github.com/soulomoon/mlf2/pull/31", "/tmp/work", "/tmp/work/.watcher/issue-plan.md"])
-              (collaborationDeveloperInstructions request.requestParams)
+              ( \input ->
+                  promptContainsAll
+                    input
+                    [ "dedicated English-only issue planner"
+                    , "#26"
+                    , "Existing PR: #31"
+                    , "https://github.com/soulomoon/mlf2/pull/31"
+                    , "/tmp/work"
+                    , "/tmp/work/.watcher/issue-plan.md"
+                    , "issue plan prompt"
+                    ]
+              )
+              (actionTurnInputText action)
+            && lookupValue "collaborationMode" request.requestParams == Nothing
             && compiled.compiledNextRequestId == 41
         _ -> False
 
@@ -1635,18 +1799,13 @@ promptHasAgentPrincipleFrame prompt =
     [ "Role:"
     , "Mission:"
     , "Operating principles:"
+    , "Tool and workflow rules:"
     , "Hard constraints:"
     , "Output contract:"
     , "Prioritize correctness, safety, usefulness, efficiency, and clarity."
+    , "do not invent facts, file contents, tool results, or user preferences."
+    , "prefer fundamental root-cause changes over superficial patches, validate, then report."
     ]
-
-collaborationDeveloperInstructions :: Value -> Maybe Text
-collaborationDeveloperInstructions params = do
-  collaboration <- lookupValue "collaborationMode" params
-  settings <- lookupValue "settings" collaboration
-  case lookupValue "developer_instructions" settings of
-    Just (String instructions) -> Just instructions
-    _ -> Nothing
 
 prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds :: ThreadId -> ThreadId -> Bool
 prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerThread =
@@ -2161,6 +2320,7 @@ data FakeActionCall
   = FakeCommand RuntimeCommand
   | FakeReadJson FilePath
   | FakeWriteJson FilePath Value
+  | FakeWriteText FilePath Text
   | FakeAppendJsonLine FilePath Value
   | FakeAppServer AppServerRequest
   | FakeSleep
@@ -2188,6 +2348,7 @@ fakeActionExecutorWithLogger logger commandResponse appServerResponse = do
               record (FakeReadJson path)
               pure (Left "not implemented in fake")
           , runtimeWriteJsonValue = \path value -> record (FakeWriteJson path value)
+          , runtimeWriteTextFile = \path content -> record (FakeWriteText path content)
           , runtimeAppendJsonLine = \path value -> record (FakeAppendJsonLine path value)
           }
       appServer =
@@ -2226,6 +2387,7 @@ fakeActionExecutorWithJsonStore commandResponse appServerResponse = do
           , runtimeWriteJsonValue = \path value -> do
               record (FakeWriteJson path value)
               writeStoredJson path value
+          , runtimeWriteTextFile = \path content -> record (FakeWriteText path content)
           , runtimeAppendJsonLine = \path value -> record (FakeAppendJsonLine path value)
           }
       appServer =
@@ -2264,6 +2426,8 @@ failedCommandReport message =
 
 defaultFakeAppServer :: AppServerRequest -> Value
 defaultFakeAppServer request
+  | request.requestMethod == "thread/start" =
+      object ["threadId" .= ("thread-started" :: Text)]
   | request.requestMethod == "turn/start" =
       object ["turnId" .= ("turn-started" :: Text)]
   | otherwise =
@@ -2770,7 +2934,7 @@ automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
           , daemonRuntimeConfig = runtimeConfig
           , daemonExecutionMode = DryRunActions
           }
-      loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
+      loopConfig = DaemonLoopConfig options Nothing
       events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
@@ -2779,9 +2943,9 @@ automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
       let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
       results <-
         sequence
-          [ assert "automatic planning dry-run emits a planning start" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "dry-run-planner-turn-120")))
+          [ assert "automatic planning dry-run emits a planning start" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "dry-run-planner-thread-120") (TurnId "dry-run-planner-turn-121")))
           , assert "automatic planning dry-run does not call interpreters" (null calls)
-          , assert "automatic planning dry-run reports start action" (length tick.loopActionReports == 1)
+          , assert "automatic planning dry-run reports thread and turn start actions" (length tick.loopActionReports == 2)
           ]
       pure (and results)
     Left failure -> do
@@ -2832,7 +2996,7 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
           , daemonRuntimeConfig = runtimeConfig
           , daemonExecutionMode = ExecuteActions
           }
-      loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
+      loopConfig = DaemonLoopConfig options Nothing
       events = [IssuePlanningInitialized (PlannerConfig repo 8 [issueNumber])]
       snapshotPath = runtimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -2841,12 +3005,14 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
     Right tick -> do
       let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
           snapshotWrites = [value | FakeWriteJson path value <- calls, path == snapshotPath]
+          threadStarts = [request | FakeAppServer request <- calls, request.requestMethod == "thread/start"]
           starts = [request | FakeAppServer request <- calls, request.requestMethod == "turn/start"]
       results <-
         sequence
           [ assert "automatic planning execute writes issue snapshot" (length snapshotWrites == 1)
           , assert "automatic planning execute starts after snapshot" (snapshotWriteBeforeTurnStart snapshotPath calls)
-          , assert "automatic planning execute emits start event" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-started")))
+          , assert "automatic planning execute starts one planner thread" (length threadStarts == 1)
+          , assert "automatic planning execute emits start event" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "thread-started") (TurnId "turn-started")))
           , assert "automatic planning execute starts one turn" (length starts == 1)
           ]
       pure (and results)
@@ -3217,7 +3383,7 @@ automaticDaemonLoopActiveTurnCompletionObservesOutput = do
                     .= [ object
                           [ "id" .= ("turn-plan" :: Text)
                           , "status" .= ("completed" :: Text)
-                          , "output" .= ("{\"outcome\":\"complete\",\"summary\":\"plan ready\"}" :: Text)
+                          , "output" .= ("{\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"plan ready\",\"plan_markdown\":\"Implement the issue in small verified steps.\"}" :: Text)
                           ]
                        ]
                 ]
@@ -3244,7 +3410,7 @@ automaticDaemonLoopActiveTurnCompletionObservesOutput = do
       results <-
         sequence
           [ assert "automatic active turn reads app-server thread" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
-          , assert "automatic active turn emits plan-completed event" (maybe False ((== IssuePlanCompletedEvent Nothing) . daemonObservedEvent) tick.loopObservedTick)
+          , assert "automatic active turn emits plan-completed event" (maybe False ((== IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing) . daemonObservedEvent) tick.loopObservedTick)
           , assert "automatic active turn reaches implementation setup" (maybe False ((== Implementing) . somePhase . daemonObservedState) tick.loopObservedTick)
           ]
       pure (and results)
@@ -3252,14 +3418,11 @@ automaticDaemonLoopActiveTurnCompletionObservesOutput = do
       putStrLn ("FAIL automatic active turn completion: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
-automaticDaemonLoopMissingPlanBlocksBeforePlanCompleted :: IO Bool
-automaticDaemonLoopMissingPlanBlocksBeforePlanCompleted = do
+automaticDaemonLoopWritesPlanBeforePlanCompletedEvent :: IO Bool
+automaticDaemonLoopWritesPlanBeforePlanCompletedEvent = do
   (executor, getCalls) <-
     fakeActionExecutorWith
-      ( \case
-          CheckNonEmptyFile {} -> failedCommandReport "file missing or empty: /tmp/work/.watcher/issue-plan.md"
-          command -> defaultFakeCommand command
-      )
+      defaultFakeCommand
       ( \request ->
           if request.requestMethod == "thread/read"
             then
@@ -3268,7 +3431,69 @@ automaticDaemonLoopMissingPlanBlocksBeforePlanCompleted = do
                     .= [ object
                           [ "id" .= ("turn-plan" :: Text)
                           , "status" .= ("completed" :: Text)
-                          , "output" .= ("{\"outcome\":\"complete\",\"summary\":\"plan ready\"}" :: Text)
+                          , "output" .= ("{\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"plan ready\",\"plan_markdown\":\"Implement the issue in small verified steps.\"}" :: Text)
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 142
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePullRequestReusedEvent prNumber
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        ]
+      expectedEvent = IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+      expectedWrite = FakeWriteText "/tmp/work/.watcher/issue-plan.md" (sampleIssuePlanFile issueConfig prNumber)
+      expectedAppend = FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right _tick -> do
+      results <-
+        sequence
+          [ assert "plan file is written before plan-completed event" (callBefore expectedWrite expectedAppend calls)
+          , assert "plan-completed event is appended" (expectedAppend `elem` calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic plan write before event: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
+callBefore :: FakeActionCall -> FakeActionCall -> [FakeActionCall] -> Bool
+callBefore expectedFirst expectedSecond =
+  go False
+ where
+  go _sawFirst [] = False
+  go sawFirst (call : rest)
+    | call == expectedFirst = go True rest
+    | call == expectedSecond = sawFirst
+    | otherwise = go sawFirst rest
+
+automaticDaemonLoopEmptyPlanMarkdownBlocksBeforePlanCompleted :: IO Bool
+automaticDaemonLoopEmptyPlanMarkdownBlocksBeforePlanCompleted = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-plan" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= ("{\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"plan ready\",\"plan_markdown\":\"\"}" :: Text)
                           ]
                        ]
                 ]
@@ -3295,14 +3520,13 @@ automaticDaemonLoopMissingPlanBlocksBeforePlanCompleted = do
       let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
       results <-
         sequence
-          [ assert "missing plan checks file before plan-completed event" (FakeCommand (CheckNonEmptyFile "/tmp/work/.watcher/issue-plan.md") `elem` calls)
-          , assert "missing plan blocks before plan-completed event" (observedEvent == Just (WatcherBlocked (BlockedReason "issue plan file missing or empty before issue_plan_completed: file missing or empty: /tmp/work/.watcher/issue-plan.md")))
-          , assert "missing plan does not append plan-completed event" (not (any isPlanCompletedAppend calls))
-          , assert "missing plan does not update PR body" (not (any isPrBodyUpdate calls))
+          [ assert "empty plan markdown blocks before plan-completed event" (observedEvent == Just (WatcherBlocked (BlockedReason "plan turn completed with empty plan_markdown")))
+          , assert "empty plan markdown does not append plan-completed event" (not (any isPlanCompletedAppend calls))
+          , assert "empty plan markdown does not update PR body" (not (any isPrBodyUpdate calls))
           ]
       pure (and results)
     Left failure -> do
-      putStrLn ("FAIL automatic missing plan pre-validation: " <> Text.unpack (formatDaemonLoopFailure failure))
+      putStrLn ("FAIL automatic empty plan_markdown pre-validation: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
  where
   isPlanCompletedAppend = \case
@@ -3345,7 +3569,7 @@ automaticDaemonLoopImplementationCompletionSequencesHandoff = do
         [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
         , IssuePullRequestReusedEvent prNumber
         , IssuePlanTurnStartedEvent (TurnId "turn-plan")
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         , IssuePullRequestBodyUpdatedEvent prNumber
         , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
         ]
@@ -3416,7 +3640,7 @@ automaticIssueMergeWaitsForIssueClose = do
           [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
           , IssuePullRequestReusedEvent (PrNumber 7)
           , IssuePlanTurnStartedEvent (TurnId "turn-plan")
-          , IssuePlanCompletedEvent Nothing
+          , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
           , IssuePullRequestBodyUpdatedEvent (PrNumber 7)
           , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
           , IssueImplementationCompletedEvent (PrNumber 7)
@@ -3604,9 +3828,10 @@ automaticDaemonLoopUpdatesPrBodyBeforeImplementation caseName prEvent = do
         [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
         , prEvent prNumber
         , IssuePlanTurnStartedEvent (TurnId "turn-plan")
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         ]
       expectedCommand = GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md"
+      expectedWrite = FakeWriteText "/tmp/work/.watcher/issue-plan.md" (sampleIssuePlanFile issueConfig prNumber)
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
   case result of
@@ -3614,7 +3839,8 @@ automaticDaemonLoopUpdatesPrBodyBeforeImplementation caseName prEvent = do
       results <-
         sequence
           [ assert (caseName <> " body update emits event") ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssuePullRequestBodyUpdatedEvent prNumber))
-          , assert (caseName <> " body update runs gh pr edit command") (FakeCommand expectedCommand `elem` calls)
+          , assert (caseName <> " body update writes plan before command") (callBefore expectedWrite (FakeCommand expectedCommand) calls)
+          , assert (caseName <> " body update command is scheduled") (FakeCommand expectedCommand `elem` calls)
           , assert (caseName <> " body update does not start implementation yet") (not (any isTurnStartCall calls))
           ]
       pure (and results)
@@ -3644,7 +3870,7 @@ automaticDaemonLoopStartsImplementationAfterPrBodyUpdate = do
         [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
         , IssuePullRequestCreatedEvent prNumber
         , IssuePlanTurnStartedEvent (TurnId "turn-plan")
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         , IssuePullRequestBodyUpdatedEvent prNumber
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -3690,7 +3916,7 @@ automaticDaemonLoopMissingPlanFailsPrBodyUpdate = do
         [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
         , IssuePullRequestCreatedEvent prNumber
         , IssuePlanTurnStartedEvent (TurnId "turn-plan")
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
@@ -3836,6 +4062,7 @@ baseObserveCli domain observation =
     , observeCliCommitSha = Nothing
     , observeCliMergeCommitSha = Nothing
     , observeCliReason = Nothing
+    , observeCliPlanMarkdown = Nothing
     , observeCliReviewThreadIds = []
     , observeCliComment = Nothing
     }
@@ -3867,6 +4094,8 @@ main = do
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
+      , quickCheckResult prop_eventLogRefreshesIdleIssueWorkerThread
+      , quickCheckResult prop_eventLogRefreshesIdlePrReviewThreads
       , quickCheckResult prop_eventLogCreatePrBeforeIssuePlanStartsPlanReady
       , quickCheckResult prop_eventLogCannotUpdatePrBodyBeforePlan
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforeImplementationTurn
@@ -3877,6 +4106,7 @@ main = do
       , quickCheckResult prop_issueImplementWatcherPlanCompletionWaitsBeforeImplementation
       , quickCheckResult prop_issueImplementWatcherIncompleteRestartsImplementation
       , quickCheckResult prop_issueImplementWatcherRejectsCompletionBeforeImplementationTurn
+      , quickCheckResult prop_issueImplementWatcherRejectsStaleCompletionPrAfterHandoff
       , quickCheckResult prop_issueImplementWatcherMergedWaitsForIssueClose
       , quickCheckResult prop_issueImplementWatcherIssueClosedCompletes
       , quickCheckResult prop_issueImplementWatcherBlockedStops
@@ -3921,10 +4151,10 @@ main = do
       , quickCheckResult prop_prReviewWatcherWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_prReviewWatcherCleanReviewerWaitsForMergeability
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
-        , quickCheckResult prop_runtimeGitPushDryRunNeverForces
-        , quickCheckResult prop_runtimeGitPushNeverForces
-        , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
-        , quickCheckResult prop_runtimeGhPrChecksUsesRequiredCurrentCli
+      , quickCheckResult prop_runtimeGitPushDryRunNeverForces
+      , quickCheckResult prop_runtimeGitPushNeverForces
+      , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
+      , quickCheckResult prop_runtimeGhPrChecksUsesRequiredCurrentCli
       , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
       , quickCheckResult prop_runtimeGhIssueCloseCommentsAndCloses
@@ -3933,12 +4163,13 @@ main = do
       , quickCheckResult prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
-        , quickCheckResult prop_ghGitParsesRemoteIssueView
-        , quickCheckResult prop_ghGitParsesRemotePrView
-        , quickCheckResult prop_ghGitParsesPrCreateAndChecks
-        , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
+      , quickCheckResult prop_ghGitParsesRemoteIssueView
+      , quickCheckResult prop_ghGitParsesRemotePrView
+      , quickCheckResult prop_ghGitParsesPrCreateAndChecks
+      , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
       , quickCheckResult prop_ghGitParsesGitOutputs
       , quickCheckResult prop_appServerInitializeRequestMatchesJsonRpc
+      , quickCheckResult prop_appServerInitializedNotificationMatchesJsonRpc
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
       , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
       , quickCheckResult prop_runtimeDefaultsCentralizeThreadAndTurnOptions
@@ -3949,20 +4180,21 @@ main = do
       , quickCheckResult prop_appServerClientSkipsNotifications
       , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds
       , quickCheckResult prop_appServerClientSurfacesJsonRpcErrors
-      , quickCheckResult prop_appServerClientFallsBackForUnmaterializedThreadRead
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_appServerClientParsesThreadReadTurns
       , quickCheckResult prop_appServerClientParsesTurnStartTurnId
       , quickCheckResult prop_appServerClientParsesThreadStartThreadId
+      , quickCheckResult prop_appServerClientStartsThreadWithInterpreter
       , quickCheckResult prop_appServerClientParsesNestedThreadReadTurns
       , quickCheckResult prop_turnClassifierCompletionStates
       , quickCheckResult prop_turnClassifierMapsDomainOutputs
       , quickCheckResult prop_turnClassifierPrefersStructuredOutputs
       , quickCheckResult prop_turnClassifierBlocksMissingOutputs
-      , quickCheckResult prop_effectInterpreterIssuePlanCompletionOnlySleeps
+      , quickCheckResult prop_effectInterpreterIssuePlanCompletionRecordsPlan
       , quickCheckResult prop_effectInterpreterPrBodyUpdateUsesIssuePlan
       , quickCheckResult prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts
-      , quickCheckResult prop_defaultEffectRuntimeConfigOmitsLiveTurnOutputSchemas
+      , quickCheckResult prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas
+      , quickCheckResult prop_turnOutputSchemasRequireStructuredDetails
       , quickCheckResult prop_threadDeveloperPromptTemplatesPortNodeProtocols
       , quickCheckResult prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple
       , quickCheckResult prop_promptPipelineAlignmentContracts
@@ -4006,7 +4238,8 @@ main = do
   automaticPlanningCanonicalCoverageOk <- automaticDaemonLoopPlanningGraphCanonicalizesOpenScopeCoverage
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
-  automaticMissingPlanPreValidationOk <- automaticDaemonLoopMissingPlanBlocksBeforePlanCompleted
+  automaticPlanWriteBeforeEventOk <- automaticDaemonLoopWritesPlanBeforePlanCompletedEvent
+  automaticMissingPlanPreValidationOk <- automaticDaemonLoopEmptyPlanMarkdownBlocksBeforePlanCompleted
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
   automaticIssueMergeClosedOk <- automaticIssueMergeWaitsForIssueClose
   automaticStaleTurnOk <- automaticStaleActiveTurnBlocksAfterThreeMisses
@@ -4053,6 +4286,7 @@ main = do
       && automaticPlanningCanonicalCoverageOk
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
+      && automaticPlanWriteBeforeEventOk
       && automaticMissingPlanPreValidationOk
       && automaticImplementationHandoffOk
       && automaticIssueMergeClosedOk

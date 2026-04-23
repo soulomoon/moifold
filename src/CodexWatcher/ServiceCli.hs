@@ -11,9 +11,8 @@ import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.ChildDaemon (stableExecutablePath)
 import CodexWatcher.Cli
 import CodexWatcher.Supervisor
-import CodexWatcher.Types (ThreadId (..), unRepoName)
+import CodexWatcher.Types (unRepoName)
 import Data.Text qualified as Text
-import System.Exit (die)
 import System.FilePath ((</>))
 
 renderService :: RenderServiceCli -> IO ()
@@ -27,12 +26,7 @@ renderService options = do
 serviceConfigFromCli :: RenderServiceCli -> IO WatcherServiceConfig
 serviceConfigFromCli options = do
   executable <- maybe stableExecutablePath pure options.renderServiceCliExecutable
-  plannerArgs <-
-    case (options.renderServiceCliDomain, options.renderServiceCliPlannerThread) of
-      (CliIssuePlanning, Just threadId) -> pure ["--planner-thread-id", Text.unpack (unThreadId threadId)]
-      (CliIssuePlanning, Nothing) -> die "render-service for issue-planning requires --planner-thread-id <thread-id>"
-      _ -> pure []
-  pure (serviceConfigFromCliWithExecutable options executable plannerArgs)
+  pure (serviceConfigFromCliWithExecutable options executable [])
 
 serviceConfigFromCliWithExecutable :: RenderServiceCli -> FilePath -> [String] -> WatcherServiceConfig
 serviceConfigFromCliWithExecutable options executable plannerArgs =

@@ -2,23 +2,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module AppServerSpec
-  ( prop_appServerClientFallsBackForUnmaterializedThreadRead
-  , prop_appServerClientInitializesSingleRequestSessions
+  ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientMatchesSuccessResponse
   , prop_appServerClientParsesNestedThreadReadTurns
   , prop_appServerClientParsesThreadReadTurns
   , prop_appServerClientParsesThreadStartThreadId
+  , prop_appServerClientStartsThreadWithInterpreter
   , prop_appServerClientParsesTurnStartTurnId
   , prop_appServerClientRejectsMismatchedResponseIds
   , prop_appServerClientRejectsUnsupportedJsonRpcVersion
   , prop_appServerClientSkipsNotifications
   , prop_appServerClientSurfacesJsonRpcErrors
   , prop_appServerInitializeRequestMatchesJsonRpc
+  , prop_appServerInitializedNotificationMatchesJsonRpc
   , prop_appServerThreadReadAndInterruptUseThreadIds
   , prop_appServerThreadStartKeepsNodeNullFields
   , prop_appServerTurnStartPlanModeEncodesCollaborationMode
   ) where
 
+import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.RuntimeDefaults
@@ -28,6 +30,7 @@ import CodexWatcher.Types
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Functor.Identity (Identity (..))
 import Data.Text (Text)
 
 prop_appServerInitializeRequestMatchesJsonRpc :: Bool
@@ -41,6 +44,15 @@ prop_appServerInitializeRequestMatchesJsonRpc =
           [ "clientInfo" .= object ["name" .= ("codex-script" :: Text), "version" .= ("0.1.0" :: Text)]
           , "capabilities" .= object ["experimentalApi" .= True]
           ]
+      ]
+
+prop_appServerInitializedNotificationMatchesJsonRpc :: Bool
+prop_appServerInitializedNotificationMatchesJsonRpc =
+  initializedNotification
+    == object
+      [ "jsonrpc" .= ("2.0" :: Text)
+      , "method" .= ("initialized" :: Text)
+      , "params" .= object []
       ]
 
 prop_appServerThreadStartKeepsNodeNullFields :: Bool
@@ -132,21 +144,6 @@ prop_appServerClientSurfacesJsonRpcErrors =
           jsonRpcErrorCode errorValue == -32000 && jsonRpcErrorMessage errorValue == "boom"
         _ -> False
 
-prop_appServerClientFallsBackForUnmaterializedThreadRead :: ThreadId -> Bool
-prop_appServerClientFallsBackForUnmaterializedThreadRead threadId =
-  let request = threadReadRequest 86 threadId True
-      failure =
-        AppServerJsonRpcFailure
-          86
-          JsonRpcError
-            { jsonRpcErrorCode = -32000
-            , jsonRpcErrorMessage = "thread " <> unThreadId threadId <> " is not materialized yet; includeTurns is unavailable before first user message"
-            , jsonRpcErrorData = Nothing
-            }
-      nonThreadRequest = initializeRequest 86 "codex-watcher-hs" "0.1.0"
-   in threadReadBeforeMaterializedFallback request failure == Just (object ["turns" .= ([] :: [Value])])
-        && threadReadBeforeMaterializedFallback nonThreadRequest failure == Nothing
-
 prop_appServerClientRejectsUnsupportedJsonRpcVersion :: Bool
 prop_appServerClientRejectsUnsupportedJsonRpcVersion =
   let response = object ["jsonrpc" .= ("1.0" :: Text), "id" .= (85 :: Int), "result" .= object []]
@@ -217,6 +214,21 @@ prop_appServerClientParsesThreadStartThreadId :: Bool
 prop_appServerClientParsesThreadStartThreadId =
   parseThreadStartThreadId (object ["thread" .= object ["id" .= ("thread-created" :: Text)]])
     == Right (ThreadId "thread-created")
+
+prop_appServerClientStartsThreadWithInterpreter :: Bool
+prop_appServerClientStartsThreadWithInterpreter =
+  let options = defaultThreadStartOptions "/workspace/repo" "developer"
+      expectedRequest = threadStartRequest 17 options
+      interpreter =
+        AppServerInterpreter
+          ( \request ->
+              Identity $
+                if request == expectedRequest
+                  then object ["thread" .= object ["id" .= ("thread-created" :: Text)]]
+                  else error "unexpected thread/start request"
+          )
+   in runIdentity (startThreadWithInterpreter interpreter 17 options)
+        == Right (ThreadId "thread-created")
 
 prop_appServerClientParsesNestedThreadReadTurns :: Bool
 prop_appServerClientParsesNestedThreadReadTurns =

@@ -20,7 +20,7 @@ import Data.Text (Text)
 
 data IssueImplementObservation
   = ObservedPlanTurnStarted TurnId
-  | ObservedPlanCompleted (Maybe TurnId)
+  | ObservedPlanCompleted Text (Maybe TurnId)
   | ObservedPullRequestCreated PrNumber
   | ObservedPullRequestReused PrNumber
   | ObservedPullRequestBodyUpdated PrNumber
@@ -45,9 +45,9 @@ data IssueImplementTick = IssueImplementTick
 issueImplementObserve :: SomeWatcherState -> IssueImplementObservation -> Either Text IssueImplementTick
 issueImplementObserve (SomeWatcherState state@(IssueReadyToPlan _config _prNumber (WorkerIdle threadId))) (ObservedPlanTurnStarted turnId) =
   Right (tick (IssuePlanTurnStartedEvent turnId) (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId))))
-issueImplementObserve (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (ObservedPlanCompleted maybeImplementationTurnId) =
+issueImplementObserve (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (ObservedPlanCompleted planMarkdown maybeImplementationTurnId) =
   let nextTurn = ActiveTurn (activeThreadId activeTurn) <$> maybeImplementationTurnId
-   in Right (tick (IssuePlanCompletedEvent maybeImplementationTurnId) (step state (IssuePlanCompleted nextTurn)))
+   in Right (tick (IssuePlanCompletedEvent planMarkdown maybeImplementationTurnId) (step state (IssuePlanCompleted planMarkdown nextTurn)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestCreated prNumber) =
   Right (tick (IssuePullRequestCreatedEvent prNumber) (step state (IssuePullRequestReady prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestReused prNumber) =

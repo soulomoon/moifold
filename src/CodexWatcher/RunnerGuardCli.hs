@@ -152,7 +152,6 @@ loopCliCommandArgs watcherPidFile cli =
     <> boolSwitch cli.loopCliExecute "--execute"
     <> boolSwitch cli.loopCliLoop "--loop"
     <> maybe [] (\iterations -> ["--iterations", Text.pack (show iterations)]) cli.loopCliIterations
-    <> maybe [] (\threadId -> ["--thread-id", unThreadId threadId]) cli.loopCliPlannerThread
     <> ( case cli.loopCliScopeIssues of
            [] -> []
            issueNumbers -> ["--scope-issues", issueNumbersCsv issueNumbers]

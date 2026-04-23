@@ -7,6 +7,7 @@ module CodexWatcher.AppServerProtocol
   ( AppServerRequest (..)
   , ThreadStartOptions (..)
   , TurnStartOptions (..)
+  , initializedNotification
   , initializeRequest
   , planCollaborationMode
   , threadNameSetRequest
@@ -78,6 +79,14 @@ initializeRequest requestId clientName clientVersion =
           , "capabilities" .= object ["experimentalApi" .= True]
           ]
     }
+
+initializedNotification :: Value
+initializedNotification =
+  object
+    [ "jsonrpc" .= String "2.0"
+    , "method" .= ("initialized" :: Text)
+    , "params" .= object []
+    ]
 
 threadStartRequest :: Int -> ThreadStartOptions -> AppServerRequest
 threadStartRequest requestId options =

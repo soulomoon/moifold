@@ -76,7 +76,7 @@ repairMissingPlanBeforePullRequest events failure prEvent prNumber = do
       inserted =
         [ WatcherRecoveredInvalidState reason
         , IssuePlanTurnStartedEvent (syntheticRecoveryPlanTurn issueNumber' prNumber)
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent syntheticRecoveryPlanMarkdown Nothing
         ]
       candidate = prefix <> inserted <> [prEvent] <> dropUnsafeImplementationCompletions (prefix <> inserted <> [prEvent]) suffixAfterFailure
       dropped = droppedEvents events candidate
@@ -91,7 +91,7 @@ repairCompletionWithoutImplementationTurn events failure prNumber = do
       recoveryMarker = WatcherRecoveredInvalidState reason
       missingPlanEvents =
         [ IssuePlanTurnStartedEvent (syntheticRecoveryPlanTurn issueNumber' prNumber)
-        , IssuePlanCompletedEvent Nothing
+        , IssuePlanCompletedEvent syntheticRecoveryPlanMarkdown Nothing
         ]
   inserted <-
     case replayPrefix.replayState of
@@ -205,6 +205,10 @@ syntheticRecoveryPlanTurn issueNumber' prNumber =
         <> "-pr-"
         <> Text.pack (show (unPrNumber prNumber))
     )
+
+syntheticRecoveryPlanMarkdown :: Text
+syntheticRecoveryPlanMarkdown =
+  "Recovered after event-log repair. Continue from the existing PR and verify the issue scope before implementation."
 
 recoveryReason :: ReplayFailure -> Text -> Text
 recoveryReason failure action =

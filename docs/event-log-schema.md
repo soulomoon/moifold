@@ -30,7 +30,7 @@ Important replay rules:
 {"type":"issue_pr_created","prNumber":7,"prUrl":"https://github.com/owner/name/pull/7"}
 {"type":"issue_pr_reused","prNumber":7,"prUrl":"https://github.com/owner/name/pull/7"}
 {"type":"issue_plan_turn_started","planTurnId":"turn-plan"}
-{"type":"issue_plan_completed"}
+{"type":"issue_plan_completed","planMarkdown":"Implementation plan markdown"}
 {"type":"issue_pr_body_updated","prNumber":7}
 {"type":"issue_implementation_turn_started","implementationTurnId":"turn-implementation"}
 {"type":"issue_implementation_incomplete","reason":"worker marked implementation incomplete"}
@@ -50,8 +50,8 @@ Compatibility notes:
 
 - `issue_pr_created` or `issue_pr_reused` moves the implementer from PR setup into `PlanMode` and writes `issue_status: "ready_to_plan"`.
 - `issue_plan_turn_started` writes `issue_status: "planning"`.
-- `issue_plan_completed` writes `issue_status: "plan_ready"` and may include `implementationTurnId`; when present, replay remembers that worker thread for the later implementation turn.
-- After planning, the runtime must emit `issue_pr_body_updated` before any implementation turn starts. The runtime verifies `issue-plan.md` is present and non-empty before committing `issue_plan_completed`.
+- `issue_plan_completed` writes `issue_status: "plan_ready"` and includes the structured `planMarkdown` returned by the issue PR planning turn; it may also include `implementationTurnId` when a next worker turn already exists.
+- After planning, the runtime must emit `issue_pr_body_updated` before any implementation turn starts. The PR body update reads the watcher-written `issue-plan.md`.
 
 Important replay rules:
 

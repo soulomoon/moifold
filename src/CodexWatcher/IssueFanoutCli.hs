@@ -246,12 +246,13 @@ prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> Int -> IssueImplemen
 prepareIssueImplementerLaunch Nothing _requestId launch =
   pure launch
 prepareIssueImplementerLaunch (Just endpoint) requestId launch = do
-  response <-
-    sendOneAppServerRequest
+  result <-
+    startThreadWithEndpoint
       endpoint
       defaultAppServerClientOptions
-      (threadStartRequest requestId (issueImplementerThreadStartOptions launch))
-  case response >>= parseThreadStartThreadId of
+      requestId
+      (issueImplementerThreadStartOptions launch)
+  case result of
     Left failure -> die (Text.unpack (formatAppServerClientFailure failure))
     Right threadId -> pure (withLaunchThreadId threadId launch)
 

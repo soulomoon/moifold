@@ -44,8 +44,7 @@ analyzePlanning :: WatcherSummary -> [Problem]
 analyzePlanning summary
   | summary.kind /= IssuePlanningKind = []
   | otherwise =
-      [problem "error" summary.label "missing planner threadId" (Just "create a Codex planner thread, then run run-issue-planning with --planner-thread-id") | summary.threadId == Nothing]
-        <> [problem "error" summary.label "maxParallel is less than 1" Nothing | maybe False (< 1) summary.maxParallel]
+      [problem "error" summary.label "maxParallel is less than 1" Nothing | maybe False (< 1) summary.maxParallel]
         <> [ problem "warn" summary.label ("planner status is " <> planningStatusLabel plannerStatus <> " but daemon is not running") Nothing
            | isNothing summary.configLoadError
            , not summary.blocked

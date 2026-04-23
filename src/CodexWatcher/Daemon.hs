@@ -378,6 +378,7 @@ actionRunsBeforeEventCommit = \case
   PlannedCommand {} -> True
   PlannedAppServerRequest {} -> True
   PlannedWriteJson {} -> False
+  PlannedWriteText {} -> True
   PlannedSleepUntilNextPoll -> False
   PlannedStopDaemon -> False
 

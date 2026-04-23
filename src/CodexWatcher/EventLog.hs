@@ -39,6 +39,7 @@ data WatcherEvent
   | IssuePlanningReadyIssuesFixed
   | IssuePlanningTurnCompleted
   | PrReviewInitialized PrConfig ThreadId ThreadId
+  | PrReviewThreadsRefreshed ThreadId ThreadId
   | PrReviewUnresolvedFound (NonEmpty ReviewThreadId) CommitSha TurnId
   | PrReviewNoUnresolvedFound CommitSha TurnId
   | PrReviewFixCompleted
@@ -51,8 +52,9 @@ data WatcherEvent
   | PrReviewMergeabilityRecheck Text
   | PrReviewMergeCompleted MergeCommit
   | IssueImplementInitialized IssueConfig ThreadId
+  | IssueWorkerThreadRefreshed ThreadId
   | IssuePlanTurnStartedEvent TurnId
-  | IssuePlanCompletedEvent (Maybe TurnId)
+  | IssuePlanCompletedEvent Text (Maybe TurnId)
   | IssuePullRequestCreatedEvent PrNumber
   | IssuePullRequestReusedEvent PrNumber
   | IssuePullRequestBodyUpdatedEvent PrNumber
@@ -106,6 +108,11 @@ instance ToJSON WatcherEvent where
           <> [ "workerThreadId" .= unThreadId workerThreadId
              , "reviewerThreadId" .= unThreadId reviewerThreadId
              ]
+      PrReviewThreadsRefreshed workerThreadId reviewerThreadId ->
+        eventType event
+          <> [ "workerThreadId" .= unThreadId workerThreadId
+             , "reviewerThreadId" .= unThreadId reviewerThreadId
+             ]
       PrReviewUnresolvedFound reviewThreadIds' commitSha workerTurnId ->
         eventType event
           <> [ "reviewThreadIds" .= fmap unReviewThreadId (nonEmptyToList reviewThreadIds')
@@ -142,10 +149,14 @@ instance ToJSON WatcherEvent where
         eventType event
           <> issueConfigFields config
           <> ["workerThreadId" .= unThreadId workerThreadId]
+      IssueWorkerThreadRefreshed workerThreadId ->
+        eventType event <> ["workerThreadId" .= unThreadId workerThreadId]
       IssuePlanTurnStartedEvent planTurnId ->
         eventType event <> ["planTurnId" .= unTurnId planTurnId]
-      IssuePlanCompletedEvent maybeImplementationTurnId ->
-        eventType event <> maybe [] (\turnId -> ["implementationTurnId" .= unTurnId turnId]) maybeImplementationTurnId
+      IssuePlanCompletedEvent planMarkdown maybeImplementationTurnId ->
+        eventType event
+          <> ["planMarkdown" .= planMarkdown]
+          <> maybe [] (\turnId -> ["implementationTurnId" .= unTurnId turnId]) maybeImplementationTurnId
       IssuePullRequestCreatedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssuePullRequestReusedEvent prNumber' ->
@@ -204,6 +215,10 @@ instance FromJSON WatcherEvent where
           <$> parsePrConfig objectValue
           <*> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
           <*> (ThreadId <$> nonEmptyTextField objectValue "reviewerThreadId")
+      "pr_review_threads_refreshed" ->
+        PrReviewThreadsRefreshed
+          <$> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
+          <*> (ThreadId <$> nonEmptyTextField objectValue "reviewerThreadId")
       "pr_review_unresolved_found" ->
         PrReviewUnresolvedFound
           <$> (reviewThreadIds =<< objectValue .: "reviewThreadIds")
@@ -243,12 +258,16 @@ instance FromJSON WatcherEvent where
         IssueImplementInitialized
           <$> parseIssueConfig objectValue
           <*> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
+      "issue_worker_thread_refreshed" ->
+        IssueWorkerThreadRefreshed
+          <$> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
       "issue_plan_turn_started" ->
         IssuePlanTurnStartedEvent
           <$> (TurnId <$> nonEmptyTextField objectValue "planTurnId")
       "issue_plan_completed" ->
         IssuePlanCompletedEvent
-          <$> (traverse nonEmptyTurnId =<< objectValue .:? "implementationTurnId")
+          <$> nonEmptyTextField objectValue "planMarkdown"
+          <*> (traverse nonEmptyTurnId =<< objectValue .:? "implementationTurnId")
       "issue_pr_created" ->
         IssuePullRequestCreatedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
@@ -345,6 +364,10 @@ applyEvent _ event@IssueImplementInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)
 applyEvent _ event@IssuePlanningInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)
+applyEvent (SomeWatcherState (PrCheckingReviews config (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
+  Right (SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
+applyEvent (SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
+  Right (SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
 applyEvent (SomeWatcherState state@PlanningReady {}) (IssuePlanningTurnStarted plannerThread turnId) =
   fromDecision (step state (StartPlanningTurn (ActiveTurn plannerThread turnId)))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningIssuesRequested requests) =
@@ -388,8 +411,14 @@ applyEvent (SomeWatcherState state@PrMerging {}) (PrReviewMergeCompleted mergeCo
   fromDecision (step state (MergeCompleted mergeCommit))
 applyEvent (SomeWatcherState state@(IssueReadyToPlan _config _prNumber (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
   fromDecision (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId)))
-applyEvent (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (IssuePlanCompletedEvent turnId) =
-  fromDecision (step state (IssuePlanCompleted (ActiveTurn (activeThreadId activeTurn) <$> turnId)))
+applyEvent (SomeWatcherState (IssueReadyToPlan config prNumber (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
+  Right (SomeWatcherState (IssueReadyToPlan config prNumber (WorkerIdle threadId)), [])
+applyEvent (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (IssuePlanCompletedEvent planMarkdown turnId) =
+  fromDecision (step state (IssuePlanCompleted planMarkdown (ActiveTurn (activeThreadId activeTurn) <$> turnId)))
+applyEvent (SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
+  Right (SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle threadId)), [])
+applyEvent (SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
+  Right (SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle threadId)), [])
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestCreatedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
@@ -624,6 +653,7 @@ eventName = \case
   IssuePlanningReadyIssuesFixed -> "issue_planning_ready_issues_fixed"
   IssuePlanningTurnCompleted -> "issue_planning_turn_completed"
   PrReviewInitialized {} -> "pr_review_initialized"
+  PrReviewThreadsRefreshed {} -> "pr_review_threads_refreshed"
   PrReviewUnresolvedFound {} -> "pr_review_unresolved_found"
   PrReviewNoUnresolvedFound {} -> "pr_review_no_unresolved_found"
   PrReviewFixCompleted -> "pr_review_fix_completed"
@@ -636,6 +666,7 @@ eventName = \case
   PrReviewMergeabilityRecheck {} -> "pr_review_mergeability_recheck"
   PrReviewMergeCompleted {} -> "pr_review_merge_completed"
   IssueImplementInitialized {} -> "issue_implement_initialized"
+  IssueWorkerThreadRefreshed {} -> "issue_worker_thread_refreshed"
   IssuePlanTurnStartedEvent {} -> "issue_plan_turn_started"
   IssuePlanCompletedEvent {} -> "issue_plan_completed"
   IssuePullRequestCreatedEvent {} -> "issue_pr_created"

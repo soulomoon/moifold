@@ -201,9 +201,8 @@ prop_runtimeGhPrBodyUpdateUsesPlanFile config prNumber =
       script = Text.pack (spec.args !! 1)
    in spec.command == "bash"
         && spec.cwd == Just "/tmp/work"
-        && "if [ ! -s \"$plan_path\" ]; then" `Text.isInfixOf` script
         && "cat \"$plan_path\"" `Text.isInfixOf` script
-        && "gh pr edit \"$pr\" --repo \"$repo\" --body-file \"$body_file\" >/dev/null" `Text.isInfixOf` script
+        && "gh api --method PATCH \"repos/$repo/pulls/$pr\" -f body=\"$(cat \"$body_file\")\" >/dev/null" `Text.isInfixOf` script
         && "printf '{\"status\":\"updated\",\"prNumber\":%s}\\n' \"$pr\"" `Text.isInfixOf` script
         && spec.args
           == [ "-lc"

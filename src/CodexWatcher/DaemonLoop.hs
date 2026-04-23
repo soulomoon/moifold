@@ -30,6 +30,7 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.PlanningGraphCanonical
 import CodexWatcher.PrReviewWatcher
 import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (..), RuntimeInterpreter (..), commandText, runtimeReadJsonValue, runtimeWriteJsonValue)
+import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
 import CodexWatcher.TurnClassifier
 import CodexWatcher.Types
 import Control.Monad (filterM)
@@ -38,7 +39,7 @@ import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Foldable (toList)
 import Data.List (find, nub)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -55,7 +56,6 @@ data DaemonLoopFailure
   = DaemonLoopDaemonFailure DaemonFailure
   | DaemonLoopExternalFailure Text
   | DaemonLoopAppServerFailure AppServerClientFailure
-  | DaemonLoopMissingPlannerThread
   | DaemonLoopUnexpectedStartPlan Text
   deriving stock (Eq, Show, Generic)
 
@@ -178,21 +178,30 @@ runFromState
 runFromState executor config events replay = do
   clearStaleActiveTurnMarkerWhenInactive executor config replay.replayState
   case replay.replayState of
-    SomeWatcherState (PlanningReady plannerConfig) ->
-      case config.loopPlannerThreadId of
-        Nothing -> pure (Left DaemonLoopMissingPlannerThread)
-        Just plannerThread -> do
-          snapshot <- ensureIssuePlanningSnapshot executor config plannerConfig
+    SomeWatcherState (PlanningReady plannerConfig) -> do
+      planner <- ensurePlannerThread executor config
+      case planner of
+        Left failure -> pure (Left failure)
+        Right (plannerThread, plannerConfig', plannerReports) -> do
+          snapshot <- ensureIssuePlanningSnapshot executor plannerConfig' plannerConfig
           case snapshot of
             Left failure -> pure (Left failure)
-            Right () -> prestartAndObserve executor config events StartPlannerTurnKind plannerThread (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
+            Right () ->
+              prependActionReports plannerReports
+                <$> prestartAndObserve
+                  executor
+                  plannerConfig'
+                  events
+                  StartPlannerTurnKind
+                  plannerThread
+                  (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
     SomeWatcherState (PlanningTurnActive plannerConfig activeTurn) ->
       observePlanningActiveTurn executor config events replay plannerConfig activeTurn
     SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
       idle executor config replay "issue planning is waiting for ready issues"
     SomeWatcherState (IssueReadyToPlan issueConfig prNumber (WorkerIdle workerThread)) ->
       prestartAndObserve executor config events (StartIssuePlanWorkerTurnKind issueConfig prNumber) workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
-    SomeWatcherState (IssueInPlanMode _ _prNumber (WorkerActive activeTurn)) ->
+    SomeWatcherState (IssueInPlanMode _issueConfig _prNumber (WorkerActive activeTurn)) ->
       observeIssuePlanActiveTurn executor config events replay activeTurn
     SomeWatcherState (IssuePlanReady issueConfig prNumber (WorkerIdle _workerThread)) ->
       updatePullRequestBody executor config events replay issueConfig prNumber
@@ -226,6 +235,60 @@ runFromState executor config events replay = do
       terminalStop executor config replay "watcher is complete"
     SomeWatcherState (StoppedState {}) ->
       terminalStop executor config replay "watcher is stopped"
+
+ensurePlannerThread
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> m (Either DaemonLoopFailure (ThreadId, DaemonLoopConfig, [ActionExecutionReport]))
+ensurePlannerThread executor config =
+  case config.loopPlannerThreadId of
+    Just threadId ->
+      pure (Right (threadId, config, []))
+    Nothing ->
+      startPlannerThread executor config
+
+startPlannerThread
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> m (Either DaemonLoopFailure (ThreadId, DaemonLoopConfig, [ActionExecutionReport]))
+startPlannerThread executor config = do
+  let runtimeConfig = config.loopDaemonOptions.daemonRuntimeConfig
+      requestId = runtimeConfig.effectRuntimeNextRequestId
+      request =
+        threadStartRequest
+          requestId
+          (defaultThreadStartOptions runtimeConfig.effectRuntimeWorkdir runtimeConfig.effectRuntimePlannerThreadInstructions)
+      nextConfig = withRuntimeNextRequestId (requestId + 1) config
+  report <- executePlannedAction executor config.loopDaemonOptions.daemonExecutionMode (PlannedAppServerRequest request)
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      pure (Right (syntheticPlannerThreadId requestId, nextConfig, [report]))
+    ExecuteActions ->
+      case report.actionExecutionResult of
+        AppServerActionResult response ->
+          case parseThreadStartThreadId response of
+            Left failure -> pure (Left (DaemonLoopAppServerFailure failure))
+            Right threadId -> pure (Right (threadId, nextConfig, [report]))
+        _ ->
+          pure (Left (DaemonLoopUnexpectedStartPlan ("planner thread start returned unexpected action result: " <> Text.pack (show report.actionExecutionResult))))
+
+syntheticPlannerThreadId :: Int -> ThreadId
+syntheticPlannerThreadId requestId =
+  ThreadId ("dry-run-planner-thread-" <> Text.pack (show requestId))
+
+withRuntimeNextRequestId :: Int -> DaemonLoopConfig -> DaemonLoopConfig
+withRuntimeNextRequestId requestId config =
+  config
+    { loopDaemonOptions =
+        config.loopDaemonOptions
+          { daemonRuntimeConfig =
+              config.loopDaemonOptions.daemonRuntimeConfig
+                { effectRuntimeNextRequestId = requestId
+                }
+          }
+    }
 
 clearStaleActiveTurnMarkerWhenInactive :: Monad m => ActionExecutor m -> DaemonLoopConfig -> SomeWatcherState -> m ()
 clearStaleActiveTurnMarkerWhenInactive executor config state =
@@ -282,37 +345,10 @@ observeIssuePlanActiveTurn executor config events replay activeTurn = do
       case classifyIssuePlanTurn turn of
         Nothing ->
           idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
-        Just (ObservedPlanCompleted maybeImplementationTurnId) -> do
-          maybeBlocked <- validateIssuePlanFile executor config
-          observeWithExecutor executor config events $
-            DaemonIssueImplementObservation $
-              maybe (ObservedPlanCompleted maybeImplementationTurnId) ObservedIssueImplementBlocked maybeBlocked
+        Just (ObservedPlanCompleted planMarkdown maybeImplementationTurnId) ->
+          observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPlanCompleted planMarkdown maybeImplementationTurnId))
         Just observation ->
           observeWithExecutor executor config events (DaemonIssueImplementObservation observation)
-
-validateIssuePlanFile :: Monad m => ActionExecutor m -> DaemonLoopConfig -> m (Maybe BlockedReason)
-validateIssuePlanFile executor config = do
-  let planPath = config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "issue-plan.md"
-  report <- executor.actionRuntime.runtimeRunCommand (CheckNonEmptyFile planPath)
-  pure
-    if report.ok
-      then Nothing
-      else
-        Just
-          ( BlockedReason
-              ( "issue plan file missing or empty before issue_plan_completed: "
-                  <> firstNonEmptyText [report.stderr, report.stdout, maybe "" id report.errorMessage, Text.pack planPath]
-              )
-          )
-
-firstNonEmptyText :: [Text] -> Text
-firstNonEmptyText =
-  maybe "" id . firstNonEmpty . fmap Text.strip
- where
-  firstNonEmpty [] = Nothing
-  firstNonEmpty (text : rest)
-    | Text.null text = firstNonEmpty rest
-    | otherwise = Just text
 
 observePlanningActiveTurn
   :: Monad m
@@ -846,10 +882,14 @@ updatePullRequestBody
   -> PrNumber
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 updatePullRequestBody executor config events replay issueConfig prNumber = do
+  let planRecordEffects =
+        [ SomeEffect (RecordIssuePlan issueConfig prNumber planMarkdown)
+        | planMarkdown <- maybeToList (latestIssuePlanMarkdown events)
+        ]
   let updatePlan =
         compileEffectPlan
           config.loopDaemonOptions.daemonRuntimeConfig
-          [SomeEffect (UpdatePullRequestBody issueConfig prNumber)]
+          (planRecordEffects <> [SomeEffect (UpdatePullRequestBody issueConfig prNumber)])
   reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode updatePlan
   case config.loopDaemonOptions.daemonExecutionMode of
     DryRunActions ->
@@ -864,22 +904,38 @@ updatePullRequestBody executor config events replay issueConfig prNumber = do
               }
         )
     ExecuteActions ->
-      case reports of
-        [report] ->
-          case report.actionExecutionResult of
-            CommandActionResult commandReport
-              | not commandReport.ok ->
-                  pure (Left (DaemonLoopDaemonFailure (DaemonActionFailed report.actionExecutionAction commandReport)))
-              | otherwise ->
-                  prependActionReport report <$> observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestBodyUpdated prNumber))
-            _ ->
-              pure (Left (DaemonLoopDaemonFailure (DaemonActionResultInvalid report.actionExecutionAction "PR body update did not return a command report")))
-        _ ->
-          pure (Left (DaemonLoopExternalFailure "unexpected PR body update action report count"))
+      case finalCommandReport reports of
+        Nothing ->
+          pure (Left (DaemonLoopExternalFailure "PR body update did not return a command report"))
+        Just (report, commandReport)
+          | not commandReport.ok ->
+              pure (Left (DaemonLoopDaemonFailure (DaemonActionFailed report.actionExecutionAction commandReport)))
+          | otherwise ->
+              prependActionReports reports <$> observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestBodyUpdated prNumber))
+
+latestIssuePlanMarkdown :: [WatcherEvent] -> Maybe Text
+latestIssuePlanMarkdown =
+  foldl' step Nothing
+ where
+  step _latestPlan (IssuePlanCompletedEvent planMarkdown _maybeImplementationTurn) = Just planMarkdown
+  step latestPlan _event = latestPlan
+
+finalCommandReport :: [ActionExecutionReport] -> Maybe (ActionExecutionReport, CommandReport)
+finalCommandReport reports =
+  case reverse reports of
+    [] -> Nothing
+    report : _ ->
+      case report.actionExecutionResult of
+        CommandActionResult commandReport -> Just (report, commandReport)
+        _ -> Nothing
 
 prependActionReport :: ActionExecutionReport -> Either DaemonLoopFailure DaemonLoopTickResult -> Either DaemonLoopFailure DaemonLoopTickResult
 prependActionReport report =
   fmap \tick -> tick {loopActionReports = report : tick.loopActionReports}
+
+prependActionReports :: [ActionExecutionReport] -> Either DaemonLoopFailure DaemonLoopTickResult -> Either DaemonLoopFailure DaemonLoopTickResult
+prependActionReports reports =
+  fmap \tick -> tick {loopActionReports = reports <> tick.loopActionReports}
 
 observeIssuePullRequestMerged
   :: Monad m
@@ -1182,7 +1238,6 @@ formatDaemonLoopFailure = \case
   DaemonLoopDaemonFailure failure -> formatDaemonFailure failure
   DaemonLoopExternalFailure reason -> "external observation failed: " <> reason
   DaemonLoopAppServerFailure failure -> formatAppServerClientFailure failure
-  DaemonLoopMissingPlannerThread -> "issue planning loop requires a planner thread id"
   DaemonLoopUnexpectedStartPlan reason -> "unexpected start-turn plan: " <> reason
 
 logLoopResult :: ActionExecutor m -> Either DaemonLoopFailure DaemonLoopTickResult -> m ()

@@ -15,6 +15,7 @@ module CodexWatcher.Effects
   ) where
 
 import CodexWatcher.Types
+import Data.Text (Text)
 
 data Effect (mutability :: Mutability) where
   ReadOpenIssues :: RepoName -> Effect 'ReadOnly
@@ -31,6 +32,7 @@ data Effect (mutability :: Mutability) where
   UpdatePullRequestBody :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   CloseIssue :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
+  RecordIssuePlan :: IssueConfig -> PrNumber -> Text -> Effect 'CanMutateLocal
   RecordPlanningGraph :: PlanningGraph -> Effect 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal
   MergePullRequest :: PrNumber -> CleanReviewEvidence -> Effect 'CanMerge
@@ -65,6 +67,8 @@ instance Eq SomeEffect where
   SomeEffect (CloseIssue leftConfig leftPr) == SomeEffect (CloseIssue rightConfig rightPr) =
     leftConfig == rightConfig && leftPr == rightPr
   SomeEffect (ResolveReviewThread left) == SomeEffect (ResolveReviewThread right) = left == right
+  SomeEffect (RecordIssuePlan leftConfig leftPr leftPlan) == SomeEffect (RecordIssuePlan rightConfig rightPr rightPlan) =
+    leftConfig == rightConfig && leftPr == rightPr && leftPlan == rightPlan
   SomeEffect (RecordPlanningGraph left) == SomeEffect (RecordPlanningGraph right) = left == right
   SomeEffect (RecordBlocked left) == SomeEffect (RecordBlocked right) = left == right
   SomeEffect (MergePullRequest leftPr leftEvidence) == SomeEffect (MergePullRequest rightPr rightEvidence) =
@@ -90,6 +94,7 @@ effectMutability CreatePullRequest {} = CanMutateGitHub
 effectMutability UpdatePullRequestBody {} = CanMutateGitHub
 effectMutability CloseIssue {} = CanMutateGitHub
 effectMutability ResolveReviewThread {} = CanMutateGitHub
+effectMutability RecordIssuePlan {} = CanMutateLocal
 effectMutability RecordPlanningGraph {} = CanMutateLocal
 effectMutability RecordBlocked {} = CanMutateLocal
 effectMutability MergePullRequest {} = CanMerge

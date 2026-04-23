@@ -21,6 +21,7 @@ module CodexWatcher.Runtime
   , runRuntimeCommand
   , skippedCommand
   , writeJsonValue
+  , writeTextFile
   ) where
 
 import CodexWatcher.Types
@@ -104,6 +105,7 @@ data RuntimeInterpreter m = RuntimeInterpreter
   { runtimeRunCommand :: RuntimeCommand -> m CommandReport
   , runtimeReadJsonValue :: FilePath -> m (Either Text Value)
   , runtimeWriteJsonValue :: FilePath -> Value -> m ()
+  , runtimeWriteTextFile :: FilePath -> Text -> m ()
   , runtimeAppendJsonLine :: FilePath -> Value -> m ()
   }
 
@@ -113,6 +115,7 @@ ioRuntimeInterpreter =
     { runtimeRunCommand = runRuntimeCommand
     , runtimeReadJsonValue = readJsonValue
     , runtimeWriteJsonValue = writeJsonValue
+    , runtimeWriteTextFile = writeTextFile
     , runtimeAppendJsonLine = appendJsonLine
     }
 
@@ -385,10 +388,6 @@ updatePullRequestBodyScript =
     , "pr=\"$2\""
     , "issue=\"$3\""
     , "plan_path=\"$4\""
-    , "if [ ! -s \"$plan_path\" ]; then"
-    , "  printf 'issue plan file missing or empty: %s\\n' \"$plan_path\" >&2"
-    , "  exit 1"
-    , "fi"
     , "body_file=$(mktemp)"
     , "trap 'rm -f \"$body_file\"' EXIT"
     , "{"
@@ -397,7 +396,7 @@ updatePullRequestBodyScript =
     , "  cat \"$plan_path\""
     , "  printf '\\n\\n---\\nImplementation plan synced by codex-watcher before implementation starts. Implementation commits will be pushed to this PR.\\n'"
     , "} > \"$body_file\""
-    , "gh pr edit \"$pr\" --repo \"$repo\" --body-file \"$body_file\" >/dev/null"
+    , "gh api --method PATCH \"repos/$repo/pulls/$pr\" -f body=\"$(cat \"$body_file\")\" >/dev/null"
     , "printf '{\"status\":\"updated\",\"prNumber\":%s}\\n' \"$pr\""
     ]
 
@@ -504,6 +503,13 @@ writeJsonValue path value = do
   createDirectoryIfMissing True (takeDirectory path)
   let tmpPath = path <> ".tmp"
   LazyByteString.writeFile tmpPath (encode value)
+  renameFile tmpPath path
+
+writeTextFile :: FilePath -> Text -> IO ()
+writeTextFile path content = do
+  createDirectoryIfMissing True (takeDirectory path)
+  let tmpPath = path <> ".tmp"
+  ByteString.writeFile tmpPath (Text.Encoding.encodeUtf8 content)
   renameFile tmpPath path
 
 appendJsonLine :: FilePath -> Value -> IO ()

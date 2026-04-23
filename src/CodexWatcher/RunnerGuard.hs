@@ -23,14 +23,13 @@ import CodexWatcher.AppServerClient
   , formatAppServerClientFailure
   , latestTurnById
   , parseThreadReadTurns
-  , parseThreadStartThreadId
   , parseTurnStartTurnId
   , sendOneAppServerRequest
+  , startThreadWithEndpoint
   )
 import CodexWatcher.AppServerProtocol
   ( threadNameSetRequest
   , threadReadRequest
-  , threadStartRequest
   , turnStartRequest
   )
 import CodexWatcher.EventLog (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName, loadEventLogFile, replayEventLog)
@@ -135,13 +134,13 @@ checkRunnerGuard config = do
 
 startRunnerGuardRepairThread :: RunnerGuardConfig -> RunnerGuardProblem -> IO RunnerGuardRepair
 startRunnerGuardRepairThread config problem' = do
-  threadResponse <-
-    sendOrFail
-      ( threadStartRequest
-          1
-          (defaultThreadStartOptions config.guardRepairCwd repairDeveloperInstructions)
-      )
-  threadId <- either (failText . formatAppServerClientFailure) pure (parseThreadStartThreadId threadResponse)
+  threadId <-
+    either (failText . formatAppServerClientFailure) pure
+      =<< startThreadWithEndpoint
+        config.guardAppServerEndpoint
+        defaultAppServerClientOptions
+        1
+        (defaultThreadStartOptions config.guardRepairCwd repairDeveloperInstructions)
   _ <-
     sendOrFail
       (threadNameSetRequest 2 threadId ("runner-guard repair " <> unRepoName config.guardRepo))

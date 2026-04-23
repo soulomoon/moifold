@@ -39,7 +39,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   PlannerTurnCompleted :: Event 'IssuePlanning 'PlanMode
 
   StartReadyIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'PlanMode
-  IssuePlanCompleted :: Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
+  IssuePlanCompleted :: Text.Text -> Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePullRequestReady :: PrNumber -> Event 'IssueImplement 'Implementing
   IssuePullRequestBodyUpdated :: PrNumber -> Event 'IssueImplement 'Implementing
   StartIssueImplementationTurn :: ActiveTurn -> Event 'IssueImplement 'Implementing
@@ -103,14 +103,11 @@ step (IssueReadyToPlan config prNumber (WorkerIdle threadId)) (StartReadyIssuePl
   Decision
     (IssueInPlanMode config prNumber (WorkerActive activeTurn))
     [SomeEffect (StartIssuePlanWorkerTurn config prNumber threadId)]
-step (IssueInPlanMode config prNumber (WorkerActive activeTurn)) (IssuePlanCompleted Nothing) =
-  Decision
-    (IssuePlanReady config prNumber (WorkerIdle (activeThreadId activeTurn)))
-    [SomeEffect SleepUntilNextPoll]
-step (IssueInPlanMode config prNumber (WorkerActive _activeTurn)) (IssuePlanCompleted (Just nextTurn)) =
-  Decision
-    (IssuePlanReady config prNumber (WorkerIdle (activeThreadId nextTurn)))
-    [SomeEffect SleepUntilNextPoll]
+step (IssueInPlanMode config prNumber (WorkerActive activeTurn)) (IssuePlanCompleted planMarkdown maybeNextTurn) =
+  let nextTurn = maybe activeTurn id maybeNextTurn
+   in Decision
+        (IssuePlanReady config prNumber (WorkerIdle (activeThreadId nextTurn)))
+        [SomeEffect (RecordIssuePlan config prNumber planMarkdown), SomeEffect SleepUntilNextPoll]
 step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady prNumber) =
   Decision
     (IssueReadyToPlan config prNumber worker)
@@ -168,12 +165,21 @@ step state@IssueWaitingForPrMerge {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step state@IssueWaitingForPrMerge {} (IssueReviewHandoffStarted _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step state@IssueHandoffReady {} (IssueImplementationCompleted _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
-step state@IssueHandoffInitialized {} (IssueImplementationCompleted _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
-step state@IssueWaitingForPrMerge {} (IssueImplementationCompleted _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+step state@(IssueHandoffReady _config expectedPrNumber) (IssueImplementationCompleted prNumber)
+  | expectedPrNumber == prNumber =
+      Decision state [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked (Just expectedPrNumber) prNumber
+step state@(IssueHandoffInitialized _config expectedPrNumber) (IssueImplementationCompleted prNumber)
+  | expectedPrNumber == prNumber =
+      Decision state [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked (Just expectedPrNumber) prNumber
+step state@(IssueWaitingForPrMerge _config expectedPrNumber) (IssueImplementationCompleted prNumber)
+  | expectedPrNumber == prNumber =
+      Decision state [SomeEffect SleepUntilNextPoll]
+  | otherwise =
+      prMismatchBlocked (Just expectedPrNumber) prNumber
 step (IssueWaitingForPrMerge config expectedPrNumber) (IssuePullRequestMerged prNumber)
   | expectedPrNumber == prNumber =
       Decision

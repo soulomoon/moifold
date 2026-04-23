@@ -177,12 +177,16 @@ bootstrapPlanReadyEvents snapshot initialEvents =
   initialEvents
     <> bootstrapPrReadyEvents snapshot
     <> [ IssuePlanTurnStartedEvent bootstrapPlanTurn
-       , IssuePlanCompletedEvent Nothing
+       , IssuePlanCompletedEvent bootstrapPlanMarkdown Nothing
        ]
 
 bootstrapPrReadyEvents :: NodeIssueImplementSnapshot -> [WatcherEvent]
 bootstrapPrReadyEvents snapshot =
   maybe [] (\prNumber -> [IssuePullRequestReusedEvent prNumber]) (snapshotPrNumber snapshot)
+
+bootstrapPlanMarkdown :: Text
+bootstrapPlanMarkdown =
+  "Bootstrapped from existing watcher state. Continue from the current issue and PR context."
 
 snapshotPrNumber :: NodeIssueImplementSnapshot -> Maybe PrNumber
 snapshotPrNumber snapshot =
