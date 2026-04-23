@@ -34,6 +34,7 @@ type family CanBlock (phase :: Phase) :: Constraint where
 data Event (domain :: Domain) (phase :: Phase) where
   StartPlanningTurn :: ActiveTurn -> Event 'IssuePlanning 'Initialized
   PlannerReadyIssuesFixed :: Event 'IssuePlanning 'Initialized
+  PlannerScopeCompleted :: Event 'IssuePlanning 'Initialized
   PlannerRequestedIssueCreation :: [IssueCreationRequest] -> Event 'IssuePlanning 'PlanMode
   PlannerUpdatedGraph :: PlanningGraph -> Event 'IssuePlanning 'PlanMode
   PlannerTurnCompleted :: Event 'IssuePlanning 'PlanMode
@@ -87,6 +88,10 @@ step (PlanningWaitingForReadyIssues config _graph) PlannerReadyIssuesFixed =
   Decision
     (PlanningReady config)
     [SomeEffect SleepUntilNextPoll]
+step (PlanningReady _config) PlannerScopeCompleted =
+  Decision
+    (CompleteState PlanningComplete)
+    [SomeEffect StopDaemon]
 step (PlanningTurnActive _config _activeTurn) PlannerTurnCompleted =
   Decision
     (CompleteState PlanningComplete)

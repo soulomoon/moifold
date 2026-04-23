@@ -3,6 +3,7 @@
 
 module AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
+  , prop_appServerClientDetectsSystemErrorThreadStatus
   , prop_appServerClientMatchesSuccessResponse
   , prop_appServerClientParsesNestedThreadReadTurns
   , prop_appServerClientParsesThreadReadTurns
@@ -104,6 +105,24 @@ prop_appServerClientInitializesSingleRequestSessions threadId =
    in fmap requestMethod session == ["initialize", "thread/read"]
         && fmap requestId session == [0, 4]
         && appServerRequestSession (initializeRequest 10 "client" "1") == [initializeRequest 10 "client" "1"]
+
+prop_appServerClientDetectsSystemErrorThreadStatus :: Bool
+prop_appServerClientDetectsSystemErrorThreadStatus =
+  threadSystemError
+    ( object
+        [ "thread"
+            .= object
+              [ "status" .= object ["type" .= ("systemError" :: Text)]
+              , "turns"
+                  .= [ object
+                        [ "id" .= ("turn-target" :: Text)
+                        , "status" .= ("completed" :: Text)
+                        ]
+                     ]
+              ]
+        ]
+    )
+    == Just "systemError"
 
 prop_appServerClientMatchesSuccessResponse :: Bool
 prop_appServerClientMatchesSuccessResponse =

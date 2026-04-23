@@ -26,6 +26,7 @@ import CodexWatcher.AppServerClient
   , parseTurnStartTurnId
   , sendOneAppServerRequest
   , startThreadWithEndpoint
+  , threadSystemError
   )
 import CodexWatcher.AppServerProtocol
   ( threadNameSetRequest
@@ -34,11 +35,9 @@ import CodexWatcher.AppServerProtocol
   )
 import CodexWatcher.EventLog (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName, loadEventLogFile, replayEventLog)
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
-import CodexWatcher.JsonPath (renderedTextAtPath)
 import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions, defaultTurnStartOptions)
 import CodexWatcher.TurnClassifier (TurnCompletion (..), classifyTurnCompletion)
 import CodexWatcher.Types
-import Control.Applicative ((<|>))
 import Data.Aeson
   ( FromJSON (..)
   , ToJSON (..)
@@ -343,14 +342,6 @@ eventLogAgeSeconds path = do
   modified <- getModificationTime path
   now <- getCurrentTime
   pure (diffUTCTime now modified)
-
-threadSystemError :: Value -> Maybe Text
-threadSystemError value =
-  let status = renderedTextAtPath ["thread", "status", "type"] value <|> renderedTextAtPath ["status", "type"] value <|> renderedTextAtPath ["thread", "status"] value <|> renderedTextAtPath ["status"] value
-   in case Text.toLower . Text.strip <$> status of
-        Just "systemerror" -> status
-        Just "system_error" -> status
-        _ -> Nothing
 
 eventReplayProblem :: ReplayFailure -> RunnerGuardProblem
 eventReplayProblem failure =

@@ -26,6 +26,7 @@ data IssuePlanningObservation
   | ObservedPlanningIssuesRequested [IssueCreationRequest]
   | ObservedPlanningGraphUpdated PlanningGraph
   | ObservedPlanningReadyIssuesFixed
+  | ObservedPlanningScopeCompleted
   | ObservedPlanningTurnCompleted
   | ObservedPlanningBlocked BlockedReason
   deriving stock (Eq, Show)
@@ -53,6 +54,8 @@ issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPla
         Right () -> Right (tick (IssuePlanningGraphUpdated graph) (step state (PlannerUpdatedGraph graph)))
 issuePlanningObserve (SomeWatcherState state@PlanningWaitingForReadyIssues {}) ObservedPlanningReadyIssuesFixed =
   Right (tick IssuePlanningReadyIssuesFixed (step state PlannerReadyIssuesFixed))
+issuePlanningObserve (SomeWatcherState state@PlanningReady {}) ObservedPlanningScopeCompleted =
+  Right (tick IssuePlanningScopeCompleted (step state PlannerScopeCompleted))
 issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) ObservedPlanningTurnCompleted =
   Right (tick IssuePlanningTurnCompleted (step state PlannerTurnCompleted))
 issuePlanningObserve (SomeWatcherState state@PlanningReady {}) (ObservedPlanningBlocked reason) =

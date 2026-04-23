@@ -74,6 +74,7 @@ import System.Posix.Process (getProcessID)
 import Test.QuickCheck
 import AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
+  , prop_appServerClientDetectsSystemErrorThreadStatus
   , prop_appServerClientMatchesSuccessResponse
   , prop_appServerClientParsesNestedThreadReadTurns
   , prop_appServerClientParsesThreadReadTurns
@@ -1710,7 +1711,6 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           , issuePrompt
           , plannerPrompt
           , planModePrompt
-          , plannerTurnInput
           , issuePlanTurnInput
           , issueImplementationTurnInput
           , prReviewWorkerTurnInput
@@ -1739,10 +1739,15 @@ prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =
   promptContainsAll
     plannerTurnInput
-    [ "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies"
-    , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"}"
-    , "Do not return minimal complete JSON while any open scoped work or pending dependency decision remains"
+    [ "Read the current issue snapshot"
+    , "return the issue-planning decision JSON"
+    , "Inspect existing GitHub issues and sub-issues when needed"
     ]
+    && promptContainsNone
+      plannerTurnInput
+      [ "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies"
+      , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"}"
+      ]
     && promptContainsAll
       issueImplementationTurnInput
       [ "Never mutate watcher events.jsonl"
@@ -1792,6 +1797,10 @@ prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
 promptContainsAll :: Text -> [Text] -> Bool
 promptContainsAll prompt =
   all (`Text.isInfixOf` prompt)
+
+promptContainsNone :: Text -> [Text] -> Bool
+promptContainsNone prompt =
+  all (not . (`Text.isInfixOf` prompt))
 
 promptHasAgentPrincipleFrame :: Text -> Bool
 promptHasAgentPrincipleFrame prompt =
@@ -3032,6 +3041,75 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
     FakeWriteJson path _ -> path == snapshotPath
     _ -> False
 
+automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn :: IO Bool
+automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn = do
+  let repo = RepoName "soulomoon/mlf2"
+      issueNumber = IssueNumber 12
+      issueJson =
+        object
+          [ "number" .= (12 :: Int)
+          , "title" .= ("Root issue" :: Text)
+          , "state" .= ("CLOSED" :: Text)
+          , "closed" .= True
+          , "body" .= ("Root body" :: Text)
+          , "url" .= ("https://github.com/soulomoon/mlf2/issues/12" :: Text)
+          , "labels" .= ([] :: [Value])
+          , "assignees" .= ([] :: [Value])
+          ]
+      subIssuesJson =
+        toJSON
+          [ object
+              [ "number" .= (26 :: Int)
+              , "title" .= ("Sub issue" :: Text)
+              , "state" .= ("CLOSED" :: Text)
+              , "closed" .= True
+              , "body" .= ("Sub body" :: Text)
+              , "url" .= ("https://github.com/soulomoon/mlf2/issues/26" :: Text)
+              , "parentIssueNumber" .= (12 :: Int)
+              ]
+          ]
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          RawCommand "gh" ["issue", "view", "12", "--repo", "soulomoon/mlf2", "--json", _] Nothing ->
+            jsonCommandReport issueJson
+          RawCommand "gh" ["api", "repos/soulomoon/mlf2/issues/12/sub_issues", "--paginate", "--jq", _] Nothing ->
+            jsonCommandReport subIssuesJson
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 122
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events = [IssuePlanningInitialized (PlannerConfig repo 8 [issueNumber])]
+      snapshotPath = runtimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          observedPhase = somePhase . daemonObservedState <$> tick.loopObservedTick
+          snapshotWrites = [value | FakeWriteJson path value <- calls, path == snapshotPath]
+          threadStarts = [request | FakeAppServer request <- calls, request.requestMethod == "thread/start"]
+          turnStarts = [request | FakeAppServer request <- calls, request.requestMethod == "turn/start"]
+      results <-
+        sequence
+          [ assert "closed scope writes issue snapshot" (length snapshotWrites == 1)
+          , assert "closed scope emits completion event" (observedEvent == Just IssuePlanningScopeCompleted)
+          , assert "closed scope reaches complete phase" (observedPhase == Just Complete)
+          , assert "closed scope does not start planner thread" (null threadStarts)
+          , assert "closed scope does not start planner turn" (null turnStarts)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic planning closed scope: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
 automaticDaemonLoopPlanningIssueCreationRequestsReplanning :: IO Bool
 automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
   let repo = RepoName "soulomoon/mlf2"
@@ -3417,6 +3495,57 @@ automaticDaemonLoopActiveTurnCompletionObservesOutput = do
       pure (and results)
     Left failure -> do
       putStrLn ("FAIL automatic active turn completion: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
+automaticDaemonLoopActiveTurnSystemErrorBlocksWatcher :: IO Bool
+automaticDaemonLoopActiveTurnSystemErrorBlocksWatcher = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "thread"
+                    .= object
+                      [ "status" .= object ["type" .= ("systemError" :: Text)]
+                      , "turns"
+                          .= [ object
+                                [ "id" .= ("turn-plan" :: Text)
+                                , "status" .= ("completed" :: Text)
+                                ]
+                             ]
+                      ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 141
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+      expectedReason = BlockedReason "app-server thread entered systemError: systemError"
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePullRequestReusedEvent (PrNumber 7)
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "automatic active turn still reads app-server thread on systemError" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
+          , assert "automatic active turn blocks watcher on systemError thread" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (WatcherBlocked expectedReason))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic active turn systemError: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
 automaticDaemonLoopWritesPlanBeforePlanCompletedEvent :: IO Bool
@@ -4177,6 +4306,7 @@ main = do
       , quickCheckResult prop_jsonPathHelpersDecodeNestedValues
       , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds
       , quickCheckResult prop_appServerClientInitializesSingleRequestSessions
+      , quickCheckResult prop_appServerClientDetectsSystemErrorThreadStatus
       , quickCheckResult prop_appServerClientMatchesSuccessResponse
       , quickCheckResult prop_appServerClientSkipsNotifications
       , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds
@@ -4233,12 +4363,14 @@ main = do
   preMergeUnstableOk <- observedDaemonTickPreMergeGateWaitsWhenUnstable
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningSnapshotOk <- automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart
+  automaticPlanningClosedScopeOk <- automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn
   automaticPlanningIssueCreationOk <- automaticDaemonLoopPlanningIssueCreationRequestsReplanning
   automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphWaitsAndRecords
   automaticPlanningClosedDepsOk <- automaticDaemonLoopPlanningGraphDropsClosedDependencies
   automaticPlanningCanonicalCoverageOk <- automaticDaemonLoopPlanningGraphCanonicalizesOpenScopeCoverage
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
+  automaticActiveTurnSystemErrorOk <- automaticDaemonLoopActiveTurnSystemErrorBlocksWatcher
   automaticPlanWriteBeforeEventOk <- automaticDaemonLoopWritesPlanBeforePlanCompletedEvent
   automaticMissingPlanPreValidationOk <- automaticDaemonLoopEmptyPlanMarkdownBlocksBeforePlanCompleted
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
@@ -4281,12 +4413,14 @@ main = do
       && preMergeUnstableOk
       && automaticPlanningDryRunOk
       && automaticPlanningSnapshotOk
+      && automaticPlanningClosedScopeOk
       && automaticPlanningIssueCreationOk
       && automaticPlanningGraphOk
       && automaticPlanningClosedDepsOk
       && automaticPlanningCanonicalCoverageOk
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
+      && automaticActiveTurnSystemErrorOk
       && automaticPlanWriteBeforeEventOk
       && automaticMissingPlanPreValidationOk
       && automaticImplementationHandoffOk

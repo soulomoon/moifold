@@ -28,7 +28,6 @@ import CodexWatcher.PromptTemplates
   , issuePlanModeDeveloperTemplate
   , issuePlanTemplate
   , issuePlanningThreadDeveloperTemplate
-  , plannerTemplate
   , prReviewReviewerThreadDeveloperTemplate
   , prReviewWorkerThreadDeveloperTemplate
   , prReviewWorkerTemplate
@@ -165,10 +164,9 @@ turnOutcomeSchema outcomes extraProperties =
 
 plannerTurnInput :: Text
 plannerTurnInput =
-  renderTemplate
-    plannerTemplate
-    [ ("structuredInstructions", structuredTurnOutcomeInstructions)
-    , ("scopeInstructions", "")
+  Text.unlines
+    [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
+    , "Inspect existing GitHub issues and sub-issues when needed before deciding."
     ]
 
 issuePlanTurnInput :: Text

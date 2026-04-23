@@ -179,14 +179,12 @@ runFromState executor config events replay = do
   clearStaleActiveTurnMarkerWhenInactive executor config replay.replayState
   case replay.replayState of
     SomeWatcherState (PlanningReady plannerConfig) -> do
-      planner <- ensurePlannerThread executor config
-      case planner of
-        Left failure -> pure (Left failure)
-        Right (plannerThread, plannerConfig', plannerReports) -> do
-          snapshot <- ensureIssuePlanningSnapshot executor plannerConfig' plannerConfig
-          case snapshot of
+      case config.loopDaemonOptions.daemonExecutionMode of
+        DryRunActions -> do
+          planner <- ensurePlannerThread executor config
+          case planner of
             Left failure -> pure (Left failure)
-            Right () ->
+            Right (plannerThread, plannerConfig', plannerReports) ->
               prependActionReports plannerReports
                 <$> prestartAndObserve
                   executor
@@ -195,6 +193,29 @@ runFromState executor config events replay = do
                   StartPlannerTurnKind
                   plannerThread
                   (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
+        ExecuteActions -> do
+          snapshot <- ensureIssuePlanningSnapshot executor config plannerConfig
+          case snapshot of
+            Left failure -> pure (Left failure)
+            Right snapshotValue ->
+              case planningSnapshotScopeCompleted plannerConfig snapshotValue of
+                Right True ->
+                  observeWithExecutor executor config events (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted)
+                Right False -> do
+                  planner <- ensurePlannerThread executor config
+                  case planner of
+                    Left failure -> pure (Left failure)
+                    Right (plannerThread, plannerConfig', plannerReports) ->
+                      prependActionReports plannerReports
+                        <$> prestartAndObserve
+                          executor
+                          plannerConfig'
+                          events
+                          StartPlannerTurnKind
+                          plannerThread
+                          (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
+                Left reason ->
+                  pure (Left (DaemonLoopExternalFailure ("could not evaluate issue planning snapshot completeness: " <> reason)))
     SomeWatcherState (PlanningTurnActive plannerConfig activeTurn) ->
       observePlanningActiveTurn executor config events replay plannerConfig activeTurn
     SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
@@ -403,21 +424,33 @@ normalizePlanningGraph executor config plannerConfig graph
             )
           filterClosedPlanningDependencies executor plannerConfig graph
 
-ensureIssuePlanningSnapshot :: Monad m => ActionExecutor m -> DaemonLoopConfig -> PlannerConfig -> m (Either DaemonLoopFailure ())
+ensureIssuePlanningSnapshot :: Monad m => ActionExecutor m -> DaemonLoopConfig -> PlannerConfig -> m (Either DaemonLoopFailure Value)
 ensureIssuePlanningSnapshot executor config plannerConfig =
-  case config.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions -> pure (Right ())
-    ExecuteActions -> do
-      snapshot <- buildIssuePlanningSnapshot executor plannerConfig
-      case snapshot of
-        Left reason -> pure (Left (DaemonLoopExternalFailure ("could not build issue planning snapshot: " <> reason)))
-        Right value -> do
-          runtimeWriteJsonValue (executor.actionRuntime) (issuePlanningSnapshotPath config) value
-          pure (Right ())
+  do
+    snapshot <- buildIssuePlanningSnapshot executor plannerConfig
+    case snapshot of
+      Left reason -> pure (Left (DaemonLoopExternalFailure ("could not build issue planning snapshot: " <> reason)))
+      Right value -> do
+        case config.loopDaemonOptions.daemonExecutionMode of
+          DryRunActions -> pure ()
+          ExecuteActions ->
+            runtimeWriteJsonValue (executor.actionRuntime) (issuePlanningSnapshotPath config) value
+        pure (Right value)
 
 issuePlanningSnapshotPath :: DaemonLoopConfig -> FilePath
 issuePlanningSnapshotPath config =
   config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
+
+planningSnapshotScopeCompleted :: PlannerConfig -> Value -> Either Text Bool
+planningSnapshotScopeCompleted plannerConfig snapshotValue
+  | null plannerConfig.plannerScopeIssues =
+      Right False
+  | otherwise = do
+      facts <- planningIssueFactsFromSnapshot snapshotValue
+      pure
+        ( not (null facts)
+            && all planningIssueFactClosed facts
+        )
 
 buildIssuePlanningSnapshot :: Monad m => ActionExecutor m -> PlannerConfig -> m (Either Text Value)
 buildIssuePlanningSnapshot executor plannerConfig
@@ -1122,9 +1155,20 @@ readActiveTurn executor config activeTurn = do
   response <-
     executor.actionAppServer.appServerSendRequest
       (threadReadRequest config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId activeTurn.activeThreadId True)
-  pure case parseThreadReadTurns response of
-    Left failure -> Left (DaemonLoopAppServerFailure failure)
-    Right turns -> Right (latestTurnById activeTurn.activeTurnId turns)
+  pure case threadSystemError response of
+    Just status ->
+      Right
+        ( Just
+            ( AppServerTurn
+                activeTurn.activeTurnId
+                "failed"
+                (Just ("app-server thread entered systemError: " <> status))
+            )
+        )
+    Nothing ->
+      case parseThreadReadTurns response of
+        Left failure -> Left (DaemonLoopAppServerFailure failure)
+        Right turns -> Right (latestTurnById activeTurn.activeTurnId turns)
 
 observeWithExecutor
   :: Monad m

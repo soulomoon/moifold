@@ -30,11 +30,12 @@ module CodexWatcher.AppServerClient
   , sendOneAppServerRequest
   , startThreadWithEndpoint
   , startThreadWithInterpreter
+  , threadSystemError
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerProtocol (AppServerRequest (..), ThreadStartOptions, initializeRequest, initializedNotification, threadStartRequest)
-import CodexWatcher.JsonPath (lookupPath)
+import CodexWatcher.JsonPath (lookupPath, renderedTextAtPath)
 import CodexWatcher.Types (ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
 import Control.Exception (AsyncException, SomeException, displayException, fromException, throwIO, try)
@@ -297,6 +298,18 @@ parseThreadStartThreadId value =
   case parseEither threadStartThreadIdParser value of
     Left errorMessage -> Left (AppServerDecodeFailure (Text.pack errorMessage))
     Right threadId -> Right threadId
+
+threadSystemError :: Value -> Maybe Text
+threadSystemError value =
+  let status =
+        renderedTextAtPath ["thread", "status", "type"] value
+          <|> renderedTextAtPath ["status", "type"] value
+          <|> renderedTextAtPath ["thread", "status"] value
+          <|> renderedTextAtPath ["status"] value
+   in case Text.toLower . Text.strip <$> status of
+        Just "systemerror" -> status
+        Just "system_error" -> status
+        _ -> Nothing
 
 latestTurnById :: TurnId -> [AppServerTurn] -> Maybe AppServerTurn
 latestTurnById turnId =

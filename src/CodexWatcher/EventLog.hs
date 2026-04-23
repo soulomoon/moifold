@@ -37,6 +37,7 @@ data WatcherEvent
   | IssuePlanningIssuesRequested [IssueCreationRequest]
   | IssuePlanningGraphUpdated PlanningGraph
   | IssuePlanningReadyIssuesFixed
+  | IssuePlanningScopeCompleted
   | IssuePlanningTurnCompleted
   | PrReviewInitialized PrConfig ThreadId ThreadId
   | PrReviewThreadsRefreshed ThreadId ThreadId
@@ -99,6 +100,8 @@ instance ToJSON WatcherEvent where
       IssuePlanningGraphUpdated graph ->
         eventType event <> ["planningGraph" .= graph]
       IssuePlanningReadyIssuesFixed ->
+        eventType event
+      IssuePlanningScopeCompleted ->
         eventType event
       IssuePlanningTurnCompleted ->
         eventType event
@@ -208,6 +211,8 @@ instance FromJSON WatcherEvent where
           <$> objectValue .: "planningGraph"
       "issue_planning_ready_issues_fixed" ->
         pure IssuePlanningReadyIssuesFixed
+      "issue_planning_scope_completed" ->
+        pure IssuePlanningScopeCompleted
       "issue_planning_turn_completed" ->
         pure IssuePlanningTurnCompleted
       "pr_review_initialized" ->
@@ -380,6 +385,8 @@ applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningGraphUpd
         Right () -> fromDecision (step state (PlannerUpdatedGraph graph))
 applyEvent (SomeWatcherState state@PlanningWaitingForReadyIssues {}) IssuePlanningReadyIssuesFixed =
   fromDecision (step state PlannerReadyIssuesFixed)
+applyEvent (SomeWatcherState state@PlanningReady {}) IssuePlanningScopeCompleted =
+  fromDecision (step state PlannerScopeCompleted)
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
   fromDecision (step state PlannerTurnCompleted)
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
@@ -651,6 +658,7 @@ eventName = \case
   IssuePlanningIssuesRequested {} -> "issue_planning_issues_requested"
   IssuePlanningGraphUpdated {} -> "issue_planning_graph_updated"
   IssuePlanningReadyIssuesFixed -> "issue_planning_ready_issues_fixed"
+  IssuePlanningScopeCompleted -> "issue_planning_scope_completed"
   IssuePlanningTurnCompleted -> "issue_planning_turn_completed"
   PrReviewInitialized {} -> "pr_review_initialized"
   PrReviewThreadsRefreshed {} -> "pr_review_threads_refreshed"
