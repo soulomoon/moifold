@@ -91,6 +91,7 @@ import AppServerSpec
   , prop_appServerInitializedNotificationMatchesJsonRpc
   , prop_appServerThreadReadAndInterruptUseThreadIds
   , prop_appServerThreadStartKeepsNodeNullFields
+  , prop_appServerTurnStartOmitsAbsentOutputSchema
   , prop_appServerTurnStartPlanModeEncodesCollaborationMode
   )
 import CliSpec
@@ -148,6 +149,9 @@ instance Arbitrary BranchName where
 
 instance Arbitrary ReviewThreadId where
   arbitrary = ReviewThreadId . Text.pack <$> listOf1 (elements ['a' .. 'z'])
+
+instance Arbitrary (NonEmpty ReviewThreadId) where
+  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
 
 instance Arbitrary CommitSha where
   arbitrary = CommitSha . Text.pack <$> vectorOf 12 (elements (['a' .. 'f'] <> ['0' .. '9']))
@@ -1559,7 +1563,9 @@ actionTurnInputText = \case
 actionTurnOutputSchema :: PlannedAction -> Maybe Value
 actionTurnOutputSchema = \case
   PlannedAppServerRequest request ->
-    lookupValue "outputSchema" request.requestParams
+    case lookupValue "outputSchema" request.requestParams of
+      Just Null -> Nothing
+      other -> other
   _ ->
     Nothing
 
@@ -1660,6 +1666,17 @@ prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
              , Just prReviewWorkerTurnOutputSchema
              , Just reviewerTurnOutputSchema
              ]
+        && maybe
+          False
+          ( \input ->
+              promptContainsAll
+                input
+                [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
+                , "Inspect existing GitHub issues and sub-issues when needed before deciding."
+                , "Return only JSON with an outcome field. Plain prose completion is not accepted."
+                ]
+          )
+          (actionTurnInputText (actions !! 0))
         && fmap actionThreadCwd actions
           == [ Just "/tmp/state"
              , Just "/tmp/work"
@@ -1746,7 +1763,9 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           ]
         && promptContainsAll
           plannerTurnPrompt
-          [ "Return only JSON with an outcome field"
+          [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
+          , "Inspect existing GitHub issues and sub-issues when needed before deciding."
+          , "Return only JSON with an outcome field"
           , "For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work."
           , "dependencies must use objects shaped as {\"issueNumber\": 27, \"dependsOn\": [26]}"
           , "Target scope: only these root issues"
@@ -4468,6 +4487,7 @@ main = do
       , quickCheckResult prop_appServerInitializedNotificationMatchesJsonRpc
       , quickCheckResult prop_appServerThreadStartKeepsNodeNullFields
       , quickCheckResult prop_appServerTurnStartPlanModeEncodesCollaborationMode
+      , quickCheckResult prop_appServerTurnStartOmitsAbsentOutputSchema
       , quickCheckResult prop_runtimeDefaultsCentralizeThreadAndTurnOptions
       , quickCheckResult prop_jsonPathHelpersDecodeNestedValues
       , quickCheckResult prop_appServerThreadReadAndInterruptUseThreadIds

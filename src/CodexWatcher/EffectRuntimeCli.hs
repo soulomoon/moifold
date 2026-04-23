@@ -51,9 +51,16 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
 
 plannerTurnInputForScope :: [IssueNumber] -> Text.Text
 plannerTurnInputForScope [] =
-  plannerStructuredInstructions
+  plannerTaskInstructions <> "\n\n" <> plannerStructuredInstructions
 plannerTurnInputForScope scopeIssues =
-  plannerStructuredInstructions <> plannerScopeInstructions scopeIssues
+  plannerTaskInstructions <> "\n\n" <> plannerStructuredInstructions <> plannerScopeInstructions scopeIssues
+
+plannerTaskInstructions :: Text.Text
+plannerTaskInstructions =
+  Text.unlines
+    [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
+    , "Inspect existing GitHub issues and sub-issues when needed before deciding."
+    ]
 
 plannerStructuredInstructions :: Text.Text
 plannerStructuredInstructions =

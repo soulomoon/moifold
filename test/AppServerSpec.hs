@@ -20,6 +20,7 @@ module AppServerSpec
   , prop_appServerInitializedNotificationMatchesJsonRpc
   , prop_appServerThreadReadAndInterruptUseThreadIds
   , prop_appServerThreadStartKeepsNodeNullFields
+  , prop_appServerTurnStartOmitsAbsentOutputSchema
   , prop_appServerTurnStartPlanModeEncodesCollaborationMode
   ) where
 
@@ -88,6 +89,17 @@ prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
         && lookupValue "summary" request.requestParams == Just Null
         && lookupValue "input" request.requestParams == Just (toJSON [object ["type" .= ("text" :: Text), "text" .= ("write the plan" :: Text)]])
         && lookupValue "outputSchema" request.requestParams == Just structuredTurnOutputSchema
+
+prop_appServerTurnStartOmitsAbsentOutputSchema :: ThreadId -> Bool
+prop_appServerTurnStartOmitsAbsentOutputSchema threadId =
+  let request =
+        turnStartRequest
+          4
+          (defaultTurnStartOptions threadId "/workspace/repo" "write the plan")
+   in request.requestMethod == "turn/start"
+        && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
+        && lookupValue "outputSchema" request.requestParams == Nothing
+        && lookupValue "collaborationMode" request.requestParams == Nothing
 
 prop_appServerThreadReadAndInterruptUseThreadIds :: ThreadId -> TurnId -> Bool
 prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =

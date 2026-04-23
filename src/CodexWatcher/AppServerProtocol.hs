@@ -142,13 +142,11 @@ turnStartRequest requestId options =
               , "personality" .= Null
               , "serviceTier" .= Null
               , "summary" .= Null
-              , "outputSchema" .= maybe Null id options.turnOutputSchema
               , "input" .= [object ["type" .= ("text" :: Text), "text" .= options.turnInput]]
               ]
             fields =
-              case options.turnCollaborationMode of
-                Nothing -> baseFields
-                Just collaborationMode -> baseFields <> ["collaborationMode" .= collaborationMode]
+              maybe baseFields (\outputSchema -> baseFields <> ["outputSchema" .= outputSchema]) options.turnOutputSchema
+                <> maybe [] (\collaborationMode -> ["collaborationMode" .= collaborationMode]) options.turnCollaborationMode
          in object fields
     }
 
