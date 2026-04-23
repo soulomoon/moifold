@@ -17,7 +17,7 @@ import CodexWatcher.Types (ThreadId)
 import Data.Text (Text)
 
 defaultModel :: Text
-defaultModel = "gpt-5.4"
+defaultModel = "gpt-5.5"
 
 defaultEffort :: Text
 defaultEffort = "xhigh"

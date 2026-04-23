@@ -57,7 +57,9 @@ prop_runtimeDefaultsCentralizeThreadAndTurnOptions :: ThreadId -> Bool
 prop_runtimeDefaultsCentralizeThreadAndTurnOptions threadId =
   let threadOptions = defaultThreadStartOptions "/tmp/repo" "developer"
       turnOptions = defaultTurnStartOptions threadId "/tmp/repo" "input"
-   in threadOptions.threadModel == defaultModel
+   in defaultModel == "gpt-5.5"
+        && defaultEffort == "xhigh"
+        && threadOptions.threadModel == defaultModel
         && threadOptions.threadApprovalPolicy == defaultApprovalPolicy
         && threadOptions.threadSandbox == defaultSandboxPolicy
         && turnOptions.turnModel == defaultModel

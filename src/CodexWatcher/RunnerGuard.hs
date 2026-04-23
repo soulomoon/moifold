@@ -36,7 +36,7 @@ import CodexWatcher.AppServerProtocol
   )
 import CodexWatcher.EventLog (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName, loadEventLogFile, replayEventLog)
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
-import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions, defaultTurnStartOptions)
+import CodexWatcher.RuntimeDefaults (defaultEffort, defaultModel, defaultThreadStartOptions, defaultTurnStartOptions)
 import CodexWatcher.TurnClassifier (TurnCompletion (..), classifyTurnCompletion)
 import CodexWatcher.Types
 import Data.Aeson
@@ -162,7 +162,7 @@ repairDeveloperInstructions =
   Text.unlines
     [ "You are the runner guard repair worker for the Haskell codex watcher runtime."
     , "Fix root causes directly. Do not ask the user to do local steps."
-    , "Use gpt-5.4 xhigh level rigor: inspect code, patch, run tests, commit, push, then restart the watcher and guard."
+    , "Use " <> defaultModel <> " " <> defaultEffort <> " level rigor: inspect code, patch, run tests, commit, push, then restart the watcher and guard."
     ]
 
 runnerGuardRepairPrompt :: RunnerGuardConfig -> RunnerGuardProblem -> Text
