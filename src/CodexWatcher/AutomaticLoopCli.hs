@@ -38,6 +38,7 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (mapMaybe)
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing)
 import System.Exit (die)
@@ -299,8 +300,9 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
           cli.loopCliChildPollSeconds
           executionMode
           (Just endpoint)
-      runIssueImplementerLaunches executionMode launchEndpoint childLaunch launches
-      mapM_ (startIssueImplementerChild childLaunch) stoppedActiveLaunches
+      launchResults <- runIssueImplementerLaunchesDetailed executionMode launchEndpoint childLaunch launches
+      restartResults <- traverse (startIssueImplementerChildDetailed childLaunch) stoppedActiveLaunches
+      let childStartProblems = mapMaybe issueImplementerChildStartProblem (launchResults <> restartResults)
       Log.logWatcher
         executor.actionLogger
         ( Log.watcherLog
@@ -309,14 +311,41 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
             "issue implementer child launch decision applied"
             [ "launches" .= length launches
             , "restarts" .= length stoppedActiveLaunches
+            , "startProblems" .= length childStartProblems
             ]
         )
       putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
       putStrLn ("planner fanout launches: " <> show (length launches))
       putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
-      when allReadyIssuesTerminal $
-        markPlanningReadyIssuesFixed executionMode cli planningState
-      pure False
+      case childStartProblems of
+        problem : _ -> do
+          blockPlanningFanout executionMode cli planningState (childStartBlockedReason problem)
+          pure False
+        [] -> do
+          finalStatuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
+          let allReadyIssuesTerminalAfterLaunch =
+                not (null readyIssues) && all (== WatcherTerminal TerminalComplete) finalStatuses
+          when (allReadyIssuesTerminal || allReadyIssuesTerminalAfterLaunch) $
+            markPlanningReadyIssuesFixed executionMode cli planningState
+          pure False
+
+issueImplementerChildStartProblem :: IssueImplementerChildStartResult -> Maybe (IssueNumber, Text.Text, WatcherRuntimeStatus)
+issueImplementerChildStartProblem = \case
+  IssueImplementerChildStartProblem issue detail status ->
+    Just (issue, detail, status)
+  _ ->
+    Nothing
+
+childStartBlockedReason :: (IssueNumber, Text.Text, WatcherRuntimeStatus) -> BlockedReason
+childStartBlockedReason (issue, detail, status) =
+  BlockedReason
+    ( "issue implementer #"
+        <> issueText issue
+        <> " exited before daemon readiness and is not fixed on GitHub: "
+        <> detail
+        <> "; status="
+        <> Text.pack (show status)
+    )
 
 validateReadyIssueFanout :: PlannerConfig -> [(IssueNumber, WatcherRuntimeStatus)] -> [IssueImplementerLaunchPlan] -> IO (Maybe BlockedReason)
 validateReadyIssueFanout plannerConfig readyStatuses launchPlans =

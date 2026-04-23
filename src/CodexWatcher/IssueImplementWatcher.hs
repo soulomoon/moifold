@@ -19,11 +19,7 @@ import CodexWatcher.Types
 import Data.Text (Text)
 
 data IssueImplementObservation
-  = ObservedTriageTurnStarted TurnId
-  | ObservedTriageAlreadyFixed
-  | ObservedTriageNeedsImplementation
-  | ObservedTriageBlocked BlockedReason
-  | ObservedPlanTurnStarted TurnId
+  = ObservedPlanTurnStarted TurnId
   | ObservedPlanCompleted (Maybe TurnId)
   | ObservedPullRequestCreated PrNumber
   | ObservedPullRequestReused PrNumber
@@ -35,6 +31,7 @@ data IssueImplementObservation
   | ObservedReviewHandoffStarted PrNumber
   | ObservedImplementationCompleted PrNumber
   | ObservedPullRequestMerged PrNumber
+  | ObservedIssueClosed PrNumber
   | ObservedIssueImplementBlocked BlockedReason
   deriving stock (Eq, Show)
 
@@ -46,25 +43,10 @@ data IssueImplementTick = IssueImplementTick
   deriving stock (Show)
 
 issueImplementObserve :: SomeWatcherState -> IssueImplementObservation -> Either Text IssueImplementTick
-issueImplementObserve (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (ObservedTriageTurnStarted turnId) =
-  Right (tick (IssueTriageTurnStartedEvent turnId) (step state (StartIssueTriageTurn (ActiveTurn threadId turnId))))
-issueImplementObserve (SomeWatcherState state@IssueTriageActive {}) ObservedTriageAlreadyFixed =
-  Right (tick IssueTriageAlreadyFixedEvent (step state IssueTriageAlreadyFixed))
-issueImplementObserve (SomeWatcherState state@IssueTriageActive {}) ObservedTriageNeedsImplementation =
-  Right (tick IssueTriageNeedsImplementationEvent (step state IssueTriageNeedsImplementation))
-issueImplementObserve (SomeWatcherState state@IssueTriageActive {}) (ObservedTriageBlocked reason) =
-  Right (tick (IssueTriageBlockedEvent reason) (step state (IssueTriageBlocked reason)))
-issueImplementObserve (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (ObservedPlanTurnStarted turnId) =
-  Right (tick (IssuePlanTurnStartedEvent turnId) (step state (StartIssuePlanTurn (ActiveTurn threadId turnId))))
-issueImplementObserve (SomeWatcherState state@(IssueTriageActive {})) (ObservedPlanTurnStarted turnId) =
-  Right (tick (IssuePlanTurnStartedEvent turnId) (step state (StartIssuePlanTurn (ActiveTurn (activeThreadIdFromTriage state) turnId))))
-issueImplementObserve (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (ObservedPlanTurnStarted turnId) =
+issueImplementObserve (SomeWatcherState state@(IssueReadyToPlan _config _prNumber (WorkerIdle threadId))) (ObservedPlanTurnStarted turnId) =
   Right (tick (IssuePlanTurnStartedEvent turnId) (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId))))
-issueImplementObserve (SomeWatcherState state@(IssueInPlanMode _config (WorkerActive activeTurn))) (ObservedPlanCompleted maybeImplementationTurnId) =
+issueImplementObserve (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (ObservedPlanCompleted maybeImplementationTurnId) =
   let nextTurn = ActiveTurn (activeThreadId activeTurn) <$> maybeImplementationTurnId
-   in Right (tick (IssuePlanCompletedEvent maybeImplementationTurnId) (step state (IssuePlanCompleted nextTurn)))
-issueImplementObserve (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (ObservedPlanCompleted maybeImplementationTurnId) =
-  let nextTurn = ActiveTurn threadId <$> maybeImplementationTurnId
    in Right (tick (IssuePlanCompletedEvent maybeImplementationTurnId) (step state (IssuePlanCompleted nextTurn)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestCreated prNumber) =
   Right (tick (IssuePullRequestCreatedEvent prNumber) (step state (IssuePullRequestReady prNumber)))
@@ -76,6 +58,8 @@ issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedPul
   Right (tick (IssuePullRequestReusedEvent prNumber) (step state (IssuePullRequestReady prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestBodyUpdated prNumber) =
   Right (tick (IssuePullRequestBodyUpdatedEvent prNumber) (step state (IssuePullRequestBodyUpdated prNumber)))
+issueImplementObserve (SomeWatcherState state@IssuePlanReady {}) (ObservedPullRequestBodyUpdated prNumber) =
+  Right (tick (IssuePullRequestBodyUpdatedEvent prNumber) (step state (IssuePullRequestBodyUpdated prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedPullRequestBodyUpdated prNumber) =
   Right (tick (IssuePullRequestBodyUpdatedEvent prNumber) (step state (IssuePullRequestBodyUpdated prNumber)))
 issueImplementObserve (SomeWatcherState state@(IssueImplementationReady _config _maybePr (WorkerIdle threadId))) (ObservedImplementationTurnStarted turnId) =
@@ -86,27 +70,29 @@ issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (Obse
   Right (tick (IssueImplementationBlockedEvent reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedImplementationBlocked reason) =
   Right (tick (IssueImplementationBlockedEvent reason) (step state (MarkBlocked reason)))
-issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedReviewHandoffInitialized prNumber) =
+issueImplementObserve (SomeWatcherState state@IssueHandoffReady {}) (ObservedReviewHandoffInitialized prNumber) =
   Right (tick (IssueReviewHandoffInitializedEvent prNumber) (step state (IssueReviewHandoffInitialized prNumber)))
-issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedReviewHandoffInitialized prNumber) =
+issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (ObservedReviewHandoffInitialized prNumber) =
   Right (tick (IssueReviewHandoffInitializedEvent prNumber) (step state (IssueReviewHandoffInitialized prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedReviewHandoffInitialized prNumber) =
   Right (tick (IssueReviewHandoffInitializedEvent prNumber) (step state (IssueReviewHandoffInitialized prNumber)))
-issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedReviewHandoffStarted prNumber) =
-  Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
-issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedReviewHandoffStarted prNumber) =
+issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (ObservedReviewHandoffStarted prNumber) =
   Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedReviewHandoffStarted prNumber) =
   Right (tick (IssueReviewHandoffStartedEvent prNumber) (step state (IssueReviewHandoffStarted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedImplementationCompleted prNumber) =
   Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueHandoffReady {}) (ObservedImplementationCompleted prNumber) =
+  Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (ObservedImplementationCompleted prNumber) =
+  Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedImplementationCompleted prNumber) =
   Right (tick (IssueImplementationCompletedEvent prNumber) (step state (IssueImplementationCompleted prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedPullRequestMerged prNumber) =
   Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
-issueImplementObserve (SomeWatcherState state@IssueNeedsTriage {}) (ObservedIssueImplementBlocked reason) =
-  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
-issueImplementObserve (SomeWatcherState state@IssueTriageActive {}) (ObservedIssueImplementBlocked reason) =
+issueImplementObserve (SomeWatcherState state@IssueWaitingForIssueClose {}) (ObservedIssueClosed prNumber) =
+  Right (tick (IssueClosedEvent prNumber) (step state (IssueClosed prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueReadyToPlan {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssuePlanReady {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
@@ -116,7 +102,13 @@ issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (Obse
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueHandoffReady {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForIssueClose {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve state observation =
   invalidObservation "issue implementation observation" state observation
@@ -132,7 +124,3 @@ fromObservedTick observed =
     , issueImplementTickState = observed.observedState
     , issueImplementTickEffects = observed.observedEffects
     }
-
-activeThreadIdFromTriage :: WatcherState 'IssueImplement 'Triage -> ThreadId
-activeThreadIdFromTriage (IssueTriageActive _config (WorkerActive activeTurn)) = activeThreadId activeTurn
-activeThreadIdFromTriage (IssueNeedsTriage _config (WorkerIdle threadId)) = threadId

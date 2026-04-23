@@ -10,7 +10,6 @@ module CodexWatcher.TurnClassifier
   , classifyIssueImplementationTurn
   , classifyIssuePlanningTurn
   , classifyIssuePlanTurn
-  , classifyIssueTriageTurn
   , classifyPrReviewReviewerTurn
   , classifyPrReviewWorkerTurn
   , classifyTurnCompletion
@@ -42,8 +41,6 @@ data StructuredTurnOutcome
   = StructuredBlocked Text
   | StructuredIncomplete Text
   | StructuredComplete Text
-  | StructuredAlreadyFixed Text
-  | StructuredNeedsImplementation Text
   | StructuredProblems Text
   | StructuredClean Text
   deriving stock (Eq, Show)
@@ -115,10 +112,6 @@ structuredOutcomeSpecs =
   , StructuredOutcomeSpec ["complete", "completed", "success"] StructuredComplete "complete"
   , StructuredOutcomeSpec ["ready_for_review", "ready for review"] StructuredComplete "ready for review"
   , StructuredOutcomeSpec ["pr_ready"] StructuredComplete "PR ready"
-  , StructuredOutcomeSpec ["already_fixed", "already fixed"] StructuredAlreadyFixed "already fixed"
-  , StructuredOutcomeSpec ["already_resolved", "already resolved"] StructuredAlreadyFixed "already resolved"
-  , StructuredOutcomeSpec ["no_changes_needed"] StructuredAlreadyFixed "no changes needed"
-  , StructuredOutcomeSpec ["needs_implementation", "needs implementation", "implement"] StructuredNeedsImplementation "needs implementation"
   , StructuredOutcomeSpec ["problems", "problem"] StructuredProblems "problems found"
   , StructuredOutcomeSpec ["comments_added", "comments added"] StructuredProblems "comments added"
   , StructuredOutcomeSpec ["changes_requested", "changes requested"] StructuredProblems "changes requested"
@@ -150,25 +143,6 @@ classifyTurnCompletion turn
  where
   normalizedStatus = normalize turn.appServerTurnStatus
   reason fallback = maybe fallback nonEmptyOutput turn.appServerTurnOutput
-
-classifyIssueTriageTurn :: AppServerTurn -> Maybe IssueImplementObservation
-classifyIssueTriageTurn turn =
-  case classifyTurnCompletion turn of
-    TurnStillRunning ->
-      Nothing
-    TurnFailed reason ->
-      Just (ObservedIssueImplementBlocked (BlockedReason reason))
-    TurnCompleted output
-      | Just observation <- missingOutputBlocked "triage turn completed without output" ObservedIssueImplementBlocked output ->
-          Just observation
-      | Just structured <- output >>= parseStructuredTurnOutcome ->
-          classifyStructuredIssueTriage structured
-      | Just observation <- blockedOutputObservation "triage turn reported blocked" ObservedIssueImplementBlocked output ->
-          Just observation
-      | outputHasAny alreadyFixedOutputAliases output ->
-          Just ObservedTriageAlreadyFixed
-      | otherwise ->
-          Just ObservedTriageNeedsImplementation
 
 classifyIssuePlanningTurn :: AppServerTurn -> Maybe IssuePlanningObservation
 classifyIssuePlanningTurn turn =
@@ -391,16 +365,6 @@ classifyStructuredIssuePlanning structured =
     Just
     (structuredBlockedLikeObservation ObservedPlanningBlocked structured)
 
-classifyStructuredIssueTriage :: StructuredTurnOutcome -> Maybe IssueImplementObservation
-classifyStructuredIssueTriage = \case
-  StructuredBlocked reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
-  StructuredAlreadyFixed _reason -> Just ObservedTriageAlreadyFixed
-  StructuredNeedsImplementation _reason -> Just ObservedTriageNeedsImplementation
-  StructuredComplete _reason -> Just ObservedTriageNeedsImplementation
-  StructuredIncomplete reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
-  StructuredProblems reason -> Just (ObservedIssueImplementBlocked (BlockedReason reason))
-  StructuredClean _reason -> Just ObservedTriageAlreadyFixed
-
 classifyStructuredIssuePlan :: StructuredTurnOutcome -> Maybe IssueImplementObservation
 classifyStructuredIssuePlan structured =
   maybe
@@ -414,20 +378,15 @@ classifyStructuredIssueImplementation maybePr = \case
   StructuredIncomplete reason -> Just (ObservedImplementationIncomplete reason)
   StructuredComplete _reason ->
     Just (completedImplementationObservation maybePr)
-  StructuredNeedsImplementation reason -> Just (ObservedImplementationIncomplete reason)
-  StructuredAlreadyFixed _reason ->
-    Just (completedImplementationObservation maybePr)
-  StructuredProblems reason -> Just (ObservedImplementationIncomplete reason)
+  StructuredProblems _reason -> Just (ObservedImplementationIncomplete "implementation turn used unsupported review-only outcome: problems")
   StructuredClean _reason ->
-    Just (completedImplementationObservation maybePr)
+    Just (ObservedImplementationIncomplete "implementation turn used unsupported review-only outcome: clean")
 
 classifyStructuredPrReviewWorker :: StructuredTurnOutcome -> Maybe WorkerOutcome
 classifyStructuredPrReviewWorker = \case
   StructuredBlocked reason -> Just (WorkerBlocked (BlockedReason reason))
   StructuredIncomplete reason -> Just (WorkerIncomplete reason)
   StructuredComplete _reason -> Just WorkerCompleted
-  StructuredNeedsImplementation reason -> Just (WorkerIncomplete reason)
-  StructuredAlreadyFixed _reason -> Just WorkerCompleted
   StructuredProblems reason -> Just (WorkerIncomplete reason)
   StructuredClean _reason -> Just WorkerCompleted
 
@@ -466,10 +425,6 @@ blockedOutputAliases =
 incompleteOutputAliases :: [Text]
 incompleteOutputAliases =
   ["incomplete", "not complete", "needs follow-up", "needs follow up"]
-
-alreadyFixedOutputAliases :: [Text]
-alreadyFixedOutputAliases =
-  ["already_fixed", "already fixed", "already_resolved", "already resolved", "no changes needed"]
 
 reviewerProblemsOutputAliases :: [Text]
 reviewerProblemsOutputAliases =

@@ -141,7 +141,7 @@ issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber' =
   stateDir = issueImplementerStateDir fanoutConfig.fanoutImplementersRoot repo issueNumber'
   workdir = (</> issueImplementerSlug repo issueNumber') <$> fanoutConfig.fanoutWorkdirRoot
   initialEvent = IssueImplementInitialized issueConfig threadId
-  initialState = SomeWatcherState (IssueNeedsTriage issueConfig (WorkerIdle threadId))
+  initialState = SomeWatcherState (IssueImplementationReady issueConfig Nothing (WorkerIdle threadId))
 
 withLaunchThreadId :: ThreadId -> IssueImplementerLaunchPlan -> IssueImplementerLaunchPlan
 withLaunchThreadId threadId launch =
@@ -152,7 +152,7 @@ withLaunchThreadId threadId launch =
     , launchCompatibilityWrites = compatibilityStateWrites launch.launchStateDir initialState
     }
  where
-  initialState = SomeWatcherState (IssueNeedsTriage launch.launchIssueConfig (WorkerIdle threadId))
+  initialState = SomeWatcherState (IssueImplementationReady launch.launchIssueConfig Nothing (WorkerIdle threadId))
 
 issueImplementerConfigJson :: IssueConfig -> ThreadId -> FilePath -> Maybe FilePath -> Value
 issueImplementerConfigJson issueConfig threadId stateDir maybeWorkdir =

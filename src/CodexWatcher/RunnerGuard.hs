@@ -264,19 +264,23 @@ checkReplayState config events = \case
     checkActiveTurn config "planner" activeTurn
   SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
     pure Nothing
-  SomeWatcherState (IssueNeedsTriage {}) ->
-    staleProblem config "issue implementer has not started triage" ["last event: " <> lastEventName events]
-  SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->
-    checkActiveTurn config "issue triage worker" activeTurn
-  SomeWatcherState (IssuePlanReady {}) ->
+  SomeWatcherState (IssueReadyToPlan {}) ->
     staleProblem config "issue implementer has not started plan turn" ["last event: " <> lastEventName events]
-  SomeWatcherState (IssueInPlanMode _ (WorkerActive activeTurn)) ->
+  SomeWatcherState (IssueInPlanMode _ _ (WorkerActive activeTurn)) ->
     checkActiveTurn config "issue plan worker" activeTurn
+  SomeWatcherState (IssuePlanReady {}) ->
+    staleProblem config "issue implementer has not synced plan to PR body" ["last event: " <> lastEventName events]
   SomeWatcherState (IssueImplementationReady {}) ->
     staleProblem config "issue implementer has not started implementation or PR detection" ["last event: " <> lastEventName events]
   SomeWatcherState (IssueImplementing _ _ (WorkerActive activeTurn)) ->
     checkActiveTurn config "issue implementation worker" activeTurn
+  SomeWatcherState (IssueHandoffReady {}) ->
+    pure Nothing
+  SomeWatcherState (IssueHandoffInitialized {}) ->
+    pure Nothing
   SomeWatcherState (IssueWaitingForPrMerge {}) ->
+    pure Nothing
+  SomeWatcherState (IssueWaitingForIssueClose {}) ->
     pure Nothing
   SomeWatcherState (PrCheckingReviews {}) ->
     staleProblem config "PR review watcher has not checked review threads" ["last event: " <> lastEventName events]
@@ -284,6 +288,8 @@ checkReplayState config events = \case
     checkActiveTurn config "PR review worker" activeTurn
   SomeWatcherState (PrReviewingClean _ _ _ (ReviewerActive activeTurn)) ->
     checkActiveTurn config "PR reviewer" activeTurn
+  SomeWatcherState (PrWaitingForMergeability {}) ->
+    pure Nothing
   SomeWatcherState (PrMerging {}) ->
     pure Nothing
   SomeWatcherState (CompleteState {}) ->

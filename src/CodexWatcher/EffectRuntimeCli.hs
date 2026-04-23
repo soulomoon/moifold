@@ -33,7 +33,6 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
                 (defaultPlanCollaborationMode (issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues))
           }
     , effectRuntimeWorkerTurn = liveTurnConfig prReviewWorkerTurnInput
-    , effectRuntimeIssueTriageTurn = liveTurnConfig issueTriageTurnInput
     , effectRuntimeIssuePlanTurn =
         (liveTurnConfig issuePlanTurnInput)
           { turnRuntimeCollaborationMode =

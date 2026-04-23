@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
@@ -13,7 +14,9 @@ module CodexWatcher.ChildDaemon
   , runWithOptionalPidFile
   , stableExecutablePath
   , startChildDaemon
+  , startChildDaemonChecked
   , waitForStartedDaemon
+  , waitForStartedDaemonStatus
   ) where
 
 import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (KillZero), runRuntimeCommand)
@@ -46,6 +49,14 @@ stableExecutablePath = do
 
 startChildDaemon :: String -> FilePath -> FilePath -> [String] -> IO ()
 startChildDaemon label stateDir pidFileName childArgs = do
+  readiness <- startChildDaemonChecked label stateDir pidFileName childArgs
+  case readiness of
+    DaemonPidReady -> pure ()
+    DaemonPidNotReady detail ->
+      die ("started " <> label <> " but daemon pid did not become running: " <> Text.unpack detail)
+
+startChildDaemonChecked :: String -> FilePath -> FilePath -> [String] -> IO DaemonPidReadiness
+startChildDaemonChecked label stateDir pidFileName childArgs = do
   executable <- stableExecutablePath
   let stdoutPath = stateDir </> "daemon.log"
       stderrPath = stateDir </> "daemon.err.log"
@@ -65,20 +76,32 @@ startChildDaemon label stateDir pidFileName childArgs = do
           )
       pid <- Process.Typed.getPid process
       void (forkIO (void (Process.Typed.waitExitCode process)))
-      waitForStartedDaemon label pidPath (Text.pack . show <$> pid)
-      putStrLn ("started " <> label <> " pid " <> maybe "unknown" show pid)
+      readiness <- waitForStartedDaemonStatus pidPath (Text.pack . show <$> pid)
+      case readiness of
+        DaemonPidReady ->
+          putStrLn ("started " <> label <> " pid " <> maybe "unknown" show pid)
+        DaemonPidNotReady detail ->
+          putStrLn ("started " <> label <> " but daemon pid did not become running: " <> Text.unpack detail)
+      pure readiness
 
 waitForStartedDaemon :: String -> FilePath -> Maybe Text -> IO ()
 waitForStartedDaemon label pidPath expectedPid =
+  waitForStartedDaemonStatus pidPath expectedPid >>= \case
+    DaemonPidReady -> pure ()
+    DaemonPidNotReady detail ->
+      die ("started " <> label <> " but daemon pid did not become running: " <> Text.unpack detail)
+
+waitForStartedDaemonStatus :: FilePath -> Maybe Text -> IO DaemonPidReadiness
+waitForStartedDaemonStatus pidPath expectedPid =
   go (20 :: Int)
  where
   go attemptsLeft = do
     status <- daemonPidFileStatus pidPath expectedPid
     case status of
-      DaemonPidReady -> pure ()
+      DaemonPidReady -> pure DaemonPidReady
       DaemonPidNotReady detail
         | attemptsLeft <= 0 ->
-            die ("started " <> label <> " but daemon pid did not become running: " <> Text.unpack detail)
+            pure (DaemonPidNotReady detail)
         | otherwise -> do
             threadDelay 250000
             go (attemptsLeft - 1)

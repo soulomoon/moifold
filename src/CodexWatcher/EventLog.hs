@@ -46,12 +46,11 @@ data WatcherEvent
   | PrReviewCleanFound CleanReviewEvidence
   | PrReviewProblemsAdded CommitSha
   | PrReviewReviewIncomplete Text
+  | PrReviewMergeabilityClean CommitSha
+  | PrReviewMergeabilityWaiting Text
+  | PrReviewMergeabilityRecheck Text
   | PrReviewMergeCompleted MergeCommit
   | IssueImplementInitialized IssueConfig ThreadId
-  | IssueTriageTurnStartedEvent TurnId
-  | IssueTriageAlreadyFixedEvent
-  | IssueTriageNeedsImplementationEvent
-  | IssueTriageBlockedEvent BlockedReason
   | IssuePlanTurnStartedEvent TurnId
   | IssuePlanCompletedEvent (Maybe TurnId)
   | IssuePullRequestCreatedEvent PrNumber
@@ -64,6 +63,7 @@ data WatcherEvent
   | IssueReviewHandoffStartedEvent PrNumber
   | IssueImplementationCompletedEvent PrNumber
   | IssuePullRequestMergedEvent PrNumber
+  | IssueClosedEvent PrNumber
   | WatcherRecoveredInvalidState Text
   | WatcherBlocked BlockedReason
   | WatcherStopped StopReason
@@ -130,20 +130,18 @@ instance ToJSON WatcherEvent where
         eventType event <> ["commitSha" .= unCommitSha commitSha]
       PrReviewReviewIncomplete reason ->
         eventType event <> ["reason" .= reason]
+      PrReviewMergeabilityClean commitSha ->
+        eventType event <> ["commitSha" .= unCommitSha commitSha]
+      PrReviewMergeabilityWaiting reason ->
+        eventType event <> ["reason" .= reason]
+      PrReviewMergeabilityRecheck reason ->
+        eventType event <> ["reason" .= reason]
       PrReviewMergeCompleted mergeCommit ->
         eventType event <> ["mergeCommitSha" .= unCommitSha (unMergeCommit mergeCommit)]
       IssueImplementInitialized config workerThreadId ->
         eventType event
           <> issueConfigFields config
           <> ["workerThreadId" .= unThreadId workerThreadId]
-      IssueTriageTurnStartedEvent triageTurnId ->
-        eventType event <> ["triageTurnId" .= unTurnId triageTurnId]
-      IssueTriageAlreadyFixedEvent ->
-        eventType event
-      IssueTriageNeedsImplementationEvent ->
-        eventType event
-      IssueTriageBlockedEvent reason ->
-        eventType event <> ["reason" .= unBlockedReason reason]
       IssuePlanTurnStartedEvent planTurnId ->
         eventType event <> ["planTurnId" .= unTurnId planTurnId]
       IssuePlanCompletedEvent maybeImplementationTurnId ->
@@ -167,6 +165,8 @@ instance ToJSON WatcherEvent where
       IssueImplementationCompletedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssuePullRequestMergedEvent prNumber' ->
+        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssueClosedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       WatcherRecoveredInvalidState reason ->
         eventType event
@@ -227,6 +227,15 @@ instance FromJSON WatcherEvent where
       "pr_review_review_incomplete" ->
         PrReviewReviewIncomplete
           <$> (objectValue .:? "reason" .!= "incomplete")
+      "pr_review_mergeability_clean" ->
+        PrReviewMergeabilityClean
+          <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
+      "pr_review_mergeability_waiting" ->
+        PrReviewMergeabilityWaiting
+          <$> (objectValue .:? "reason" .!= "waiting for mergeability")
+      "pr_review_mergeability_recheck" ->
+        PrReviewMergeabilityRecheck
+          <$> (objectValue .:? "reason" .!= "rechecking reviews")
       "pr_review_merge_completed" ->
         PrReviewMergeCompleted . MergeCommit . CommitSha
           <$> nonEmptyTextField objectValue "mergeCommitSha"
@@ -234,16 +243,6 @@ instance FromJSON WatcherEvent where
         IssueImplementInitialized
           <$> parseIssueConfig objectValue
           <*> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
-      "issue_triage_turn_started" ->
-        IssueTriageTurnStartedEvent
-          <$> (TurnId <$> nonEmptyTextField objectValue "triageTurnId")
-      "issue_triage_already_fixed" ->
-        pure IssueTriageAlreadyFixedEvent
-      "issue_triage_needs_implementation" ->
-        pure IssueTriageNeedsImplementationEvent
-      "issue_triage_blocked" ->
-        IssueTriageBlockedEvent
-          <$> (BlockedReason <$> nonEmptyTextField objectValue "reason")
       "issue_plan_turn_started" ->
         IssuePlanTurnStartedEvent
           <$> (TurnId <$> nonEmptyTextField objectValue "planTurnId")
@@ -279,6 +278,9 @@ instance FromJSON WatcherEvent where
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "issue_pr_merged" ->
         IssuePullRequestMergedEvent
+          <$> (PrNumber <$> positiveIntField objectValue "prNumber")
+      "issue_closed" ->
+        IssueClosedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
       "watcher_recovered_invalid_state" ->
         WatcherRecoveredInvalidState
@@ -327,7 +329,7 @@ initializeFromEvent = \case
       )
   IssueImplementInitialized config workerThread ->
     Right
-      ( SomeWatcherState (IssueNeedsTriage config (WorkerIdle workerThread) :: WatcherState 'IssueImplement 'Triage)
+      ( SomeWatcherState (IssueImplementationReady config Nothing (WorkerIdle workerThread) :: WatcherState 'IssueImplement 'Implementing)
       , []
       )
   event ->
@@ -371,24 +373,23 @@ applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewProblemsAdded _
   fromDecision (step state ReviewerFoundProblems)
 applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewReviewIncomplete _reason) =
   fromDecision (step state ReviewerTurnIncomplete)
+applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) event@(PrReviewMergeabilityClean commitSha) =
+  case state of
+    PrWaitingForMergeability _config evidence _worker _reviewer
+      | cleanReviewCommit evidence == commitSha ->
+          fromDecision (step state MergeabilityClean)
+      | otherwise ->
+          Left ("event " <> eventName event <> " does not match reviewed commit")
+applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) (PrReviewMergeabilityWaiting reason) =
+  fromDecision (step state (MergeabilityRetryLater reason))
+applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) (PrReviewMergeabilityRecheck reason) =
+  fromDecision (step state (MergeabilityRecheckReviews reason))
 applyEvent (SomeWatcherState state@PrMerging {}) (PrReviewMergeCompleted mergeCommit) =
   fromDecision (step state (MergeCompleted mergeCommit))
-applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssueTriageTurnStartedEvent turnId) =
-  fromDecision (step state (StartIssueTriageTurn (ActiveTurn threadId turnId)))
-applyEvent (SomeWatcherState state@IssueTriageActive {}) IssueTriageAlreadyFixedEvent =
-  fromDecision (step state IssueTriageAlreadyFixed)
-applyEvent (SomeWatcherState state@IssueTriageActive {}) IssueTriageNeedsImplementationEvent =
-  fromDecision (step state IssueTriageNeedsImplementation)
-applyEvent (SomeWatcherState state@IssueTriageActive {}) (IssueTriageBlockedEvent reason) =
-  fromDecision (step state (IssueTriageBlocked reason))
-applyEvent (SomeWatcherState state@(IssueNeedsTriage _config (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
-  fromDecision (step state (StartIssuePlanTurn (ActiveTurn threadId turnId)))
-applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
+applyEvent (SomeWatcherState state@(IssueReadyToPlan _config _prNumber (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
   fromDecision (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId)))
-applyEvent (SomeWatcherState state@(IssueInPlanMode _config (WorkerActive activeTurn))) (IssuePlanCompletedEvent turnId) =
+applyEvent (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (IssuePlanCompletedEvent turnId) =
   fromDecision (step state (IssuePlanCompleted (ActiveTurn (activeThreadId activeTurn) <$> turnId)))
-applyEvent (SomeWatcherState state@(IssuePlanReady _config (WorkerIdle threadId))) (IssuePlanCompletedEvent turnId) =
-  fromDecision (step state (IssuePlanCompleted (ActiveTurn threadId <$> turnId)))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestCreatedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
@@ -397,6 +398,11 @@ applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker))
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
+applyEvent (SomeWatcherState state@(IssuePlanReady _config expectedPrNumber _worker)) event@(IssuePullRequestBodyUpdatedEvent prNumber)
+  | expectedPrNumber == prNumber =
+      fromDecision (step state (IssuePullRequestBodyUpdated prNumber))
+  | otherwise =
+      Left ("event " <> eventName event <> " does not match a known PR")
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config maybePr _worker)) event@(IssuePullRequestBodyUpdatedEvent prNumber)
   | maybePr == Just prNumber =
       fromDecision (step state (IssuePullRequestBodyUpdated prNumber))
@@ -411,13 +417,11 @@ applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr (W
   fromDecision (step state (StartIssueImplementationTurn (ActiveTurn threadId turnId)))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationIncompleteEvent _reason) =
   fromDecision (step state IssueImplementationIncomplete)
-applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueReviewHandoffInitializedEvent prNumber) =
+applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueReviewHandoffInitializedEvent prNumber) =
   fromDecision (step state (IssueReviewHandoffInitialized prNumber))
-applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueReviewHandoffStartedEvent prNumber) =
-  fromDecision (step state (IssueReviewHandoffStarted prNumber))
-applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueReviewHandoffInitializedEvent prNumber) =
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueReviewHandoffInitializedEvent prNumber) =
   fromDecision (step state (IssueReviewHandoffInitialized prNumber))
-applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueReviewHandoffStartedEvent prNumber) =
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueReviewHandoffStartedEvent prNumber) =
   fromDecision (step state (IssueReviewHandoffStarted prNumber))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueReviewHandoffInitializedEvent prNumber) =
   fromDecision (step state (IssueReviewHandoffInitialized prNumber))
@@ -427,16 +431,24 @@ applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueImplementa
   fromDecision (step state (MarkBlocked reason))
 applyEvent (SomeWatcherState state@IssueImplementing {}) (IssueImplementationBlockedEvent reason) =
   fromDecision (step state (MarkBlocked reason))
+applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueImplementationBlockedEvent reason) =
+  fromDecision (step state (MarkBlocked reason))
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueImplementationBlockedEvent reason) =
+  fromDecision (step state (MarkBlocked reason))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationBlockedEvent reason) =
   fromDecision (step state (MarkBlocked reason))
-applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueImplementationCompletedEvent prNumber) =
-  fromDecision (step state (IssueImplementationCompleted prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
+  fromDecision (step state (IssueImplementationCompleted prNumber))
+applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueImplementationCompletedEvent prNumber) =
+  fromDecision (step state (IssueImplementationCompleted prNumber))
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationCompletedEvent prNumber) =
   fromDecision (step state (IssueImplementationCompleted prNumber))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssuePullRequestMergedEvent prNumber) =
   fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssueWaitingForIssueClose {}) (IssueClosedEvent prNumber) =
+  fromDecision (step state (IssueClosed prNumber))
 applyEvent (SomeWatcherState state) (WatcherRecoveredInvalidState _reason) =
   Right (SomeWatcherState state, [])
 applyEvent (SomeWatcherState state) (WatcherBlocked reason) =
@@ -619,12 +631,11 @@ eventName = \case
   PrReviewCleanFound {} -> "pr_review_clean_found"
   PrReviewProblemsAdded {} -> "pr_review_problems_added"
   PrReviewReviewIncomplete {} -> "pr_review_review_incomplete"
+  PrReviewMergeabilityClean {} -> "pr_review_mergeability_clean"
+  PrReviewMergeabilityWaiting {} -> "pr_review_mergeability_waiting"
+  PrReviewMergeabilityRecheck {} -> "pr_review_mergeability_recheck"
   PrReviewMergeCompleted {} -> "pr_review_merge_completed"
   IssueImplementInitialized {} -> "issue_implement_initialized"
-  IssueTriageTurnStartedEvent {} -> "issue_triage_turn_started"
-  IssueTriageAlreadyFixedEvent -> "issue_triage_already_fixed"
-  IssueTriageNeedsImplementationEvent -> "issue_triage_needs_implementation"
-  IssueTriageBlockedEvent {} -> "issue_triage_blocked"
   IssuePlanTurnStartedEvent {} -> "issue_plan_turn_started"
   IssuePlanCompletedEvent {} -> "issue_plan_completed"
   IssuePullRequestCreatedEvent {} -> "issue_pr_created"
@@ -637,6 +648,7 @@ eventName = \case
   IssueReviewHandoffStartedEvent {} -> "issue_review_handoff_started"
   IssueImplementationCompletedEvent {} -> "issue_implementation_completed"
   IssuePullRequestMergedEvent {} -> "issue_pr_merged"
+  IssueClosedEvent {} -> "issue_closed"
   WatcherRecoveredInvalidState {} -> "watcher_recovered_invalid_state"
   WatcherBlocked {} -> "watcher_blocked"
   WatcherStopped {} -> "watcher_stopped"

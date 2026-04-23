@@ -25,6 +25,9 @@ data PrReviewObservation
   = ObservedReviewThreads ReviewThreadsReport CommitSha TurnId
   | ObservedWorkerOutcome WorkerOutcome
   | ObservedReviewerOutcome ReviewerOutcome
+  | ObservedMergeabilityClean CommitSha
+  | ObservedMergeabilityRetry Text
+  | ObservedMergeabilityRecheck Text
   | ObservedMergeCompleted MergeCommit
   | ObservedPrReviewBlocked BlockedReason
   deriving stock (Eq, Show)
@@ -69,6 +72,17 @@ prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedReviewerOu
       Right (tick (PrReviewReviewIncomplete reason) (step state ReviewerTurnIncomplete))
     ReviewerBlocked reason ->
       Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityClean commitSha) =
+  case state of
+    PrWaitingForMergeability _config evidence _worker _reviewer
+      | cleanReviewCommit evidence == commitSha ->
+          Right (tick (PrReviewMergeabilityClean commitSha) (step state MergeabilityClean))
+      | otherwise ->
+          Left "mergeability clean commit does not match reviewed commit"
+prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityRetry reason) =
+  Right (tick (PrReviewMergeabilityWaiting reason) (step state (MergeabilityRetryLater reason)))
+prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityRecheck reason) =
+  Right (tick (PrReviewMergeabilityRecheck reason) (step state (MergeabilityRecheckReviews reason)))
 prReviewObserve (SomeWatcherState state@PrMerging {}) (ObservedMergeCompleted mergeCommit) =
   Right (tick (PrReviewMergeCompleted mergeCommit) (step state (MergeCompleted mergeCommit)))
 prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedPrReviewBlocked reason) =
@@ -76,6 +90,8 @@ prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedPrReviewB
 prReviewObserve (SomeWatcherState state@PrFixingReviews {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedPrReviewBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 prReviewObserve (SomeWatcherState state@PrMerging {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))

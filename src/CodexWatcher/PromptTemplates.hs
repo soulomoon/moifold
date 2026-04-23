@@ -10,7 +10,6 @@ module CodexWatcher.PromptTemplates
   , issuePlanModeDeveloperTemplate
   , issuePlanTemplate
   , issuePlanningThreadDeveloperTemplate
-  , issueTriageTemplate
   , plannerTemplate
   , prReviewReviewerThreadDeveloperTemplate
   , prReviewWorkerThreadDeveloperTemplate
@@ -77,12 +76,12 @@ plannerTemplate =
         , "Respect target scope exactly when scope instructions are present."
         ]
         [ "{{structuredInstructions}}"
-        , "For fanout decisions, return one JSON object with outcome=complete, ready_issues, blocked_issues, and dependencies."
+        , "For fanout decisions, return one JSON object with outcome=complete and dependencies; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
         , "Bare {\"outcome\":\"complete\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
         , "Do not return bare {\"outcome\":\"complete\"} while any open scoped work or pending dependency decision remains."
-        , "ready_issues must be issue numbers only, and must not include any issue blocked by another open issue."
-        , "blocked_issues must use {\"issueNumber\": 27, \"blockedBy\": [26], \"reason\": \"...\"}."
-        , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]}."
+        , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]} and should include only semantic dependencies between scoped open issues."
+        , "Do not omit an open scoped issue from dependencies just because it has no blockers; use an empty dependsOn list."
+        , "ready_issues and blocked_issues are optional hints only; they are not authoritative."
         ]
         <> Text.unlines
           [ ""
@@ -94,23 +93,6 @@ plannerTemplate =
           , "- After issue creation, expect the watcher to re-enter planning before fanout."
           , "{{scopeInstructions}}"
           ]
-    )
-
-issueTriageTemplate :: PromptTemplate
-issueTriageTemplate =
-  PromptTemplate
-    "issue-triage.md"
-    ( agentPrincipleFrame
-        "Issue implementation triage turn."
-        "Decide whether the issue is already solved, needs implementation, or is blocked."
-        [ "Only inspect the issue, repository state, existing branches, and existing PRs."
-        , "Do not edit files, commit, push, create PRs, write watcher state, or write events.jsonl."
-        ]
-        [ "{{structuredInstructions}}"
-        , "Return already_fixed when the issue is solved on the target branch."
-        , "Return needs_implementation when implementation work is still required."
-        , "Return blocked with reason when safe progress is not possible."
-        ]
     )
 
 issuePlanTemplate :: PromptTemplate
@@ -291,7 +273,7 @@ issueImplementThreadDeveloperTemplate =
     "issue-thread-developer.md"
     ( agentPrincipleFrame
         "You are the dedicated English-only issue implementer for {{repoFullName}}#{{issueNumber}}."
-        "Move the issue from triage through planning, implementation, publish, and PR handoff while writing exact watcher state."
+        "Move the issue through planning, implementation, publish, PR handoff, PR merge observation, and issue close while writing exact watcher state."
         [ "Issue URL: {{issueUrl}}."
         , "Your working directory is {{workdir}}."
         , "Base branch: {{baseBranch}}."
@@ -302,23 +284,23 @@ issueImplementThreadDeveloperTemplate =
         , "Use English for every message in this thread."
         ]
         [ "Write {{issueStatePath}} with the exact issue_status required by the current phase."
-        , "Use issue_status values already_resolved, needs_implementation, plan_ready, complete, or blocked."
+        , "Use issue_status values plan_ready or blocked only when this turn is responsible for writing local issue state."
+        , "The watcher writes ready_to_plan, planning, in_progress, waiting_pr_merge, waiting_issue_close, and complete as it advances."
         , "Use blocked_reason whenever issue_status is blocked."
         ]
         <> Text.unlines
           [ ""
           , "Workflow guidance:"
           , "- Use {{workerModel}}/{{workerEffort}} for issue implementation turns."
-          , "- First triage whether the issue is already solved, blocked, or needs implementation."
-          , "- If already solved, close the issue with a concise GitHub comment and write {{issueStatePath}} with `issue_status: \"already_resolved\"`."
-          , "- If implementation is needed, write {{issueStatePath}} with `issue_status: \"needs_implementation\"` so the watcher can start a true Plan mode turn."
-          , "- During the Plan mode turn, write the implementation plan to {{issuePlanPath}} and write {{issueStatePath}} with `issue_status: \"plan_ready\"`."
-          , "- After planning, the watcher creates or updates the PR and writes the plan to the PR body before implementation starts."
+          , "- There is no triage turn. The watcher prepares the issue workspace and creates or reuses the PR before Plan mode starts."
+          , "- During the Plan mode turn, inspect the issue, repository state, existing branch, existing PR, and any previous {{issuePlanPath}} content as needed."
+          , "- Write the implementation plan to {{issuePlanPath}} and write {{issueStatePath}} with `issue_status: \"plan_ready\"`."
+          , "- After planning, the watcher writes the plan to the existing PR body before implementation starts."
           , "- Then implement the plan across one or more turns. Each implementation turn may edit files, validate, commit, and push the existing PR branch."
           , "- If {{issueStatePath}} is missing `pr_number` or `pr_url`, report `issue_status: \"blocked\"`."
-          , "- When implementation is complete, validation and publish succeeded, and the existing PR branch is ready for review, write {{issueStatePath}} with `issue_status: \"complete\"`, `pr_number`, and `pr_url`."
-          , "- `issue_status: \"complete\"` means PR-ready handoff; it does not mean the GitHub issue is closed."
-          , "- After PR review, the watcher verifies PR merge and GitHub issue closed state before final terminal success."
+          , "- When implementation is complete, validation and publish succeeded, and the existing PR branch is ready for review, return the structured outcome `complete` with a summary."
+          , "- Do not use `issue_status: \"complete\"` for PR-ready handoff; the watcher reserves that status for the final terminal state after the GitHub issue is closed."
+          , "- After PR review, the watcher verifies PR merge before final terminal success."
           , "- Use GitHub CLI and normal git for issue/PR/branch operations. Run `gh auth status` and `gh auth setup-git` before publishing."
           , "- Before committing, inspect `git status --short` and relevant diffs; stage only files related to this issue and never watcher state/runtime files."
           , "- If unrelated dirty changes make safe staging unclear, write `issue_status: \"blocked\"` with a clear `blocked_reason`."
@@ -347,7 +329,7 @@ issuePlanningThreadDeveloperTemplate =
           [ ""
           , "Planning guidance:"
           , "- Use {{plannerModel}}/{{plannerEffort}} for planning turns."
-          , "- Decide priority, dependencies, whether issues should be split, and which issues can be implemented in parallel now."
+          , "- Decide priority, dependencies, and whether issues should be split; the watcher computes which issues can be implemented in parallel now."
           , "- Prefer small independent implementation units. If an issue is too broad, propose concrete subissues instead of starting implementation for the broad issue."
           , "- After proposing issue creation, expect the watcher to create GitHub issues and re-enter planning before fanout."
           , "{{scopeInstructions}}"
@@ -362,11 +344,12 @@ issuePlanModeDeveloperTemplate =
         "You are the dedicated English-only issue planner for {{repoFullName}}#{{issueNumber}}."
         "Produce a decision-complete implementation plan for later default-mode implementation turns."
         [ "Issue URL: {{issueUrl}}."
+        , "Existing PR: #{{prNumber}} ({{prUrl}})."
         , "Your working directory is {{workdir}}."
         , "Base branch: {{baseBranch}}."
         , "Implementation branch: {{branchOrUnknownUseTools}}."
         , "This turn is running in Codex Plan mode with {{workerModel}}/{{planEffort}}."
-        , "The issue has already passed triage as needing implementation."
+        , "The watcher has already prepared the local issue workspace and created or reused PR #{{prNumber}} before this turn."
         , "Do not edit implementation files, commit, push, create a PR, or start PR review."
         , "Do not use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."

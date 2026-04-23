@@ -49,7 +49,7 @@ data CliDomain
 data CliCommand
   = CliReplayEvents FilePath
   | CliHealthcheck HealthcheckCli
-  | CliClaimRuntimeOwner FilePath
+  | CliClearRuntimeLease FilePath
   | CliStopDaemon StopDaemonCli
   | CliRenderService RenderServiceCli
   | CliIssueFanout IssueFanoutCli
@@ -201,7 +201,7 @@ cliCommandParser =
   hsubparser
     ( command "replay-events" (info (CliReplayEvents <$> eventsPathArgument) (progDesc "Replay a canonical watcher events.jsonl file"))
         <> command "healthcheck" (info (CliHealthcheck <$> healthcheckParser) (progDesc "Run the read-only watcher healthcheck"))
-        <> command "claim-runtime-owner" (info claimRuntimeOwnerParser (progDesc "Claim Haskell execute ownership for a watcher state directory"))
+        <> command "clear-runtime-lease" (info clearRuntimeLeaseParser (progDesc "Clear an inactive Haskell watcher runtime lease"))
         <> command "stop-daemon" (info (CliStopDaemon <$> stopDaemonParser) (progDesc "Send TERM to a Haskell watcher daemon"))
         <> command "render-service" (info (CliRenderService <$> renderServiceParser) (progDesc "Render a systemd unit and logrotate config"))
         <> command "issue-fanout" (info (CliIssueFanout <$> issueFanoutParser) (progDesc "Plan or create issue implementer child watcher state"))
@@ -228,9 +228,9 @@ healthcheckParser =
     <*> optional repoOption
     <*> optionalEndpointParser
 
-claimRuntimeOwnerParser :: Parser CliCommand
-claimRuntimeOwnerParser =
-  CliClaimRuntimeOwner <$> stateDirOption
+clearRuntimeLeaseParser :: Parser CliCommand
+clearRuntimeLeaseParser =
+  CliClearRuntimeLease <$> stateDirOption
 
 stopDaemonParser :: Parser StopDaemonCli
 stopDaemonParser =

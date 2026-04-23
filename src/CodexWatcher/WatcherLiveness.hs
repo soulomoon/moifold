@@ -22,7 +22,7 @@ issueStatusRequiresDaemon status =
   status `elem` activeIssueStatuses
 
 activeIssueStatuses :: [Text]
-activeIssueStatuses = ["triage", "needs_implementation", "plan_ready", "in_progress", "incomplete", "waiting_pr_merge"]
+activeIssueStatuses = ["preparing_pr", "ready_to_plan", "planning", "plan_ready", "in_progress", "incomplete", "waiting_pr_merge", "waiting_issue_close"]
 
 prReviewRequiresDaemon :: Bool -> Maybe Text -> Bool
 prReviewRequiresDaemon remoteMerged replayPhase =

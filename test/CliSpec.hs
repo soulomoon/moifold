@@ -22,8 +22,8 @@ prop_cliParsesHealthcheckAndRunLoop =
             , healthcheckCliEndpoint = Nothing
             }
       )
-    && parseCliCommand ["claim-runtime-owner", "--state-dir", "/tmp/state"]
-      == Right (CliClaimRuntimeOwner "/tmp/state")
+    && parseCliCommand ["clear-runtime-lease", "--state-dir", "/tmp/state"]
+      == Right (CliClearRuntimeLease "/tmp/state")
     && parseCliCommand
       [ "run-issue-planning"
       , "--events"

@@ -7,7 +7,6 @@ module CodexWatcher.TurnOutput
   , issuePlanModeDeveloperInstructions
   , issuePlanTurnInput
   , issuePlanningThreadDeveloperInstructions
-  , issueTriageTurnInput
   , prReviewWorkerTurnInput
   , prReviewThreadDeveloperInstructions
   , plannerTurnInput
@@ -25,7 +24,6 @@ import CodexWatcher.PromptTemplates
   , issuePlanModeDeveloperTemplate
   , issuePlanTemplate
   , issuePlanningThreadDeveloperTemplate
-  , issueTriageTemplate
   , plannerTemplate
   , prReviewReviewerThreadDeveloperTemplate
   , prReviewWorkerThreadDeveloperTemplate
@@ -59,10 +57,6 @@ structuredTurnOutputSchema =
                     .= ( [ "complete"
                          , "incomplete"
                          , "blocked"
-                         , "already_fixed"
-                         , "needs_implementation"
-                         , "clean"
-                         , "problems"
                          ] ::
                           [Text]
                        )
@@ -127,10 +121,6 @@ plannerTurnInput =
     [ ("structuredInstructions", structuredTurnOutcomeInstructions)
     , ("scopeInstructions", "")
     ]
-
-issueTriageTurnInput :: Text
-issueTriageTurnInput =
-  renderTemplate issueTriageTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
 
 issuePlanTurnInput :: Text
 issuePlanTurnInput =
@@ -209,13 +199,15 @@ issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues =
     , ("scopeInstructions", issuePlanningScopeInstructions scopeIssues)
     ]
 
-issuePlanModeDeveloperInstructions :: FilePath -> FilePath -> IssueConfig -> Text
-issuePlanModeDeveloperInstructions workdir stateDir config =
+issuePlanModeDeveloperInstructions :: FilePath -> FilePath -> IssueConfig -> PrNumber -> Text
+issuePlanModeDeveloperInstructions workdir stateDir config prNumber =
   renderTemplate
     issuePlanModeDeveloperTemplate
     [ ("repoFullName", unRepoName config.issueRepo)
     , ("issueNumber", Text.pack (show (unIssueNumber config.issueNumber)))
     , ("issueUrl", issueUrl config.issueRepo config.issueNumber)
+    , ("prNumber", Text.pack (show (unPrNumber prNumber)))
+    , ("prUrl", prUrl config.issueRepo prNumber)
     , ("workdir", Text.pack workdir)
     , ("baseBranch", "origin/HEAD")
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.issueBranch)

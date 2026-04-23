@@ -85,6 +85,8 @@ data GhPullRequest = GhPullRequest
   , ghPullRequestTitle :: Text
   , ghPullRequestHeadRefName :: BranchName
   , ghPullRequestHeadRefOid :: Maybe CommitSha
+  , ghPullRequestLinkedIssueNumbers :: [IssueNumber]
+  , ghPullRequestBody :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
@@ -95,6 +97,14 @@ instance FromJSON GhPullRequest where
       <*> objectValue .: "title"
       <*> (BranchName <$> objectValue .: "headRefName")
       <*> (fmap CommitSha <$> objectValue .:? "headRefOid")
+      <*> parseClosingIssueReferences objectValue
+      <*> objectValue .:? "body"
+
+newtype ClosingIssueReference = ClosingIssueReference IssueNumber
+
+instance FromJSON ClosingIssueReference where
+  parseJSON = withObject "ClosingIssueReference" \objectValue ->
+    ClosingIssueReference . IssueNumber <$> objectValue .: "number"
 
 data GhPullRequestCreateResult
   = GhPullRequestCreated PrNumber
@@ -211,13 +221,45 @@ parseGhPrList :: Text -> Either Text [GhPullRequest]
 parseGhPrList =
   decodeJsonText "gh pr list"
 
+parseClosingIssueReferences :: Object -> AesonTypes.Parser [IssueNumber]
+parseClosingIssueReferences objectValue = do
+  references <- objectValue .:? "closingIssuesReferences" .!= ([] :: [ClosingIssueReference])
+  pure [issueNumber | ClosingIssueReference issueNumber <- references]
+
 parseGhPrCreateResult :: Text -> Either Text GhPullRequestCreateResult
 parseGhPrCreateResult =
   decodeJsonText "gh pr create"
 
 parseGhPrChecks :: Text -> Either Text [GhPullRequestCheck]
-parseGhPrChecks =
-  decodeJsonText "gh pr checks"
+parseGhPrChecks text =
+  case decodeJsonText "gh pr checks" text of
+    Right checks -> Right checks
+    Left _ -> parseGhPrChecksTable text
+
+parseGhPrChecksTable :: Text -> Either Text [GhPullRequestCheck]
+parseGhPrChecksTable text
+  | stripped == "" = Right []
+  | "no required checks reported" `Text.isInfixOf` Text.toLower stripped = Right []
+  | "no checks reported" `Text.isInfixOf` Text.toLower stripped = Right []
+  | otherwise = traverse parseGhPrCheckLine (filter (not . Text.null) (Text.strip <$> Text.lines text))
+ where
+  stripped = Text.strip text
+
+parseGhPrCheckLine :: Text -> Either Text GhPullRequestCheck
+parseGhPrCheckLine line =
+  case Text.splitOn "\t" line of
+    name : state : _ ->
+      Right (GhPullRequestCheck (stripCheckMarker name) (Text.strip state) Nothing)
+    _ ->
+      Left ("gh pr checks output line is not tab-separated: " <> line)
+
+stripCheckMarker :: Text -> Text
+stripCheckMarker text =
+  Text.strip
+    ( Text.dropWhile
+        (\char -> char == 'X' || char == '-' || char == ' ')
+        text
+    )
 
 parseGhPrView :: Text -> Either Text RemotePullRequest
 parseGhPrView =
@@ -261,8 +303,13 @@ runGhPrListOpen interpreter repo =
   parseCommandJson parseGhPrList <$> interpreter.runtimeRunCommand (GhPrListOpen repo)
 
 runGhPrChecks :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text [GhPullRequestCheck])
-runGhPrChecks interpreter repo prNumber =
-  parseCommandJson parseGhPrChecks <$> interpreter.runtimeRunCommand (GhPrChecks repo prNumber)
+runGhPrChecks interpreter repo prNumber = do
+  report <- interpreter.runtimeRunCommand (GhPrChecks repo prNumber)
+  case parseGhPrChecks report.stdout of
+    Right checks -> pure (Right checks)
+    Left parseError
+      | report.ok -> pure (Left parseError)
+      | otherwise -> pure (Left (commandText report))
 
 runGhPrView :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text RemotePullRequest)
 runGhPrView interpreter repo prNumber =

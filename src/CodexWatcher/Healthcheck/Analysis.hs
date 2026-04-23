@@ -186,7 +186,7 @@ isActiveImplementer summary =
     && (summary.pid.running || maybe False (`elem` activeIssueStatuses) summary.issueStatus)
 
 terminalIssueStatuses :: [Text]
-terminalIssueStatuses = ["already_resolved", "complete"]
+terminalIssueStatuses = ["complete"]
 
 blockedSeverity :: WatcherSummary -> Text
 blockedSeverity summary
@@ -244,7 +244,7 @@ logicReview =
            , "watcher events.jsonl can replay through the Haskell lifecycle model when present"
            , "non-terminal planning, implement, and PR review watchers have a running daemon pid"
            , "configured app-server threads can be read when an app-server endpoint is provided"
-           , "runtime-owner marker is surfaced for execute ownership visibility when present"
+           , "runtime-owner lease is surfaced for execute ownership visibility when present"
            , "blocked states are surfaced instead of retried forever"
            ]
     , "notes"

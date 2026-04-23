@@ -60,6 +60,7 @@ data RuntimeCommand
   | GhIssueListOpen RepoName
   | GhIssueView RepoName IssueNumber [Text]
   | GhIssueCreate RepoName IssueCreationRequest
+  | GhIssueClose IssueConfig PrNumber
   | GhPrListOpen RepoName
   | GhPrView RepoName PrNumber [Text]
   | GhPrChecks RepoName PrNumber
@@ -69,6 +70,7 @@ data RuntimeCommand
   | GhResolveReviewThread ReviewThreadId
   | GhPrMerge RepoName PrNumber Text
   | GhPrCommentReviewAndMerge RepoName PrNumber CleanReviewEvidence Text
+  | CheckNonEmptyFile FilePath
   | GitBranchCurrent FilePath
   | GitRevParseHead FilePath
   | GitStatusPorcelain FilePath
@@ -142,10 +144,22 @@ renderRuntimeCommand (GhIssueView repo issueNumber fields) =
     ""
 renderRuntimeCommand (GhIssueCreate repo request) =
   renderGhIssueCreate repo request
+renderRuntimeCommand (GhIssueClose config prNumber') =
+  RuntimeCommandSpec
+    "bash"
+    [ "-lc"
+    , Text.unpack closeIssueScript
+    , "codex-watcher-gh-issue-close"
+    , Text.unpack (unRepoName (issueRepo config))
+    , show (unIssueNumber (issueNumber config))
+    , show (unPrNumber prNumber')
+    ]
+    Nothing
+    ""
 renderRuntimeCommand (GhPrListOpen repo) =
   RuntimeCommandSpec
     "gh"
-    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid"]
+    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid,body"]
     Nothing
     ""
 
@@ -171,8 +185,6 @@ renderRuntimeCommand (GhPrChecks repo prNumber) =
     , "--repo"
     , Text.unpack (unRepoName repo)
     , "--required"
-    , "--json"
-    , "name,state,bucket"
     ]
     Nothing
     ""
@@ -254,6 +266,16 @@ renderRuntimeCommand (GhPrCommentReviewAndMerge repo prNumber evidence mergeMeth
     ]
     Nothing
     (cleanReviewBody evidence)
+renderRuntimeCommand (CheckNonEmptyFile path) =
+  RuntimeCommandSpec
+    "bash"
+    [ "-lc"
+    , "set -euo pipefail; test -s \"$1\" || { printf 'file missing or empty: %s\\n' \"$1\" >&2; exit 1; }"
+    , "codex-watcher-check-non-empty-file"
+    , path
+    ]
+    Nothing
+    ""
 renderRuntimeCommand (GitBranchCurrent workdir) =
   RuntimeCommandSpec "git" ["branch", "--show-current"] (Just workdir) ""
 renderRuntimeCommand (GitRevParseHead workdir) =
@@ -328,6 +350,11 @@ createPullRequestScript =
     , "issue=\"$3\""
     , "existing=$(gh pr list --repo \"$repo\" --head \"$branch\" --state open --json number --jq '.[0].number // empty')"
     , "if [ -n \"$existing\" ]; then"
+    , "  linked=$(gh pr view \"$existing\" --repo \"$repo\" --json body,closingIssuesReferences --jq \"(([.closingIssuesReferences[]?.number] | index($issue)) != null) or ((.body // \\\"\\\") | test(\\\"(?i)(close[sd]?|fix(e[sd])?|resolve[sd]?) +#$issue(\\\\\\\\b|[^0-9])\\\"))\")"
+    , "  if [ \"$linked\" != \"true\" ]; then"
+    , "    printf 'open PR #%s already uses branch %s but is not linked to issue #%s\\n' \"$existing\" \"$branch\" \"$issue\" >&2"
+    , "    exit 1"
+    , "  fi"
     , "  printf '{\"status\":\"reused\",\"prNumber\":%s}\\n' \"$existing\""
     , "  exit 0"
     , "fi"
@@ -344,7 +371,7 @@ createPullRequestScript =
     , "  git commit --allow-empty -m \"Start issue #$issue implementation\" >/dev/null"
     , "fi"
     , "git push -u origin \"$branch\" >/dev/null"
-    , "body=$(printf 'Implements #%s.\\n\\nCreated by codex-watcher after the issue planning turn. Implementation commits will be pushed to this PR.' \"$issue\")"
+    , "body=$(printf 'Closes #%s.\\n\\nImplementation plan pending. The issue implementer will sync issue-plan.md into this PR before implementation starts.' \"$issue\")"
     , "url=$(gh pr create --repo \"$repo\" --head \"$branch\" --title \"Implement #$issue\" --body \"$body\")"
     , "number=\"${url##*/}\""
     , "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\""
@@ -365,13 +392,28 @@ updatePullRequestBodyScript =
     , "body_file=$(mktemp)"
     , "trap 'rm -f \"$body_file\"' EXIT"
     , "{"
-    , "  printf 'Implements #%s.\\n\\n' \"$issue\""
+    , "  printf 'Closes #%s.\\n\\n' \"$issue\""
     , "  printf '## Implementation Plan\\n\\n'"
     , "  cat \"$plan_path\""
-    , "  printf '\\n\\n---\\nCreated by codex-watcher after the issue planning turn. Implementation commits will be pushed to this PR.\\n'"
+    , "  printf '\\n\\n---\\nImplementation plan synced by codex-watcher before implementation starts. Implementation commits will be pushed to this PR.\\n'"
     , "} > \"$body_file\""
     , "gh pr edit \"$pr\" --repo \"$repo\" --body-file \"$body_file\" >/dev/null"
     , "printf '{\"status\":\"updated\",\"prNumber\":%s}\\n' \"$pr\""
+    ]
+
+closeIssueScript :: Text
+closeIssueScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "repo=\"$1\""
+    , "issue=\"$2\""
+    , "pr=\"$3\""
+    , "state=$(gh issue view \"$issue\" --repo \"$repo\" --json state --jq '.state')"
+    , "if [ \"$state\" != \"CLOSED\" ]; then"
+    , "  gh issue comment \"$issue\" --repo \"$repo\" --body \"Implemented by merged PR #$pr.\" >/dev/null"
+    , "  gh issue close \"$issue\" --repo \"$repo\" --reason completed >/dev/null"
+    , "fi"
+    , "printf '{\"status\":\"closed\",\"issueNumber\":%s,\"prNumber\":%s}\\n' \"$issue\" \"$pr\""
     ]
 
 repoOwnerName :: RepoName -> (Text, Text)

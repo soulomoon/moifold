@@ -22,7 +22,6 @@ import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeOwner (RuntimeOwner (HaskellRuntime), writeRuntimeOwner)
 import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
 import CodexWatcher.Types
@@ -170,7 +169,6 @@ writePrReviewWatcherLaunch launch = do
   writeJsonValue launch.reviewLaunchConfigPath launch.reviewLaunchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.reviewLaunchEventsPath launch.reviewLaunchInitialEvent
   mapM_ (writeCompatibility ioRuntimeInterpreter) launch.reviewLaunchCompatibilityWrites
-  writeRuntimeOwner ioRuntimeInterpreter launch.reviewLaunchStateDir HaskellRuntime
   putStrLn ("wrote PR review watcher " <> show (unPrNumber launch.reviewLaunchPrConfig.prNumber) <> " to " <> launch.reviewLaunchStateDir)
 
 ensurePrReviewWatcherLaunchWritable :: PrReviewWatcherLaunchPlan -> IO ()

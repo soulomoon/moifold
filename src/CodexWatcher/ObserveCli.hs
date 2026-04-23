@@ -80,14 +80,6 @@ observationSpecs =
           <*> requiredValue "--turn-id" cli.observeCliTurnId
     )
   , planningPure "turn-completed" ObservedPlanningTurnCompleted
-  , issue "triage-turn-started" ( \cli ->
-        ObservedTriageTurnStarted <$> requiredValue "--turn-id" cli.observeCliTurnId
-    )
-  , issuePure "triage-already-fixed" ObservedTriageAlreadyFixed
-  , issuePure "triage-needs-implementation" ObservedTriageNeedsImplementation
-  , issue "triage-blocked" ( \cli ->
-        ObservedTriageBlocked <$> requiredBlockedReason cli
-    )
   , issue "plan-turn-started" ( \cli ->
         ObservedPlanTurnStarted <$> requiredValue "--turn-id" cli.observeCliTurnId
     )
@@ -146,6 +138,15 @@ observationSpecs =
   , prReview "reviewer-blocked" ( \cli ->
         ObservedReviewerOutcome . ReviewerBlocked <$> requiredBlockedReason cli
     )
+  , prReview "mergeability-clean" ( \cli ->
+        ObservedMergeabilityClean <$> requiredValue "--commit-sha" cli.observeCliCommitSha
+    )
+  , prReviewPureFromCli "mergeability-waiting" ( \cli ->
+        ObservedMergeabilityRetry (fromMaybe "waiting for mergeability" cli.observeCliReason)
+    )
+  , prReviewPureFromCli "mergeability-recheck" ( \cli ->
+        ObservedMergeabilityRecheck (fromMaybe "rechecking reviews" cli.observeCliReason)
+    )
   , prReview "merge-completed" ( \cli ->
         ObservedMergeCompleted . MergeCommit <$> requiredValue "--merge-commit-sha" cli.observeCliMergeCommitSha
     )
@@ -165,10 +166,6 @@ planningPure name observation =
 issue :: String -> (ObserveOnceCli -> IO IssueImplementObservation) -> ObservationSpec
 issue name parser =
   ObservationSpec CliIssueImplement name (fmap DaemonIssueImplementObservation . parser)
-
-issuePure :: String -> IssueImplementObservation -> ObservationSpec
-issuePure name observation =
-  issue name (const (pure observation))
 
 issuePureFromCli :: String -> (ObserveOnceCli -> IssueImplementObservation) -> ObservationSpec
 issuePureFromCli name parser =

@@ -61,6 +61,7 @@ library
     CodexWatcher.Logging
     CodexWatcher.Observation
     CodexWatcher.ObserveCli
+    CodexWatcher.PlanningGraphCanonical
     CodexWatcher.Protocol
     CodexWatcher.PromptTemplates
     CodexWatcher.PrReviewLaunchCli

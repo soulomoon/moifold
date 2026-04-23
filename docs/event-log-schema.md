@@ -27,39 +27,44 @@ Important replay rules:
 
 ```json
 {"type":"issue_implement_initialized","repoFullName":"owner/name","issueNumber":42,"branch":"codex/issue-42","workerThreadId":"thread-id"}
-{"type":"issue_triage_turn_started","triageTurnId":"turn-triage"}
-{"type":"issue_triage_already_fixed","evidence":"already fixed on base branch"}
-{"type":"issue_triage_needs_implementation"}
-{"type":"issue_triage_blocked","reason":"missing reproduction"}
-{"type":"issue_plan_turn_started","planTurnId":"turn-plan"}
-{"type":"issue_plan_completed"}
 {"type":"issue_pr_created","prNumber":7,"prUrl":"https://github.com/owner/name/pull/7"}
 {"type":"issue_pr_reused","prNumber":7,"prUrl":"https://github.com/owner/name/pull/7"}
+{"type":"issue_plan_turn_started","planTurnId":"turn-plan"}
+{"type":"issue_plan_completed"}
+{"type":"issue_pr_body_updated","prNumber":7}
 {"type":"issue_implementation_turn_started","implementationTurnId":"turn-implementation"}
 {"type":"issue_implementation_incomplete","reason":"worker marked implementation incomplete"}
 {"type":"issue_implementation_blocked","reason":"human-readable blocker"}
+{"type":"issue_implementation_completed","prNumber":7}
 {"type":"issue_review_handoff_initialized","prNumber":7}
 {"type":"issue_review_handoff_started","prNumber":7}
-{"type":"issue_implementation_completed","prNumber":7}
+{"type":"issue_pr_merged","prNumber":7}
+{"type":"issue_closed","prNumber":7}
 ```
 
 Valid replay path:
 
-`IssueImplement / Triage -> PlanMode -> Implementing -> Complete`
+`IssueImplement / Implementing setup -> PlanMode -> Implementing -> handoff-ready -> waiting for PR merge -> waiting for issue close -> Complete`
 
 Compatibility notes:
 
-- `issue_plan_completed` may include `implementationTurnId`; when present, replay starts the first implementation turn immediately.
-- Without `implementationTurnId`, `issue_plan_completed` moves to implementation-ready and emits effects to push the branch and create or reuse a PR before any implementation turn starts.
+- `issue_pr_created` or `issue_pr_reused` moves the implementer from PR setup into `PlanMode` and writes `issue_status: "ready_to_plan"`.
+- `issue_plan_turn_started` writes `issue_status: "planning"`.
+- `issue_plan_completed` writes `issue_status: "plan_ready"` and may include `implementationTurnId`; when present, replay remembers that worker thread for the later implementation turn.
+- After planning, the runtime must emit `issue_pr_body_updated` before any implementation turn starts. The runtime verifies `issue-plan.md` is present and non-empty before committing `issue_plan_completed`.
 
 Important replay rules:
 
-- `issue_triage_already_fixed` moves directly to `Complete`.
-- `issue_triage_needs_implementation` moves to `PlanMode`; implementation cannot start before a plan event.
-- `issue_plan_completed` must occur before `issue_pr_created` or `issue_pr_reused`.
+- `issue_implement_initialized` starts in PR setup; there is no triage turn.
+- `issue_pr_created` or `issue_pr_reused` must occur before `issue_plan_turn_started`.
+- `issue_plan_completed` must occur before `issue_pr_body_updated`.
+- `issue_review_handoff_initialized` and `issue_review_handoff_started` are only valid after `issue_implementation_completed`; they cannot bypass an implementation turn.
 - `issue_implementation_incomplete` returns to implementation-ready and emits a worker-start effect; it is not a blocked state.
 - `issue_implementation_blocked` moves to `Blocked`.
-- Review handoff events are accepted before final `issue_implementation_completed` so the issue watcher only completes after PR review handoff has been initialized and started.
+- `issue_implementation_completed` only records that the implementation worker finished and the PR is ready to hand off, not that the issue is done.
+- Review handoff events move the implementer into the PR lifecycle.
+- `issue_pr_merged` moves the implementer to a non-terminal issue-close wait state and emits the GitHub issue close effect.
+- `issue_closed` is the single terminal fact for an implemented issue; only then does the implementer move to `Complete`.
 
 ## PR Review
 
@@ -70,6 +75,9 @@ Important replay rules:
 {"type":"pr_review_fix_incomplete","reason":"worker marked completion_status incomplete"}
 {"type":"pr_review_no_unresolved_found","commitSha":"head-sha","reviewerTurnId":"turn-id"}
 {"type":"pr_review_clean_found","commitSha":"head-sha","comment":"LGTM"}
+{"type":"pr_review_mergeability_waiting","reason":"pre-merge merge state is UNSTABLE"}
+{"type":"pr_review_mergeability_recheck","reason":"pre-merge found unresolved review threads"}
+{"type":"pr_review_mergeability_clean","commitSha":"head-sha"}
 {"type":"pr_review_problems_added","commitSha":"head-sha"}
 {"type":"pr_review_review_incomplete","reason":"reviewer state missing required fields"}
 {"type":"pr_review_merge_completed","mergeCommitSha":"merge-sha"}
@@ -80,7 +88,10 @@ Important replay rules:
 - `pr_review_unresolved_found` starts a worker repair turn.
 - `pr_review_fix_completed` and `pr_review_fix_incomplete` both return to `CheckingReviews`; incomplete means the runtime should immediately re-check instead of sleeping.
 - `pr_review_no_unresolved_found` starts a reviewer turn.
-- `pr_review_clean_found` moves to `Merging`.
+- `pr_review_clean_found` moves to `WaitingMergeability`; the watcher does not merge until a later pre-merge check emits `pr_review_mergeability_clean`.
+- `pr_review_mergeability_waiting` stays in `WaitingMergeability` and sleeps; use it for retryable GitHub states such as `UNSTABLE`, unknown mergeability, or pending checks.
+- `pr_review_mergeability_recheck` returns to `CheckingReviews`; use it when the reviewed head changed or review threads reappeared.
+- `pr_review_mergeability_clean` moves to `Merging`.
 - `pr_review_problems_added` and `pr_review_review_incomplete` both return to `CheckingReviews`.
 - `pr_review_merge_completed` moves to `Complete`.
 

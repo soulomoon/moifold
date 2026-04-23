@@ -35,11 +35,13 @@ prop_ghGitParsesIssueAndPrLists =
                   , "title" .= ("Implement fix" :: Text)
                   , "headRefName" .= ("codex/issue-42" :: Text)
                   , "headRefOid" .= ("abc123" :: Text)
+                  , "closingIssuesReferences" .= [object ["number" .= (42 :: Int)]]
+                  , "body" .= ("Closes #42" :: Text)
                   ]
               ]
           )
    in parseGhIssueList issuesJson == Right [GhIssue (IssueNumber 42) "Fix bug"]
-        && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123"))]
+        && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123")) [IssueNumber 42] (Just "Closes #42")]
 
 prop_ghGitParsesRemoteIssueView :: Bool
 prop_ghGitParsesRemoteIssueView =
@@ -99,9 +101,12 @@ prop_ghGitParsesPrCreateAndChecks =
                   ]
               ]
           )
+      checksText = "ci/test\tSUCCESS\t1m\thttps://example.invalid\n"
    in parseGhPrCreateResult createdJson == Right (GhPullRequestCreated (PrNumber 7))
         && parseGhPrCreateResult reusedJson == Right (GhPullRequestReused (PrNumber 8))
         && parseGhPrChecks checksJson == Right [GhPullRequestCheck "ci/test" "SUCCESS" (Just "pass")]
+        && parseGhPrChecks checksText == Right [GhPullRequestCheck "ci/test" "SUCCESS" Nothing]
+        && parseGhPrChecks "no required checks reported on the 'codex/example' branch\n" == Right []
 
 prop_ghGitParsesReviewThreadsGraphql :: Bool
 prop_ghGitParsesReviewThreadsGraphql =

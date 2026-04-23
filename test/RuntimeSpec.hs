@@ -6,10 +6,11 @@ module RuntimeSpec
   , prop_runtimeDefaultsCentralizeThreadAndTurnOptions
   , prop_runtimeGhIssueCreateUsesRepoTitleAndBody
   , prop_runtimeGhIssueCreateWithParentLinksSubIssue
+  , prop_runtimeGhIssueCloseCommentsAndCloses
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
-  , prop_runtimeGhPrChecksUsesRequiredStructuredFields
+  , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
@@ -31,6 +32,7 @@ runtimeCommandExamples =
   , GhIssueListOpen (RepoName "soulomoon/mlf2")
   , GhIssueView (RepoName "soulomoon/mlf2") (IssueNumber 42) ["state", "closed", "url"]
   , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body" Nothing)
+  , GhIssueClose (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example")) (PrNumber 7)
   , GhPrListOpen (RepoName "soulomoon/mlf2")
   , GhPrChecks (RepoName "soulomoon/mlf2") (PrNumber 6)
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
@@ -40,6 +42,7 @@ runtimeCommandExamples =
   , GhResolveReviewThread (ReviewThreadId "PRRT_test")
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
   , GhPrCommentReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
+  , CheckNonEmptyFile "/tmp/work/.watcher/issue-plan.md"
   , GitBranchCurrent "/tmp/work"
   , GitRevParseHead "/tmp/work"
   , GitStatusPorcelain "/tmp/work"
@@ -87,6 +90,7 @@ prop_runtimeGitPushNeverForces branch =
 prop_runtimeGhPrViewUsesStructuredFields :: RepoName -> PrNumber -> Bool
 prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
   let spec = renderRuntimeCommand (GhPrView repo prNumber ["state", "url", "headRefOid"])
+      listSpec = renderRuntimeCommand (GhPrListOpen repo)
    in spec.command == "gh"
         && spec.args
           == [ "pr"
@@ -97,9 +101,19 @@ prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
              , "--json"
              , "state,url,headRefOid"
              ]
+        && listSpec.args
+          == [ "pr"
+             , "list"
+             , "--repo"
+             , Text.unpack (unRepoName repo)
+             , "--state"
+             , "open"
+             , "--json"
+             , "number,title,headRefName,headRefOid,body"
+             ]
 
-prop_runtimeGhPrChecksUsesRequiredStructuredFields :: RepoName -> PrNumber -> Bool
-prop_runtimeGhPrChecksUsesRequiredStructuredFields repo prNumber =
+prop_runtimeGhPrChecksUsesRequiredCurrentCli :: RepoName -> PrNumber -> Bool
+prop_runtimeGhPrChecksUsesRequiredCurrentCli repo prNumber =
   let spec = renderRuntimeCommand (GhPrChecks repo prNumber)
    in spec.command == "gh"
         && spec.args
@@ -109,8 +123,6 @@ prop_runtimeGhPrChecksUsesRequiredStructuredFields repo prNumber =
              , "--repo"
              , Text.unpack (unRepoName repo)
              , "--required"
-             , "--json"
-             , "name,state,bucket"
              ]
 
 prop_runtimeGhIssueCreateUsesRepoTitleAndBody :: RepoName -> IssueCreationRequest -> Bool
@@ -149,6 +161,25 @@ prop_runtimeGhIssueCreateWithParentLinksSubIssue repo requestWithoutParent paren
              , show (unIssueNumber parentIssue)
              ]
 
+prop_runtimeGhIssueCloseCommentsAndCloses :: IssueConfig -> PrNumber -> Bool
+prop_runtimeGhIssueCloseCommentsAndCloses config prNumber =
+  let spec = renderRuntimeCommand (GhIssueClose config prNumber)
+      script = Text.pack (spec.args !! 1)
+   in spec.command == "bash"
+        && take 2 spec.args == ["-lc", Text.unpack script]
+        && "gh issue comment \"$issue\"" `Text.isInfixOf` script
+        && "Implemented by merged PR #$pr." `Text.isInfixOf` script
+        && "gh issue close \"$issue\" --repo \"$repo\" --reason completed" `Text.isInfixOf` script
+        && "gh issue view \"$issue\" --repo \"$repo\" --json state" `Text.isInfixOf` script
+        && spec.args
+          == [ "-lc"
+             , Text.unpack script
+             , "codex-watcher-gh-issue-close"
+             , Text.unpack (unRepoName (issueRepo config))
+             , show (unIssueNumber (issueNumber config))
+             , show (unPrNumber prNumber)
+             ]
+
 prop_runtimeGhPrCreateKeepsStdoutJsonOnly :: IssueConfig -> Bool
 prop_runtimeGhPrCreateKeepsStdoutJsonOnly config =
   let spec = renderRuntimeCommand (GhCreatePullRequest "/tmp/work" config)
@@ -157,6 +188,9 @@ prop_runtimeGhPrCreateKeepsStdoutJsonOnly config =
         && "git checkout -B \"$branch\" >/dev/null" `Text.isInfixOf` script
         && "git commit --allow-empty -m \"Start issue #$issue implementation\" >/dev/null" `Text.isInfixOf` script
         && "git push -u origin \"$branch\" >/dev/null" `Text.isInfixOf` script
+        && "gh pr view \"$existing\" --repo \"$repo\" --json body,closingIssuesReferences" `Text.isInfixOf` script
+        && "already uses branch" `Text.isInfixOf` script
+        && "but is not linked to issue" `Text.isInfixOf` script
         && "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\"" `Text.isInfixOf` script
         && "printf '{\"status\":\"reused\",\"prNumber\":%s}\\n' \"$existing\"" `Text.isInfixOf` script
 

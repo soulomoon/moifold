@@ -89,7 +89,7 @@ bootstrapUnblockedPrReviewSnapshotEvents snapshot initialEvents
   | Just reason <- snapshot.watcherState.blockedReason =
       initialEvents <> [WatcherBlocked (BlockedReason reason)]
   | snapshot.watcherState.lastTurnStatus == Just "merged" =
-      reviewerCleanEvents <> [PrReviewMergeCompleted (MergeCommit commit)]
+      reviewerCleanEvents <> [PrReviewMergeabilityClean commit, PrReviewMergeCompleted (MergeCommit commit)]
   | reviewerSaysClean snapshot =
       reviewerCleanEvents
   | otherwise =
@@ -127,10 +127,8 @@ bootstrapUnblockedIssueImplementSnapshotEvents snapshot initialEvents
 
 bootstrapActiveIssueTurnEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> Text -> ActiveTurn -> [WatcherEvent]
 bootstrapActiveIssueTurnEvents snapshot initialEvents purpose activeTurn
-  | purpose == "triage" =
-      initialEvents <> [IssueTriageTurnStartedEvent activeTurn.activeTurnId]
   | purpose == "plan" =
-      initialEvents <> [IssuePlanTurnStartedEvent activeTurn.activeTurnId]
+      initialEvents <> bootstrapPrReadyEvents snapshot <> [IssuePlanTurnStartedEvent activeTurn.activeTurnId]
   | purpose == "implement" =
       bootstrapImplementationReadyEvents snapshot initialEvents
         <> [IssueImplementationTurnStartedEvent activeTurn.activeTurnId]
@@ -143,21 +141,12 @@ bootstrapIdleIssueStatusEvents snapshot initialEvents = \case
     initialEvents
   Just "blocked" ->
     initialEvents <> [WatcherBlocked (BlockedReason (fromMaybe "Issue worker reported blocked without reason" (snapshot.issueState >>= (.issueBlockedReason))))]
-  Just "already_resolved" ->
-    initialEvents
-      <> [ IssueTriageTurnStartedEvent bootstrapTriageTurn
-         , IssueTriageAlreadyFixedEvent
-         ]
-  Just "needs_implementation" ->
-    initialEvents
-      <> [ IssueTriageTurnStartedEvent bootstrapTriageTurn
-         , IssueTriageNeedsImplementationEvent
-         ]
+  Just "ready_to_plan" ->
+    initialEvents <> bootstrapPrReadyEvents snapshot
+  Just "planning" ->
+    initialEvents <> bootstrapPrReadyEvents snapshot
   Just "plan_ready" ->
-    initialEvents
-      <> [ IssueTriageTurnStartedEvent bootstrapTriageTurn
-         , IssueTriageNeedsImplementationEvent
-         ]
+    bootstrapPlanReadyEvents snapshot initialEvents
   Just "in_progress" ->
     bootstrapImplementationReadyEvents snapshot initialEvents
   Just "incomplete" ->
@@ -166,9 +155,12 @@ bootstrapIdleIssueStatusEvents snapshot initialEvents = \case
     case snapshotPrNumber snapshot of
       Just prNumber ->
         bootstrapImplementationReadyEvents snapshot initialEvents
-          <> [ IssueReviewHandoffInitializedEvent prNumber
+          <> [ IssueImplementationTurnStartedEvent bootstrapImplementationTurn
+             , IssueImplementationCompletedEvent prNumber
+             , IssueReviewHandoffInitializedEvent prNumber
              , IssueReviewHandoffStartedEvent prNumber
              , IssuePullRequestMergedEvent prNumber
+             , IssueClosedEvent prNumber
              ]
       Nothing ->
         initialEvents <> [WatcherBlocked (BlockedReason "Issue state is complete but pr_number is missing")]
@@ -177,11 +169,20 @@ bootstrapIdleIssueStatusEvents snapshot initialEvents = \case
 
 bootstrapImplementationReadyEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> [WatcherEvent]
 bootstrapImplementationReadyEvents snapshot initialEvents =
+  bootstrapPlanReadyEvents snapshot initialEvents
+    <> maybe [] (\prNumber -> [IssuePullRequestBodyUpdatedEvent prNumber]) (snapshotPrNumber snapshot)
+
+bootstrapPlanReadyEvents :: NodeIssueImplementSnapshot -> [WatcherEvent] -> [WatcherEvent]
+bootstrapPlanReadyEvents snapshot initialEvents =
   initialEvents
+    <> bootstrapPrReadyEvents snapshot
     <> [ IssuePlanTurnStartedEvent bootstrapPlanTurn
        , IssuePlanCompletedEvent Nothing
        ]
-    <> maybe [] (\prNumber -> [IssuePullRequestReusedEvent prNumber]) (snapshotPrNumber snapshot)
+
+bootstrapPrReadyEvents :: NodeIssueImplementSnapshot -> [WatcherEvent]
+bootstrapPrReadyEvents snapshot =
+  maybe [] (\prNumber -> [IssuePullRequestReusedEvent prNumber]) (snapshotPrNumber snapshot)
 
 snapshotPrNumber :: NodeIssueImplementSnapshot -> Maybe PrNumber
 snapshotPrNumber snapshot =
@@ -206,10 +207,12 @@ normalizeUnblockedPrReviewSnapshot snapshot
   | reviewerSaysClean snapshot =
       pure
         ( typedPrReview
-            ( PrMerging
+            ( PrWaitingForMergeability
                 (toPrConfig snapshot.config)
                 (CleanReviewEvidence (CommitSha (bestKnownCommit snapshot)) "LGTM")
-                :: WatcherState 'PrReview 'Merging
+                (WorkerIdle (ThreadId snapshot.config.threadId))
+                (ReviewerIdle (ThreadId (fromMaybe snapshot.config.threadId snapshot.config.reviewerThreadId)))
+                :: WatcherState 'PrReview 'WaitingMergeability
             )
             []
         )
@@ -235,16 +238,18 @@ normalizeUnblockedIssueImplementSnapshot snapshot
 
 replayActiveIssueTurn :: NodeIssueImplementSnapshot -> Text -> ActiveTurn -> Either Text TypedSnapshot
 replayActiveIssueTurn snapshot purpose activeTurn
-  | purpose == "triage" =
-      pure (typedIssueImplement (IssueTriageActive (toIssueConfig snapshot.config) (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'Triage) [])
   | purpose == "plan" =
-      pure (typedIssueImplement (IssueInPlanMode (toIssueConfig snapshot.config) (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'PlanMode) [])
+      case PrNumber <$> (snapshot.issueState >>= (.issuePrNumber)) of
+        Just pr ->
+          pure (typedIssueImplement (IssueInPlanMode (toIssueConfig snapshot.config) pr (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'PlanMode) [])
+        Nothing ->
+          pure (typedIssueImplement (BlockedState (BlockedReason "Active issue plan turn is missing pr_number") :: WatcherState 'IssueImplement 'Blocked) [])
   | purpose == "implement" =
       pure (typedIssueImplement (IssueImplementing (toIssueConfig snapshot.config) (PrNumber <$> (snapshot.issueState >>= (.issuePrNumber))) (WorkerActive activeTurn) :: WatcherState 'IssueImplement 'Implementing) [])
   | otherwise =
       pure
         ( typedIssueImplement
-            (IssueNeedsTriage (toIssueConfig snapshot.config) (WorkerIdle (ThreadId snapshot.config.threadId)) :: WatcherState 'IssueImplement 'Triage)
+            (IssueImplementationReady (toIssueConfig snapshot.config) (PrNumber <$> (snapshot.issueState >>= (.issuePrNumber))) (WorkerIdle (ThreadId snapshot.config.threadId)) :: WatcherState 'IssueImplement 'Implementing)
             ["Unknown active issue turn purpose: " <> purpose]
         )
 
@@ -252,25 +257,31 @@ replayIdleIssueStatus :: NodeIssueImplementSnapshot -> Maybe Text -> Either Text
 replayIdleIssueStatus snapshot status =
   case status of
     Nothing ->
-      pure (typedIssueImplement (IssueNeedsTriage config worker :: WatcherState 'IssueImplement 'Triage) [])
+      pure (typedIssueImplement (IssueImplementationReady config Nothing worker :: WatcherState 'IssueImplement 'Implementing) [])
     Just "blocked" ->
       pure (typedIssueImplement (BlockedState (BlockedReason (fromMaybe "Issue worker reported blocked without reason" (snapshot.issueState >>= (.issueBlockedReason)))) :: WatcherState 'IssueImplement 'Blocked) [])
-    Just "already_resolved" ->
-      pure (typedIssueImplement (CompleteState (IssueAlreadyResolved (IssueNumber snapshot.config.issueNumber)) :: WatcherState 'IssueImplement 'Complete) [])
-    Just "needs_implementation" ->
-      pure (typedIssueImplement (IssuePlanReady config worker :: WatcherState 'IssueImplement 'PlanMode) [])
+    Just "ready_to_plan" ->
+      case maybePr of
+        Just pr -> pure (typedIssueImplement (IssueReadyToPlan config pr worker :: WatcherState 'IssueImplement 'PlanMode) [])
+        Nothing -> pure (typedIssueImplement (BlockedState (BlockedReason "Issue state is ready_to_plan but pr_number is missing") :: WatcherState 'IssueImplement 'Blocked) [])
+    Just "planning" ->
+      case maybePr of
+        Just pr -> pure (typedIssueImplement (IssueReadyToPlan config pr worker :: WatcherState 'IssueImplement 'PlanMode) ["Issue state says planning but no active plan turn is represented."])
+        Nothing -> pure (typedIssueImplement (BlockedState (BlockedReason "Issue state is planning but pr_number is missing") :: WatcherState 'IssueImplement 'Blocked) [])
     Just "plan_ready" ->
-      pure
-        ( typedIssueImplement
-            (IssuePlanReady config worker :: WatcherState 'IssueImplement 'PlanMode)
-            ["Issue plan is ready; next step should create/update the PR before implementation."]
-        )
+      case maybePr of
+        Just pr -> pure (typedIssueImplement (IssuePlanReady config pr worker :: WatcherState 'IssueImplement 'Implementing) [])
+        Nothing -> pure (typedIssueImplement (BlockedState (BlockedReason "Issue state is plan_ready but pr_number is missing") :: WatcherState 'IssueImplement 'Blocked) [])
     Just "in_progress" ->
       pure (typedIssueImplement (IssueImplementationReady config maybePr worker :: WatcherState 'IssueImplement 'Implementing) [])
     Just "waiting_pr_merge" ->
       case maybePr of
         Just pr -> pure (typedIssueImplement (IssueWaitingForPrMerge config pr :: WatcherState 'IssueImplement 'Implementing) [])
         Nothing -> pure (typedIssueImplement (BlockedState (BlockedReason "Issue state is waiting_pr_merge but pr_number is missing") :: WatcherState 'IssueImplement 'Blocked) [])
+    Just "waiting_issue_close" ->
+      case maybePr of
+        Just pr -> pure (typedIssueImplement (IssueWaitingForIssueClose config pr :: WatcherState 'IssueImplement 'Implementing) [])
+        Nothing -> pure (typedIssueImplement (BlockedState (BlockedReason "Issue state is waiting_issue_close but pr_number is missing") :: WatcherState 'IssueImplement 'Blocked) [])
     Just "incomplete" ->
       pure
         ( typedIssueImplement
@@ -284,7 +295,7 @@ replayIdleIssueStatus snapshot status =
     Just unknown ->
       pure
         ( typedIssueImplement
-            (IssueNeedsTriage config worker :: WatcherState 'IssueImplement 'Triage)
+            (IssueImplementationReady config maybePr worker :: WatcherState 'IssueImplement 'Implementing)
             ["Unknown issue_status: " <> unknown]
         )
  where
@@ -355,11 +366,11 @@ staleReviewerBlockedWarning snapshot =
     Just reason -> ["Ignoring stale reviewer blocked reason for merged PR snapshot: " <> reason]
     Nothing -> []
 
-bootstrapTriageTurn :: TurnId
-bootstrapTriageTurn = TurnId "bootstrap-triage-turn"
-
 bootstrapPlanTurn :: TurnId
 bootstrapPlanTurn = TurnId "bootstrap-plan-turn"
+
+bootstrapImplementationTurn :: TurnId
+bootstrapImplementationTurn = TurnId "bootstrap-implementation-turn"
 
 bootstrapReviewerTurn :: TurnId
 bootstrapReviewerTurn = TurnId "bootstrap-reviewer-turn"

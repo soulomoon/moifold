@@ -40,32 +40,40 @@ compatibilityStateWrites stateDir state =
       , write "planning-state.json" (toJSON graph)
       , write "daemon-state.json" idleDaemonJson
       ]
-    SomeWatcherState (IssueNeedsTriage config (WorkerIdle _threadId)) ->
-      [ write "issue-state.json" (issueStateJson config "triage" Nothing Nothing)
+    SomeWatcherState (IssueReadyToPlan config prNumber (WorkerIdle _threadId)) ->
+      [ write "issue-state.json" (issueStateJson config "ready_to_plan" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
       ]
-    SomeWatcherState (IssueTriageActive config (WorkerActive activeTurn)) ->
-      [ write "issue-state.json" (issueStateJson config "triage" Nothing Nothing)
-      , write "daemon-state.json" (activeDaemonJson "triage" activeTurn)
-      ]
-    SomeWatcherState (IssuePlanReady config (WorkerIdle _threadId)) ->
-      [ write "issue-state.json" (issueStateJson config "plan_ready" Nothing Nothing)
-      , write "daemon-state.json" idleDaemonJson
-      ]
-    SomeWatcherState (IssueInPlanMode config (WorkerActive activeTurn)) ->
-      [ write "issue-state.json" (issueStateJson config "needs_implementation" Nothing Nothing)
+    SomeWatcherState (IssueInPlanMode config prNumber (WorkerActive activeTurn)) ->
+      [ write "issue-state.json" (issueStateJson config "planning" (Just prNumber) Nothing)
       , write "daemon-state.json" (activeDaemonJson "plan" activeTurn)
       ]
+    SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle _threadId)) ->
+      [ write "issue-state.json" (issueStateJson config "plan_ready" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
     SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle _threadId)) ->
-      [ write "issue-state.json" (issueStateJson config "in_progress" maybePr Nothing)
+      [ write "issue-state.json" (issueStateJson config (maybe "preparing_pr" (const "in_progress") maybePr) maybePr Nothing)
       , write "daemon-state.json" idleDaemonJson
       ]
     SomeWatcherState (IssueImplementing config maybePr (WorkerActive activeTurn)) ->
       [ write "issue-state.json" (issueStateJson config "in_progress" maybePr Nothing)
       , write "daemon-state.json" (activeDaemonJson "implement" activeTurn)
       ]
+    SomeWatcherState (IssueHandoffReady config prNumber) ->
+      [ write "issue-state.json" (issueStateJson config "in_progress" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
+    SomeWatcherState (IssueHandoffInitialized config prNumber) ->
+      [ write "issue-state.json" (issueStateJson config "in_progress" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
     SomeWatcherState (IssueWaitingForPrMerge config prNumber) ->
       [ write "issue-state.json" (issueStateJson config "waiting_pr_merge" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
+    SomeWatcherState (IssueWaitingForIssueClose config prNumber) ->
+      [ write "issue-state.json" (issueStateJson config "waiting_issue_close" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
       ]
     SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
@@ -80,6 +88,11 @@ compatibilityStateWrites stateDir state =
       [ write "watcher-state.json" (prWatcherStateJson config workerThread (activeThreadId activeTurn) "reviewer_active" (Just commit) (Just commit))
       , write "checker-state.json" (checkerStateClearJson config)
       ]
+    SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
+      [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "waiting_mergeability" (Just (cleanReviewCommit evidence)) (Just (cleanReviewCommit evidence)))
+      , write "checker-state.json" (checkerStateClearJson config)
+      , write "reviewer-state.json" (reviewerStateJson evidence)
+      ]
     SomeWatcherState (PrMerging config evidence) ->
       [ write "watcher-state.json" (prWatcherStateJson config (ThreadId "") (ThreadId "") "clean" (Just (cleanReviewCommit evidence)) (Just (cleanReviewCommit evidence)))
       , write "checker-state.json" (checkerStateClearJson config)
@@ -91,8 +104,6 @@ compatibilityStateWrites stateDir state =
       [write "daemon-state.json" (stoppedDaemonJson reason)]
     SomeWatcherState (CompleteState PlanningComplete) ->
       [write "planner-state.json" (object ["status" .= ("complete" :: Text)])]
-    SomeWatcherState (CompleteState (IssueAlreadyResolved issueNumber)) ->
-      [write "issue-state.json" (object ["issue_status" .= ("already_resolved" :: Text), "issueNumber" .= unIssueNumber issueNumber])]
     SomeWatcherState (CompleteState (IssueComplete prNumber)) ->
       [write "issue-state.json" (object ["issue_status" .= ("complete" :: Text), "pr_number" .= unPrNumber prNumber])]
     SomeWatcherState (CompleteState (PrMerged mergeCommit)) ->

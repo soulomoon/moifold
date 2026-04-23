@@ -10,7 +10,7 @@ import CodexWatcher.Healthcheck
 import CodexWatcher.IssueFanoutCli (issueFanout)
 import CodexWatcher.ObserveCli (observeOnce)
 import CodexWatcher.ReplayCli (repairInvalidState, replayEvents)
-import CodexWatcher.RuntimeOwnerCli (claimRuntimeOwner)
+import CodexWatcher.RuntimeOwnerCli (clearRuntimeLease)
 import CodexWatcher.RunnerGuardCli (runWatcherRunnerGuard)
 import CodexWatcher.ServiceCli (renderService)
 import CodexWatcher.Types (RepoName (unRepoName))
@@ -23,7 +23,7 @@ runCliCommand :: CliCommand -> IO ()
 runCliCommand = \case
   CliReplayEvents path -> replayEvents path
   CliHealthcheck options -> runHealthcheck (healthcheckOptionsFromCli options)
-  CliClaimRuntimeOwner stateDir -> claimRuntimeOwner stateDir
+  CliClearRuntimeLease stateDir -> clearRuntimeLease stateDir
   CliStopDaemon options -> stopDaemon options
   CliRenderService options -> renderService options
   CliIssueFanout options -> issueFanout options

@@ -83,20 +83,29 @@ repairMissingPlanBeforePullRequest events failure prEvent prNumber = do
   finishPlan events failure "inserted missing issue plan events and re-entered implementation before marking complete" inserted dropped candidate
 
 repairCompletionWithoutImplementationTurn :: [WatcherEvent] -> ReplayFailure -> PrNumber -> Either Text EventLogRepairPlan
-repairCompletionWithoutImplementationTurn events failure _prNumber = do
+repairCompletionWithoutImplementationTurn events failure prNumber = do
   let (prefix, suffixAfterFailure) = splitAtFailure failure events
   replayPrefix <- replayPrefixState prefix
-  case replayPrefix.replayState of
-    SomeWatcherState IssueImplementationReady {} -> pure ()
-    other ->
-      Left
-        ( "completion-without-implementation repair expected IssueImplementationReady before completion, got "
-            <> Text.pack (show (someDomain other))
-            <> "/"
-            <> Text.pack (show (somePhase other))
-        )
+  issueNumber' <- issueNumberFromEvents events
   let reason = recoveryReason failure "drop unsafe completion and re-enter implementation"
-      inserted = [WatcherRecoveredInvalidState reason]
+      recoveryMarker = WatcherRecoveredInvalidState reason
+      missingPlanEvents =
+        [ IssuePlanTurnStartedEvent (syntheticRecoveryPlanTurn issueNumber' prNumber)
+        , IssuePlanCompletedEvent Nothing
+        ]
+  inserted <-
+    case replayPrefix.replayState of
+      SomeWatcherState IssueReadyToPlan {} -> Right (recoveryMarker : missingPlanEvents)
+      SomeWatcherState IssueImplementationReady {} -> Right [recoveryMarker]
+      SomeWatcherState IssuePlanReady {} -> Right [recoveryMarker]
+      other ->
+        Left
+          ( "completion-without-implementation repair expected IssueReadyToPlan, IssuePlanReady, or IssueImplementationReady before completion, got "
+              <> Text.pack (show (someDomain other))
+              <> "/"
+              <> Text.pack (show (somePhase other))
+          )
+  let
       candidate = prefix <> inserted <> dropUnsafeImplementationCompletions (prefix <> inserted) suffixAfterFailure
       dropped = droppedEvents events candidate
   finishPlan events failure "dropped unsafe completion and re-entered implementation" inserted dropped candidate

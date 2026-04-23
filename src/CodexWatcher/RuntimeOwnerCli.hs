@@ -3,30 +3,30 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module CodexWatcher.RuntimeOwnerCli
-  ( claimRuntimeOwner
+  ( clearRuntimeLease
   , renewRuntimeOwnerForExecution
   , validateRuntimeOwnerForExecution
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..))
 import CodexWatcher.ChildDaemon (isPidRunning)
-import CodexWatcher.RuntimeOwner (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..), readRuntimeOwnerMarker, runtimeOwnerText, writeRuntimeLease)
+import CodexWatcher.RuntimeOwner (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..), readRuntimeOwnerMarker, writeRuntimeLease)
 import CodexWatcher.Runtime (ioRuntimeInterpreter)
 import Data.ByteString qualified as ByteString
 import Data.Text qualified as Text
 import Data.Time.Clock (NominalDiffTime, addUTCTime, getCurrentTime)
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, removeFile)
 import System.Environment (lookupEnv)
 import System.Exit (die)
 import System.FilePath ((</>))
 import System.Posix.Process (getProcessID)
 
-claimRuntimeOwner :: FilePath -> IO ()
-claimRuntimeOwner stateDir = do
+clearRuntimeLease :: FilePath -> IO ()
+clearRuntimeLease stateDir = do
   marker <- readMarkerOrDie stateDir
-  ensureClaimable marker
-  writeFreshLease stateDir HaskellRuntime
-  putStrLn ("wrote runtime owner " <> Text.unpack (runtimeOwnerText HaskellRuntime) <> " lease to " <> stateDir)
+  ensureClearable marker
+  removeRuntimeOwnerFile stateDir
+  putStrLn ("cleared inactive runtime lease in " <> stateDir)
 
 validateRuntimeOwnerForExecution :: FilePath -> ActionExecutionMode -> IO ()
 validateRuntimeOwnerForExecution stateDir executionMode =
@@ -34,15 +34,13 @@ validateRuntimeOwnerForExecution stateDir executionMode =
     DryRunActions -> pure ()
     ExecuteActions -> do
       readMarkerOrDie stateDir >>= \case
-        Just (RuntimeOwnerLegacy HaskellRuntime) ->
-          writeFreshLease stateDir HaskellRuntime
         Just (RuntimeOwnerLeased lease) -> do
           blocked <- leaseBlocksCurrentProcess lease
           if blocked
             then die ("refusing to execute because runtime owner lease is valid or held by running pid " <> Text.unpack lease.runtimeLeasePid)
             else writeFreshLease stateDir HaskellRuntime
         Nothing ->
-          die "refusing to execute because runtime-owner.json is missing; claim this state directory before execute mode"
+          writeFreshLease stateDir HaskellRuntime
 
 renewRuntimeOwnerForExecution :: FilePath -> ActionExecutionMode -> IO ()
 renewRuntimeOwnerForExecution stateDir executionMode =
@@ -59,15 +57,20 @@ readMarkerOrDie stateDir = do
     Right parsed ->
       pure parsed
 
-ensureClaimable :: Maybe RuntimeOwnerMarker -> IO ()
-ensureClaimable = \case
+ensureClearable :: Maybe RuntimeOwnerMarker -> IO ()
+ensureClearable = \case
   Just (RuntimeOwnerLeased lease) -> do
     blocked <- leaseBlocksTakeover lease
     if blocked
-      then die ("refusing to claim runtime owner because an active lease is valid or its pid is running: " <> Text.unpack lease.runtimeLeasePid)
+      then die ("refusing to clear runtime lease because its pid is running: " <> Text.unpack lease.runtimeLeasePid)
       else pure ()
-  _ ->
-    pure ()
+  Nothing -> pure ()
+
+removeRuntimeOwnerFile :: FilePath -> IO ()
+removeRuntimeOwnerFile stateDir = do
+  let path = stateDir </> "runtime-owner.json"
+  exists <- doesFileExist path
+  if exists then removeFile path else pure ()
 
 writeFreshLease :: FilePath -> RuntimeOwner -> IO ()
 writeFreshLease stateDir owner = do
@@ -101,10 +104,8 @@ leaseBlocksCurrentProcess lease = do
     else leaseBlocksTakeover lease
 
 leaseBlocksTakeover :: RuntimeLease -> IO Bool
-leaseBlocksTakeover lease = do
-  now <- getCurrentTime
-  running <- isPidRunning lease.runtimeLeasePid
-  pure (running || now < lease.runtimeLeaseExpiresAt)
+leaseBlocksTakeover lease =
+  isPidRunning lease.runtimeLeasePid
 
 eventLogHeadHash :: FilePath -> IO Text.Text
 eventLogHeadHash stateDir = do

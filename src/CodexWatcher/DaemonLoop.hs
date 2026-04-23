@@ -27,15 +27,21 @@ import CodexWatcher.GhGit
 import CodexWatcher.IssueImplementWatcher
 import CodexWatcher.IssuePlanningWatcher
 import CodexWatcher.Logging qualified as Log
+import CodexWatcher.PlanningGraphCanonical
 import CodexWatcher.PrReviewWatcher
-import CodexWatcher.Runtime (CommandReport (..), runtimeReadJsonValue, runtimeWriteJsonValue)
+import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (..), RuntimeInterpreter (..), commandText, runtimeReadJsonValue, runtimeWriteJsonValue)
 import CodexWatcher.TurnClassifier
 import CodexWatcher.Types
 import Control.Monad (filterM)
-import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON, object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), eitherDecodeStrict', fromJSON, object, withObject, (.:), (.=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Foldable (toList)
 import Data.List (find, nub)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Generics (Generic)
 import System.FilePath ((</>))
 
@@ -65,8 +71,7 @@ data DaemonLoopTickResult = DaemonLoopTickResult
 data StartTurnKind
   = StartPlannerTurnKind
   | StartWorkerTurnKind
-  | StartIssueTriageWorkerTurnKind
-  | StartIssuePlanWorkerTurnKind IssueConfig
+  | StartIssuePlanWorkerTurnKind IssueConfig PrNumber
   | StartIssueImplementationWorkerTurnKind
   | StartReviewerTurnKind PrConfig CommitSha
   deriving stock (Eq, Show)
@@ -173,39 +178,46 @@ runFromState
 runFromState executor config events replay = do
   clearStaleActiveTurnMarkerWhenInactive executor config replay.replayState
   case replay.replayState of
-    SomeWatcherState (PlanningReady {}) ->
+    SomeWatcherState (PlanningReady plannerConfig) ->
       case config.loopPlannerThreadId of
         Nothing -> pure (Left DaemonLoopMissingPlannerThread)
-        Just plannerThread -> prestartAndObserve executor config events StartPlannerTurnKind plannerThread (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
+        Just plannerThread -> do
+          snapshot <- ensureIssuePlanningSnapshot executor config plannerConfig
+          case snapshot of
+            Left failure -> pure (Left failure)
+            Right () -> prestartAndObserve executor config events StartPlannerTurnKind plannerThread (DaemonIssuePlanningObservation . ObservedPlanningTurnStarted plannerThread)
     SomeWatcherState (PlanningTurnActive plannerConfig activeTurn) ->
       observePlanningActiveTurn executor config events replay plannerConfig activeTurn
     SomeWatcherState (PlanningWaitingForReadyIssues {}) ->
       idle executor config replay "issue planning is waiting for ready issues"
-    SomeWatcherState (IssueNeedsTriage _ (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events StartIssueTriageWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedTriageTurnStarted)
-    SomeWatcherState (IssueTriageActive _ (WorkerActive activeTurn)) ->
-      observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueTriageTurn)
-    SomeWatcherState (IssuePlanReady issueConfig (WorkerIdle workerThread)) ->
-      prestartAndObserve executor config events (StartIssuePlanWorkerTurnKind issueConfig) workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
-    SomeWatcherState (IssueInPlanMode _ (WorkerActive activeTurn)) ->
-      observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssuePlanTurn)
+    SomeWatcherState (IssueReadyToPlan issueConfig prNumber (WorkerIdle workerThread)) ->
+      prestartAndObserve executor config events (StartIssuePlanWorkerTurnKind issueConfig prNumber) workerThread (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
+    SomeWatcherState (IssueInPlanMode _ _prNumber (WorkerActive activeTurn)) ->
+      observeIssuePlanActiveTurn executor config events replay activeTurn
+    SomeWatcherState (IssuePlanReady issueConfig prNumber (WorkerIdle _workerThread)) ->
+      updatePullRequestBody executor config events replay issueConfig prNumber
     SomeWatcherState (IssueImplementationReady issueConfig Nothing _worker) ->
       observeExistingPullRequest executor config events replay issueConfig
-    SomeWatcherState (IssueImplementationReady issueConfig (Just prNumber) (WorkerIdle workerThread))
-      | hasIssuePullRequestBodyUpdated prNumber events ->
-          prestartAndObserve executor config events StartIssueImplementationWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
-      | otherwise ->
-          updatePullRequestBody executor config events replay issueConfig prNumber
+    SomeWatcherState (IssueImplementationReady _issueConfig (Just _prNumber) (WorkerIdle workerThread)) ->
+      prestartAndObserve executor config events StartIssueImplementationWorkerTurnKind workerThread (DaemonIssueImplementObservation . ObservedImplementationTurnStarted)
     SomeWatcherState (IssueImplementing _issueConfig maybePr (WorkerActive activeTurn)) ->
-      observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueImplementationObservation events maybePr)
+      observeActiveTurn executor config events replay activeTurn (fmap DaemonIssueImplementObservation . classifyIssueImplementationTurn maybePr)
+    SomeWatcherState (IssueHandoffReady _issueConfig prNumber) ->
+      observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber))
+    SomeWatcherState (IssueHandoffInitialized _issueConfig prNumber) ->
+      observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber))
     SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber) ->
       observeIssuePullRequestMerged executor config events replay issueConfig prNumber
+    SomeWatcherState (IssueWaitingForIssueClose issueConfig prNumber) ->
+      observeIssueClosed executor config events replay issueConfig prNumber
     SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       observeReviewThreads executor config events prConfig workerThread reviewerThread
     SomeWatcherState (PrFixingReviews _prConfig _evidence (WorkerActive activeTurn) _reviewer) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonPrReviewObservation . classifyPrReviewWorkerTurn)
     SomeWatcherState (PrReviewingClean _prConfig commit _worker (ReviewerActive activeTurn)) ->
       observeActiveTurn executor config events replay activeTurn (fmap DaemonPrReviewObservation . classifyPrReviewReviewerTurn commit)
+    SomeWatcherState (PrWaitingForMergeability prConfig evidence _worker _reviewer) ->
+      observeMergeability executor config events prConfig evidence
     SomeWatcherState (PrMerging prConfig _evidence) ->
       observeMergeCompletion executor config events replay prConfig
     SomeWatcherState (BlockedState {}) ->
@@ -224,7 +236,6 @@ clearStaleActiveTurnMarkerWhenInactive executor config state =
 watcherStateHasActiveTurn :: SomeWatcherState -> Bool
 watcherStateHasActiveTurn = \case
   SomeWatcherState PlanningTurnActive {} -> True
-  SomeWatcherState IssueTriageActive {} -> True
   SomeWatcherState IssueInPlanMode {} -> True
   SomeWatcherState IssueImplementing {} -> True
   SomeWatcherState PrFixingReviews {} -> True
@@ -252,6 +263,57 @@ observeActiveTurn executor config events replay activeTurn classify = do
         Nothing -> idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
         Just observation -> observeWithExecutor executor config events observation
 
+observeIssuePlanActiveTurn
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> ActiveTurn
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+observeIssuePlanActiveTurn executor config events replay activeTurn = do
+  turnResult <- readActiveTurn executor config activeTurn
+  case turnResult of
+    Left failure -> pure (Left failure)
+    Right Nothing ->
+      handleMissingActiveTurn executor config events replay activeTurn
+    Right (Just turn) -> do
+      clearStaleActiveTurnMarker executor config
+      case classifyIssuePlanTurn turn of
+        Nothing ->
+          idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
+        Just (ObservedPlanCompleted maybeImplementationTurnId) -> do
+          maybeBlocked <- validateIssuePlanFile executor config
+          observeWithExecutor executor config events $
+            DaemonIssueImplementObservation $
+              maybe (ObservedPlanCompleted maybeImplementationTurnId) ObservedIssueImplementBlocked maybeBlocked
+        Just observation ->
+          observeWithExecutor executor config events (DaemonIssueImplementObservation observation)
+
+validateIssuePlanFile :: Monad m => ActionExecutor m -> DaemonLoopConfig -> m (Maybe BlockedReason)
+validateIssuePlanFile executor config = do
+  let planPath = config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "issue-plan.md"
+  report <- executor.actionRuntime.runtimeRunCommand (CheckNonEmptyFile planPath)
+  pure
+    if report.ok
+      then Nothing
+      else
+        Just
+          ( BlockedReason
+              ( "issue plan file missing or empty before issue_plan_completed: "
+                  <> firstNonEmptyText [report.stderr, report.stdout, maybe "" id report.errorMessage, Text.pack planPath]
+              )
+          )
+
+firstNonEmptyText :: [Text] -> Text
+firstNonEmptyText =
+  maybe "" id . firstNonEmpty . fmap Text.strip
+ where
+  firstNonEmpty [] = Nothing
+  firstNonEmpty (text : rest)
+    | Text.null text = firstNonEmpty rest
+    | otherwise = Just text
+
 observePlanningActiveTurn
   :: Monad m
   => ActionExecutor m
@@ -273,15 +335,149 @@ observePlanningActiveTurn executor config events replay plannerConfig activeTurn
         Nothing ->
           idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
         Just observation -> do
-          normalized <- normalizePlanningObservation executor plannerConfig observation
+          normalized <- normalizePlanningObservation executor config plannerConfig observation
           observeWithExecutor executor config events (DaemonIssuePlanningObservation normalized)
 
-normalizePlanningObservation :: Monad m => ActionExecutor m -> PlannerConfig -> IssuePlanningObservation -> m IssuePlanningObservation
-normalizePlanningObservation executor plannerConfig = \case
+normalizePlanningObservation :: Monad m => ActionExecutor m -> DaemonLoopConfig -> PlannerConfig -> IssuePlanningObservation -> m IssuePlanningObservation
+normalizePlanningObservation executor config plannerConfig = \case
   ObservedPlanningGraphUpdated graph ->
-    ObservedPlanningGraphUpdated <$> filterClosedPlanningDependencies executor plannerConfig graph
+    ObservedPlanningGraphUpdated <$> normalizePlanningGraph executor config plannerConfig graph
   observation ->
     pure observation
+
+normalizePlanningGraph :: Monad m => ActionExecutor m -> DaemonLoopConfig -> PlannerConfig -> PlanningGraph -> m PlanningGraph
+normalizePlanningGraph executor config plannerConfig graph
+  | null plannerConfig.plannerScopeIssues =
+      filterClosedPlanningDependencies executor plannerConfig graph
+  | config.loopDaemonOptions.daemonExecutionMode == DryRunActions =
+      filterClosedPlanningDependencies executor plannerConfig graph
+  | otherwise = do
+      snapshot <- buildIssuePlanningSnapshot executor plannerConfig
+      case snapshot >>= planningIssueFactsFromSnapshot of
+        Right facts ->
+          pure (canonicalPlanningGraph plannerConfig facts graph)
+        Left reason -> do
+          Log.logWatcher
+            executor.actionLogger
+            ( Log.watcherLog
+                Log.Warn
+                "planning_graph_canonicalization_failed"
+                "could not compute canonical planning graph; falling back to dependency filtering"
+                ["reason" .= reason]
+            )
+          filterClosedPlanningDependencies executor plannerConfig graph
+
+ensureIssuePlanningSnapshot :: Monad m => ActionExecutor m -> DaemonLoopConfig -> PlannerConfig -> m (Either DaemonLoopFailure ())
+ensureIssuePlanningSnapshot executor config plannerConfig =
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions -> pure (Right ())
+    ExecuteActions -> do
+      snapshot <- buildIssuePlanningSnapshot executor plannerConfig
+      case snapshot of
+        Left reason -> pure (Left (DaemonLoopExternalFailure ("could not build issue planning snapshot: " <> reason)))
+        Right value -> do
+          runtimeWriteJsonValue (executor.actionRuntime) (issuePlanningSnapshotPath config) value
+          pure (Right ())
+
+issuePlanningSnapshotPath :: DaemonLoopConfig -> FilePath
+issuePlanningSnapshotPath config =
+  config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
+
+buildIssuePlanningSnapshot :: Monad m => ActionExecutor m -> PlannerConfig -> m (Either Text Value)
+buildIssuePlanningSnapshot executor plannerConfig
+  | null plannerConfig.plannerScopeIssues =
+      pure
+        ( Right
+            ( object
+                [ "repoFullName" .= unRepoName plannerConfig.plannerRepo
+                , "scopeIssueNumbers" .= ([] :: [Int])
+                , "issues" .= ([] :: [Value])
+                , "note" .= ("No explicit issue scope was configured; planner may inspect GitHub open issues if needed." :: Text)
+                ]
+            )
+        )
+  | otherwise = do
+      issues <- traverse (fetchScopedIssueSnapshot executor plannerConfig.plannerRepo) plannerConfig.plannerScopeIssues
+      pure do
+        issueValues <- sequence issues
+        Right
+          ( object
+              [ "repoFullName" .= unRepoName plannerConfig.plannerRepo
+              , "scopeIssueNumbers" .= fmap unIssueNumber plannerConfig.plannerScopeIssues
+              , "issues" .= issueValues
+              ]
+          )
+
+fetchScopedIssueSnapshot :: Monad m => ActionExecutor m -> RepoName -> IssueNumber -> m (Either Text Value)
+fetchScopedIssueSnapshot executor repo issueNumber = do
+  issue <- fetchIssueJson executor repo issueNumber
+  subIssues <- fetchSubIssuesJson executor repo issueNumber
+  pure do
+    issueValue <- issue
+    subIssueValue <- subIssues
+    Right (issueValue `withObjectField` ("parentIssueNumber", Null) `withObjectField` ("subIssues", arrayOrEmpty subIssueValue))
+
+fetchIssueJson :: Monad m => ActionExecutor m -> RepoName -> IssueNumber -> m (Either Text Value)
+fetchIssueJson executor repo issueNumber =
+  runJsonCommand
+    executor
+    ("issue #" <> issueNumberText issueNumber)
+    ( RawCommand
+        "gh"
+        [ "issue"
+        , "view"
+        , show (unIssueNumber issueNumber)
+        , "--repo"
+        , Text.unpack (unRepoName repo)
+        , "--json"
+        , "number,title,state,closed,body,url,labels,assignees,createdAt,updatedAt"
+        ]
+        Nothing
+    )
+
+fetchSubIssuesJson :: Monad m => ActionExecutor m -> RepoName -> IssueNumber -> m (Either Text Value)
+fetchSubIssuesJson executor repo issueNumber =
+  runJsonCommand
+    executor
+    ("sub-issues for #" <> issueNumberText issueNumber)
+    ( RawCommand
+        "gh"
+        [ "api"
+        , "repos/" <> Text.unpack (unRepoName repo) <> "/issues/" <> show (unIssueNumber issueNumber) <> "/sub_issues"
+        , "--paginate"
+        , "--jq"
+        , "[.[] | {number,title,state,closed:(.closed_at != null),body,url:.html_url,parentIssueNumber:" <> show (unIssueNumber issueNumber) <> "}]"
+        ]
+        Nothing
+    )
+
+runJsonCommand :: Monad m => ActionExecutor m -> Text -> RuntimeCommand -> m (Either Text Value)
+runJsonCommand executor label command = do
+  report <- executor.actionRuntime.runtimeRunCommand command
+  pure
+    if report.ok
+      then decodeJsonReport label report.stdout
+      else Left (label <> " command failed: " <> commandText report)
+
+decodeJsonReport :: Text -> Text -> Either Text Value
+decodeJsonReport label output =
+  case eitherDecodeStrict' (Text.Encoding.encodeUtf8 output) of
+    Left errorMessage -> Left (label <> " returned invalid JSON: " <> Text.pack errorMessage)
+    Right value -> Right value
+
+withObjectField :: Value -> (Text, Value) -> Value
+withObjectField (Object fields) (key, value) =
+  Object (KeyMap.insert (Key.fromText key) value fields)
+withObjectField value (key, fieldValue) =
+  object [Key.fromText key .= fieldValue, "value" .= value]
+
+arrayOrEmpty :: Value -> Value
+arrayOrEmpty value@Array {} = value
+arrayOrEmpty _ = toJSON ([] :: [Value])
+
+issueNumberText :: IssueNumber -> Text
+issueNumberText =
+  Text.pack . show . unIssueNumber
 
 filterClosedPlanningDependencies :: Monad m => ActionExecutor m -> PlannerConfig -> PlanningGraph -> m PlanningGraph
 filterClosedPlanningDependencies executor plannerConfig graph = do
@@ -426,8 +622,6 @@ activeTurnBlockedObservation state activeTurn =
    in case state of
         SomeWatcherState PlanningTurnActive {} ->
           Just (DaemonIssuePlanningObservation (ObservedPlanningBlocked reason))
-        SomeWatcherState IssueTriageActive {} ->
-          Just (DaemonIssueImplementObservation (ObservedIssueImplementBlocked reason))
         SomeWatcherState IssueInPlanMode {} ->
           Just (DaemonIssueImplementObservation (ObservedIssueImplementBlocked reason))
         SomeWatcherState IssueImplementing {} ->
@@ -462,6 +656,28 @@ observeReviewThreads executor config events prConfig workerThread reviewerThread
            in prestartAndObserve executor config events (if hasUnresolved then StartWorkerTurnKind else StartReviewerTurnKind prConfig commit) targetThread \turnId ->
                 DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
 
+observeMergeability
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> PrConfig
+  -> CleanReviewEvidence
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+observeMergeability executor config events prConfig evidence = do
+  gate <- runPreMergeGate executor prConfig evidence
+  let observation =
+        case gate of
+          PreMergeGatePassed ->
+            ObservedMergeabilityClean evidence.cleanReviewCommit
+          PreMergeGateRetry reason ->
+            ObservedMergeabilityRetry reason
+          PreMergeGateRecheck reason ->
+            ObservedMergeabilityRecheck reason
+          PreMergeGateBlocked reason ->
+            ObservedPrReviewBlocked (BlockedReason reason)
+  observeWithExecutor executor config events (DaemonPrReviewObservation observation)
+
 observeExistingPullRequest
   :: Monad m
   => ActionExecutor m
@@ -477,12 +693,101 @@ observeExistingPullRequest executor config events replay issueConfig = do
     Right openPullRequests ->
       case find ((== issueConfig.issueBranch) . ghPullRequestHeadRefName) openPullRequests of
         Nothing -> retryCreatePullRequest executor config events replay issueConfig
-        Just pullRequest ->
-          observeWithExecutor
-            executor
-            config
-            events
-            (DaemonIssueImplementObservation (ObservedPullRequestReused pullRequest.ghPullRequestNumber))
+        Just pullRequest -> do
+          linked <- validateExistingPullRequestLink executor issueConfig pullRequest
+          case linked of
+            Left reason ->
+              pure (Left (DaemonLoopExternalFailure reason))
+            Right True ->
+              observeWithExecutor
+                executor
+                config
+                events
+                (DaemonIssueImplementObservation (ObservedPullRequestReused pullRequest.ghPullRequestNumber))
+            Right False ->
+              observeWithExecutor
+                executor
+                config
+                events
+                ( DaemonIssueImplementObservation
+                    ( ObservedIssueImplementBlocked
+                        ( BlockedReason
+                            ( "open PR #"
+                                <> Text.pack (show (unPrNumber pullRequest.ghPullRequestNumber))
+                                <> " already uses branch "
+                                <> unBranchName issueConfig.issueBranch
+                                <> " but is not linked to issue #"
+                                <> Text.pack (show (unIssueNumber issueConfig.issueNumber))
+                            )
+                        )
+                    )
+                )
+
+validateExistingPullRequestLink :: Monad m => ActionExecutor m -> IssueConfig -> GhPullRequest -> m (Either Text Bool)
+validateExistingPullRequestLink executor issueConfig pullRequest
+  | pullRequestLinkedToIssue issueConfig pullRequest =
+      pure (Right True)
+  | otherwise = do
+      report <-
+        executor.actionRuntime.runtimeRunCommand
+          (GhPrView issueConfig.issueRepo pullRequest.ghPullRequestNumber ["body", "closingIssuesReferences"])
+      pure do
+        if report.ok
+          then pullRequestLinkJsonLinksIssue issueConfig.issueNumber <$> decodeJsonReport ("PR #" <> Text.pack (show (unPrNumber pullRequest.ghPullRequestNumber))) report.stdout
+          else Left ("could not validate existing PR link: " <> commandText report)
+
+pullRequestLinkedToIssue :: IssueConfig -> GhPullRequest -> Bool
+pullRequestLinkedToIssue issueConfig pullRequest =
+  issueConfig.issueNumber `elem` pullRequest.ghPullRequestLinkedIssueNumbers
+    || maybe False (bodyLinksIssue issueConfig.issueNumber) pullRequest.ghPullRequestBody
+
+pullRequestLinkJsonLinksIssue :: IssueNumber -> Value -> Bool
+pullRequestLinkJsonLinksIssue issueNumber value =
+  issueNumber `elem` jsonLinkedIssueNumbers value
+    || maybe False (bodyLinksIssue issueNumber) (jsonTextField "body" value)
+
+jsonLinkedIssueNumbers :: Value -> [IssueNumber]
+jsonLinkedIssueNumbers value =
+  case jsonField "closingIssuesReferences" value of
+    Just (Array references) -> mapMaybe jsonIssueNumber (toList references)
+    _ -> []
+
+jsonIssueNumber :: Value -> Maybe IssueNumber
+jsonIssueNumber (Object objectValue) = do
+  value <- KeyMap.lookup (Key.fromText "number") objectValue
+  case fromJSON value of
+    Success number -> Just (IssueNumber number)
+    Error _ -> Nothing
+jsonIssueNumber _ = Nothing
+
+jsonTextField :: Text -> Value -> Maybe Text
+jsonTextField key value = do
+  String text <- jsonField key value
+  pure text
+
+jsonField :: Text -> Value -> Maybe Value
+jsonField key (Object objectValue) =
+  KeyMap.lookup (Key.fromText key) objectValue
+jsonField _ _ =
+  Nothing
+
+bodyLinksIssue :: IssueNumber -> Text -> Bool
+bodyLinksIssue issueNumber body =
+  any (`Text.isInfixOf` normalizedBody) linkPhrases
+ where
+  issueRef = "#" <> Text.pack (show (unIssueNumber issueNumber))
+  normalizedBody = Text.toLower body
+  linkPhrases =
+    [ "close " <> issueRef
+    , "closes " <> issueRef
+    , "closed " <> issueRef
+    , "fix " <> issueRef
+    , "fixes " <> issueRef
+    , "fixed " <> issueRef
+    , "resolve " <> issueRef
+    , "resolves " <> issueRef
+    , "resolved " <> issueRef
+    ]
 
 retryCreatePullRequest
   :: Monad m
@@ -572,38 +877,9 @@ updatePullRequestBody executor config events replay issueConfig prNumber = do
         _ ->
           pure (Left (DaemonLoopExternalFailure "unexpected PR body update action report count"))
 
-hasIssuePullRequestBodyUpdated :: PrNumber -> [WatcherEvent] -> Bool
-hasIssuePullRequestBodyUpdated prNumber =
-  any \case
-    IssuePullRequestBodyUpdatedEvent updatedPrNumber -> updatedPrNumber == prNumber
-    _ -> False
-
 prependActionReport :: ActionExecutionReport -> Either DaemonLoopFailure DaemonLoopTickResult -> Either DaemonLoopFailure DaemonLoopTickResult
 prependActionReport report =
   fmap \tick -> tick {loopActionReports = report : tick.loopActionReports}
-
-classifyIssueImplementationObservation :: [WatcherEvent] -> Maybe PrNumber -> AppServerTurn -> Maybe IssueImplementObservation
-classifyIssueImplementationObservation events maybePr turn =
-  case classifyIssueImplementationTurn maybePr turn of
-    Just (ObservedImplementationCompleted prNumber)
-      | not (hasReviewHandoffInitialized prNumber events) ->
-          Just (ObservedReviewHandoffInitialized prNumber)
-      | not (hasReviewHandoffStarted prNumber events) ->
-          Just (ObservedReviewHandoffStarted prNumber)
-    observation ->
-      observation
-
-hasReviewHandoffInitialized :: PrNumber -> [WatcherEvent] -> Bool
-hasReviewHandoffInitialized prNumber =
-  any \case
-    IssueReviewHandoffInitializedEvent eventPr -> eventPr == prNumber
-    _ -> False
-
-hasReviewHandoffStarted :: PrNumber -> [WatcherEvent] -> Bool
-hasReviewHandoffStarted prNumber =
-  any \case
-    IssueReviewHandoffStartedEvent eventPr -> eventPr == prNumber
-    _ -> False
 
 observeIssuePullRequestMerged
   :: Monad m
@@ -619,26 +895,83 @@ observeIssuePullRequestMerged executor config events replay issueConfig prNumber
   case pullRequest of
     Left reason -> pure (Left (DaemonLoopExternalFailure reason))
     Right remote
-      | Text.toUpper remote.remotePullRequestState == "MERGED" -> do
-          issue <- runGhIssueView executor.actionRuntime issueConfig.issueRepo issueConfig.issueNumber
-          case issue of
-            Left reason ->
-              observeWithExecutor
-                executor
-                config
-                events
-                (DaemonIssueImplementObservation (ObservedIssueImplementBlocked (BlockedReason ("PR merged but GitHub issue close state could not be verified: " <> reason))))
-            Right remoteIssue
-              | remoteIssue.remoteIssueClosed || Text.toUpper remoteIssue.remoteIssueState == "CLOSED" ->
-                  observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
-              | otherwise ->
-                  observeWithExecutor
-                    executor
-                    config
-                    events
-                    (DaemonIssueImplementObservation (ObservedIssueImplementBlocked (BlockedReason "PR merged but GitHub issue remains open")))
+      | Text.toUpper remote.remotePullRequestState == "MERGED" ->
+          observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
       | otherwise ->
-          idle executor config replay ("waiting for PR merge before completing issue implementer: #" <> Text.pack (show (unPrNumber prNumber)))
+          idle executor config replay ("waiting for PR merge before closing issue: #" <> Text.pack (show (unPrNumber prNumber)))
+
+observeIssueClosed
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> IssueConfig
+  -> PrNumber
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+observeIssueClosed executor config events replay issueConfig prNumber = do
+  issue <- runGhIssueView executor.actionRuntime issueConfig.issueRepo issueConfig.issueNumber
+  case issue of
+    Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+    Right remote
+      | remoteIssueIsClosed remote ->
+          observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedIssueClosed prNumber))
+      | otherwise ->
+          retryCloseIssue executor config replay issueConfig prNumber
+
+retryCloseIssue
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonLoopConfig
+  -> EventReplayResult
+  -> IssueConfig
+  -> PrNumber
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+retryCloseIssue executor config replay issueConfig prNumber = do
+  let closePlan =
+        compileEffectPlan
+          config.loopDaemonOptions.daemonRuntimeConfig
+          [ SomeEffect (CloseIssue issueConfig prNumber)
+          , SomeEffect SleepUntilNextPoll
+          ]
+  reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode closePlan
+  pure case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      Right
+        DaemonLoopTickResult
+          { loopReplayResult = replay
+          , loopObservation = Nothing
+          , loopObservedTick = Nothing
+          , loopIdleReason = Just ("would close issue after merged PR #" <> Text.pack (show (unPrNumber prNumber)))
+          , loopActionReports = reports
+          }
+    ExecuteActions ->
+      case firstCommandFailure reports of
+        Just failure -> Left (DaemonLoopDaemonFailure failure)
+        Nothing ->
+          Right
+            DaemonLoopTickResult
+              { loopReplayResult = replay
+              , loopObservation = Nothing
+              , loopObservedTick = Nothing
+              , loopIdleReason = Just ("closed issue after merged PR #" <> Text.pack (show (unPrNumber prNumber)) <> "; waiting to observe closed issue")
+              , loopActionReports = reports
+              }
+
+firstCommandFailure :: [ActionExecutionReport] -> Maybe DaemonFailure
+firstCommandFailure [] =
+  Nothing
+firstCommandFailure (report : rest) =
+  case report.actionExecutionResult of
+    CommandActionResult commandReport
+      | not commandReport.ok ->
+          Just (DaemonActionFailed report.actionExecutionAction commandReport)
+    _ ->
+      firstCommandFailure rest
+
+remoteIssueIsClosed :: RemoteIssue -> Bool
+remoteIssueIsClosed issue =
+  issue.remoteIssueClosed || Text.toUpper issue.remoteIssueState == "CLOSED"
 
 observeMergeCompletion
   :: Monad m
@@ -712,8 +1045,7 @@ startTurnEffect kind threadId =
   case kind of
     StartPlannerTurnKind -> SomeEffect (StartPlannerTurn threadId)
     StartWorkerTurnKind -> SomeEffect (StartWorkerTurn threadId)
-    StartIssueTriageWorkerTurnKind -> SomeEffect (StartIssueTriageWorkerTurn threadId)
-    StartIssuePlanWorkerTurnKind issueConfig -> SomeEffect (StartIssuePlanWorkerTurn issueConfig threadId)
+    StartIssuePlanWorkerTurnKind issueConfig prNumber -> SomeEffect (StartIssuePlanWorkerTurn issueConfig prNumber threadId)
     StartIssueImplementationWorkerTurnKind -> SomeEffect (StartIssueImplementationWorkerTurn threadId)
     StartReviewerTurnKind prConfig reviewTargetSha -> SomeEffect (StartReviewerTurn prConfig reviewTargetSha threadId)
 
@@ -725,7 +1057,6 @@ kindText :: StartTurnKind -> Text
 kindText = \case
   StartPlannerTurnKind -> "planner-turn"
   StartWorkerTurnKind -> "worker-turn"
-  StartIssueTriageWorkerTurnKind -> "issue-triage-turn"
   StartIssuePlanWorkerTurnKind {} -> "issue-plan-turn"
   StartIssueImplementationWorkerTurnKind -> "issue-implementation-turn"
   StartReviewerTurnKind {} -> "reviewer-turn"

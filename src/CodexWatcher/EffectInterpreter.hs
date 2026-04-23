@@ -51,7 +51,6 @@ data EffectRuntimeConfig = EffectRuntimeConfig
   , effectRuntimeNextRequestId :: Int
   , effectRuntimePlannerTurn :: TurnRuntimeConfig
   , effectRuntimeWorkerTurn :: TurnRuntimeConfig
-  , effectRuntimeIssueTriageTurn :: TurnRuntimeConfig
   , effectRuntimeIssuePlanTurn :: TurnRuntimeConfig
   , effectRuntimeIssueImplementationTurn :: TurnRuntimeConfig
   , effectRuntimeReviewerTurn :: TurnRuntimeConfig
@@ -100,10 +99,8 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest config.effectRuntimePlannerTurn threadId
     StartWorkerTurn threadId ->
       oneAppServerRequest config.effectRuntimeWorkerTurn threadId
-    StartIssueTriageWorkerTurn threadId ->
-      oneAppServerRequest config.effectRuntimeIssueTriageTurn threadId
-    StartIssuePlanWorkerTurn issueConfig threadId ->
-      oneAppServerRequest (issuePlanTurnRuntimeConfig config issueConfig) threadId
+    StartIssuePlanWorkerTurn issueConfig prNumber threadId ->
+      oneAppServerRequest (issuePlanTurnRuntimeConfig config issueConfig prNumber) threadId
     StartIssueImplementationWorkerTurn threadId ->
       oneAppServerRequest config.effectRuntimeIssueImplementationTurn threadId
     StartReviewerTurn prConfig reviewTargetSha threadId ->
@@ -116,6 +113,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhCreatePullRequest config.effectRuntimeWorkdir issueConfig)]
     UpdatePullRequestBody issueConfig prNumber ->
       unchanged [PlannedCommand (GhUpdatePullRequestBody config.effectRuntimeWorkdir issueConfig prNumber (config.effectRuntimeStateDir </> "issue-plan.md"))]
+    CloseIssue issueConfig prNumber ->
+      unchanged [PlannedCommand (GhIssueClose issueConfig prNumber)]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
     RecordPlanningGraph graph ->
@@ -161,12 +160,12 @@ reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
     , turnRuntimeOutputSchema = Nothing
     }
 
-issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> TurnRuntimeConfig
-issuePlanTurnRuntimeConfig config issueConfig =
+issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> PrNumber -> TurnRuntimeConfig
+issuePlanTurnRuntimeConfig config issueConfig prNumber =
   config.effectRuntimeIssuePlanTurn
     { turnRuntimeCollaborationMode =
         Just
-          (defaultPlanCollaborationMode (issuePlanModeDeveloperInstructions config.effectRuntimeWorkdir config.effectRuntimeStateDir issueConfig))
+          (defaultPlanCollaborationMode (issuePlanModeDeveloperInstructions config.effectRuntimeWorkdir config.effectRuntimeStateDir issueConfig prNumber))
     }
 
 blockedStateJson :: BlockedReason -> Value

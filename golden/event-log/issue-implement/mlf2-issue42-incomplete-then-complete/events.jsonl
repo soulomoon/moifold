@@ -1,12 +1,13 @@
 {"type":"issue_implement_initialized","repoFullName":"soulomoon/mlf2","issueNumber":42,"branch":"codex/issue-42","workerThreadId":"issue-worker-42"}
-{"type":"issue_triage_turn_started","triageTurnId":"turn-triage"}
-{"type":"issue_triage_needs_implementation"}
+{"type":"issue_pr_created","prNumber":7,"prUrl":"https://github.com/soulomoon/mlf2/pull/7"}
 {"type":"issue_plan_turn_started","planTurnId":"turn-plan"}
 {"type":"issue_plan_completed"}
-{"type":"issue_pr_created","prNumber":7,"prUrl":"https://github.com/soulomoon/mlf2/pull/7"}
+{"type":"issue_pr_body_updated","prNumber":7}
 {"type":"issue_implementation_turn_started","implementationTurnId":"turn-implement-1"}
 {"type":"issue_implementation_incomplete","reason":"worker marked implementation incomplete"}
 {"type":"issue_implementation_turn_started","implementationTurnId":"turn-implement-2"}
+{"type":"issue_implementation_completed","prNumber":7}
 {"type":"issue_review_handoff_initialized","prNumber":7}
 {"type":"issue_review_handoff_started","prNumber":7}
 {"type":"issue_pr_merged","prNumber":7}
+{"type":"issue_closed","prNumber":7}

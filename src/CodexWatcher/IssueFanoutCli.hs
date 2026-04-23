@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -6,10 +7,13 @@
 
 module CodexWatcher.IssueFanoutCli
   ( IssueImplementerChildLaunch (..)
+  , IssueImplementerChildStartResult (..)
   , issueFanout
   , issueImplementerChildLaunchMode
   , runIssueImplementerLaunches
+  , runIssueImplementerLaunchesDetailed
   , startIssueImplementerChild
+  , startIssueImplementerChildDetailed
   , resolveFanoutActiveIssues
   , issueImplementerRuntimeStatus
   , readyIssueStatusFromRuntime
@@ -26,7 +30,6 @@ import CodexWatcher.EventLog
 import CodexWatcher.GhGit
 import CodexWatcher.IssuePlanningFanout
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeOwner (RuntimeOwner (HaskellRuntime), writeRuntimeOwner)
 import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions)
 import CodexWatcher.Types
@@ -140,6 +143,12 @@ data IssueImplementerChildLaunch
   | PrintChildLaunchCommands AppServerEndpoint Int
   | StartChildLaunches AppServerEndpoint Int
 
+data IssueImplementerChildStartResult
+  = IssueImplementerChildStarted IssueNumber
+  | IssueImplementerChildCompletedBeforeReady IssueNumber
+  | IssueImplementerChildStartProblem IssueNumber Text.Text WatcherRuntimeStatus
+  deriving stock (Eq, Show)
+
 issueImplementerChildLaunchMode :: Bool -> Maybe Int -> Maybe Int -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
 issueImplementerChildLaunchMode startChildren maybePollSeconds maybeChildPollSeconds executionMode maybeEndpoint
   | not startChildren = pure DoNotLaunchChildren
@@ -151,13 +160,29 @@ issueImplementerChildLaunchMode startChildren maybePollSeconds maybeChildPollSec
         ExecuteActions -> StartChildLaunches endpoint pollSeconds
 
 runIssueImplementerLaunches :: ActionExecutionMode -> Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> [IssueImplementerLaunchPlan] -> IO ()
-runIssueImplementerLaunches DryRunActions _endpoint childLaunch launches = do
+runIssueImplementerLaunches executionMode maybeEndpoint childLaunch launches = do
+  results <- runIssueImplementerLaunchesDetailed executionMode maybeEndpoint childLaunch launches
+  case firstChildStartProblem results of
+    Nothing -> pure ()
+    Just (issue, detail, status) ->
+      die
+        ( "issue implementer "
+            <> show (unIssueNumber issue)
+            <> " did not become running and is not complete: "
+            <> Text.unpack detail
+            <> "; status="
+            <> show status
+        )
+
+runIssueImplementerLaunchesDetailed :: ActionExecutionMode -> Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> [IssueImplementerLaunchPlan] -> IO [IssueImplementerChildStartResult]
+runIssueImplementerLaunchesDetailed DryRunActions _endpoint childLaunch launches = do
   mapM_ printIssueImplementerLaunch launches
   mapM_ (printIssueImplementerChildLaunch childLaunch) launches
-runIssueImplementerLaunches ExecuteActions maybeEndpoint childLaunch launches =
-  mapM_ (uncurry (runIssueImplementerLaunch maybeEndpoint childLaunch)) (zip [8000 ..] launches)
+  pure (fmap (IssueImplementerChildStarted . launchIssueNumber) launches)
+runIssueImplementerLaunchesDetailed ExecuteActions maybeEndpoint childLaunch launches =
+  traverse (uncurry (runIssueImplementerLaunch maybeEndpoint childLaunch)) (zip [8000 ..] launches)
 
-runIssueImplementerLaunch :: Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> Int -> IssueImplementerLaunchPlan -> IO ()
+runIssueImplementerLaunch :: Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> Int -> IssueImplementerLaunchPlan -> IO IssueImplementerChildStartResult
 runIssueImplementerLaunch maybeEndpoint childLaunch requestId launch = do
   ensureIssueImplementerLaunchWritable launch
   prepareIssueImplementerWorkdir launch
@@ -165,7 +190,7 @@ runIssueImplementerLaunch maybeEndpoint childLaunch requestId launch = do
   preparedLaunch <- prepareIssueImplementerLaunch maybeEndpoint requestId launch
   writeIssueImplementerLaunch preparedLaunch
   writeIssueImplementerLaunchFinalized childLaunch preparedLaunch
-  startIssueImplementerChild childLaunch preparedLaunch
+  startIssueImplementerChildDetailed childLaunch preparedLaunch
 
 ensureIssueImplementerLaunchWritable :: IssueImplementerLaunchPlan -> IO ()
 ensureIssueImplementerLaunchWritable launch = do
@@ -247,7 +272,6 @@ writeIssueImplementerLaunch launch = do
   writeJsonValue launch.launchConfigPath launch.launchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent
   mapM_ (writeCompatibility ioRuntimeInterpreter) launch.launchCompatibilityWrites
-  writeRuntimeOwner ioRuntimeInterpreter launch.launchStateDir HaskellRuntime
   putStrLn ("wrote issue implementer " <> show (unIssueNumber (launchIssueNumber launch)) <> " to " <> launch.launchStateDir)
 
 writeIssueImplementerLaunchPending :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
@@ -316,18 +340,49 @@ printIssueImplementerChildLaunch StartChildLaunches {} _launch =
   pure ()
 
 startIssueImplementerChild :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
-startIssueImplementerChild DoNotLaunchChildren _launch =
-  pure ()
-startIssueImplementerChild (PrintChildLaunchCommands endpoint pollSeconds) launch =
+startIssueImplementerChild childLaunch launch = do
+  result <- startIssueImplementerChildDetailed childLaunch launch
+  case result of
+    IssueImplementerChildStarted {} -> pure ()
+    IssueImplementerChildCompletedBeforeReady {} -> pure ()
+    IssueImplementerChildStartProblem issue detail status ->
+      die
+        ( "issue implementer "
+            <> show (unIssueNumber issue)
+            <> " did not become running and is not complete: "
+            <> Text.unpack detail
+            <> "; status="
+            <> show status
+        )
+
+startIssueImplementerChildDetailed :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO IssueImplementerChildStartResult
+startIssueImplementerChildDetailed DoNotLaunchChildren launch =
+  pure (IssueImplementerChildStarted (launchIssueNumber launch))
+startIssueImplementerChildDetailed (PrintChildLaunchCommands endpoint pollSeconds) launch = do
   printIssueImplementerChildLaunch (PrintChildLaunchCommands endpoint pollSeconds) launch
-startIssueImplementerChild (StartChildLaunches endpoint pollSeconds) launch =
-  startChildDaemon
-    ( "issue implementer "
-        <> show (unIssueNumber (launchIssueNumber launch))
-    )
-    launch.launchStateDir
-    "issue-watcher.pid"
-    (issueImplementerChildArgs endpoint pollSeconds launch)
+  pure (IssueImplementerChildStarted (launchIssueNumber launch))
+startIssueImplementerChildDetailed (StartChildLaunches endpoint pollSeconds) launch = do
+  readiness <-
+    startChildDaemonChecked
+      label
+      launch.launchStateDir
+      "issue-watcher.pid"
+      (issueImplementerChildArgs endpoint pollSeconds launch)
+  case readiness of
+    DaemonPidReady ->
+      pure (IssueImplementerChildStarted issue)
+    DaemonPidNotReady detail -> do
+      status <- issueImplementerRuntimeStatusForLaunch launch
+      pure case status of
+        WatcherTerminal TerminalComplete ->
+          IssueImplementerChildCompletedBeforeReady issue
+        WatcherActiveRunning ->
+          IssueImplementerChildStarted issue
+        _ ->
+          IssueImplementerChildStartProblem issue detail status
+ where
+  issue = launchIssueNumber launch
+  label = "issue implementer " <> show (unIssueNumber issue)
 
 issueImplementerChildArgs :: AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> [String]
 issueImplementerChildArgs endpoint pollSeconds launch =
@@ -366,10 +421,23 @@ readyIssueStatusFromRuntime = \case
 issueImplementerRuntimeStatus :: IssuePlanningFanoutConfig -> PlannerConfig -> IssueNumber -> IO WatcherRuntimeStatus
 issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
   let stateDir = issueImplementerStateDir fanoutConfig.fanoutImplementersRoot plannerConfig.plannerRepo issueNumber'
+      launch =
+        (issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber')
+          { launchStateDir = stateDir
+          , launchConfigPath = stateDir </> "config.json"
+          , launchEventsPath = stateDir </> "events.jsonl"
+          }
+  issueImplementerRuntimeStatusForLaunch launch
+
+issueImplementerRuntimeStatusForLaunch :: IssueImplementerLaunchPlan -> IO WatcherRuntimeStatus
+issueImplementerRuntimeStatusForLaunch launch = do
+  let repo = launch.launchIssueConfig.issueRepo
+      issueNumber' = launchIssueNumber launch
       eventsPath = stateDir </> "events.jsonl"
       configPath = stateDir </> "config.json"
       pidPath = WatcherPaths.defaultPidPath IssueImplement stateDir
-      issueClosed = githubIssueClosed plannerConfig.plannerRepo issueNumber'
+      stateDir = launch.launchStateDir
+      issueClosed = githubIssueClosed repo issueNumber'
   watcherRuntimeStatus
     WatcherRuntimeStatusConfig
       { watcherRuntimeExpectedDomain = IssueImplement
@@ -377,27 +445,22 @@ issueImplementerRuntimeStatus fanoutConfig plannerConfig issueNumber' = do
       , watcherRuntimeEventsPath = eventsPath
       , watcherRuntimePidPath = pidPath
       , watcherRuntimeMissingIsTerminal = issueClosed
-      , watcherRuntimeReplayTerminalIsTerminal = issueImplementReplayTerminalSucceeded plannerConfig.plannerRepo issueNumber'
+      , watcherRuntimeReplayTerminalIsTerminal = issueImplementReplayTerminalSucceeded repo issueNumber'
       }
+
+firstChildStartProblem :: [IssueImplementerChildStartResult] -> Maybe (IssueNumber, Text.Text, WatcherRuntimeStatus)
+firstChildStartProblem [] = Nothing
+firstChildStartProblem (IssueImplementerChildStartProblem issue detail status : _) =
+  Just (issue, detail, status)
+firstChildStartProblem (_ : rest) =
+  firstChildStartProblem rest
 
 issueImplementReplayTerminalSucceeded :: RepoName -> IssueNumber -> EventReplayResult -> IO Bool
 issueImplementReplayTerminalSucceeded repo issueNumber' replay =
   case replay.replayState of
-    SomeWatcherState (CompleteState (IssueAlreadyResolved resolvedIssueNumber)) ->
-      githubIssueClosed repo resolvedIssueNumber
-    SomeWatcherState (CompleteState (IssueComplete prNumber)) ->
-      (&&) <$> githubPullRequestMerged repo prNumber <*> githubIssueClosed repo issueNumber'
+    SomeWatcherState (CompleteState (IssueComplete _prNumber)) ->
+      githubIssueClosed repo issueNumber'
     _ ->
-      pure False
-
-githubPullRequestMerged :: RepoName -> PrNumber -> IO Bool
-githubPullRequestMerged repo prNumber = do
-  remotePr <- runGhPrView ioRuntimeInterpreter repo prNumber
-  case remotePr of
-    Right pr ->
-      pure (Text.toUpper pr.remotePullRequestState == "MERGED")
-    Left errorMessage -> do
-      putStrLn ("planner could not verify PR " <> show (unPrNumber prNumber) <> " remote state: " <> Text.unpack errorMessage)
       pure False
 
 githubIssueClosed :: RepoName -> IssueNumber -> IO Bool
@@ -405,7 +468,7 @@ githubIssueClosed repo issueNumber' = do
   remoteIssue <- runGhIssueView ioRuntimeInterpreter repo issueNumber'
   case remoteIssue of
     Right issue ->
-      pure (issue.remoteIssueClosed || issue.remoteIssueState == "CLOSED")
+      pure (issue.remoteIssueClosed || Text.toUpper issue.remoteIssueState == "CLOSED")
     Left errorMessage -> do
       putStrLn ("planner could not verify issue " <> show (unIssueNumber issueNumber') <> " remote state: " <> Text.unpack errorMessage)
       pure False

@@ -22,14 +22,14 @@ data Effect (mutability :: Mutability) where
   ReadReviewThreads :: PrConfig -> Effect 'ReadOnly
   StartPlannerTurn :: ThreadId -> Effect 'CanStartTurn
   StartWorkerTurn :: ThreadId -> Effect 'CanStartTurn
-  StartIssueTriageWorkerTurn :: ThreadId -> Effect 'CanStartTurn
-  StartIssuePlanWorkerTurn :: IssueConfig -> ThreadId -> Effect 'CanStartTurn
+  StartIssuePlanWorkerTurn :: IssueConfig -> PrNumber -> ThreadId -> Effect 'CanStartTurn
   StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartReviewerTurn :: PrConfig -> CommitSha -> ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub
   UpdatePullRequestBody :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
+  CloseIssue :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
   RecordPlanningGraph :: PlanningGraph -> Effect 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal
@@ -51,9 +51,8 @@ instance Eq SomeEffect where
   SomeEffect (ReadReviewThreads left) == SomeEffect (ReadReviewThreads right) = left == right
   SomeEffect (StartPlannerTurn left) == SomeEffect (StartPlannerTurn right) = left == right
   SomeEffect (StartWorkerTurn left) == SomeEffect (StartWorkerTurn right) = left == right
-  SomeEffect (StartIssueTriageWorkerTurn left) == SomeEffect (StartIssueTriageWorkerTurn right) = left == right
-  SomeEffect (StartIssuePlanWorkerTurn leftConfig leftThread) == SomeEffect (StartIssuePlanWorkerTurn rightConfig rightThread) =
-    leftConfig == rightConfig && leftThread == rightThread
+  SomeEffect (StartIssuePlanWorkerTurn leftConfig leftPr leftThread) == SomeEffect (StartIssuePlanWorkerTurn rightConfig rightPr rightThread) =
+    leftConfig == rightConfig && leftPr == rightPr && leftThread == rightThread
   SomeEffect (StartIssueImplementationWorkerTurn left) == SomeEffect (StartIssueImplementationWorkerTurn right) = left == right
   SomeEffect (StartReviewerTurn leftConfig leftCommit leftThread) == SomeEffect (StartReviewerTurn rightConfig rightCommit rightThread) =
     leftConfig == rightConfig && leftCommit == rightCommit && leftThread == rightThread
@@ -62,6 +61,8 @@ instance Eq SomeEffect where
     leftRepo == rightRepo && leftRequest == rightRequest
   SomeEffect (CreatePullRequest left) == SomeEffect (CreatePullRequest right) = left == right
   SomeEffect (UpdatePullRequestBody leftConfig leftPr) == SomeEffect (UpdatePullRequestBody rightConfig rightPr) =
+    leftConfig == rightConfig && leftPr == rightPr
+  SomeEffect (CloseIssue leftConfig leftPr) == SomeEffect (CloseIssue rightConfig rightPr) =
     leftConfig == rightConfig && leftPr == rightPr
   SomeEffect (ResolveReviewThread left) == SomeEffect (ResolveReviewThread right) = left == right
   SomeEffect (RecordPlanningGraph left) == SomeEffect (RecordPlanningGraph right) = left == right
@@ -80,7 +81,6 @@ effectMutability ReadOpenPullRequests {} = ReadOnly
 effectMutability ReadReviewThreads {} = ReadOnly
 effectMutability StartPlannerTurn {} = CanStartTurn
 effectMutability StartWorkerTurn {} = CanStartTurn
-effectMutability StartIssueTriageWorkerTurn {} = CanStartTurn
 effectMutability StartIssuePlanWorkerTurn {} = CanStartTurn
 effectMutability StartIssueImplementationWorkerTurn {} = CanStartTurn
 effectMutability StartReviewerTurn {} = CanStartTurn
@@ -88,6 +88,7 @@ effectMutability PushBranch {} = CanMutateLocal
 effectMutability CreateIssue {} = CanMutateGitHub
 effectMutability CreatePullRequest {} = CanMutateGitHub
 effectMutability UpdatePullRequestBody {} = CanMutateGitHub
+effectMutability CloseIssue {} = CanMutateGitHub
 effectMutability ResolveReviewThread {} = CanMutateGitHub
 effectMutability RecordPlanningGraph {} = CanMutateLocal
 effectMutability RecordBlocked {} = CanMutateLocal

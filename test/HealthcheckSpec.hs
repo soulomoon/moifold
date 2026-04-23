@@ -23,6 +23,9 @@ prop_healthcheckDaemonRequiredStatuses =
     && not (planningStatusRequiresDaemon (Just "Complete") (Just "ready"))
     && not (planningStatusRequiresDaemon (Just "Initialized") (Just "complete"))
     && issueStatusRequiresDaemon "waiting_pr_merge"
+    && issueStatusRequiresDaemon "ready_to_plan"
+    && issueStatusRequiresDaemon "planning"
+    && issueStatusRequiresDaemon "plan_ready"
     && issueStatusRequiresDaemon "in_progress"
     && not (issueStatusRequiresDaemon "complete")
     && prReviewRequiresDaemon False (Just "Reviewing")

@@ -13,10 +13,8 @@ module CodexWatcher.RuntimeOwner
   , readRuntimeOwnerMarker
   , readRuntimeOwner
   , runtimeLeaseJson
-  , runtimeOwnerJson
   , runtimeOwnerText
   , writeRuntimeLease
-  , writeRuntimeOwner
   ) where
 
 import CodexWatcher.Runtime
@@ -45,8 +43,7 @@ data RuntimeLease = RuntimeLease
   deriving stock (Eq, Show, Generic)
 
 data RuntimeOwnerMarker
-  = RuntimeOwnerLegacy RuntimeOwner
-  | RuntimeOwnerLeased RuntimeLease
+  = RuntimeOwnerLeased RuntimeLease
   deriving stock (Eq, Show, Generic)
 
 runtimeOwnerText :: RuntimeOwner -> Text
@@ -59,27 +56,19 @@ parseRuntimeOwner owner =
     "haskell" -> Right HaskellRuntime
     other -> Left ("unsupported runtime owner: " <> other <> "; expected haskell")
 
-runtimeOwnerJson :: RuntimeOwner -> Value
-runtimeOwnerJson owner =
-  object ["owner" .= runtimeOwnerText owner]
-
 runtimeLeaseJson :: RuntimeLease -> Value
 runtimeLeaseJson lease =
   object
-    [ "owner" .= runtimeOwnerText lease.runtimeLeaseOwner
-    , "lease"
+    [ "lease"
         .= object
-          [ "pid" .= lease.runtimeLeasePid
+          [ "runtime" .= runtimeOwnerText lease.runtimeLeaseOwner
+          , "pid" .= lease.runtimeLeasePid
           , "hostname" .= lease.runtimeLeaseHost
           , "claimedAt" .= lease.runtimeLeaseClaimedAt
           , "expiresAt" .= lease.runtimeLeaseExpiresAt
           , "eventLogHeadHash" .= lease.runtimeLeaseEventLogHeadHash
           ]
     ]
-
-writeRuntimeOwner :: RuntimeInterpreter m -> FilePath -> RuntimeOwner -> m ()
-writeRuntimeOwner interpreter stateDir owner =
-  interpreter.runtimeWriteJsonValue (stateDir </> "runtime-owner.json") (runtimeOwnerJson owner)
 
 writeRuntimeLease :: RuntimeInterpreter m -> FilePath -> RuntimeLease -> m ()
 writeRuntimeLease interpreter stateDir lease =
@@ -91,7 +80,6 @@ readRuntimeOwner stateDir = do
   pure case marker of
     Left reason -> Left reason
     Right Nothing -> Right Nothing
-    Right (Just (RuntimeOwnerLegacy owner)) -> Right (Just owner)
     Right (Just (RuntimeOwnerLeased lease)) -> Right (Just lease.runtimeLeaseOwner)
 
 readRuntimeOwnerMarker :: FilePath -> IO (Either Text (Maybe RuntimeOwnerMarker))
@@ -107,19 +95,14 @@ readRuntimeOwnerMarker stateDir = do
 runtimeOwnerMarkerFromJson :: Value -> Either Text (Maybe RuntimeOwnerMarker)
 runtimeOwnerMarkerFromJson Null = Right Nothing
 runtimeOwnerMarkerFromJson value@(Object _) =
-  case lookupPath ["owner"] value of
-    Nothing -> Right Nothing
-    Just (String ownerText') -> do
-      owner <- parseRuntimeOwner ownerText'
-      case lookupPath ["lease"] value of
-        Nothing -> Right (Just (RuntimeOwnerLegacy owner))
-        Just leaseValue -> Just . RuntimeOwnerLeased <$> runtimeLeaseFromJson owner leaseValue
-    Just _ -> Left "runtime owner field must be a string"
+  case lookupPath ["lease"] value of
+    Just leaseValue -> Just . RuntimeOwnerLeased <$> runtimeLeaseFromJson leaseValue
+    Nothing -> Left "runtime owner marker must contain a lease object"
 runtimeOwnerMarkerFromJson _ =
   Left "runtime owner marker must be a JSON object"
 
-runtimeLeaseFromJson :: RuntimeOwner -> Value -> Either Text RuntimeLease
-runtimeLeaseFromJson owner value =
+runtimeLeaseFromJson :: Value -> Either Text RuntimeLease
+runtimeLeaseFromJson value =
   case parseEither parser value of
     Left reason -> Left (Text.pack reason)
     Right lease -> Right lease
@@ -127,7 +110,7 @@ runtimeLeaseFromJson owner value =
   parser =
     withObject "RuntimeLease" \objectValue ->
       RuntimeLease
-        <$> pure owner
+        <$> (objectValue .: "runtime" >>= either (fail . Text.unpack) pure . parseRuntimeOwner)
         <*> objectValue .: "pid"
         <*> objectValue .: "hostname"
         <*> objectValue .: "claimedAt"

@@ -78,12 +78,12 @@ instance KnownDomain 'PrReview where
 
 data Phase
   = Initialized
-  | Triage
   | PlanMode
   | Implementing
   | CheckingReviews
   | FixingReviews
   | ReviewingClean
+  | WaitingMergeability
   | Merging
   | Blocked
   | Complete
@@ -107,7 +107,7 @@ newtype RepoName = RepoName { unRepoName :: Text }
   deriving stock (Eq, Show)
 
 newtype IssueNumber = IssueNumber { unIssueNumber :: Int }
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show)
 
 newtype PrNumber = PrNumber { unPrNumber :: Int }
   deriving stock (Eq, Show)
@@ -319,7 +319,6 @@ data CleanReviewEvidence = CleanReviewEvidence
 
 data CompletionEvidence (domain :: Domain) where
   PlanningComplete :: CompletionEvidence 'IssuePlanning
-  IssueAlreadyResolved :: IssueNumber -> CompletionEvidence 'IssueImplement
   IssueComplete :: PrNumber -> CompletionEvidence 'IssueImplement
   PrMerged :: MergeCommit -> CompletionEvidence 'PrReview
 
@@ -341,25 +340,23 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> PlanningGraph
     -> WatcherState 'IssuePlanning 'Initialized
 
-  IssueNeedsTriage
+  IssueReadyToPlan
     :: IssueConfig
-    -> WorkerThread 'Idle
-    -> WatcherState 'IssueImplement 'Triage
-
-  IssueTriageActive
-    :: IssueConfig
-    -> WorkerThread 'Active
-    -> WatcherState 'IssueImplement 'Triage
-
-  IssuePlanReady
-    :: IssueConfig
+    -> PrNumber
     -> WorkerThread 'Idle
     -> WatcherState 'IssueImplement 'PlanMode
 
   IssueInPlanMode
     :: IssueConfig
+    -> PrNumber
     -> WorkerThread 'Active
     -> WatcherState 'IssueImplement 'PlanMode
+
+  IssuePlanReady
+    :: IssueConfig
+    -> PrNumber
+    -> WorkerThread 'Idle
+    -> WatcherState 'IssueImplement 'Implementing
 
   IssueImplementationReady
     :: IssueConfig
@@ -373,7 +370,22 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> WorkerThread 'Active
     -> WatcherState 'IssueImplement 'Implementing
 
+  IssueHandoffReady
+    :: IssueConfig
+    -> PrNumber
+    -> WatcherState 'IssueImplement 'Implementing
+
+  IssueHandoffInitialized
+    :: IssueConfig
+    -> PrNumber
+    -> WatcherState 'IssueImplement 'Implementing
+
   IssueWaitingForPrMerge
+    :: IssueConfig
+    -> PrNumber
+    -> WatcherState 'IssueImplement 'Implementing
+
+  IssueWaitingForIssueClose
     :: IssueConfig
     -> PrNumber
     -> WatcherState 'IssueImplement 'Implementing
@@ -397,6 +409,13 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> WorkerThread 'Idle
     -> ReviewerThread 'Active
     -> WatcherState 'PrReview 'ReviewingClean
+
+  PrWaitingForMergeability
+    :: PrConfig
+    -> CleanReviewEvidence
+    -> WorkerThread 'Idle
+    -> ReviewerThread 'Idle
+    -> WatcherState 'PrReview 'WaitingMergeability
 
   PrMerging
     :: PrConfig
@@ -430,16 +449,19 @@ phaseOf :: WatcherState domain phase -> Phase
 phaseOf PlanningReady {} = Initialized
 phaseOf PlanningTurnActive {} = PlanMode
 phaseOf PlanningWaitingForReadyIssues {} = Initialized
-phaseOf IssueNeedsTriage {} = Triage
-phaseOf IssueTriageActive {} = Triage
-phaseOf IssuePlanReady {} = PlanMode
+phaseOf IssueReadyToPlan {} = PlanMode
 phaseOf IssueInPlanMode {} = PlanMode
+phaseOf IssuePlanReady {} = Implementing
 phaseOf IssueImplementationReady {} = Implementing
 phaseOf IssueImplementing {} = Implementing
+phaseOf IssueHandoffReady {} = Implementing
+phaseOf IssueHandoffInitialized {} = Implementing
 phaseOf IssueWaitingForPrMerge {} = Implementing
+phaseOf IssueWaitingForIssueClose {} = Implementing
 phaseOf PrCheckingReviews {} = CheckingReviews
 phaseOf PrFixingReviews {} = FixingReviews
 phaseOf PrReviewingClean {} = ReviewingClean
+phaseOf PrWaitingForMergeability {} = WaitingMergeability
 phaseOf PrMerging {} = Merging
 phaseOf BlockedState {} = Blocked
 phaseOf CompleteState {} = Complete

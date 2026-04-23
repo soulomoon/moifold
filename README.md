@@ -24,7 +24,7 @@ The first milestone models the lifecycle shared by:
 - single issue implementation
 - PR review fixing and merging
 
-The core explicitly tracks phases such as triage, plan mode, implementation, review checking, review fixing, merging, blocked, complete, and stopped.
+The core explicitly tracks phases such as plan mode, implementation, review checking, review fixing, merging, blocked, complete, and stopped.
 
 ## Build
 
@@ -61,7 +61,7 @@ bin=$(cabal list-bin codex-watcher-hs)
   --turn-id turn-next
 ```
 
-The command replays the log, applies the observation through the typed watcher policy, reports the canonical event, compatibility writes, and planned actions, and defaults to `DryRunActions`. Use `--execute --app-server-host <host> --app-server-port <port>` only after explicitly claiming the watcher state as Haskell-owned.
+The command replays the log, applies the observation through the typed watcher policy, reports the canonical event, compatibility writes, and planned actions, and defaults to `DryRunActions`. Use `--execute --app-server-host <host> --app-server-port <port>` only when the watcher state is not already leased by a running daemon.
 
 Run one automatic typed daemon iteration:
 
@@ -76,15 +76,15 @@ bin=$(cabal list-bin codex-watcher-hs)
   --app-server-port 3000
 ```
 
-The automatic commands are `run-pr-review`, `run-issue-implement`, and `run-issue-planning`. They replay the event log, fetch the next observation from `gh`, `git`, and/or app-server `thread/read`, classify turn output into typed watcher observations, and report the next canonical event and planned actions. They default to a dry run; add `--execute` to append the event, write Haskell-compatible state files, and run the compiled effects. Execute mode requires `runtime-owner.json` to contain `{"owner":"haskell"}`. Use `--loop --iterations N` for bounded daemon polling, or `--loop` for continuous polling. Loop mode writes the conventional watcher pid file under `--state-dir` unless `--pid-file` is supplied, and refuses to start over a running pid. `run-issue-planning` also requires `--planner-thread-id`. Add `--implementers-root <path>` to `run-issue-planning` to fan out issue implementer child state immediately after a canonical planning-completed event; in execute mode this uses the configured app-server endpoint to create real child threads. Add `--start-children` to print child daemon commands in dry-run mode or start the new child `run-issue-implement --loop --execute` processes after state is written in execute mode.
+The automatic commands are `run-pr-review`, `run-issue-implement`, and `run-issue-planning`. They replay the event log, fetch the next observation from `gh`, `git`, and/or app-server `thread/read`, classify turn output into typed watcher observations, and report the next canonical event and planned actions. They default to a dry run; add `--execute` to append the event, write Haskell-compatible state files, and run the compiled effects. Execute mode creates or renews a `runtime-owner.json` lease for the current daemon process and refuses to start over a running lease pid. Use `--loop --iterations N` for bounded daemon polling, or `--loop` for continuous polling. Loop mode writes the conventional watcher pid file under `--state-dir` unless `--pid-file` is supplied, and refuses to start over a running pid. `run-issue-planning` also requires `--planner-thread-id`. Add `--implementers-root <path>` to `run-issue-planning` to fan out issue implementer child state immediately after a canonical planning-completed event; in execute mode this uses the configured app-server endpoint to create real child threads. Add `--start-children` to print child daemon commands in dry-run mode or start the new child `run-issue-implement --loop --execute` processes after state is written in execute mode.
 
-Claim Haskell execute ownership for a watcher state directory:
+Clear an inactive runtime lease for a watcher state directory:
 
 ```bash
-"$bin" claim-runtime-owner --state-dir /path/to/state
+"$bin" clear-runtime-lease --state-dir /path/to/state
 ```
 
-The marker is surfaced by healthcheck and prevents accidental writes to state that is not Haskell-owned. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during maintenance.
+The command refuses to clear a lease whose pid is still running. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during maintenance.
 
 Use `render-service` with the same watcher loop flags to print a systemd unit and matching logrotate snippet. The command is render-only; it does not install or enable host services.
 
@@ -104,7 +104,7 @@ Without `--open-issues`, fanout discovers open issues with `gh issue list`. With
 
 The runtime event format is documented in `docs/event-log-schema.md`.
 
-Automatic turn starts now include an output schema and prompts that ask for structured JSON. Classification first accepts outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `already_fixed`, `needs_implementation`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
+Automatic turn starts now include an output schema and prompts that ask for structured JSON. Classification first accepts outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
 
 ## Design Rule
 
