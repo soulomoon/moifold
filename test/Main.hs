@@ -1673,7 +1673,8 @@ prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
                 input
                 [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
                 , "Inspect existing GitHub issues and sub-issues when needed before deciding."
-                , "Return only JSON with an outcome field. Plain prose completion is not accepted."
+                , "Return only JSON matching the active output schema. Plain prose completion is not accepted."
+                , "Include every schema field, using empty arrays, empty strings, or null parentIssueNumber when a field is not applicable."
                 ]
           )
           (actionTurnInputText (actions !! 0))
@@ -1690,17 +1691,53 @@ prop_turnOutputSchemasRequireStructuredDetails :: Bool
 prop_turnOutputSchemasRequireStructuredDetails =
   all
     schemaRequiresOutcomeReasonSummary
-    [ issuePlanTurnOutputSchema
+    [ plannerTurnOutputSchema
+    , issuePlanTurnOutputSchema
     , issueImplementationTurnOutputSchema
     , prReviewWorkerTurnOutputSchema
     ]
-    && schemaRequiredFields plannerTurnOutputSchema == ["outcome"]
+    && all
+      schemaRequiresEveryObjectProperty
+      [ plannerTurnOutputSchema
+      , issuePlanTurnOutputSchema
+      , issueImplementationTurnOutputSchema
+      , prReviewWorkerTurnOutputSchema
+      , reviewerTurnOutputSchema
+      ]
+    && schemaRequiredFields plannerTurnOutputSchema
+      == [ "outcome"
+         , "reason"
+         , "summary"
+         , "issues_to_create"
+         , "subissues_to_create"
+         , "ready_issues"
+         , "blocked_issues"
+         , "dependencies"
+         ]
     && "plan_markdown" `elem` schemaRequiredFields issuePlanTurnOutputSchema
 
 schemaRequiresOutcomeReasonSummary :: Value -> Bool
 schemaRequiresOutcomeReasonSummary schema =
   let requiredFields = schemaRequiredFields schema
    in all (`elem` requiredFields) ["outcome", "reason", "summary"]
+
+schemaRequiresEveryObjectProperty :: Value -> Bool
+schemaRequiresEveryObjectProperty schema@(Object objectValue)
+  | KeyMap.lookup (Key.fromString "type") objectValue == Just (String "object") =
+      case KeyMap.lookup (Key.fromString "properties") objectValue of
+        Just (Object properties) ->
+          let requiredFields = schemaRequiredFields schema
+              propertyKeys = fmap Key.toText (KeyMap.keys properties)
+           in all (`elem` requiredFields) propertyKeys
+                && all schemaRequiresEveryObjectProperty (KeyMap.elems properties)
+        _ ->
+          False
+  | KeyMap.lookup (Key.fromString "type") objectValue == Just (String "array") =
+      maybe True schemaRequiresEveryObjectProperty (KeyMap.lookup (Key.fromString "items") objectValue)
+  | otherwise =
+      True
+schemaRequiresEveryObjectProperty _ =
+  True
 
 schemaRequiredFields :: Value -> [Text]
 schemaRequiredFields (Object objectValue)
@@ -1765,7 +1802,8 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           plannerTurnPrompt
           [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
           , "Inspect existing GitHub issues and sub-issues when needed before deciding."
-          , "Return only JSON with an outcome field"
+          , "Return only JSON matching the active output schema"
+          , "Include every schema field, using empty arrays, empty strings, or null parentIssueNumber when a field is not applicable."
           , "For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work."
           , "dependencies must use objects shaped as {\"issueNumber\": 27, \"dependsOn\": [26]}"
           , "Target scope: only these root issues"
@@ -1806,7 +1844,7 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
     structuredTurnOutcomeInstructions
     [ "Return only JSON matching the active output schema"
     , "Every schema includes outcome, reason, and summary"
-    , "additional schema-required fields such as plan_markdown"
+    , "include every schema field, using empty strings or arrays when a field is not applicable"
     , "Plain prose completion is not accepted"
     , "outcome=blocked with a non-empty reason"
     , "outcome=incomplete with a non-empty reason"

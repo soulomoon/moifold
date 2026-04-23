@@ -52,44 +52,44 @@ structuredTurnOutputSchema =
 
 plannerTurnOutputSchema :: Value
 plannerTurnOutputSchema =
-  object
-    [ "type" .= ("object" :: Text)
-    , "additionalProperties" .= False
-    , "required" .= (["outcome"] :: [Text])
-    , "properties"
-        .= object
-          [ "outcome"
-              .= object
-                [ "type" .= ("string" :: Text)
-                , "enum" .= (["complete", "incomplete", "blocked"] :: [Text])
-                ]
-          , "reason" .= stringField
-          , "summary" .= stringField
-          , "issues_to_create" .= issueArrayField ["title"]
-          , "subissues_to_create" .= issueArrayField ["title", "body", "parentIssueNumber"]
-          , "ready_issues" .= issueNumberArrayField
-          , "blocked_issues" .= blockedIssueArrayField
-          , "dependencies" .= dependencyArrayField
+  strictObjectSchema
+    [ "outcome"
+    , "reason"
+    , "summary"
+    , "issues_to_create"
+    , "subissues_to_create"
+    , "ready_issues"
+    , "blocked_issues"
+    , "dependencies"
+    ]
+    [ ( "outcome"
+      , object
+          [ "type" .= ("string" :: Text)
+          , "enum" .= (["complete", "incomplete", "blocked"] :: [Text])
           ]
+      )
+    , ("reason", stringField)
+    , ("summary", stringField)
+    , ("issues_to_create", issueArrayField nullableIssueNumberField)
+    , ("subissues_to_create", issueArrayField issueNumberField)
+    , ("ready_issues", issueNumberArrayField)
+    , ("blocked_issues", blockedIssueArrayField)
+    , ("dependencies", dependencyArrayField)
     ]
 
 issuePlanTurnOutputSchema :: Value
 issuePlanTurnOutputSchema =
-  object
-    [ "type" .= ("object" :: Text)
-    , "additionalProperties" .= False
-    , "required" .= (["outcome", "reason", "summary", "plan_markdown"] :: [Text])
-    , "properties"
-        .= object
-          [ "outcome"
-              .= object
-                [ "type" .= ("string" :: Text)
-                , "enum" .= (["complete", "blocked"] :: [Text])
-                ]
-          , "reason" .= stringField
-          , "summary" .= stringField
-          , "plan_markdown" .= stringField
+  strictObjectSchema
+    ["outcome", "reason", "summary", "plan_markdown"]
+    [ ( "outcome"
+      , object
+          [ "type" .= ("string" :: Text)
+          , "enum" .= (["complete", "blocked"] :: [Text])
           ]
+      )
+    , ("reason", stringField)
+    , ("summary", stringField)
+    , ("plan_markdown", stringField)
     ]
 
 issueImplementationTurnOutputSchema :: Value
@@ -102,41 +102,34 @@ prReviewWorkerTurnOutputSchema =
 
 reviewerTurnOutputSchema :: Value
 reviewerTurnOutputSchema =
-  object
-    [ "type" .= ("object" :: Text)
-    , "additionalProperties" .= False
-    , "required"
-        .= ( [ "review_status"
-             , "reviewed_commit_sha"
-             , "reviewer_prompt_version"
-             , "added_review_comment_count"
-             , "lgtm_comment"
-             , "findings_summary"
-             , "blocked_reason"
-             ] ::
-              [Text]
-           )
-    , "properties"
-        .= object
-          [ "review_status"
-              .= object
-                [ "type" .= ("string" :: Text)
-                , "enum" .= (["clean", "comments_added", "incomplete", "blocked"] :: [Text])
-                ]
-          , "reviewed_commit_sha" .= stringField
-          , "reviewer_prompt_version" .= stringField
-          , "added_review_comment_count" .= object ["type" .= ("integer" :: Text), "minimum" .= (0 :: Int)]
-          , "lgtm_comment" .= nullableStringField
-          , "findings_summary" .= object ["type" .= ("array" :: Text), "items" .= stringField]
-          , "blocked_reason" .= nullableStringField
+  strictObjectSchema
+    [ "review_status"
+    , "reviewed_commit_sha"
+    , "reviewer_prompt_version"
+    , "added_review_comment_count"
+    , "lgtm_comment"
+    , "findings_summary"
+    , "blocked_reason"
+    ]
+    [ ( "review_status"
+      , object
+          [ "type" .= ("string" :: Text)
+          , "enum" .= (["clean", "comments_added", "incomplete", "blocked"] :: [Text])
           ]
+      )
+    , ("reviewed_commit_sha", stringField)
+    , ("reviewer_prompt_version", stringField)
+    , ("added_review_comment_count", object ["type" .= ("integer" :: Text), "minimum" .= (0 :: Int)])
+    , ("lgtm_comment", nullableStringField)
+    , ("findings_summary", object ["type" .= ("array" :: Text), "items" .= stringField])
+    , ("blocked_reason", nullableStringField)
     ]
 
 structuredTurnOutcomeInstructions :: Text
 structuredTurnOutcomeInstructions =
   Text.unlines
     [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
-    , "Every schema includes outcome, reason, and summary; include all additional schema-required fields such as plan_markdown."
+    , "Every schema includes outcome, reason, and summary; include every schema field, using empty strings or arrays when a field is not applicable."
     , "Use outcome=blocked with a non-empty reason when you cannot proceed safely."
     , "Use outcome=incomplete with a non-empty reason when follow-up is required."
     , "Use outcome=complete with a non-empty summary when the turn is done; reason may be an empty string."
@@ -144,23 +137,18 @@ structuredTurnOutcomeInstructions =
 
 turnOutcomeSchema :: [Text] -> [(Text, Value)] -> Value
 turnOutcomeSchema outcomes extraProperties =
-  object
-    [ "type" .= ("object" :: Text)
-    , "additionalProperties" .= False
-    , "required" .= (["outcome", "reason", "summary"] :: [Text])
-    , "properties"
-        .= object
-          ( [ "outcome"
-                .= object
-                  [ "type" .= ("string" :: Text)
-                  , "enum" .= outcomes
-                  ]
-            , "reason" .= stringField
-            , "summary" .= stringField
-            ]
-              <> [Key.fromText key .= value | (key, value) <- extraProperties]
+  let properties =
+        [ ( "outcome"
+          , object
+              [ "type" .= ("string" :: Text)
+              , "enum" .= outcomes
+              ]
           )
-    ]
+        , ("reason", stringField)
+        , ("summary", stringField)
+        ]
+          <> extraProperties
+   in strictObjectSchema (fmap fst properties) properties
 
 plannerTurnInput :: Text
 plannerTurnInput =
@@ -334,21 +322,33 @@ nullableStringField :: Value
 nullableStringField =
   object ["type" .= (["string", "null"] :: [Text])]
 
-issueArrayField :: [Text] -> Value
-issueArrayField requiredFields =
+strictObjectSchema :: [Text] -> [(Text, Value)] -> Value
+strictObjectSchema requiredFields properties =
+  object
+    [ "type" .= ("object" :: Text)
+    , "additionalProperties" .= False
+    , "required" .= requiredFields
+    , "properties" .= object [Key.fromText key .= value | (key, value) <- properties]
+    ]
+
+issueNumberField :: Value
+issueNumberField =
+  object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
+
+nullableIssueNumberField :: Value
+nullableIssueNumberField =
+  object ["type" .= (["integer", "null"] :: [Text]), "minimum" .= (1 :: Int)]
+
+issueArrayField :: Value -> Value
+issueArrayField parentIssueNumberField =
   object
     [ "type" .= ("array" :: Text)
     , "items"
-        .= object
-          [ "type" .= ("object" :: Text)
-          , "additionalProperties" .= False
-          , "required" .= requiredFields
-          , "properties"
-              .= object
-                [ "title" .= stringField
-                , "body" .= stringField
-                , "parentIssueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
-                ]
+        .= strictObjectSchema
+          ["title", "body", "parentIssueNumber"]
+          [ ("title", stringField)
+          , ("body", stringField)
+          , ("parentIssueNumber", parentIssueNumberField)
           ]
     ]
 
@@ -356,7 +356,7 @@ issueNumberArrayField :: Value
 issueNumberArrayField =
   object
     [ "type" .= ("array" :: Text)
-    , "items" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
+    , "items" .= issueNumberField
     ]
 
 blockedIssueArrayField :: Value
@@ -364,16 +364,11 @@ blockedIssueArrayField =
   object
     [ "type" .= ("array" :: Text)
     , "items"
-        .= object
-          [ "type" .= ("object" :: Text)
-          , "additionalProperties" .= False
-          , "required" .= (["issueNumber", "blockedBy"] :: [Text])
-          , "properties"
-              .= object
-                [ "issueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
-                , "blockedBy" .= issueNumberArrayField
-                , "reason" .= stringField
-                ]
+        .= strictObjectSchema
+          ["issueNumber", "blockedBy", "reason"]
+          [ ("issueNumber", issueNumberField)
+          , ("blockedBy", issueNumberArrayField)
+          , ("reason", stringField)
           ]
     ]
 
@@ -382,14 +377,9 @@ dependencyArrayField =
   object
     [ "type" .= ("array" :: Text)
     , "items"
-        .= object
-          [ "type" .= ("object" :: Text)
-          , "additionalProperties" .= False
-          , "required" .= (["issueNumber", "dependsOn"] :: [Text])
-          , "properties"
-              .= object
-                [ "issueNumber" .= object ["type" .= ("integer" :: Text), "minimum" .= (1 :: Int)]
-                , "dependsOn" .= issueNumberArrayField
-                ]
+        .= strictObjectSchema
+          ["issueNumber", "dependsOn"]
+          [ ("issueNumber", issueNumberField)
+          , ("dependsOn", issueNumberArrayField)
           ]
     ]

@@ -65,7 +65,8 @@ plannerTaskInstructions =
 plannerStructuredInstructions :: Text.Text
 plannerStructuredInstructions =
   Text.unlines
-    [ "Return only JSON with an outcome field. Plain prose completion is not accepted."
+    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
+    , "Include every schema field, using empty arrays, empty strings, or null parentIssueNumber when a field is not applicable."
     , "Use outcome=blocked with a reason when you cannot proceed safely."
     , "Use outcome=incomplete with a reason when follow-up is required."
     , "Use outcome=complete with a summary when the turn is done."
