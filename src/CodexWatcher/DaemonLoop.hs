@@ -286,7 +286,7 @@ startPlannerThread executor config = do
       request =
         threadStartRequest
           requestId
-          (defaultThreadStartOptions runtimeConfig.effectRuntimeWorkdir runtimeConfig.effectRuntimePlannerThreadInstructions)
+          (defaultThreadStartOptions runtimeConfig.effectRuntimePlannerTurn.turnRuntimeCwd runtimeConfig.effectRuntimePlannerThreadInstructions)
       nextConfig = withRuntimeNextRequestId (requestId + 1) config
   report <- executePlannedAction executor config.loopDaemonOptions.daemonExecutionMode (PlannedAppServerRequest request)
   case config.loopDaemonOptions.daemonExecutionMode of

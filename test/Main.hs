@@ -1508,16 +1508,17 @@ effectRuntimeConfig repo workdir requestId =
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = requestId
     , effectRuntimePlannerThreadInstructions = "planner developer instructions"
-    , effectRuntimePlannerTurn = turnRuntime "planner prompt" Nothing
+    , effectRuntimePlannerTurn = mkTurnRuntime plannerCwd "planner prompt" Nothing
     , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
     , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" Nothing
     , effectRuntimeIssueImplementationTurn = turnRuntime "issue implementation prompt" Nothing
     , effectRuntimeReviewerTurn = turnRuntime "reviewer prompt" Nothing
     }
  where
-  turnRuntime input collaborationMode =
+  plannerCwd = workdir </> ".watcher"
+  mkTurnRuntime cwd input collaborationMode =
     TurnRuntimeConfig
-      { turnRuntimeCwd = workdir
+      { turnRuntimeCwd = cwd
       , turnRuntimeModel = defaultModel
       , turnRuntimeEffort = defaultEffort
       , turnRuntimeApprovalPolicy = defaultApprovalPolicy
@@ -1526,6 +1527,7 @@ effectRuntimeConfig repo workdir requestId =
       , turnRuntimeOutputSchema = Nothing
       , turnRuntimeCollaborationMode = collaborationMode
       }
+  turnRuntime = mkTurnRuntime workdir
 
 actionIsTurnStartFor :: ThreadId -> PlannedAction -> Bool
 actionIsTurnStartFor threadId = \case
@@ -1565,6 +1567,15 @@ actionTurnCollaborationMode :: PlannedAction -> Maybe Value
 actionTurnCollaborationMode = \case
   PlannedAppServerRequest request ->
     lookupValue "collaborationMode" request.requestParams
+  _ ->
+    Nothing
+
+actionThreadCwd :: PlannedAction -> Maybe Text
+actionThreadCwd = \case
+  PlannedAppServerRequest request ->
+    case lookupValue "cwd" request.requestParams of
+      Just (String cwd) -> Just cwd
+      _ -> Nothing
   _ ->
     Nothing
 
@@ -1648,6 +1659,13 @@ prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
              , Just issueImplementationTurnOutputSchema
              , Just prReviewWorkerTurnOutputSchema
              , Just reviewerTurnOutputSchema
+             ]
+        && fmap actionThreadCwd actions
+          == [ Just "/tmp/state"
+             , Just "/tmp/work"
+             , Just "/tmp/work"
+             , Just "/tmp/work"
+             , Just "/tmp/work"
              ]
         && all (== Nothing) (map actionTurnCollaborationMode actions)
 
@@ -3064,8 +3082,10 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
           [ assert "automatic planning execute writes issue snapshot" (length snapshotWrites == 1)
           , assert "automatic planning execute starts after snapshot" (snapshotWriteBeforeTurnStart snapshotPath calls)
           , assert "automatic planning execute starts one planner thread" (length threadStarts == 1)
+          , assert "automatic planning execute starts planner thread in state dir" (all ((== Just "/tmp/work/.watcher") . actionThreadCwd . PlannedAppServerRequest) threadStarts)
           , assert "automatic planning execute emits start event" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "thread-started") (TurnId "turn-started")))
           , assert "automatic planning execute starts one turn" (length starts == 1)
+          , assert "automatic planning execute starts planner turn in state dir" (all ((== Just "/tmp/work/.watcher") . actionThreadCwd . PlannedAppServerRequest) starts)
           ]
       pure (and results)
     Left failure -> do
