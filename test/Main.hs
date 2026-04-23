@@ -76,6 +76,8 @@ import AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientDetectsSystemErrorThreadStatus
   , prop_appServerClientMatchesSuccessResponse
+  , prop_appServerClientMaterializationFallbackMarksSyntheticResponse
+  , prop_appServerClientMaterializationFallbackRetriesWithoutTurns
   , prop_appServerClientParsesNestedThreadReadTurns
   , prop_appServerClientParsesThreadReadTurns
   , prop_appServerClientParsesThreadStartThreadId
@@ -799,6 +801,22 @@ prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning config plannerThread 
         && somePhase replay.replayState == Initialized
     Left _ -> False
 
+prop_eventLogIssuePlanningRetryReentersPlanning :: PlannerConfig -> ThreadId -> TurnId -> BlockedReason -> Bool
+prop_eventLogIssuePlanningRetryReentersPlanning config plannerThread plannerTurn reason =
+  case replayEventLog
+    [ IssuePlanningInitialized config
+    , IssuePlanningTurnStarted plannerThread plannerTurn
+    , IssuePlanningTurnRetryRequested reason
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssuePlanning
+        && somePhase replay.replayState == Initialized
+        && case replay.replayEffects of
+          _initialEffects : _startEffects : retryEffects : _ ->
+            retryEffects == [SomeEffect SleepUntilNextPoll]
+          _ -> False
+    Left _ -> False
+
 prop_eventLogCannotCompletePlanningBeforeStart :: PlannerConfig -> Bool
 prop_eventLogCannotCompletePlanningBeforeStart config =
   case replayEventLog
@@ -820,6 +838,19 @@ prop_issuePlanningWatcherStartsAndCompletesTurn config threadId turnId =
                 && hasEffect StartPlannerTurnTag started.issuePlanningTickEffects
                 && issuePlanningTickEvent completed == IssuePlanningTurnCompleted
                 && somePhase completed.issuePlanningTickState == Complete
+            Left _ -> False
+        Left _ -> False
+
+prop_issuePlanningWatcherRetriesTurn :: PlannerConfig -> ThreadId -> TurnId -> BlockedReason -> Bool
+prop_issuePlanningWatcherRetriesTurn config threadId turnId reason =
+  let ready = SomeWatcherState (PlanningReady config)
+   in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
+        Right started ->
+          case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningTurnRetryRequested reason) of
+            Right retried ->
+              issuePlanningTickEvent retried == IssuePlanningTurnRetryRequested reason
+                && somePhase retried.issuePlanningTickState == Initialized
+                && issuePlanningTickEffects retried == [SomeEffect SleepUntilNextPoll]
             Left _ -> False
         Left _ -> False
 
@@ -972,6 +1003,7 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
         && plannerConfigFromState planningWaiting == Just config
         && plannerConfigFromState issueState == Nothing
         && issuePlanningCompletionEvent (IssuePlanningGraphUpdated graph)
+        && not (issuePlanningCompletionEvent (IssuePlanningTurnRetryRequested (BlockedReason "retry")) )
         && not (issuePlanningCompletionEvent IssuePlanningTurnCompleted)
         && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested [IssueCreationRequest "subissue" "details" Nothing]))
         && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
@@ -1027,6 +1059,7 @@ canonicalEventExamples =
   , IssuePlanningIssuesRequested [IssueCreationRequest "Subissue title" "Subissue body" Nothing]
   , IssuePlanningGraphUpdated planningGraph
   , IssuePlanningReadyIssuesFixed
+  , IssuePlanningTurnRetryRequested blockedReason
   , IssuePlanningTurnCompleted
   , PrReviewInitialized prConfig workerThread reviewerThread
   , PrReviewUnresolvedFound (ReviewThreadId "review-thread-1" :| [ReviewThreadId "review-thread-2"]) commit workerTurn
@@ -1622,11 +1655,11 @@ prop_turnOutputSchemasRequireStructuredDetails :: Bool
 prop_turnOutputSchemasRequireStructuredDetails =
   all
     schemaRequiresOutcomeReasonSummary
-    [ plannerTurnOutputSchema
-    , issuePlanTurnOutputSchema
+    [ issuePlanTurnOutputSchema
     , issueImplementationTurnOutputSchema
     , prReviewWorkerTurnOutputSchema
     ]
+    && schemaRequiredFields plannerTurnOutputSchema == ["outcome"]
     && "plan_markdown" `elem` schemaRequiredFields issuePlanTurnOutputSchema
 
 schemaRequiresOutcomeReasonSummary :: Value -> Bool
@@ -1649,6 +1682,7 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
       reviewerPrompt = prReviewThreadDeveloperInstructions "/tmp/work" "/tmp/state/pr29" prConfig "reviewer"
       issuePrompt = issueImplementerThreadDeveloperInstructions "/tmp/work" "/tmp/state/issue26" issueConfig
       plannerPrompt = issuePlanningThreadDeveloperInstructions "/tmp/state/planner" (RepoName "soulomoon/mlf2") [IssueNumber 12]
+      plannerTurnPrompt = plannerTurnInputForScope [IssueNumber 12]
       planModePrompt = issuePlanModeDeveloperInstructions "/tmp/work" "/tmp/state/issue26" issueConfig (PrNumber 31)
    in promptContainsAll
         workerPrompt
@@ -1686,9 +1720,18 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
         && promptContainsAll
           plannerPrompt
           [ "dedicated English-only issue planning coordinator"
-          , "only classify the listed root issues"
+          , "Return structured JSON outcomes only when asked by the watcher turn."
+          , "Treat existing issue implementer watchers as already owned work"
           , "concrete body with scope, acceptance criteria"
           , "Ignore repository-local legacy orchestrator prompts"
+          , "12"
+          ]
+        && promptContainsAll
+          plannerTurnPrompt
+          [ "Return only JSON with an outcome field"
+          , "For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work."
+          , "dependencies must use objects shaped as {\"issueNumber\": 27, \"dependsOn\": [26]}"
+          , "Target scope: only these root issues"
           , "12"
           ]
         && promptContainsAll
@@ -1709,7 +1752,6 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           [ workerPrompt
           , reviewerPrompt
           , issuePrompt
-          , plannerPrompt
           , planModePrompt
           , issuePlanTurnInput
           , issueImplementationTurnInput
@@ -3548,6 +3590,108 @@ automaticDaemonLoopActiveTurnSystemErrorBlocksWatcher = do
       putStrLn ("FAIL automatic active turn systemError: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+automaticPlanningSystemErrorRetriesWatcher :: IO Bool
+automaticPlanningSystemErrorRetriesWatcher = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "thread"
+                    .= object
+                      [ "status" .= object ["type" .= ("systemError" :: Text)]
+                      , "turns"
+                          .= [ object
+                                [ "id" .= ("planner-turn" :: Text)
+                                , "status" .= ("completed" :: Text)
+                                ]
+                             ]
+                      ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 142
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      expectedEvent = IssuePlanningTurnRetryRequested (BlockedReason "retrying planner turn after app-server systemError: systemError")
+      events =
+        [ IssuePlanningInitialized (PlannerConfig repo 1 [])
+        , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "planning systemError still reads active planner turn" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
+          , assert "planning systemError retries instead of blocking" ((daemonObservedEvent <$> tick.loopObservedTick) == Just expectedEvent)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL planning systemError retry: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
+automaticPlanningSystemErrorBlocksAfterRetryLimit :: IO Bool
+automaticPlanningSystemErrorBlocksAfterRetryLimit = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "thread"
+                    .= object
+                      [ "status" .= object ["type" .= ("systemError" :: Text)]
+                      , "turns"
+                          .= [ object
+                                [ "id" .= ("planner-turn-2" :: Text)
+                                , "status" .= ("completed" :: Text)
+                                ]
+                             ]
+                      ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 143
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      expectedReason = BlockedReason "app-server thread entered systemError: systemError"
+      events =
+        [ IssuePlanningInitialized (PlannerConfig repo 1 [])
+        , IssuePlanningTurnStarted (ThreadId "planner-thread-1") (TurnId "planner-turn-1")
+        , IssuePlanningTurnRetryRequested (BlockedReason "retrying planner turn after app-server systemError: systemError")
+        , IssuePlanningTurnStarted (ThreadId "planner-thread-2") (TurnId "planner-turn-2")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      results <-
+        sequence
+          [ assert "planning systemError still reads active planner turn after retry" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
+          , assert "planning systemError blocks after retry limit" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (WatcherBlocked expectedReason))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL planning systemError retry limit: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
 automaticDaemonLoopWritesPlanBeforePlanCompletedEvent :: IO Bool
 automaticDaemonLoopWritesPlanBeforePlanCompletedEvent = do
   (executor, getCalls) <-
@@ -3786,8 +3930,8 @@ automaticIssueMergeWaitsForIssueClose = do
       PlannedCommand GhIssueClose {} -> True
       _ -> False
 
-automaticStaleActiveTurnBlocksAfterThreeMisses :: IO Bool
-automaticStaleActiveTurnBlocksAfterThreeMisses = do
+automaticStalePlanningTurnRetriesAfterThreeMisses :: IO Bool
+automaticStalePlanningTurnRetriesAfterThreeMisses = do
   (executor, getCalls) <-
     fakeActionExecutorWithJsonStore
       defaultFakeCommand
@@ -3828,12 +3972,12 @@ automaticStaleActiveTurnBlocksAfterThreeMisses = do
       [ assert "first missing active turn idles" (eventOf first == Nothing)
       , assert "second missing active turn idles" (eventOf second == Nothing)
       , assert
-          "third missing active turn blocks"
+          "third missing planner turn retries"
           ( eventOf third
-              == Just (WatcherBlocked (BlockedReason "active turn not found after 3 consecutive checks: missing-turn"))
+              == Just (IssuePlanningTurnRetryRequested (BlockedReason "active turn not found after 3 consecutive checks: missing-turn"))
           )
       , assert "stale active turn marker is persisted" (not (null markerWrites))
-      , assert "stale active turn marker is cleared on block" (last markerWrites == Null)
+      , assert "stale active turn marker is cleared on retry" (last markerWrites == Null)
       ]
   pure (and results)
 
@@ -4246,8 +4390,10 @@ main = do
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningGraphWaitsForReadyIssues
       , quickCheckResult prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning
+      , quickCheckResult prop_eventLogIssuePlanningRetryReentersPlanning
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
       , quickCheckResult prop_issuePlanningWatcherStartsAndCompletesTurn
+      , quickCheckResult prop_issuePlanningWatcherRetriesTurn
       , quickCheckResult prop_issuePlanningWatcherCreatesIssuesBeforeReplanning
       , quickCheckResult prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits
       , quickCheckResult prop_issuePlanningWatcherBlocksOutOfScopeGraph
@@ -4311,6 +4457,8 @@ main = do
       , quickCheckResult prop_appServerClientSkipsNotifications
       , quickCheckResult prop_appServerClientRejectsMismatchedResponseIds
       , quickCheckResult prop_appServerClientSurfacesJsonRpcErrors
+      , quickCheckResult prop_appServerClientMaterializationFallbackRetriesWithoutTurns
+      , quickCheckResult prop_appServerClientMaterializationFallbackMarksSyntheticResponse
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_appServerClientParsesThreadReadTurns
       , quickCheckResult prop_appServerClientParsesTurnStartTurnId
@@ -4371,11 +4519,13 @@ main = do
   automaticExecutePrestartOk <- automaticDaemonLoopExecutePrestartsTurnOnce
   automaticActiveTurnOk <- automaticDaemonLoopActiveTurnCompletionObservesOutput
   automaticActiveTurnSystemErrorOk <- automaticDaemonLoopActiveTurnSystemErrorBlocksWatcher
+  automaticPlanningSystemErrorRetryOk <- automaticPlanningSystemErrorRetriesWatcher
+  automaticPlanningSystemErrorLimitOk <- automaticPlanningSystemErrorBlocksAfterRetryLimit
   automaticPlanWriteBeforeEventOk <- automaticDaemonLoopWritesPlanBeforePlanCompletedEvent
   automaticMissingPlanPreValidationOk <- automaticDaemonLoopEmptyPlanMarkdownBlocksBeforePlanCompleted
   automaticImplementationHandoffOk <- automaticDaemonLoopImplementationCompletionSequencesHandoff
   automaticIssueMergeClosedOk <- automaticIssueMergeWaitsForIssueClose
-  automaticStaleTurnOk <- automaticStaleActiveTurnBlocksAfterThreeMisses
+  automaticStaleTurnOk <- automaticStalePlanningTurnRetriesAfterThreeMisses
   automaticPrRetryOk <- automaticDaemonLoopRetriesPrCreateWhileWaitingForPr
   automaticUnlinkedPrOk <- automaticDaemonLoopBlocksUnlinkedBranchPr
   automaticNewPrBodyOk <- automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation
@@ -4421,6 +4571,8 @@ main = do
       && automaticExecutePrestartOk
       && automaticActiveTurnOk
       && automaticActiveTurnSystemErrorOk
+      && automaticPlanningSystemErrorRetryOk
+      && automaticPlanningSystemErrorLimitOk
       && automaticPlanWriteBeforeEventOk
       && automaticMissingPlanPreValidationOk
       && automaticImplementationHandoffOk

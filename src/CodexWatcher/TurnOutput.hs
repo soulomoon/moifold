@@ -55,7 +55,7 @@ plannerTurnOutputSchema =
   object
     [ "type" .= ("object" :: Text)
     , "additionalProperties" .= False
-    , "required" .= (["outcome", "reason", "summary"] :: [Text])
+    , "required" .= (["outcome"] :: [Text])
     , "properties"
         .= object
           [ "outcome"

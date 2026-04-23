@@ -38,6 +38,7 @@ data WatcherEvent
   | IssuePlanningGraphUpdated PlanningGraph
   | IssuePlanningReadyIssuesFixed
   | IssuePlanningScopeCompleted
+  | IssuePlanningTurnRetryRequested BlockedReason
   | IssuePlanningTurnCompleted
   | PrReviewInitialized PrConfig ThreadId ThreadId
   | PrReviewThreadsRefreshed ThreadId ThreadId
@@ -103,6 +104,8 @@ instance ToJSON WatcherEvent where
         eventType event
       IssuePlanningScopeCompleted ->
         eventType event
+      IssuePlanningTurnRetryRequested reason ->
+        eventType event <> ["reason" .= unBlockedReason reason]
       IssuePlanningTurnCompleted ->
         eventType event
       PrReviewInitialized config workerThreadId reviewerThreadId ->
@@ -213,6 +216,9 @@ instance FromJSON WatcherEvent where
         pure IssuePlanningReadyIssuesFixed
       "issue_planning_scope_completed" ->
         pure IssuePlanningScopeCompleted
+      "issue_planning_turn_retry_requested" ->
+        IssuePlanningTurnRetryRequested
+          <$> (BlockedReason <$> (objectValue .:? "reason" .!= "planner turn retry requested"))
       "issue_planning_turn_completed" ->
         pure IssuePlanningTurnCompleted
       "pr_review_initialized" ->
@@ -387,6 +393,8 @@ applyEvent (SomeWatcherState state@PlanningWaitingForReadyIssues {}) IssuePlanni
   fromDecision (step state PlannerReadyIssuesFixed)
 applyEvent (SomeWatcherState state@PlanningReady {}) IssuePlanningScopeCompleted =
   fromDecision (step state PlannerScopeCompleted)
+applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningTurnRetryRequested reason) =
+  fromDecision (step state (PlannerTurnRetryRequested reason))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
   fromDecision (step state PlannerTurnCompleted)
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
@@ -659,6 +667,7 @@ eventName = \case
   IssuePlanningGraphUpdated {} -> "issue_planning_graph_updated"
   IssuePlanningReadyIssuesFixed -> "issue_planning_ready_issues_fixed"
   IssuePlanningScopeCompleted -> "issue_planning_scope_completed"
+  IssuePlanningTurnRetryRequested {} -> "issue_planning_turn_retry_requested"
   IssuePlanningTurnCompleted -> "issue_planning_turn_completed"
   PrReviewInitialized {} -> "pr_review_initialized"
   PrReviewThreadsRefreshed {} -> "pr_review_threads_refreshed"

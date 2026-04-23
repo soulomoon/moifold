@@ -88,6 +88,12 @@ data StaleActiveTurnMarker = StaleActiveTurnMarker
   }
   deriving stock (Eq, Show, Generic)
 
+data ActiveTurnReadResult = ActiveTurnReadResult
+  { activeTurnReadTurn :: Maybe AppServerTurn
+  , activeTurnReadThreadSystemError :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+
 instance ToJSON StaleActiveTurnMarker where
   toJSON marker =
     object
@@ -339,13 +345,22 @@ observeActiveTurn executor config events replay activeTurn classify = do
   turnResult <- readActiveTurn executor config activeTurn
   case turnResult of
     Left failure -> pure (Left failure)
-    Right Nothing ->
-      handleMissingActiveTurn executor config events replay activeTurn
-    Right (Just turn) -> do
-      clearStaleActiveTurnMarker executor config
-      case classify turn of
-        Nothing -> idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
-        Just observation -> observeWithExecutor executor config events observation
+    Right readResult ->
+      case readResult.activeTurnReadThreadSystemError of
+        Just status -> do
+          clearStaleActiveTurnMarker executor config
+          case classify (systemErrorTurn activeTurn status) of
+            Nothing -> idle executor config replay ("active turn is not finished: " <> unTurnId (activeTurn.activeTurnId))
+            Just observation -> observeWithExecutor executor config events observation
+        Nothing ->
+          case readResult.activeTurnReadTurn of
+            Nothing ->
+              handleMissingActiveTurn executor config events replay activeTurn
+            Just turn -> do
+              clearStaleActiveTurnMarker executor config
+              case classify turn of
+                Nothing -> idle executor config replay ("active turn is not finished: " <> unTurnId (activeTurn.activeTurnId))
+                Just observation -> observeWithExecutor executor config events observation
 
 observeIssuePlanActiveTurn
   :: Monad m
@@ -359,17 +374,30 @@ observeIssuePlanActiveTurn executor config events replay activeTurn = do
   turnResult <- readActiveTurn executor config activeTurn
   case turnResult of
     Left failure -> pure (Left failure)
-    Right Nothing ->
-      handleMissingActiveTurn executor config events replay activeTurn
-    Right (Just turn) -> do
-      clearStaleActiveTurnMarker executor config
-      case classifyIssuePlanTurn turn of
+    Right readResult ->
+      case readResult.activeTurnReadThreadSystemError of
+        Just status -> do
+          clearStaleActiveTurnMarker executor config
+          case classifyIssuePlanTurn (systemErrorTurn activeTurn status) of
+            Nothing ->
+              idle executor config replay ("active turn is not finished: " <> unTurnId (activeTurn.activeTurnId))
+            Just (ObservedPlanCompleted planMarkdown maybeImplementationTurnId) ->
+              observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPlanCompleted planMarkdown maybeImplementationTurnId))
+            Just observation ->
+              observeWithExecutor executor config events (DaemonIssueImplementObservation observation)
         Nothing ->
-          idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
-        Just (ObservedPlanCompleted planMarkdown maybeImplementationTurnId) ->
-          observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPlanCompleted planMarkdown maybeImplementationTurnId))
-        Just observation ->
-          observeWithExecutor executor config events (DaemonIssueImplementObservation observation)
+          case readResult.activeTurnReadTurn of
+            Nothing ->
+              handleMissingActiveTurn executor config events replay activeTurn
+            Just turn -> do
+              clearStaleActiveTurnMarker executor config
+              case classifyIssuePlanTurn turn of
+                Nothing ->
+                  idle executor config replay ("active turn is not finished: " <> unTurnId (activeTurn.activeTurnId))
+                Just (ObservedPlanCompleted planMarkdown maybeImplementationTurnId) ->
+                  observeWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPlanCompleted planMarkdown maybeImplementationTurnId))
+                Just observation ->
+                  observeWithExecutor executor config events (DaemonIssueImplementObservation observation)
 
 observePlanningActiveTurn
   :: Monad m
@@ -384,16 +412,24 @@ observePlanningActiveTurn executor config events replay plannerConfig activeTurn
   turnResult <- readActiveTurn executor config activeTurn
   case turnResult of
     Left failure -> pure (Left failure)
-    Right Nothing ->
-      handleMissingActiveTurn executor config events replay activeTurn
-    Right (Just turn) -> do
-      clearStaleActiveTurnMarker executor config
-      case classifyIssuePlanningTurn turn of
-        Nothing ->
-          idle executor config replay ("active turn is not finished: " <> unTurnId activeTurn.activeTurnId)
-        Just observation -> do
-          normalized <- normalizePlanningObservation executor config plannerConfig observation
-          observeWithExecutor executor config events (DaemonIssuePlanningObservation normalized)
+    Right readResult ->
+      case readResult.activeTurnReadThreadSystemError of
+        Just status
+          | Just observation <- planningSystemErrorObservation events status readResult.activeTurnReadTurn -> do
+              clearStaleActiveTurnMarker executor config
+              observeWithExecutor executor config events (DaemonIssuePlanningObservation observation)
+        _ ->
+          case readResult.activeTurnReadTurn of
+            Nothing ->
+              handleMissingActiveTurn executor config events replay activeTurn
+            Just turn -> do
+              clearStaleActiveTurnMarker executor config
+              case classifyIssuePlanningTurn turn of
+                Nothing ->
+                  idle executor config replay ("active turn is not finished: " <> unTurnId (activeTurn.activeTurnId))
+                Just observation -> do
+                  normalized <- normalizePlanningObservation executor config plannerConfig observation
+                  observeWithExecutor executor config events (DaemonIssuePlanningObservation normalized)
 
 normalizePlanningObservation :: Monad m => ActionExecutor m -> DaemonLoopConfig -> PlannerConfig -> IssuePlanningObservation -> m IssuePlanningObservation
 normalizePlanningObservation executor config plannerConfig = \case
@@ -594,21 +630,24 @@ handleMissingActiveTurn executor config events replay activeTurn =
             Log.Warn
             "stale_active_turn_seen"
             "active turn was not found"
-            [ "turnId" .= unTurnId activeTurn.activeTurnId
-            , "threadId" .= unThreadId activeTurn.activeThreadId
+            [ "turnId" .= unTurnId (activeTurn.activeTurnId)
+            , "threadId" .= unThreadId (activeTurn.activeThreadId)
             , "count" .= marker.staleMarkerCount
             ]
         )
       if marker.staleMarkerCount >= staleActiveTurnThreshold
         then do
           clearStaleActiveTurnMarker executor config
-          case activeTurnBlockedObservation replay.replayState activeTurn of
+          case activeTurnBlockedObservation events replay.replayState activeTurn of
             Just observation -> observeWithExecutor executor config events observation
             Nothing -> idle executor config replay (missingActiveTurnReason activeTurn)
         else idle executor config replay (missingActiveTurnReason activeTurn)
 
 staleActiveTurnThreshold :: Int
 staleActiveTurnThreshold = 3
+
+maxPlanningTurnRetries :: Int
+maxPlanningTurnRetries = 1
 
 updateStaleActiveTurnMarker
   :: Monad m
@@ -633,8 +672,8 @@ updateStaleActiveTurnMarker executor config replay activeTurn = do
       marker =
         StaleActiveTurnMarker
           { staleMarkerDomain = Text.pack (show (someDomain replay.replayState))
-          , staleMarkerThreadId = unThreadId activeTurn.activeThreadId
-          , staleMarkerTurnId = unTurnId activeTurn.activeTurnId
+          , staleMarkerThreadId = unThreadId (activeTurn.activeThreadId)
+          , staleMarkerTurnId = unTurnId (activeTurn.activeTurnId)
           , staleMarkerStateFingerprint = fingerprint
           , staleMarkerReason = reason
           , staleMarkerFirstSeenAt = firstSeenAt
@@ -646,12 +685,12 @@ updateStaleActiveTurnMarker executor config replay activeTurn = do
 
 missingActiveTurnReason :: ActiveTurn -> Text
 missingActiveTurnReason activeTurn =
-  "active turn not found: " <> unTurnId activeTurn.activeTurnId
+  "active turn not found: " <> unTurnId (activeTurn.activeTurnId)
 
 markerMatchesActiveTurn :: StaleActiveTurnMarker -> (ActiveTurn, Text) -> Bool
 markerMatchesActiveTurn marker (activeTurn, fingerprint) =
-  marker.staleMarkerThreadId == unThreadId activeTurn.activeThreadId
-    && marker.staleMarkerTurnId == unTurnId activeTurn.activeTurnId
+  marker.staleMarkerThreadId == unThreadId (activeTurn.activeThreadId)
+    && marker.staleMarkerTurnId == unTurnId (activeTurn.activeTurnId)
     && marker.staleMarkerStateFingerprint == fingerprint
 
 readStaleActiveTurnMarker :: Monad m => ActionExecutor m -> DaemonLoopConfig -> m (Maybe StaleActiveTurnMarker)
@@ -681,16 +720,22 @@ activeTurnStateFingerprint state activeTurn =
     ":"
     [ Text.pack (show (someDomain state))
     , Text.pack (show (somePhase state))
-    , unThreadId activeTurn.activeThreadId
-    , unTurnId activeTurn.activeTurnId
+    , unThreadId (activeTurn.activeThreadId)
+    , unTurnId (activeTurn.activeTurnId)
     ]
 
-activeTurnBlockedObservation :: SomeWatcherState -> ActiveTurn -> Maybe DaemonObservation
-activeTurnBlockedObservation state activeTurn =
-  let reason = BlockedReason ("active turn not found after 3 consecutive checks: " <> unTurnId activeTurn.activeTurnId)
+activeTurnBlockedObservation :: [WatcherEvent] -> SomeWatcherState -> ActiveTurn -> Maybe DaemonObservation
+activeTurnBlockedObservation events state activeTurn =
+  let reason = BlockedReason ("active turn not found after 3 consecutive checks: " <> unTurnId (activeTurn.activeTurnId))
    in case state of
         SomeWatcherState PlanningTurnActive {} ->
-          Just (DaemonIssuePlanningObservation (ObservedPlanningBlocked reason))
+          Just
+            ( DaemonIssuePlanningObservation
+                ( if planningRetryAvailable events
+                    then ObservedPlanningTurnRetryRequested reason
+                    else ObservedPlanningBlocked reason
+                )
+            )
         SomeWatcherState IssueInPlanMode {} ->
           Just (DaemonIssueImplementObservation (ObservedIssueImplementBlocked reason))
         SomeWatcherState IssueImplementing {} ->
@@ -701,6 +746,58 @@ activeTurnBlockedObservation state activeTurn =
           Just (DaemonPrReviewObservation (ObservedPrReviewBlocked reason))
         _ ->
           Nothing
+
+planningSystemErrorObservation :: [WatcherEvent] -> Text -> Maybe AppServerTurn -> Maybe IssuePlanningObservation
+planningSystemErrorObservation events status maybeTurn =
+  case maybeTurn of
+    Nothing ->
+      Just (planningSystemErrorRecoveryObservation events status)
+    Just turn ->
+      case classifyIssuePlanningTurn turn of
+        Nothing ->
+          Just (planningSystemErrorRecoveryObservation events status)
+        Just observation
+          | retryablePlanningSystemErrorObservation observation ->
+              Just (planningSystemErrorRecoveryObservation events status)
+          | otherwise ->
+              Nothing
+
+planningSystemErrorRecoveryObservation :: [WatcherEvent] -> Text -> IssuePlanningObservation
+planningSystemErrorRecoveryObservation events status
+  | planningRetryAvailable events =
+      ObservedPlanningTurnRetryRequested (BlockedReason ("retrying planner turn after app-server systemError: " <> status))
+  | otherwise =
+      ObservedPlanningBlocked (BlockedReason ("app-server thread entered systemError: " <> status))
+
+retryablePlanningSystemErrorObservation :: IssuePlanningObservation -> Bool
+retryablePlanningSystemErrorObservation = \case
+  ObservedPlanningBlocked (BlockedReason reason) ->
+    normalizedPlanningRetryReason reason `elem` planningSystemErrorRetryReasons
+  _ ->
+    False
+
+planningRetryAvailable :: [WatcherEvent] -> Bool
+planningRetryAvailable events =
+  planningRetryCount events < maxPlanningTurnRetries
+
+planningRetryCount :: [WatcherEvent] -> Int
+planningRetryCount =
+  go 0 . reverse
+ where
+  go count [] = count
+  go count (IssuePlanningTurnStarted {} : rest) = go count rest
+  go count (IssuePlanningTurnRetryRequested {} : rest) = go (count + 1) rest
+  go count (_ : _) = count
+
+planningSystemErrorRetryReasons :: [Text]
+planningSystemErrorRetryReasons =
+  [ "planning turn completed without output"
+  , "planning turn completed without structured outcome"
+  ]
+
+normalizedPlanningRetryReason :: Text -> Text
+normalizedPlanningRetryReason =
+  Text.toLower . Text.strip
 
 observeReviewThreads
   :: Monad m
@@ -1150,25 +1247,26 @@ kindText = \case
   StartIssueImplementationWorkerTurnKind -> "issue-implementation-turn"
   StartReviewerTurnKind {} -> "reviewer-turn"
 
-readActiveTurn :: Monad m => ActionExecutor m -> DaemonLoopConfig -> ActiveTurn -> m (Either DaemonLoopFailure (Maybe AppServerTurn))
+readActiveTurn :: Monad m => ActionExecutor m -> DaemonLoopConfig -> ActiveTurn -> m (Either DaemonLoopFailure ActiveTurnReadResult)
 readActiveTurn executor config activeTurn = do
   response <-
     executor.actionAppServer.appServerSendRequest
       (threadReadRequest config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId activeTurn.activeThreadId True)
-  pure case threadSystemError response of
-    Just status ->
+  pure case parseThreadReadTurns response of
+    Left failure -> Left (DaemonLoopAppServerFailure failure)
+    Right turns ->
       Right
-        ( Just
-            ( AppServerTurn
-                activeTurn.activeTurnId
-                "failed"
-                (Just ("app-server thread entered systemError: " <> status))
-            )
-        )
-    Nothing ->
-      case parseThreadReadTurns response of
-        Left failure -> Left (DaemonLoopAppServerFailure failure)
-        Right turns -> Right (latestTurnById activeTurn.activeTurnId turns)
+        ActiveTurnReadResult
+          { activeTurnReadTurn = latestTurnById activeTurn.activeTurnId turns
+          , activeTurnReadThreadSystemError = threadSystemError response
+          }
+
+systemErrorTurn :: ActiveTurn -> Text -> AppServerTurn
+systemErrorTurn activeTurn status =
+  AppServerTurn
+    activeTurn.activeTurnId
+    "failed"
+    (Just ("app-server thread entered systemError: " <> status))
 
 observeWithExecutor
   :: Monad m

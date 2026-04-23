@@ -5,6 +5,8 @@ module AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientDetectsSystemErrorThreadStatus
   , prop_appServerClientMatchesSuccessResponse
+  , prop_appServerClientMaterializationFallbackMarksSyntheticResponse
+  , prop_appServerClientMaterializationFallbackRetriesWithoutTurns
   , prop_appServerClientParsesNestedThreadReadTurns
   , prop_appServerClientParsesThreadReadTurns
   , prop_appServerClientParsesThreadStartThreadId
@@ -162,6 +164,24 @@ prop_appServerClientSurfacesJsonRpcErrors =
         Left (AppServerJsonRpcFailure 84 errorValue) ->
           jsonRpcErrorCode errorValue == -32000 && jsonRpcErrorMessage errorValue == "boom"
         _ -> False
+
+prop_appServerClientMaterializationFallbackRetriesWithoutTurns :: ThreadId -> Bool
+prop_appServerClientMaterializationFallbackRetriesWithoutTurns threadId =
+  let request = threadReadRequest 86 threadId True
+      failure =
+        AppServerJsonRpcFailure
+          86
+          (JsonRpcError (-32000) "thread is not materialized yet; includeTurns is unavailable before first user message" Nothing)
+   in threadReadFallbackRequest request failure == Just (threadReadRequest 86 threadId False)
+
+prop_appServerClientMaterializationFallbackMarksSyntheticResponse :: Bool
+prop_appServerClientMaterializationFallbackMarksSyntheticResponse =
+  threadReadMaterializationPending
+    ( object
+        [ "thread" .= object ["id" .= ("thread-created" :: Text)]
+        , "_codexWatcherMaterializationPending" .= True
+        ]
+    )
 
 prop_appServerClientRejectsUnsupportedJsonRpcVersion :: Bool
 prop_appServerClientRejectsUnsupportedJsonRpcVersion =

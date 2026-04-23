@@ -26,6 +26,7 @@ import CodexWatcher.AppServerClient
   , parseTurnStartTurnId
   , sendOneAppServerRequest
   , startThreadWithEndpoint
+  , threadReadMaterializationPending
   , threadSystemError
   )
 import CodexWatcher.AppServerProtocol
@@ -309,6 +310,14 @@ checkActiveTurn config role activeTurn = do
               pure (Just (repairProblem ("guard cannot parse " <> role <> " app-server turns") [formatAppServerClientFailure failure]))
             Right turns ->
               case latestTurnById activeTurn.activeTurnId turns of
+                Nothing
+                  | threadReadMaterializationPending value ->
+                      staleProblem
+                        config
+                        ("active " <> role <> " turn is still materializing")
+                        [ "turn: " <> unTurnId activeTurn.activeTurnId
+                        , "thread: " <> unThreadId activeTurn.activeThreadId
+                        ]
                 Nothing ->
                   pure (Just (repairProblem ("active " <> role <> " turn is missing from app-server thread") ["turn: " <> unTurnId activeTurn.activeTurnId, "thread: " <> unThreadId activeTurn.activeThreadId]))
                 Just turn ->

@@ -37,6 +37,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   PlannerScopeCompleted :: Event 'IssuePlanning 'Initialized
   PlannerRequestedIssueCreation :: [IssueCreationRequest] -> Event 'IssuePlanning 'PlanMode
   PlannerUpdatedGraph :: PlanningGraph -> Event 'IssuePlanning 'PlanMode
+  PlannerTurnRetryRequested :: BlockedReason -> Event 'IssuePlanning 'PlanMode
   PlannerTurnCompleted :: Event 'IssuePlanning 'PlanMode
 
   StartReadyIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'PlanMode
@@ -92,6 +93,10 @@ step (PlanningReady _config) PlannerScopeCompleted =
   Decision
     (CompleteState PlanningComplete)
     [SomeEffect StopDaemon]
+step (PlanningTurnActive config _activeTurn) (PlannerTurnRetryRequested _reason) =
+  Decision
+    (PlanningReady config)
+    [SomeEffect SleepUntilNextPoll]
 step (PlanningTurnActive _config _activeTurn) PlannerTurnCompleted =
   Decision
     (CompleteState PlanningComplete)

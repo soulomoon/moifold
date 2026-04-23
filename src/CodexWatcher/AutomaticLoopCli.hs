@@ -526,6 +526,7 @@ markPlanningReadyIssuesFixed executionMode cli planningState =
 resolveFanoutReadyIssues :: WatcherEvent -> IO [IssueNumber]
 resolveFanoutReadyIssues = \case
   IssuePlanningGraphUpdated graph -> pure graph.planningReadyIssues
+  IssuePlanningTurnRetryRequested {} -> pure []
   IssuePlanningTurnCompleted -> pure []
   _ -> pure []
 

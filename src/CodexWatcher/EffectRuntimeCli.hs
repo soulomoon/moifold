@@ -49,9 +49,34 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
 
 plannerTurnInputForScope :: [IssueNumber] -> Text.Text
 plannerTurnInputForScope [] =
-  plannerTurnInput
+  plannerStructuredInstructions
 plannerTurnInputForScope scopeIssues =
-  plannerTurnInput
-    <> " Target scope: only these root issues and their existing or newly created GitHub sub-issues are in scope: "
+  plannerStructuredInstructions <> plannerScopeInstructions scopeIssues
+
+plannerStructuredInstructions :: Text.Text
+plannerStructuredInstructions =
+  Text.unlines
+    [ "Return only JSON with an outcome field. Plain prose completion is not accepted."
+    , "Use outcome=blocked with a reason when you cannot proceed safely."
+    , "Use outcome=incomplete with a reason when follow-up is required."
+    , "Use outcome=complete with a summary when the turn is done."
+    , ""
+    , "For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work."
+    , "Use issues_to_create only for independent top-level issues."
+    , "Use subissues_to_create for GitHub sub-issues, and every subissues_to_create item must include title, a concrete body, and parentIssueNumber."
+    , "A sub-issue body must describe scope, acceptance criteria, dependencies/blockers, and how it stays compatible with sibling sub-issues."
+    , "When a parent issue already has sub-issues, new sub-issues must be compatible with the existing set: do not duplicate titles/scopes, do not create overlapping work, and preserve dependency boundaries between siblings."
+    , "After issue creation the watcher will re-enter planning."
+    , "When no more issues need to be created, return ready_issues for issues safe to implement now, blocked_issues for issues that must wait, and dependencies for issue ordering."
+    , "ready_issues must be an array of issue numbers, not objects."
+    , "blocked_issues must use objects shaped as {\"issueNumber\": 27, \"blockedBy\": [26], \"reason\": \"...\"}."
+    , "dependencies must use objects shaped as {\"issueNumber\": 27, \"dependsOn\": [26]}."
+    , "Only issues listed in ready_issues can be started by fanout; do not list an issue as ready if another open issue must be completed first."
+    , "Use outcome=complete only when the issue graph is stable and ready for dependency-aware implementer fanout."
+    ]
+
+plannerScopeInstructions :: [IssueNumber] -> Text.Text
+plannerScopeInstructions scopeIssues =
+  " Target scope: only these root issues and their existing or newly created GitHub sub-issues are in scope: "
     <> issueNumbersText scopeIssues
-    <> ". Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees. If a scoped root issue needs decomposition, propose concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only scoped root issues and descendants that belong to these issue trees."
+    <> ". Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees. If a scoped root issue needs decomposition, create concrete GitHub sub-issues under that root, then let the watcher re-enter planning. When returning ready_issues, blocked_issues, and dependencies, include only scoped root issues and descendants that belong to these issue trees."

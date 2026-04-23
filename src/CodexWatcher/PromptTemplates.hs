@@ -83,8 +83,8 @@ plannerTemplate =
         , "Respect target scope exactly when scope instructions are present."
         ]
         [ "{{structuredInstructions}}"
-        , "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
-        , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
+        , "For fanout decisions, return one JSON object with outcome=complete plus the dependency graph fields needed for the watcher to continue; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
+        , "Minimal {\"outcome\":\"complete\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
         , "Do not return minimal complete JSON while any open scoped work or pending dependency decision remains."
         , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]} and should include only semantic dependencies between scoped open issues."
         , "Do not omit an open scoped issue from dependencies just because it has no blockers; use an empty dependsOn list."
@@ -324,29 +324,17 @@ issuePlanningThreadDeveloperTemplate :: PromptTemplate
 issuePlanningThreadDeveloperTemplate =
   PromptTemplate
     "issue-planning-thread-developer.md"
-    ( agentPrincipleFrame
-        "You are the dedicated English-only issue planning coordinator for {{repoFullName}}."
-        "Classify issues, identify dependencies, propose subissues, and select safe parallel implementation work."
-        [ "Read the issue snapshot from {{issueSnapshotPath}}."
-        , "Do not edit source files, commit, push, create PRs, create issues directly, or start watchers."
-        , "The watcher script applies your JSON decisions."
-        , "If target scope is configured, only classify the listed root issues and their existing or newly created GitHub sub-issues."
-        , "Ignore repository-local legacy orchestrator prompts such as `.codex/agents/orchestrator-*` and `docs/prompts/*improving-loop*` unless the watcher prompt explicitly asks you to use them."
-        , "Use English for every message in this thread."
-        ]
-        [ "Return structured decisions only through the watcher turn output."
+    ( Text.unlines
+        [ "You are the dedicated English-only issue planning coordinator for {{repoFullName}}."
+        , "Read the issue snapshot from {{issueSnapshotPath}}."
+        , "Use {{plannerModel}}/{{plannerEffort}} for planning turns."
+        , "Return structured JSON outcomes only when asked by the watcher turn."
         , "Treat existing issue implementer watchers as already owned work; do not select those issues again."
         , "When creating sub-issues, include a concrete body with scope, acceptance criteria, dependencies/blockers, and compatibility with sibling sub-issues."
+        , "Do not edit source files, commit, push, create PRs directly, or start watchers."
+        , "Ignore repository-local legacy orchestrator prompts such as `.codex/agents/orchestrator-*` and `docs/prompts/*improving-loop*` unless the watcher prompt explicitly asks you to use them."
+        , "{{scopeInstructions}}"
         ]
-        <> Text.unlines
-          [ ""
-          , "Planning guidance:"
-          , "- Use {{plannerModel}}/{{plannerEffort}} for planning turns."
-          , "- Decide priority, dependencies, and whether issues should be split; the watcher computes which issues can be implemented in parallel now."
-          , "- Prefer small independent implementation units. If an issue is too broad, propose concrete subissues instead of starting implementation for the broad issue."
-          , "- After proposing issue creation, expect the watcher to create GitHub issues and re-enter planning before fanout."
-          , "{{scopeInstructions}}"
-          ]
     )
 
 issuePlanModeDeveloperTemplate :: PromptTemplate

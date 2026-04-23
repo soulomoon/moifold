@@ -30,11 +30,13 @@ module CodexWatcher.AppServerClient
   , sendOneAppServerRequest
   , startThreadWithEndpoint
   , startThreadWithInterpreter
+  , threadReadFallbackRequest
+  , threadReadMaterializationPending
   , threadSystemError
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
-import CodexWatcher.AppServerProtocol (AppServerRequest (..), ThreadStartOptions, initializeRequest, initializedNotification, threadStartRequest)
+import CodexWatcher.AppServerProtocol (AppServerRequest (..), ThreadStartOptions, initializeRequest, initializedNotification, threadReadRequest, threadStartRequest)
 import CodexWatcher.JsonPath (lookupPath, renderedTextAtPath)
 import CodexWatcher.Types (ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
@@ -45,9 +47,11 @@ import Data.Aeson
   , Value (..)
   , eitherDecode'
   , encode
+  , object
   , withObject
   , (.:)
   , (.:?)
+  , (.=)
   , (.!=)
   )
 import Data.Aeson.Types (Parser, parseEither)
@@ -147,6 +151,21 @@ connectAppServer endpoint action =
 
 sendOneAppServerRequest :: AppServerEndpoint -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
 sendOneAppServerRequest endpoint options request =
+  sendRequestWithFallback endpoint options request
+
+sendRequestWithFallback :: AppServerEndpoint -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
+sendRequestWithFallback endpoint options request = do
+  initial <- sendOneAppServerRequestOnce endpoint options request
+  case initial of
+    Left failure
+      | Just fallbackRequest <- threadReadFallbackRequest request failure -> do
+          fallbackResult <- sendOneAppServerRequestOnce endpoint options fallbackRequest
+          pure (markThreadReadMaterializationPending <$> fallbackResult)
+    _ ->
+      pure initial
+
+sendOneAppServerRequestOnce :: AppServerEndpoint -> AppServerClientOptions -> AppServerRequest -> IO (Either AppServerClientFailure Value)
+sendOneAppServerRequestOnce endpoint options request =
   transportTry (connectAppServer endpoint \connection -> sendAppServerRequestSession connection options (appServerRequestSession request)) >>= \case
     Left message -> pure (Left (AppServerTransportFailure message))
     Right result -> pure result
@@ -311,6 +330,21 @@ threadSystemError value =
         Just "system_error" -> status
         _ -> Nothing
 
+threadReadFallbackRequest :: AppServerRequest -> AppServerClientFailure -> Maybe AppServerRequest
+threadReadFallbackRequest request = \case
+  AppServerJsonRpcFailure _ errorValue
+    | request.requestMethod == "thread/read"
+    , lookupPath ["includeTurns"] request.requestParams == Just (Bool True)
+    , jsonRpcErrorRequiresThreadReadFallback errorValue
+    , Just threadIdText <- renderedTextAtPath ["threadId"] request.requestParams ->
+        Just (threadReadRequest request.requestId (ThreadId threadIdText) False)
+  _ ->
+    Nothing
+
+threadReadMaterializationPending :: Value -> Bool
+threadReadMaterializationPending value =
+  lookupPath [materializationPendingMarkerField] value == Just (Bool True)
+
 latestTurnById :: TurnId -> [AppServerTurn] -> Maybe AppServerTurn
 latestTurnById turnId =
   foldl
@@ -336,6 +370,26 @@ formatAppServerClientFailure = \case
       <> Text.pack (show responseId)
       <> ": "
       <> errorValue.jsonRpcErrorMessage
+
+materializationPendingMarkerField :: Text
+materializationPendingMarkerField =
+  "_codexWatcherMaterializationPending"
+
+markThreadReadMaterializationPending :: Value -> Value
+markThreadReadMaterializationPending = \case
+  Object objectValue ->
+    Object (KeyMap.insert (Key.fromText materializationPendingMarkerField) (Bool True) objectValue)
+  value ->
+    object
+      [ "value" .= value
+      , Key.fromText materializationPendingMarkerField .= True
+      ]
+
+jsonRpcErrorRequiresThreadReadFallback :: JsonRpcError -> Bool
+jsonRpcErrorRequiresThreadReadFallback errorValue =
+  let normalizedMessage = Text.toLower errorValue.jsonRpcErrorMessage
+   in "not materialized yet" `Text.isInfixOf` normalizedMessage
+        || "includeturns is unavailable before first user message" `Text.isInfixOf` normalizedMessage
 
 validateJsonRpcVersion :: Object -> Parser ()
 validateJsonRpcVersion objectValue = do
