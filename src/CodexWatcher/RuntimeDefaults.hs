@@ -4,7 +4,6 @@ module CodexWatcher.RuntimeDefaults
   ( defaultApprovalPolicy
   , defaultEffort
   , defaultModel
-  , defaultPlanCollaborationMode
   , defaultSandboxPolicy
   , defaultThreadStartOptions
   , defaultTurnStartOptions
@@ -13,11 +12,9 @@ module CodexWatcher.RuntimeDefaults
 import CodexWatcher.AppServerProtocol
   ( ThreadStartOptions (..)
   , TurnStartOptions (..)
-  , planCollaborationMode
   )
 import CodexWatcher.Types (ThreadId)
 import Data.Text (Text)
-import Data.Aeson (Value)
 
 defaultModel :: Text
 defaultModel = "gpt-5.4"
@@ -54,7 +51,3 @@ defaultTurnStartOptions threadId cwd input =
     , turnOutputSchema = Nothing
     , turnCollaborationMode = Nothing
     }
-
-defaultPlanCollaborationMode :: Text -> Value
-defaultPlanCollaborationMode developerInstructions =
-  planCollaborationMode developerInstructions defaultModel defaultEffort

@@ -1615,6 +1615,7 @@ prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
              , Just prReviewWorkerTurnOutputSchema
              , Just reviewerTurnOutputSchema
              ]
+        && all (== Nothing) (map actionTurnCollaborationMode actions)
 
 prop_turnOutputSchemasRequireStructuredDetails :: Bool
 prop_turnOutputSchemasRequireStructuredDetails =

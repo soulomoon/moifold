@@ -28,11 +28,7 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
     , effectRuntimeNextRequestId = 1
     , effectRuntimePlannerThreadInstructions = issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues
     , effectRuntimePlannerTurn =
-        (turnConfig (plannerTurnInputForScope scopeIssues) (Just plannerTurnOutputSchema))
-          { turnRuntimeCollaborationMode =
-              Just
-                (defaultPlanCollaborationMode (issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues))
-          }
+        turnConfig (plannerTurnInputForScope scopeIssues) (Just plannerTurnOutputSchema)
     , effectRuntimeWorkerTurn = turnConfig prReviewWorkerTurnInput (Just prReviewWorkerTurnOutputSchema)
     , effectRuntimeIssuePlanTurn = turnConfig issuePlanTurnInput (Just issuePlanTurnOutputSchema)
     , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput (Just issueImplementationTurnOutputSchema)

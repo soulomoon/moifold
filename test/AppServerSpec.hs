@@ -69,7 +69,7 @@ prop_appServerThreadStartKeepsNodeNullFields =
 
 prop_appServerTurnStartPlanModeEncodesCollaborationMode :: ThreadId -> Bool
 prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
-  let collaborationMode = defaultPlanCollaborationMode "plan only"
+  let collaborationMode = planCollaborationMode "plan only" defaultModel defaultEffort
       request =
         turnStartRequest
           3
