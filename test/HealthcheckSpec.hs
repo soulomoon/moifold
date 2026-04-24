@@ -49,15 +49,15 @@ prop_healthcheckDaemonRequiredStatuses =
 
 prop_healthcheckSingletonDomains :: Bool
 prop_healthcheckSingletonDomains =
-  expectedDomain SIssuePlanningKind == IssuePlanning
-    && expectedDomain SIssueImplementKind == IssueImplement
-    && expectedDomain SPrReviewKind == PrReview
+  watcherDomainValue SIssuePlanning == IssuePlanning
+    && watcherDomainValue SIssueImplement == IssueImplement
+    && watcherDomainValue SPrReview == PrReview
 
 prop_healthcheckSummaryJsonKeepsKindField :: Bool
 prop_healthcheckSummaryJsonKeepsKindField =
-  kindField (SomeWatcherSummary SIssuePlanningKind sampleSummary) == Just (String "issue-planning")
-    && kindField (SomeWatcherSummary SIssueImplementKind sampleSummary) == Just (String "issue-implement")
-    && kindField (SomeWatcherSummary SPrReviewKind sampleSummary) == Just (String "pr-review")
+  kindField (SomeWatcherSummary SIssuePlanning sampleSummary) == Just (String "issue-planning")
+    && kindField (SomeWatcherSummary SIssueImplement sampleSummary) == Just (String "issue-implement")
+    && kindField (SomeWatcherSummary SPrReview sampleSummary) == Just (String "pr-review")
 
 prop_healthcheckTypedAnalyzerDispatch :: Bool
 prop_healthcheckTypedAnalyzerDispatch =
@@ -69,16 +69,16 @@ prop_healthcheckTypedAnalyzerDispatch =
     && containsMessage "reviewWhenClean is enabled but reviewerThreadId is missing" reviewProblems
  where
   planningProblems =
-    analyzeItem (SomeWatcherSummary SIssuePlanningKind planningSummary)
+    analyzeItem (SomeWatcherSummary SIssuePlanning planningSummary)
   implementProblems =
-    analyzeItem (SomeWatcherSummary SIssueImplementKind implementSummary)
+    analyzeItem (SomeWatcherSummary SIssueImplement implementSummary)
   reviewProblems =
-    analyzeItem (SomeWatcherSummary SPrReviewKind reviewSummary)
-  planningSummary :: WatcherSummary 'IssuePlanningKind
+    analyzeItem (SomeWatcherSummary SPrReview reviewSummary)
+  planningSummary :: WatcherSummary 'IssuePlanning
   planningSummary = sampleSummaryWith Nothing (Just "reviewer-thread") (Just False) (Just 0)
-  implementSummary :: WatcherSummary 'IssueImplementKind
+  implementSummary :: WatcherSummary 'IssueImplement
   implementSummary = sampleSummaryWith Nothing Nothing (Just False) (Just 8)
-  reviewSummary :: WatcherSummary 'PrReviewKind
+  reviewSummary :: WatcherSummary 'PrReview
   reviewSummary = sampleSummaryWith Nothing Nothing (Just True) (Just 8)
 
 kindField :: SomeWatcherSummary -> Maybe Value

@@ -106,6 +106,12 @@ data Domain
   | PrReview
   deriving stock (Eq, Show)
 
+instance ToJSON Domain where
+  toJSON = \case
+    IssuePlanning -> "issue-planning"
+    IssueImplement -> "issue-implement"
+    PrReview -> "pr-review"
+
 type KnownDomain :: Domain -> Constraint
 type KnownDomain domain = SingI domain
 

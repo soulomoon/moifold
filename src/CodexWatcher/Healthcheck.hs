@@ -88,22 +88,22 @@ loadInventory options = do
   let root = if null options.stateRoot then defaultStateRoot else options.stateRoot
   concat
     <$> sequence
-      [ loadSomeConfigs SIssuePlanningKind root options.repoFilter
-      , loadSomeConfigs SIssueImplementKind root options.repoFilter
-      , loadSomeConfigs SPrReviewKind root options.repoFilter
+      [ loadSomeConfigs SIssuePlanning root options.repoFilter
+      , loadSomeConfigs SIssueImplement root options.repoFilter
+      , loadSomeConfigs SPrReview root options.repoFilter
       ]
 
-loadSomeConfigs :: SWatcherKind kind -> FilePath -> Maybe Text -> IO [SomeConfigItem]
+loadSomeConfigs :: SDomain kind -> FilePath -> Maybe Text -> IO [SomeConfigItem]
 loadSomeConfigs kind stateRoot repoFilter' =
-  fmap (SomeConfigItem kind) <$> loadConfigs kind (stateRoot </> watcherKindStateSubdir kind) repoFilter'
+  fmap (SomeConfigItem kind) <$> loadConfigs kind (stateRoot </> watcherDomainStateSubdir kind) repoFilter'
 
-watcherKindStateSubdir :: SWatcherKind kind -> FilePath
-watcherKindStateSubdir = \case
-  SIssuePlanningKind -> "issue-planners"
-  SIssueImplementKind -> "issue-implementers"
-  SPrReviewKind -> "pr-review-watchers"
+watcherDomainStateSubdir :: SDomain kind -> FilePath
+watcherDomainStateSubdir = \case
+  SIssuePlanning -> "issue-planners"
+  SIssueImplement -> "issue-implementers"
+  SPrReview -> "pr-review-watchers"
 
-loadConfigs :: SWatcherKind kind -> FilePath -> Maybe Text -> IO [ConfigItem kind]
+loadConfigs :: SDomain kind -> FilePath -> Maybe Text -> IO [ConfigItem kind]
 loadConfigs _kind root repoFilter' = do
   dirs <- listConfigDirs root
   fmap catMaybes $
@@ -151,13 +151,13 @@ summarizeItem options (SomeConfigItem kind item) =
   SomeWatcherSummary kind
     <$> summarizeTypedItem kind options item
 
-summarizeTypedItem :: SWatcherKind kind -> HealthcheckOptions -> ConfigItem kind -> IO (WatcherSummary kind)
+summarizeTypedItem :: SDomain kind -> HealthcheckOptions -> ConfigItem kind -> IO (WatcherSummary kind)
 summarizeTypedItem kind options item =
   case item.config of
     Left error' -> summarizeBrokenItem kind item error'
     Right config -> summarizeLoadedItem kind options item config
 
-summarizeBrokenItem :: SWatcherKind kind -> ConfigItem kind -> Text -> IO (WatcherSummary kind)
+summarizeBrokenItem :: SDomain kind -> ConfigItem kind -> Text -> IO (WatcherSummary kind)
 summarizeBrokenItem kind item error' = do
   let pid = PidReport (fallbackPidPath kind item.dir Nothing) Nothing False
   pure
@@ -188,7 +188,7 @@ summarizeBrokenItem kind item error' = do
       , states = Null
       }
 
-summarizeLoadedItem :: SWatcherKind kind -> HealthcheckOptions -> ConfigItem kind -> GenericConfig -> IO (WatcherSummary kind)
+summarizeLoadedItem :: SDomain kind -> HealthcheckOptions -> ConfigItem kind -> GenericConfig -> IO (WatcherSummary kind)
 summarizeLoadedItem kind options item config = do
   let stateDir' = fromMaybe item.dir config.stateDir
       pidPath' = fallbackPidPath kind stateDir' config.pidPath
@@ -233,7 +233,7 @@ summarizeLoadedItem kind options item config = do
       , states
       }
 
-readStateFiles :: SWatcherKind kind -> FilePath -> IO Value
+readStateFiles :: SDomain kind -> FilePath -> IO Value
 readStateFiles kind stateDir' =
   object <$> traverse readStateFile (stateFileSpecs kind)
  where
@@ -241,17 +241,17 @@ readStateFiles kind stateDir' =
     value <- readOptionalValueFile (stateDir' </> fileName)
     pure (Key.fromText key .= fromMaybe Null value)
 
-stateFileSpecs :: SWatcherKind kind -> [(Text, FilePath)]
+stateFileSpecs :: SDomain kind -> [(Text, FilePath)]
 stateFileSpecs = \case
-  SIssuePlanningKind ->
+  SIssuePlanning ->
     sharedStateFiles
       [ ("plannerState", "planner-state.json")
       ]
-  SIssueImplementKind ->
+  SIssueImplement ->
     sharedStateFiles
       [ ("issueState", "issue-state.json")
       ]
-  SPrReviewKind ->
+  SPrReview ->
     [ ("watcherState", "watcher-state.json")
     , ("checkerState", "checker-state.json")
     , ("agentState", "agent-state.json")
@@ -275,9 +275,9 @@ readOptionalValueFile path = do
     then pure Nothing
     else either (const Nothing) Just <$> readJsonValue path
 
-fallbackPidPath :: SWatcherKind kind -> FilePath -> Maybe FilePath -> FilePath
+fallbackPidPath :: SDomain kind -> FilePath -> Maybe FilePath -> FilePath
 fallbackPidPath kind stateDir' configured =
-  fromMaybe (WatcherPaths.defaultPidPath (expectedDomain kind) stateDir') configured
+  fromMaybe (WatcherPaths.defaultPidPath (watcherDomainValue kind) stateDir') configured
 
 readPid :: FilePath -> IO PidReport
 readPid pidPath = do
@@ -325,8 +325,8 @@ checkGitPushDryRun config workdirReport =
       runRuntimeCommand (GitPushDryRun path' (BranchName branchName))
     _ -> pure (skippedCommand "missing branch or git checkout")
 
-checkRemotePr :: SWatcherKind kind -> GenericConfig -> IO RemotePrReport
-checkRemotePr SPrReviewKind config =
+checkRemotePr :: SDomain kind -> GenericConfig -> IO RemotePrReport
+checkRemotePr SPrReview config =
   case (config.repoFullName, config.prNumber) of
     (Just repo, Just prNumber') -> do
       report <-
@@ -346,13 +346,13 @@ checkRemotePr SPrReviewKind config =
 checkRemotePr _ _ =
   pure (skippedRemotePr "not a PR watcher")
 
-checkReviewerThread :: SWatcherKind kind -> Maybe AppServerEndpoint -> GenericConfig -> IO AppServerThreadReport
-checkReviewerThread SPrReviewKind endpoint config =
+checkReviewerThread :: SDomain kind -> Maybe AppServerEndpoint -> GenericConfig -> IO AppServerThreadReport
+checkReviewerThread SPrReview endpoint config =
   checkAppServerThread endpoint config.reviewerThreadId
 checkReviewerThread _ _ config =
   pure (skippedAppServerThread "not a PR watcher" config.reviewerThreadId)
 
-checkEventReplay :: SWatcherKind kind -> Maybe FilePath -> IO EventReplayReport
+checkEventReplay :: SDomain kind -> Maybe FilePath -> IO EventReplayReport
 checkEventReplay kind (Just path') = do
   exists <- doesFileExist path'
   if not exists
@@ -365,13 +365,13 @@ checkEventReplay kind (Just path') = do
           case replayEventLog events of
             Left failure -> failedEventReplay path' (Text.pack (formatReplayFailureForHealthcheck failure))
             Right replay
-              | not (watcherKindDomainMatches kind replay.replayState) ->
+              | not (watcherDomainMatches kind replay.replayState) ->
                   failedEventReplay
                     path'
                     ( "events replayed as "
                         <> Text.pack (show (someDomain replay.replayState))
                         <> " but config is "
-                        <> Text.pack (show (watcherKindValue kind))
+                        <> Text.pack (show (watcherDomainValue kind))
                     )
               | otherwise ->
                   EventReplayReport

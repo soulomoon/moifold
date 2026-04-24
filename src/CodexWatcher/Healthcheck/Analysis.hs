@@ -24,6 +24,7 @@ module CodexWatcher.Healthcheck.Analysis
 import CodexWatcher.Healthcheck.Types
 import CodexWatcher.JsonPath (boolAtPath, textAtPath)
 import CodexWatcher.Runtime (CommandReport (..), commandText)
+import CodexWatcher.Types (Domain (..))
 import CodexWatcher.WatcherLiveness
 import Data.Aeson (Value (..), object, (.=))
 import Data.Aeson.Key qualified as Key
@@ -37,17 +38,17 @@ analyzeItem :: SomeWatcherSummary -> [Problem]
 analyzeItem (SomeWatcherSummary kind summary) =
   commonItemProblems kind summary
     <> case kind of
-      SIssuePlanningKind -> analyzePlanning summary
-      SIssueImplementKind -> analyzeImplement summary
-      SPrReviewKind -> analyzePrReview summary
+      SIssuePlanning -> analyzePlanning summary
+      SIssueImplement -> analyzeImplement summary
+      SPrReview -> analyzePrReview summary
 
-commonItemProblems :: SWatcherKind kind -> WatcherSummary kind -> [Problem]
+commonItemProblems :: SDomain kind -> WatcherSummary kind -> [Problem]
 commonItemProblems kind summary =
   [problem (blockedSeverity kind summary) summary.label ("blocked: " <> fromMaybe "no reason recorded" summary.blockedReason) Nothing | summary.blocked]
     <> [problem "error" summary.label "config failed to load" summary.configLoadError | isJust summary.configLoadError]
     <> eventReplayProblems summary
 
-analyzePlanning :: WatcherSummary 'IssuePlanningKind -> [Problem]
+analyzePlanning :: WatcherSummary 'IssuePlanning -> [Problem]
 analyzePlanning summary =
   [problem "error" summary.label "maxParallel is less than 1" Nothing | maybe False (< 1) summary.maxParallel]
     <> [ problem "warn" summary.label ("planner status is " <> planningStatusLabel plannerStatus <> " but daemon is not running") Nothing
@@ -59,7 +60,7 @@ analyzePlanning summary =
  where
   plannerStatus = lookupStateText ["plannerState", "status"] summary.states
 
-analyzeImplement :: WatcherSummary 'IssueImplementKind -> [Problem]
+analyzeImplement :: WatcherSummary 'IssueImplement -> [Problem]
 analyzeImplement summary =
   [problem "error" summary.label "missing worker threadId" (Just "create a Codex worker thread before run-issue-implement --execute") | summary.threadId == Nothing]
     <> workdirProblems summary
@@ -68,7 +69,7 @@ analyzeImplement summary =
     <> [problem "warn" summary.label ("issue status is " <> status <> " but daemon is not running") Nothing | Just status <- [summary.issueStatus], issueStatusRequiresDaemon status, not summary.pid.running]
     <> appServerThreadProblems summary.label "worker" summary.workerThreadInspection
 
-analyzePrReview :: WatcherSummary 'PrReviewKind -> [Problem]
+analyzePrReview :: WatcherSummary 'PrReview -> [Problem]
 analyzePrReview summary =
   [problem "error" summary.label "missing PR worker threadId" (Just "create a Codex worker thread before run-pr-review --execute") | summary.threadId == Nothing]
     <> [problem "error" summary.label "reviewWhenClean is enabled but reviewerThreadId is missing" Nothing | summary.reviewWhenClean /= Just False && summary.reviewerThreadId == Nothing]
@@ -92,7 +93,7 @@ appServerThreadProblems label role report =
   , not report.ok
   ]
 
-prReviewTerminal :: WatcherSummary 'PrReviewKind -> Bool
+prReviewTerminal :: WatcherSummary 'PrReview -> Bool
 prReviewTerminal summary =
   not (prReviewRequiresDaemon summary.remotePr.merged summary.eventReplay.phase)
 
@@ -129,7 +130,7 @@ duplicateRunningPrWatcherProblems summaries =
   ]
  where
   runningPrKey :: SomeWatcherSummary -> Maybe Text
-  runningPrKey (SomeWatcherSummary SPrReviewKind summary)
+  runningPrKey (SomeWatcherSummary SPrReview summary)
     | summary.pid.running = (\repo pr -> repo <> "#" <> Text.pack (show pr)) <$> summary.repoFullName <*> summary.prNumber
   runningPrKey _ = Nothing
 
@@ -146,9 +147,9 @@ liveWorkdirKey summary
 
 isTerminalWorkdirOwner :: SomeWatcherSummary -> Bool
 isTerminalWorkdirOwner = \case
-  SomeWatcherSummary SIssuePlanningKind summary -> summary.eventReplay.phase == Just "Complete"
-  SomeWatcherSummary SIssueImplementKind summary -> maybe False (`elem` terminalIssueStatuses) summary.issueStatus
-  SomeWatcherSummary SPrReviewKind summary -> summary.remotePr.merged
+  SomeWatcherSummary SIssuePlanning summary -> summary.eventReplay.phase == Just "Complete"
+  SomeWatcherSummary SIssueImplement summary -> maybe False (`elem` terminalIssueStatuses) summary.issueStatus
+  SomeWatcherSummary SPrReview summary -> summary.remotePr.merged
 
 someSummaryLabel :: SomeWatcherSummary -> Text
 someSummaryLabel =
@@ -189,7 +190,7 @@ warnPrReviewDirtyWorkdir dirty daemonRunning prMerged =
 maxParallelProblems :: [SomeWatcherSummary] -> [Problem]
 maxParallelProblems summaries =
   [ problem "warn" planner.label ("active implementers (" <> Text.pack (show activeCount) <> ") exceed maxParallel (" <> Text.pack (show maxParallel') <> ")") Nothing
-  | SomeWatcherSummary SIssuePlanningKind planner <- summaries
+  | SomeWatcherSummary SIssuePlanning planner <- summaries
   , Just repo <- [planner.repoFullName]
   , let maxParallel' = fromMaybe 8 planner.maxParallel
   , let activeCount = length [() | summary <- summaries, someSummaryRepo summary == Just repo, isActiveImplementer summary]
@@ -209,7 +210,7 @@ duplicateLabelsBy keyOf summaries =
       [(key, [someSummaryLabel summary]) | summary <- summaries, Just key <- [keyOf summary]]
 
 isActiveImplementer :: SomeWatcherSummary -> Bool
-isActiveImplementer (SomeWatcherSummary SIssueImplementKind summary) =
+isActiveImplementer (SomeWatcherSummary SIssueImplement summary) =
   summary.pid.running || maybe False (`elem` activeIssueStatuses) summary.issueStatus
 isActiveImplementer _ =
   False
@@ -217,8 +218,8 @@ isActiveImplementer _ =
 terminalIssueStatuses :: [Text]
 terminalIssueStatuses = ["complete"]
 
-blockedSeverity :: SWatcherKind kind -> WatcherSummary kind -> Text
-blockedSeverity SPrReviewKind summary
+blockedSeverity :: SDomain kind -> WatcherSummary kind -> Text
+blockedSeverity SPrReview summary
   | summary.remotePr.merged = "warn"
 blockedSeverity _ _ =
   "error"
@@ -252,15 +253,15 @@ summaryObject :: [SomeWatcherSummary] -> Value
 summaryObject summaries =
   object
     [ "totalConfigs" .= length summaries
-    , "planners" .= countKind IssuePlanningKind
-    , "implementers" .= countKind IssueImplementKind
-    , "reviewWatchers" .= countKind PrReviewKind
+    , "planners" .= countKind IssuePlanning
+    , "implementers" .= countKind IssueImplement
+    , "reviewWatchers" .= countKind PrReview
     , "runningDaemons" .= length [() | summary <- summaries, someSummaryPidRunning summary]
     , "blockedConfigs" .= length [() | summary <- summaries, someSummaryBlocked summary]
     , "activeImplementers" .= length [() | summary <- summaries, isActiveImplementer summary]
     ]
  where
-  countKind kind' = length [() | summary <- summaries, someSummaryKind summary == kind']
+  countKind kind' = length [() | summary <- summaries, someSummaryDomain summary == kind']
 
 logicReview :: Value
 logicReview =
@@ -288,12 +289,12 @@ problem :: Text -> Text -> Text -> Maybe Text -> Problem
 problem severity component message recommendation =
   Problem {severity, component, message, recommendation}
 
-itemLabel :: SWatcherKind kind -> Maybe Text -> Maybe Int -> Maybe Int -> Text
+itemLabel :: SDomain kind -> Maybe Text -> Maybe Int -> Maybe Int -> Text
 itemLabel kind repo issue pr =
   case kind of
-    SIssuePlanningKind -> fromMaybe "unknown repo" repo <> " planner"
-    SIssueImplementKind -> fromMaybe "unknown repo" repo <> "#" <> maybe "unknown" (Text.pack . show) issue <> " implementer"
-    SPrReviewKind -> fromMaybe "unknown repo" repo <> "#" <> maybe "unknown" (Text.pack . show) pr <> " reviewer"
+    SIssuePlanning -> fromMaybe "unknown repo" repo <> " planner"
+    SIssueImplement -> fromMaybe "unknown repo" repo <> "#" <> maybe "unknown" (Text.pack . show) issue <> " implementer"
+    SPrReview -> fromMaybe "unknown repo" repo <> "#" <> maybe "unknown" (Text.pack . show) pr <> " reviewer"
 
 lookupStateText :: [Text] -> Value -> Maybe Text
 lookupStateText = textAtPath

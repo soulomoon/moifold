@@ -5,8 +5,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module CodexWatcher.GoldenReplay
-  ( SnapshotKind (..)
-  , TypedSnapshot (..)
+  ( TypedSnapshot (..)
   , ReplayResult (..)
   , normalizeNodeSnapshot
   , replayTypedSnapshot
@@ -26,13 +25,8 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-data SnapshotKind
-  = PrReviewSnapshotKind
-  | IssueImplementSnapshotKind
-  deriving stock (Eq, Show)
-
 data TypedSnapshot = TypedSnapshot
-  { typedKind :: SnapshotKind
+  { typedKind :: Domain
   , typedState :: SomeWatcherState
   , typedWarnings :: [Text]
   }
@@ -310,7 +304,7 @@ replayIdleIssueStatus snapshot status =
 typedPrReview :: KnownPhase phase => WatcherState 'PrReview phase -> [Text] -> TypedSnapshot
 typedPrReview state warnings =
   TypedSnapshot
-    { typedKind = PrReviewSnapshotKind
+    { typedKind = PrReview
     , typedState = SomeWatcherState state
     , typedWarnings = warnings
     }
@@ -318,7 +312,7 @@ typedPrReview state warnings =
 typedIssueImplement :: KnownPhase phase => WatcherState 'IssueImplement phase -> [Text] -> TypedSnapshot
 typedIssueImplement state warnings =
   TypedSnapshot
-    { typedKind = IssueImplementSnapshotKind
+    { typedKind = IssueImplement
     , typedState = SomeWatcherState state
     , typedWarnings = warnings
     }
