@@ -8,11 +8,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeAbstractions #-}
 
 module CodexWatcher.Types
   ( Domain (..)
+  , SDomain (..)
   , Phase (..)
+  , SPhase (..)
   , ThreadActivity (..)
   , Mutability (..)
   , KnownDomain (..)
@@ -47,11 +52,14 @@ module CodexWatcher.Types
   , WatcherState (..)
   , SomeWatcherState (..)
   , domainOf
+  , domainSing
   , phaseOf
+  , phaseSing
   , nextRequestId
   , someDomain
   , somePhase
   , isTerminalPhase
+  , isTerminalPhaseSing
   , mkMaxParallel
   , mkPollSeconds
   , mkStaleSeconds
@@ -62,9 +70,11 @@ module CodexWatcher.Types
   ) where
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
+import Data.Singletons (Sing, SingI (..), SingKind (..), SomeSing (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Control.Applicative ((<|>))
+import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -76,17 +86,43 @@ data Domain
   | PrReview
   deriving stock (Eq, Show)
 
-class KnownDomain (domain :: Domain) where
+type SDomain :: Domain -> Type
+data SDomain domain where
+  SIssuePlanning :: SDomain 'IssuePlanning
+  SIssueImplement :: SDomain 'IssueImplement
+  SPrReview :: SDomain 'PrReview
+
+type instance Sing @Domain = SDomain
+
+instance SingI 'IssuePlanning where
+  sing = SIssuePlanning
+
+instance SingI 'IssueImplement where
+  sing = SIssueImplement
+
+instance SingI 'PrReview where
+  sing = SPrReview
+
+instance SingKind Domain where
+  type Demote Domain = Domain
+
+  fromSing SIssuePlanning = IssuePlanning
+  fromSing SIssueImplement = IssueImplement
+  fromSing SPrReview = PrReview
+
+  toSing IssuePlanning = SomeSing SIssuePlanning
+  toSing IssueImplement = SomeSing SIssueImplement
+  toSing PrReview = SomeSing SPrReview
+
+class SingI domain => KnownDomain (domain :: Domain) where
   knownDomain :: Domain
+  knownDomain = fromSing (sing @domain)
 
-instance KnownDomain 'IssuePlanning where
-  knownDomain = IssuePlanning
+instance KnownDomain 'IssuePlanning
 
-instance KnownDomain 'IssueImplement where
-  knownDomain = IssueImplement
+instance KnownDomain 'IssueImplement
 
-instance KnownDomain 'PrReview where
-  knownDomain = PrReview
+instance KnownDomain 'PrReview
 
 data Phase
   = Initialized
@@ -101,6 +137,82 @@ data Phase
   | Complete
   | Stopped
   deriving stock (Eq, Show)
+
+type SPhase :: Phase -> Type
+data SPhase phase where
+  SInitialized :: SPhase 'Initialized
+  SPlanMode :: SPhase 'PlanMode
+  SImplementing :: SPhase 'Implementing
+  SCheckingReviews :: SPhase 'CheckingReviews
+  SFixingReviews :: SPhase 'FixingReviews
+  SReviewingClean :: SPhase 'ReviewingClean
+  SWaitingMergeability :: SPhase 'WaitingMergeability
+  SMerging :: SPhase 'Merging
+  SBlocked :: SPhase 'Blocked
+  SComplete :: SPhase 'Complete
+  SStopped :: SPhase 'Stopped
+
+type instance Sing @Phase = SPhase
+
+instance SingI 'Initialized where
+  sing = SInitialized
+
+instance SingI 'PlanMode where
+  sing = SPlanMode
+
+instance SingI 'Implementing where
+  sing = SImplementing
+
+instance SingI 'CheckingReviews where
+  sing = SCheckingReviews
+
+instance SingI 'FixingReviews where
+  sing = SFixingReviews
+
+instance SingI 'ReviewingClean where
+  sing = SReviewingClean
+
+instance SingI 'WaitingMergeability where
+  sing = SWaitingMergeability
+
+instance SingI 'Merging where
+  sing = SMerging
+
+instance SingI 'Blocked where
+  sing = SBlocked
+
+instance SingI 'Complete where
+  sing = SComplete
+
+instance SingI 'Stopped where
+  sing = SStopped
+
+instance SingKind Phase where
+  type Demote Phase = Phase
+
+  fromSing SInitialized = Initialized
+  fromSing SPlanMode = PlanMode
+  fromSing SImplementing = Implementing
+  fromSing SCheckingReviews = CheckingReviews
+  fromSing SFixingReviews = FixingReviews
+  fromSing SReviewingClean = ReviewingClean
+  fromSing SWaitingMergeability = WaitingMergeability
+  fromSing SMerging = Merging
+  fromSing SBlocked = Blocked
+  fromSing SComplete = Complete
+  fromSing SStopped = Stopped
+
+  toSing Initialized = SomeSing SInitialized
+  toSing PlanMode = SomeSing SPlanMode
+  toSing Implementing = SomeSing SImplementing
+  toSing CheckingReviews = SomeSing SCheckingReviews
+  toSing FixingReviews = SomeSing SFixingReviews
+  toSing ReviewingClean = SomeSing SReviewingClean
+  toSing WaitingMergeability = SomeSing SWaitingMergeability
+  toSing Merging = SomeSing SMerging
+  toSing Blocked = SomeSing SBlocked
+  toSing Complete = SomeSing SComplete
+  toSing Stopped = SomeSing SStopped
 
 data ThreadActivity
   = Idle
@@ -514,29 +626,35 @@ data SomeWatcherState where
 deriving stock instance Show SomeWatcherState
 
 domainOf :: forall domain phase. KnownDomain domain => WatcherState domain phase -> Domain
-domainOf _ = knownDomain @domain
+domainOf = fromSing . domainSing
+
+domainSing :: forall domain phase. KnownDomain domain => WatcherState domain phase -> SDomain domain
+domainSing _ = sing @domain
 
 phaseOf :: WatcherState domain phase -> Phase
-phaseOf PlanningReady {} = Initialized
-phaseOf PlanningTurnActive {} = PlanMode
-phaseOf PlanningWaitingForReadyIssues {} = Initialized
-phaseOf IssueReadyToPlan {} = PlanMode
-phaseOf IssueInPlanMode {} = PlanMode
-phaseOf IssuePlanReady {} = Implementing
-phaseOf IssueImplementationReady {} = Implementing
-phaseOf IssueImplementing {} = Implementing
-phaseOf IssueHandoffReady {} = Implementing
-phaseOf IssueHandoffInitialized {} = Implementing
-phaseOf IssueWaitingForPrMerge {} = Implementing
-phaseOf IssueWaitingForIssueClose {} = Implementing
-phaseOf PrCheckingReviews {} = CheckingReviews
-phaseOf PrFixingReviews {} = FixingReviews
-phaseOf PrReviewingClean {} = ReviewingClean
-phaseOf PrWaitingForMergeability {} = WaitingMergeability
-phaseOf PrMerging {} = Merging
-phaseOf BlockedState {} = Blocked
-phaseOf CompleteState {} = Complete
-phaseOf StoppedState {} = Stopped
+phaseOf = fromSing . phaseSing
+
+phaseSing :: WatcherState domain phase -> SPhase phase
+phaseSing PlanningReady {} = SInitialized
+phaseSing PlanningTurnActive {} = SPlanMode
+phaseSing PlanningWaitingForReadyIssues {} = SInitialized
+phaseSing IssueReadyToPlan {} = SPlanMode
+phaseSing IssueInPlanMode {} = SPlanMode
+phaseSing IssuePlanReady {} = SImplementing
+phaseSing IssueImplementationReady {} = SImplementing
+phaseSing IssueImplementing {} = SImplementing
+phaseSing IssueHandoffReady {} = SImplementing
+phaseSing IssueHandoffInitialized {} = SImplementing
+phaseSing IssueWaitingForPrMerge {} = SImplementing
+phaseSing IssueWaitingForIssueClose {} = SImplementing
+phaseSing PrCheckingReviews {} = SCheckingReviews
+phaseSing PrFixingReviews {} = SFixingReviews
+phaseSing PrReviewingClean {} = SReviewingClean
+phaseSing PrWaitingForMergeability {} = SWaitingMergeability
+phaseSing PrMerging {} = SMerging
+phaseSing BlockedState {} = SBlocked
+phaseSing CompleteState {} = SComplete
+phaseSing StoppedState {} = SStopped
 
 someDomain :: SomeWatcherState -> Domain
 someDomain (SomeWatcherState state) = domainOf state
@@ -545,7 +663,12 @@ somePhase :: SomeWatcherState -> Phase
 somePhase (SomeWatcherState state) = phaseOf state
 
 isTerminalPhase :: Phase -> Bool
-isTerminalPhase Blocked = True
-isTerminalPhase Complete = True
-isTerminalPhase Stopped = True
-isTerminalPhase _ = False
+isTerminalPhase phase =
+  case toSing phase of
+    SomeSing phase' -> isTerminalPhaseSing phase'
+
+isTerminalPhaseSing :: SPhase phase -> Bool
+isTerminalPhaseSing SBlocked = True
+isTerminalPhaseSing SComplete = True
+isTerminalPhaseSing SStopped = True
+isTerminalPhaseSing _ = False

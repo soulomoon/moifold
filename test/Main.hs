@@ -453,6 +453,15 @@ prop_plannerIssueCreationReturnsToPlanning config activeTurn request =
       phaseOf state == Initialized
         && effects == [SomeEffect (CreateIssue (plannerRepo config) request), SomeEffect SleepUntilNextPoll]
 
+prop_stateSingletonReflection :: PlannerConfig -> ActiveTurn -> Bool
+prop_stateSingletonReflection config activeTurn =
+  let activeState = PlanningTurnActive config activeTurn
+      completeState = CompleteState PlanningComplete :: WatcherState 'IssuePlanning 'Complete
+   in domainOf activeState == IssuePlanning
+        && phaseOf activeState == PlanMode
+        && not (isTerminalPhaseSing (phaseSing activeState))
+        && isTerminalPhaseSing (phaseSing completeState)
+
 prop_terminalStateHasNoImplicitEffects :: MergeCommit -> BlockedReason -> StopReason -> Bool
 prop_terminalStateHasNoImplicitEffects mergeCommit blockedReason stopReason =
   all
@@ -4448,6 +4457,7 @@ main = do
       , quickCheckResult prop_plannerCompletionReturnsToReady
       , quickCheckResult prop_plannerGraphUpdateWaitsAndRecords
       , quickCheckResult prop_plannerIssueCreationReturnsToPlanning
+      , quickCheckResult prop_stateSingletonReflection
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       , quickCheckResult prop_eventLogFullPrReviewPathCompletes
       , quickCheckResult prop_eventLogCannotReviewCleanWhileFixing
