@@ -25,24 +25,28 @@ import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
 import CodexWatcher.IssueFanoutCli (readyIssueStatusFromRuntime)
-import CodexWatcher.IssueImplementWatcher
-import CodexWatcher.IssuePlanningFanout
-import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Domain.IssueImplement.Watcher
+import CodexWatcher.Domain.IssuePlanning.Fanout
+import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Observation
 import CodexWatcher.ObserveCli (parseDaemonObservation)
-import CodexWatcher.PlanningGraphCanonical
-import CodexWatcher.Protocol
-import CodexWatcher.PrReviewWatcher
+import CodexWatcher.Domain.IssuePlanning.Graph.Canonical
+import CodexWatcher.Domain.PrReview.Protocol
+import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeDefaults
-import CodexWatcher.RuntimeOwner
-import CodexWatcher.RuntimeOwnerCli (clearRuntimeLease)
+import CodexWatcher.Runtime.Defaults
+import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
+import CodexWatcher.Runtime.Owner.Store
+import CodexWatcher.Runtime.Owner.Types
 import CodexWatcher.RunnerGuard
 import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Supervisor
-import CodexWatcher.TurnClassifier
+import CodexWatcher.Domain.IssueImplement.TurnClassifier
+import CodexWatcher.Domain.IssuePlanning.TurnClassifier
+import CodexWatcher.Domain.PrReview.TurnClassifier
+import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput
 import CodexWatcher.Types
 import CodexWatcher.WatcherRuntimeStatus

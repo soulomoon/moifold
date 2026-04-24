@@ -9,7 +9,7 @@ module CodexWatcher.EffectRuntimeCli
 
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.IssueText (issueNumbersText)
-import CodexWatcher.RuntimeDefaults
+import CodexWatcher.Runtime.Defaults
 import CodexWatcher.TurnOutput
 import CodexWatcher.Types
 import Data.Text qualified as Text

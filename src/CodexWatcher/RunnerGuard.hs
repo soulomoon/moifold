@@ -40,7 +40,7 @@ import CodexWatcher.AppServerProtocol
   )
 import CodexWatcher.EventLog (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName, loadEventLogFile, replayEventLog)
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
-import CodexWatcher.RuntimeDefaults (defaultEffort, defaultModel, defaultThreadStartOptions, defaultTurnStartOptions)
+import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel, defaultThreadStartOptions, defaultTurnStartOptions)
 import CodexWatcher.Turn.Classifier.Common (TurnCompletion (..), classifyTurnCompletion)
 import CodexWatcher.Types
 import Data.Aeson

@@ -29,7 +29,7 @@ import CodexWatcher.EventLog (EventReplayResult (..), loadEventLogFile, replayEv
 import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime (ioRuntimeInterpreter, writeJsonValue)
-import CodexWatcher.RuntimeOwnerCli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
+import CodexWatcher.Runtime.Owner.Cli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Types
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, when)

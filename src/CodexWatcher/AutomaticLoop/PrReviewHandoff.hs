@@ -14,8 +14,8 @@ import CodexWatcher.CompatibilityState (compatibilityStateWrites)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
 import CodexWatcher.EventLog (EventReplayResult (..), WatcherEvent (..))
-import CodexWatcher.IssueImplementWatcher (IssueImplementObservation (..), IssueImplementTick (..), issueImplementObserve)
-import CodexWatcher.PrReviewLaunchCli (ensurePrReviewWatcherForHandoff)
+import CodexWatcher.Domain.IssueImplement.Watcher (IssueImplementObservation (..), IssueImplementTick (..), issueImplementObserve)
+import CodexWatcher.Domain.PrReview.LaunchCli (ensurePrReviewWatcherForHandoff)
 import CodexWatcher.Runtime (ioRuntimeInterpreter)
 import CodexWatcher.Types
 import Data.Text qualified as Text

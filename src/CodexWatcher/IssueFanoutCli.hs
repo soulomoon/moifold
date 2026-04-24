@@ -30,9 +30,9 @@ import CodexWatcher.CompatibilityRuntime
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog
 import CodexWatcher.GhGit
-import CodexWatcher.IssuePlanningFanout
+import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
+import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions)
 import CodexWatcher.Types
 import CodexWatcher.WatcherPaths qualified as WatcherPaths

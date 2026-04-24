@@ -29,10 +29,10 @@ import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog
 import CodexWatcher.GhGit
-import CodexWatcher.IssueImplementWatcher
-import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Domain.IssueImplement.Watcher
+import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.PrReviewWatcher
+import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime
 import CodexWatcher.Types
 import Data.Aeson (toJSON)

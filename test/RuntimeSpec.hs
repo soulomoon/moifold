@@ -19,7 +19,7 @@ module RuntimeSpec
   ) where
 
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeDefaults
+import CodexWatcher.Runtime.Defaults
 import CodexWatcher.AppServerProtocol (ThreadStartOptions (..), TurnStartOptions (..))
 import CodexWatcher.Types
 import Data.Text qualified as Text

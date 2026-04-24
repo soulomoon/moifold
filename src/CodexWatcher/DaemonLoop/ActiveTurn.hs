@@ -20,11 +20,11 @@ import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.EventLog
-import CodexWatcher.IssueImplementWatcher
-import CodexWatcher.IssuePlanningWatcher
+import CodexWatcher.Domain.IssueImplement.Watcher
+import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.PlanningLoop qualified as PlanningLoop
-import CodexWatcher.PrReviewWatcher
+import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
+import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime (RuntimeInterpreter (..), runtimeReadJsonValue, runtimeWriteJsonValue)
 import CodexWatcher.Types
 import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON, object, withObject, (.:), (.=))

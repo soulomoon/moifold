@@ -19,7 +19,7 @@ import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
 import CodexWatcher.EventLog (EventReplayResult (..), WatcherEvent (..), loadEventLogFile, replayEventLog)
 import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime (ioRuntimeInterpreter)
-import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
+import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
 import CodexWatcher.Types
 import Data.Text qualified as Text

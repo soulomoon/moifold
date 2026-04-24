@@ -27,8 +27,8 @@ module AppServerSpec
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
-import CodexWatcher.RuntimeDefaults
-import CodexWatcher.TurnClassifier (StructuredTurnOutcome (..), parseStructuredTurnOutcome)
+import CodexWatcher.Runtime.Defaults
+import CodexWatcher.Turn.Classifier.Common (StructuredTurnOutcome (..), parseStructuredTurnOutcome)
 import CodexWatcher.TurnOutput (structuredTurnOutputSchema)
 import CodexWatcher.Types
 import Data.Aeson (Value (..), object, toJSON, (.=))

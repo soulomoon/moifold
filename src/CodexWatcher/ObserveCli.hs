@@ -13,11 +13,11 @@ import CodexWatcher.Cli
 import CodexWatcher.Daemon
 import CodexWatcher.EffectRuntimeCli
 import CodexWatcher.GhGit
-import CodexWatcher.IssueImplementWatcher
-import CodexWatcher.IssuePlanningWatcher
-import CodexWatcher.PrReviewWatcher
-import CodexWatcher.Protocol
-import CodexWatcher.RuntimeOwnerCli (validateRuntimeOwnerForExecution)
+import CodexWatcher.Domain.IssueImplement.Watcher
+import CodexWatcher.Domain.IssuePlanning.Watcher
+import CodexWatcher.Domain.PrReview.Watcher
+import CodexWatcher.Domain.PrReview.Protocol
+import CodexWatcher.Runtime.Owner.Cli (validateRuntimeOwnerForExecution)
 import CodexWatcher.Types
 import Data.Aeson (Value (Null))
 import Data.List (find)

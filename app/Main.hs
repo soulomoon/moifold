@@ -3,14 +3,14 @@
 
 module Main (main) where
 
-import CodexWatcher.AutomaticLoopCli (runAutomaticLoop)
+import CodexWatcher.AutomaticLoop.Runner (runAutomaticLoop)
 import CodexWatcher.Cli
 import CodexWatcher.DaemonControlCli (stopDaemon)
 import CodexWatcher.Healthcheck
 import CodexWatcher.IssueFanoutCli (issueFanout)
 import CodexWatcher.ObserveCli (observeOnce)
 import CodexWatcher.ReplayCli (repairInvalidState, replayEvents)
-import CodexWatcher.RuntimeOwnerCli (clearRuntimeLease)
+import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
 import CodexWatcher.RunnerGuardCli (runWatcherRunnerGuard)
 import CodexWatcher.ServiceCli (renderService)
 import CodexWatcher.Types (RepoName (unRepoName))

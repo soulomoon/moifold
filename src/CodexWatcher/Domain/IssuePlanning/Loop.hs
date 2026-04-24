@@ -24,7 +24,7 @@ import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (..), RuntimeInterpreter (..), commandText, runtimeWriteJsonValue)
 import CodexWatcher.Runtime.Json (decodeJsonText)
-import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
+import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Types
 import Control.Monad (filterM)
 import Data.Aeson (Value (..), object, toJSON, (.=))

@@ -24,7 +24,7 @@ import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog
 import CodexWatcher.Runtime
-import CodexWatcher.RuntimeDefaults (defaultThreadStartOptions)
+import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
 import CodexWatcher.Types
 import CodexWatcher.WatcherPaths qualified as WatcherPaths

@@ -19,10 +19,10 @@ import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Runtime
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EventLog
-import CodexWatcher.IssueImplementationLoop qualified as IssueImplementationLoop
+import CodexWatcher.Domain.IssueImplement.Loop qualified as IssueImplementationLoop
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.PlanningLoop qualified as PlanningLoop
-import CodexWatcher.PrReviewLoop qualified as PrReviewLoop
+import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
+import CodexWatcher.Domain.PrReview.Loop qualified as PrReviewLoop
 import CodexWatcher.Types
 import Data.Aeson ((.=))
 import Data.Text (Text)

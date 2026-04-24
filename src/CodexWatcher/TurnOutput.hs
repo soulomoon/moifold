@@ -39,7 +39,7 @@ import CodexWatcher.PromptTemplates
   )
 import CodexWatcher.IssueText (issueNumbersText)
 import CodexWatcher.Types
-import CodexWatcher.RuntimeDefaults (defaultEffort, defaultModel)
+import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Text (Text)

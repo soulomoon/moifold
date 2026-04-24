@@ -26,8 +26,8 @@ import CodexWatcher.IssueFanoutCli
   , runIssueImplementerLaunchesDetailed
   , startIssueImplementerChildDetailed
   )
-import CodexWatcher.IssuePlanningFanout
-import CodexWatcher.IssuePlanningWatcher (IssuePlanningObservation (..), IssuePlanningTick (..), issuePlanningObserve)
+import CodexWatcher.Domain.IssuePlanning.Fanout
+import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..), IssuePlanningTick (..), issuePlanningObserve)
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime (ioRuntimeInterpreter)
