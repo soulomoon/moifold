@@ -240,9 +240,30 @@ validatePlanningGraphForReplay config graph
   outOfScopeIssue =
     case plannerScopeIssues config of
       [] -> Nothing
-      scopeIssues -> find (`notElem` scopeIssues) graphIssues
+      scopeIssues -> find (`notElem` scopedGraphClosure scopeIssues graph) graphIssues
   readyIssueHasDependency dependency =
     dependency.dependencyIssue `elem` graph.planningReadyIssues && not (null dependency.dependencyDependsOn)
+
+scopedGraphClosure :: [IssueNumber] -> PlanningGraph -> [IssueNumber]
+scopedGraphClosure scopeIssues graph =
+  go [] scopeIssues
+ where
+  go seen [] = seen
+  go seen (issue : rest)
+    | issue `elem` seen = go seen rest
+    | otherwise = go (seen <> [issue]) (graphIssueDependencies issue <> rest)
+
+  graphIssueDependencies issue =
+    concat
+      [ dependency.dependencyDependsOn
+      | dependency <- graph.planningDependencies
+      , dependency.dependencyIssue == issue
+      ]
+      <> concat
+        [ blocked.blockedPlanningDependsOn
+        | blocked <- graph.planningBlockedIssues
+        , blocked.blockedPlanningIssue == issue
+        ]
 
 hasDuplicate :: Eq a => [a] -> Bool
 hasDuplicate [] = False

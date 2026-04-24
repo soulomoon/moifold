@@ -818,6 +818,31 @@ prop_eventLogIssuePlanningGraphWaitsForReadyIssues config plannerThread plannerT
           _ -> False
     Left _ -> False
 
+prop_eventLogAllowsScopedPlanningDependencyClosure :: ThreadId -> TurnId -> Bool
+prop_eventLogAllowsScopedPlanningDependencyClosure plannerThread plannerTurn =
+  let config = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 8]
+      graph =
+        PlanningGraph
+          [IssueNumber 15]
+          [BlockedPlanningIssue (IssueNumber 8) [IssueNumber 15, IssueNumber 16] "split work"]
+          [ IssueDependency (IssueNumber 8) [IssueNumber 15, IssueNumber 16]
+          , IssueDependency (IssueNumber 16) [IssueNumber 15]
+          ]
+   in
+  case replayEventLog
+    [ IssuePlanningInitialized config
+    , IssuePlanningTurnStarted plannerThread plannerTurn
+    , IssuePlanningGraphUpdated graph
+    ] of
+    Right replay ->
+      someDomain replay.replayState == IssuePlanning
+        && somePhase replay.replayState == Initialized
+        && case replay.replayEffects of
+          _initialEffects : _startEffects : graphEffects : _ ->
+            hasEffect RecordPlanningGraphTag graphEffects
+          _ -> False
+    Left _ -> False
+
 prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning :: PlannerConfig -> ThreadId -> TurnId -> Bool
 prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning config plannerThread plannerTurn =
   let graph = validPlanningGraphForConfig config
@@ -4517,6 +4542,7 @@ main = do
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningGraphWaitsForReadyIssues
+      , quickCheckResult prop_eventLogAllowsScopedPlanningDependencyClosure
       , quickCheckResult prop_eventLogIssuePlanningReadyIssuesFixedReentersPlanning
       , quickCheckResult prop_eventLogIssuePlanningRetryReentersPlanning
       , quickCheckResult prop_eventLogCannotCompletePlanningBeforeStart
