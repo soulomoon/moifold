@@ -150,9 +150,6 @@ instance Arbitrary BranchName where
 instance Arbitrary ReviewThreadId where
   arbitrary = ReviewThreadId . Text.pack <$> listOf1 (elements ['a' .. 'z'])
 
-instance Arbitrary (NonEmpty ReviewThreadId) where
-  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
-
 instance Arbitrary CommitSha where
   arbitrary = CommitSha . Text.pack <$> vectorOf 12 (elements (['a' .. 'f'] <> ['0' .. '9']))
 

@@ -27,6 +27,8 @@ module CodexWatcher.GhGit
   , parseGitBranch
   , parseGitSha
   , parseLsRemoteBranch
+  , remoteIssueIsClosed
+  , remotePullRequestIsMerged
   , runGitWorktreeStatus
   , runGhIssueListOpen
   , runGhIssueView
@@ -79,6 +81,10 @@ instance FromJSON RemoteIssue where
     state <- objectValue .: "state"
     closed <- objectValue .:? "closed" .!= (state == "CLOSED")
     RemoteIssue state closed <$> objectValue .:? "url"
+
+remoteIssueIsClosed :: RemoteIssue -> Bool
+remoteIssueIsClosed issue =
+  issue.remoteIssueClosed || Text.toUpper issue.remoteIssueState == "CLOSED"
 
 data GhPullRequest = GhPullRequest
   { ghPullRequestNumber :: PrNumber
@@ -153,6 +159,10 @@ instance FromJSON RemotePullRequest where
       <*> parseMergeCommit objectValue
       <*> objectValue .:? "mergedAt"
       <*> objectValue .:? "mergeStateStatus"
+
+remotePullRequestIsMerged :: RemotePullRequest -> Bool
+remotePullRequestIsMerged pullRequest =
+  Text.toUpper pullRequest.remotePullRequestState == "MERGED"
 
 data ReviewComment = ReviewComment
   { reviewCommentId :: Text

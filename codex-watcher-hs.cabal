@@ -41,6 +41,8 @@ library
     CodexWatcher.Daemon
     CodexWatcher.DaemonControlCli
     CodexWatcher.DaemonLoop
+    CodexWatcher.DaemonLoop.Runtime
+    CodexWatcher.DaemonLoop.Types
     CodexWatcher.EffectInterpreter
     CodexWatcher.EffectRuntimeCli
     CodexWatcher.Effects
@@ -53,6 +55,7 @@ library
     CodexWatcher.Healthcheck.Types
     CodexWatcher.IssueFanoutCli
     CodexWatcher.IssueText
+    CodexWatcher.IssueImplementationLoop
     CodexWatcher.IssuePlanningFanout
     CodexWatcher.IssueImplementWatcher
     CodexWatcher.IssuePlanningWatcher
@@ -61,10 +64,12 @@ library
     CodexWatcher.Logging
     CodexWatcher.Observation
     CodexWatcher.ObserveCli
+    CodexWatcher.PlanningLoop
     CodexWatcher.PlanningGraphCanonical
     CodexWatcher.Protocol
     CodexWatcher.PromptTemplates
     CodexWatcher.PrReviewLaunchCli
+    CodexWatcher.PrReviewLoop
     CodexWatcher.PrReviewWatcher
     CodexWatcher.ReplayCli
     CodexWatcher.Runtime
