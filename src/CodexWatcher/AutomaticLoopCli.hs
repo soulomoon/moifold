@@ -1,8 +1,11 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.AutomaticLoopCli
   ( runAutomaticLoop
@@ -41,6 +44,7 @@ import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (mapMaybe)
+import Data.Proxy (Proxy (..))
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing)
 import System.Exit (die)
@@ -49,8 +53,7 @@ import System.FilePath ((</>))
 runAutomaticLoop :: LoopCli -> IO ()
 runAutomaticLoop cli = do
   stopRequested <- newIORef False
-  let domain = cliDomainName cli.loopCliDomain
-      endpoint = cli.loopCliEndpoint
+  let endpoint = cli.loopCliEndpoint
       executionMode = if cli.loopCliExecute then ExecuteActions else DryRunActions
       options =
         DaemonOptions
@@ -94,7 +97,7 @@ runAutomaticLoop cli = do
     )
   runWithOptionalPidFile maybePidFile do
     loopConfig <- refreshStartupThreads executor cli executionMode baseLoopConfig
-    runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations 1
+    runLoopIterations stopRequested executor loopConfig cli.loopCliDomain postTick shouldLoop maxIterations 1
 
 automaticLoopLogger :: ActionExecutionMode -> FilePath -> IO (Log.WatcherLogger IO)
 automaticLoopLogger DryRunActions _stateDir =
@@ -107,8 +110,8 @@ automaticLoopAfterTick executor cli endpoint executionMode tick = do
   issueImplementReviewHandoffAfterTick cli endpoint executionMode tick
   issuePlanningFanoutAfterTick executor cli endpoint executionMode tick
 
-runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO Bool) -> Bool -> Int -> Int -> IO ()
-runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
+runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> Domain -> (DaemonLoopTickResult -> IO Bool) -> Bool -> Int -> Int -> IO ()
+runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoop maxIterations iteration = do
   renewRuntimeOwnerForExecution
     (runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir)
     loopConfig.loopDaemonOptions.daemonExecutionMode
@@ -127,13 +130,13 @@ runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop m
       recordInvalidReplayBlockState loopConfig failure
       die (Text.unpack (formatDaemonLoopFailure failure))
     Right tick -> do
-      validateLoopResultDomain domain tick
-      printLoopTick domain iteration tick
+      validateLoopResultDomain cliDomain tick
+      printLoopTick (cliDomainName cliDomain) iteration tick
       shouldStopAfterTick <- postTick tick
       when shouldStopAfterTick (writeIORef stopRequested True)
   shouldStop <- readIORef stopRequested
   when (shouldLoop && not shouldStop && iteration < maxIterations) $
-    runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations (iteration + 1)
+    runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoop maxIterations (iteration + 1)
 
 recordInvalidReplayBlockState :: DaemonLoopConfig -> DaemonLoopFailure -> IO ()
 recordInvalidReplayBlockState loopConfig = \case
@@ -173,7 +176,7 @@ reconcileLoopCompatibility executor loopConfig =
 
 refreshStartupThreads :: ActionExecutor IO -> LoopCli -> ActionExecutionMode -> DaemonLoopConfig -> IO DaemonLoopConfig
 refreshStartupThreads _executor cli _executionMode loopConfig
-  | cli.loopCliDomain == CliIssuePlanning =
+  | cli.loopCliDomain == IssuePlanning =
       pure loopConfig
 refreshStartupThreads _executor _cli DryRunActions loopConfig =
   pure loopConfig
@@ -188,11 +191,11 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
           pure loopConfig
         Right replay ->
           case cli.loopCliDomain of
-            CliIssueImplement ->
+            IssueImplement ->
               refreshIssueImplementThread replay
-            CliPrReview ->
+            PrReview ->
               refreshPrReviewThreads replay
-            CliIssuePlanning ->
+            IssuePlanning ->
               pure loopConfig
  where
   runtimeConfig = loopConfig.loopDaemonOptions.daemonRuntimeConfig
@@ -264,7 +267,7 @@ idlePrReviewConfig = \case
 issueImplementReviewHandoffAfterTick :: LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO ()
 issueImplementReviewHandoffAfterTick cli endpoint executionMode tick =
   case (cli.loopCliDomain, tick.loopObservedTick) of
-    (CliIssueImplement, Just observedTick)
+    (IssueImplement, Just observedTick)
       | IssueReviewHandoffStartedEvent prNumber <- observedTick.daemonObservedEvent
       , Just (issueConfig, handoffPr) <- issueWaitingForPrMerge observedTick.daemonObservedState
       , handoffPr == prNumber ->
@@ -282,7 +285,7 @@ issueImplementReviewHandoffAfterTick cli endpoint executionMode tick =
                     <> Text.pack (show (unPrNumber prNumber))
                 )
             )
-    (CliIssueImplement, _) ->
+    (IssueImplement, _) ->
       case issueWaitingForPrMerge tick.loopReplayResult.replayState of
         Just (issueConfig, prNumber) ->
           ensurePrReviewWatcherOrBlock tick.loopReplayResult.replayState issueConfig prNumber
@@ -318,7 +321,7 @@ issueWaitingForPrMerge _ =
 issuePlanningFanoutAfterTick :: ActionExecutor IO -> LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
 issuePlanningFanoutAfterTick executor cli endpoint executionMode tick =
   case (cli.loopCliDomain, cli.loopCliImplementersRoot) of
-    (CliIssuePlanning, Just implementersRoot) -> do
+    (IssuePlanning, Just implementersRoot) -> do
       completedFromObserved <- maintainObservedPlanningState implementersRoot
       completedFromReplay <- maintainReplayPlanningState implementersRoot
       pure (completedFromObserved || completedFromReplay)
@@ -548,21 +551,17 @@ printLoopTick domain iteration tick = do
       putStrLn ("compatibility writes: " <> show (length observed.daemonObservedCompatibilityWrites))
   putStrLn ("actions: " <> show (length tick.loopActionReports))
 
-validateLoopDomain :: CliDomain -> Maybe ThreadId -> IO ()
+validateLoopDomain :: Domain -> Maybe ThreadId -> IO ()
 validateLoopDomain _domain _plannerThread =
   pure ()
 
-validateLoopResultDomain :: String -> DaemonLoopTickResult -> IO ()
-validateLoopResultDomain domain tick =
-  unless (someDomain tick.loopReplayResult.replayState == expectedLoopDomain domain) $
-    die
-      ( "event log domain "
-          <> show (someDomain tick.loopReplayResult.replayState)
-          <> " does not match command domain "
-          <> domain
-      )
-
-expectedLoopDomain :: String -> Domain
-expectedLoopDomain "pr-review" = PrReview
-expectedLoopDomain "issue-implement" = IssueImplement
-expectedLoopDomain _ = IssuePlanning
+validateLoopResultDomain :: Domain -> DaemonLoopTickResult -> IO ()
+validateLoopResultDomain cliDomain tick =
+  withDomain cliDomain \(_ :: Proxy domain) ->
+    unless (someDomainIs @domain tick.loopReplayResult.replayState) $
+      die
+        ( "event log domain "
+            <> show (someDomain tick.loopReplayResult.replayState)
+            <> " does not match command domain "
+            <> cliDomainName cliDomain
+        )

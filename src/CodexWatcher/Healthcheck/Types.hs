@@ -14,6 +14,7 @@
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
@@ -39,13 +40,14 @@ module CodexWatcher.Healthcheck.Types
   , someConfigKind
   , someSummaryKind
   , someWatcherKind
+  , watcherKindDomainMatches
   , watcherKindValue
   , withSomeWatcher
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint)
 import CodexWatcher.Runtime (CommandReport)
-import CodexWatcher.Types (Domain (..), SDomain (..))
+import CodexWatcher.Types (Domain (..), SDomain (..), SomeWatcherState, someDomainIs)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withObject, (.:?))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -95,6 +97,12 @@ watcherKindDomainSing = \case
 expectedDomain :: SWatcherKind kind -> Domain
 expectedDomain =
   fromSing . watcherKindDomainSing
+
+watcherKindDomainMatches :: SWatcherKind kind -> SomeWatcherState -> Bool
+watcherKindDomainMatches = \case
+  SIssuePlanningKind -> someDomainIs @'IssuePlanning
+  SIssueImplementKind -> someDomainIs @'IssueImplement
+  SPrReviewKind -> someDomainIs @'PrReview
 
 data GenericConfig = GenericConfig
   { repoFullName :: Maybe Text

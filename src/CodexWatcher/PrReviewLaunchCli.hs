@@ -3,6 +3,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.PrReviewLaunchCli
   ( PrReviewWatcherLaunchPlan (..)
@@ -30,6 +31,7 @@ import CodexWatcher.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Monad (when)
 import Data.Aeson (Value, object, (.=))
+import Data.Proxy (Proxy (..))
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.Exit (die)
@@ -296,7 +298,7 @@ prReviewWatcherRuntimeStatus :: FilePath -> IO WatcherRuntimeStatus
 prReviewWatcherRuntimeStatus stateDir = do
   let configPath = stateDir </> "config.json"
       eventsPath = stateDir </> "events.jsonl"
-      pidPath = WatcherPaths.defaultPidPath PrReview stateDir
+      pidPath = WatcherPaths.defaultPidPathForKnownDomain (Proxy @'PrReview) stateDir
       statusConfig :: WatcherRuntimeStatusConfig 'PrReview
       statusConfig =
         WatcherRuntimeStatusConfig
@@ -304,7 +306,7 @@ prReviewWatcherRuntimeStatus stateDir = do
           , watcherRuntimeEventsPath = eventsPath
           , watcherRuntimePidPath = pidPath
           , watcherRuntimeMissingIsTerminal = pure False
-          , watcherRuntimeReplayTerminalIsTerminal = \replay -> pure (somePhase replay.replayState == Complete)
+          , watcherRuntimeReplayTerminalIsTerminal = \replay -> pure (somePhaseIs @'Complete replay.replayState)
           }
   watcherRuntimeStatus
     statusConfig

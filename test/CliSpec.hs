@@ -47,7 +47,7 @@ prop_cliParsesHealthcheckAndRunLoop =
       == Right
         ( CliRunLoop
             LoopCli
-              { loopCliDomain = CliIssuePlanning
+              { loopCliDomain = IssuePlanning
               , loopCliEventsPath = "/tmp/events.jsonl"
               , loopCliStateDir = "/tmp/state"
               , loopCliRepo = RepoName "owner/name"
@@ -101,7 +101,7 @@ prop_cliParsesHealthcheckAndRunLoop =
             GuardWatcherCli
               { guardCliLoop =
                   LoopCli
-                    { loopCliDomain = CliIssuePlanning
+                    { loopCliDomain = IssuePlanning
                     , loopCliEventsPath = "/tmp/events.jsonl"
                     , loopCliStateDir = "/tmp/state"
                     , loopCliRepo = RepoName "owner/name"
@@ -151,8 +151,8 @@ prop_cliRejectsBadDomain =
 
 prop_cliParsesGenericRunnerGuardDomains :: Bool
 prop_cliParsesGenericRunnerGuardDomains =
-  guardDomainOf "guard-pr-review" == Just CliPrReview
-    && guardDomainOf "guard-issue-implement" == Just CliIssueImplement
+  guardDomainOf "guard-pr-review" == Just PrReview
+    && guardDomainOf "guard-issue-implement" == Just IssueImplement
  where
   guardDomainOf command =
     case parseCliCommand

@@ -4386,17 +4386,17 @@ observeOnceParsingCoversDomainsAndDefaults :: IO Bool
 observeOnceParsingCoversDomainsAndDefaults = do
   planning <-
     parseDaemonObservation
-      ( (baseObserveCli CliIssuePlanning "turn-started")
+      ( (baseObserveCli IssuePlanning "turn-started")
           { observeCliThreadId = Just (ThreadId "planner-thread")
           , observeCliTurnId = Just (TurnId "planner-turn")
           }
       )
   issueIncomplete <-
     parseDaemonObservation
-      (baseObserveCli CliIssueImplement "implementation-incomplete")
+      (baseObserveCli IssueImplement "implementation-incomplete")
   prWorkerIncomplete <-
     parseDaemonObservation
-      (baseObserveCli CliPrReview "worker-incomplete")
+      (baseObserveCli PrReview "worker-incomplete")
   results <-
     sequence
       [ assert
@@ -4411,7 +4411,7 @@ observeOnceParsingCoversDomainsAndDefaults = do
       ]
   pure (and results)
 
-baseObserveCli :: CliDomain -> String -> ObserveOnceCli
+baseObserveCli :: Domain -> String -> ObserveOnceCli
 baseObserveCli domain observation =
   ObserveOnceCli
     { observeCliEventsPath = "/tmp/events.jsonl"

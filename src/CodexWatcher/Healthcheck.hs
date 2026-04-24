@@ -365,7 +365,7 @@ checkEventReplay kind (Just path') = do
           case replayEventLog events of
             Left failure -> failedEventReplay path' (Text.pack (formatReplayFailureForHealthcheck failure))
             Right replay
-              | someDomain replay.replayState /= expectedDomain kind ->
+              | not (watcherKindDomainMatches kind replay.replayState) ->
                   failedEventReplay
                     path'
                     ( "events replayed as "

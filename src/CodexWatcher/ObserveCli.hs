@@ -56,7 +56,7 @@ observeOnceExecutor cli
       pure (ioActionExecutor (AppServerInterpreter (\_ -> pure Null)) (pure ()) (pure ()))
 
 data ObservationSpec = ObservationSpec
-  { specDomain :: CliDomain
+  { specDomain :: Domain
   , specName :: String
   , specParser :: ObserveOnceCli -> IO DaemonObservation
   }
@@ -159,7 +159,7 @@ observationSpecs =
 
 planning :: String -> (ObserveOnceCli -> IO IssuePlanningObservation) -> ObservationSpec
 planning name parser =
-  ObservationSpec CliIssuePlanning name (fmap DaemonIssuePlanningObservation . parser)
+  ObservationSpec IssuePlanning name (fmap DaemonIssuePlanningObservation . parser)
 
 planningPure :: String -> IssuePlanningObservation -> ObservationSpec
 planningPure name observation =
@@ -167,7 +167,7 @@ planningPure name observation =
 
 issue :: String -> (ObserveOnceCli -> IO IssueImplementObservation) -> ObservationSpec
 issue name parser =
-  ObservationSpec CliIssueImplement name (fmap DaemonIssueImplementObservation . parser)
+  ObservationSpec IssueImplement name (fmap DaemonIssueImplementObservation . parser)
 
 issuePureFromCli :: String -> (ObserveOnceCli -> IssueImplementObservation) -> ObservationSpec
 issuePureFromCli name parser =
@@ -175,7 +175,7 @@ issuePureFromCli name parser =
 
 prReview :: String -> (ObserveOnceCli -> IO PrReviewObservation) -> ObservationSpec
 prReview name parser =
-  ObservationSpec CliPrReview name (fmap DaemonPrReviewObservation . parser)
+  ObservationSpec PrReview name (fmap DaemonPrReviewObservation . parser)
 
 prReviewPure :: String -> PrReviewObservation -> ObservationSpec
 prReviewPure name observation =

@@ -8,6 +8,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
@@ -70,6 +71,7 @@ module CodexWatcher.Types
   , someDomainIs
   , somePhase
   , somePhaseIs
+  , withDomain
   , isTerminalState
   , mkMaxParallel
   , mkPollSeconds
@@ -92,6 +94,7 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Control.Applicative ((<|>))
 import Data.Kind (Constraint)
 import Data.List.NonEmpty (NonEmpty)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Aeson.Types (Parser)
@@ -571,6 +574,11 @@ deriving stock instance Show SomeWatcherState
 knownDomain :: forall domain. KnownDomain domain => Domain
 knownDomain =
   fromSing (sing @domain)
+
+withDomain :: Domain -> (forall domain. KnownDomain domain => Proxy domain -> r) -> r
+withDomain PrReview f = f (Proxy @'PrReview)
+withDomain IssueImplement f = f (Proxy @'IssueImplement)
+withDomain IssuePlanning f = f (Proxy @'IssuePlanning)
 
 knownPhase :: forall phase. KnownPhase phase => Phase
 knownPhase =

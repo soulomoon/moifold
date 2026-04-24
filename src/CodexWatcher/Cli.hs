@@ -7,7 +7,6 @@
 
 module CodexWatcher.Cli
   ( CliCommand (..)
-  , CliDomain (..)
   , GuardWatcherCli (..)
   , HealthcheckCli (..)
   , IssueFanoutCli (..)
@@ -18,7 +17,6 @@ module CodexWatcher.Cli
   , StopDaemonCli (..)
   , cliCommandParserInfo
   , cliDomainName
-  , cliDomainToDomain
   , execCliCommandParser
   , parseCliCommand
   ) where
@@ -46,12 +44,6 @@ import GHC.Generics (Generic)
 import Options.Applicative
 import Text.Read (readMaybe)
 
-data CliDomain
-  = CliPrReview
-  | CliIssueImplement
-  | CliIssuePlanning
-  deriving stock (Eq, Show, Generic)
-
 data CliCommand
   = CliReplayEvents FilePath
   | CliHealthcheck HealthcheckCli
@@ -75,13 +67,13 @@ data HealthcheckCli = HealthcheckCli
 data StopDaemonCli = StopDaemonCli
   { stopDaemonCliPidFile :: Maybe FilePath
   , stopDaemonCliStateDir :: Maybe FilePath
-  , stopDaemonCliDomain :: Maybe CliDomain
+  , stopDaemonCliDomain :: Maybe Domain
   }
   deriving stock (Eq, Show, Generic)
 
 data RenderServiceCli = RenderServiceCli
   { renderServiceCliName :: Text
-  , renderServiceCliDomain :: CliDomain
+  , renderServiceCliDomain :: Domain
   , renderServiceCliEventsPath :: FilePath
   , renderServiceCliStateDir :: FilePath
   , renderServiceCliRepo :: RepoName
@@ -120,7 +112,7 @@ data ObserveOnceCli = ObserveOnceCli
   , observeCliStateDir :: FilePath
   , observeCliRepo :: RepoName
   , observeCliWorkdir :: FilePath
-  , observeCliDomain :: CliDomain
+  , observeCliDomain :: Domain
   , observeCliObservation :: String
   , observeCliExecute :: Bool
   , observeCliEndpoint :: Maybe AppServerEndpoint
@@ -145,7 +137,7 @@ data RepairInvalidStateCli = RepairInvalidStateCli
   deriving stock (Eq, Show, Generic)
 
 data LoopCli = LoopCli
-  { loopCliDomain :: CliDomain
+  { loopCliDomain :: Domain
   , loopCliEventsPath :: FilePath
   , loopCliStateDir :: FilePath
   , loopCliRepo :: RepoName
@@ -213,12 +205,12 @@ cliCommandParser =
         <> command "render-service" (info (CliRenderService <$> renderServiceParser) (progDesc "Render a systemd unit and logrotate config"))
         <> command "issue-fanout" (info (CliIssueFanout <$> issueFanoutParser) (progDesc "Plan or create issue implementer child watcher state"))
         <> command "observe-once" (info (CliObserveOnce <$> observeOnceParser) (progDesc "Apply one explicit typed watcher observation"))
-        <> command "run-pr-review" (info (CliRunLoop <$> loopParser CliPrReview) (progDesc "Run one or more PR review watcher loop iterations"))
-        <> command "run-issue-implement" (info (CliRunLoop <$> loopParser CliIssueImplement) (progDesc "Run one or more issue implementation watcher loop iterations"))
-        <> command "run-issue-planning" (info (CliRunLoop <$> loopParser CliIssuePlanning) (progDesc "Run one or more issue planning watcher loop iterations"))
+        <> command "run-pr-review" (info (CliRunLoop <$> loopParser PrReview) (progDesc "Run one or more PR review watcher loop iterations"))
+        <> command "run-issue-implement" (info (CliRunLoop <$> loopParser IssueImplement) (progDesc "Run one or more issue implementation watcher loop iterations"))
+        <> command "run-issue-planning" (info (CliRunLoop <$> loopParser IssuePlanning) (progDesc "Run one or more issue planning watcher loop iterations"))
         <> command "guard-issue-planning" (info (CliGuardWatcher <$> guardIssuePlanningParser) (progDesc "Guard an issue planning watcher and launch a repair thread on failure"))
-        <> command "guard-issue-implement" (info (CliGuardWatcher <$> guardWatcherParser CliIssueImplement) (progDesc "Guard an issue implementer watcher and launch a repair thread on failure"))
-        <> command "guard-pr-review" (info (CliGuardWatcher <$> guardWatcherParser CliPrReview) (progDesc "Guard a PR review watcher and launch a repair thread on failure"))
+        <> command "guard-issue-implement" (info (CliGuardWatcher <$> guardWatcherParser IssueImplement) (progDesc "Guard an issue implementer watcher and launch a repair thread on failure"))
+        <> command "guard-pr-review" (info (CliGuardWatcher <$> guardWatcherParser PrReview) (progDesc "Guard a PR review watcher and launch a repair thread on failure"))
         <> command "repair-invalid-state" (info (CliRepairInvalidState <$> repairInvalidStateParser) (progDesc "Plan or apply a deterministic repair for an invalid watcher event log"))
     )
 
@@ -311,7 +303,7 @@ repairInvalidStateParser =
     <*> stateDirOption
     <*> switch (long "execute" <> help "Archive and rewrite events.jsonl plus compatibility state files")
 
-loopParser :: CliDomain -> Parser LoopCli
+loopParser :: Domain -> Parser LoopCli
 loopParser domain =
   LoopCli
     <$> pure domain
@@ -339,9 +331,9 @@ loopParser domain =
 
 guardIssuePlanningParser :: Parser GuardWatcherCli
 guardIssuePlanningParser =
-  guardWatcherParser CliIssuePlanning
+  guardWatcherParser IssuePlanning
 
-guardWatcherParser :: CliDomain -> Parser GuardWatcherCli
+guardWatcherParser :: Domain -> Parser GuardWatcherCli
 guardWatcherParser domain =
   GuardWatcherCli
     <$> loopParser domain
@@ -361,7 +353,7 @@ optionalEndpointParser :: Parser (Maybe AppServerEndpoint)
 optionalEndpointParser =
   optional requiredEndpointParser
 
-domainOption :: Parser CliDomain
+domainOption :: Parser Domain
 domainOption =
   option domainReader (long "domain" <> metavar "pr-review|issue-implement|issue-planning" <> help "Watcher domain")
 
@@ -449,12 +441,12 @@ staleSecondsOptionDefault :: String -> Int -> String -> String -> Parser StaleSe
 staleSecondsOptionDefault optionName defaultValue metavarName helpText =
   option staleSecondsReader (long optionName <> metavar metavarName <> value (staleSecondsDefault defaultValue) <> showDefaultWith show <> help helpText)
 
-domainReader :: ReadM CliDomain
+domainReader :: ReadM Domain
 domainReader =
   eitherReader \case
-    "pr-review" -> Right CliPrReview
-    "issue-implement" -> Right CliIssueImplement
-    "issue-planning" -> Right CliIssuePlanning
+    "pr-review" -> Right PrReview
+    "issue-implement" -> Right IssueImplement
+    "issue-planning" -> Right IssuePlanning
     other -> Left ("unsupported watcher domain: " <> other)
 
 intReader :: ReadM Int
@@ -533,14 +525,8 @@ splitComma text =
     (part, []) -> [part]
     (part, _comma : rest) -> part : splitComma rest
 
-cliDomainName :: CliDomain -> String
+cliDomainName :: Domain -> String
 cliDomainName = \case
-  CliPrReview -> "pr-review"
-  CliIssueImplement -> "issue-implement"
-  CliIssuePlanning -> "issue-planning"
-
-cliDomainToDomain :: CliDomain -> Domain
-cliDomainToDomain = \case
-  CliPrReview -> PrReview
-  CliIssueImplement -> IssueImplement
-  CliIssuePlanning -> IssuePlanning
+  PrReview -> "pr-review"
+  IssueImplement -> "issue-implement"
+  IssuePlanning -> "issue-planning"

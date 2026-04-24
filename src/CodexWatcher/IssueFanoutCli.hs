@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.IssueFanoutCli
   ( IssueImplementerChildLaunch (..)
@@ -41,6 +42,7 @@ import Control.Monad (unless, when)
 import Data.Aeson (Value, object, (.=))
 import Data.List (nub, sortOn)
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Proxy (Proxy (..))
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
 import System.Exit (die)
@@ -137,7 +139,7 @@ issueImplementerStateIsActive stateDir = do
           case replayEventLog events of
             Left _ -> pure True
             Right replay ->
-              pure (someDomain replay.replayState == IssueImplement && not (isTerminalState replay.replayState))
+              pure (someDomainIs @'IssueImplement replay.replayState && not (isTerminalState replay.replayState))
 
 data IssueImplementerChildLaunch
   = DoNotLaunchChildren
@@ -443,7 +445,7 @@ issueImplementerRuntimeStatusForLaunch launch = do
       issueNumber' = launchIssueNumber launch
       eventsPath = stateDir </> "events.jsonl"
       configPath = stateDir </> "config.json"
-      pidPath = WatcherPaths.defaultPidPath IssueImplement stateDir
+      pidPath = WatcherPaths.defaultPidPathForKnownDomain (Proxy @'IssueImplement) stateDir
       stateDir = launch.launchStateDir
       issueClosed = githubIssueClosed repo issueNumber'
       statusConfig :: WatcherRuntimeStatusConfig 'IssueImplement

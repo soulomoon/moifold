@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -34,10 +35,8 @@ import System.FilePath ((</>))
 
 runWatcherRunnerGuard :: GuardWatcherCli -> IO ()
 runWatcherRunnerGuard cli =
-  case cli.guardCliLoop.loopCliDomain of
-    CliPrReview -> runWatcherRunnerGuardTyped (Proxy @'PrReview) cli
-    CliIssueImplement -> runWatcherRunnerGuardTyped (Proxy @'IssueImplement) cli
-    CliIssuePlanning -> runWatcherRunnerGuardTyped (Proxy @'IssuePlanning) cli
+  withDomain cli.guardCliLoop.loopCliDomain \proxy ->
+    runWatcherRunnerGuardTyped proxy cli
 
 runWatcherRunnerGuardTyped :: forall domain. KnownDomain domain => Proxy domain -> GuardWatcherCli -> IO ()
 runWatcherRunnerGuardTyped _ cli = do
@@ -176,17 +175,17 @@ loopCliCommandArgs watcherPidFile cli =
     <> boolSwitch cli.loopCliStartChildren "--start-children"
     <> maybe [] (\seconds -> ["--child-poll-seconds", Text.pack (show seconds)]) cli.loopCliChildPollSeconds
 
-runCommandForDomain :: CliDomain -> String
+runCommandForDomain :: Domain -> String
 runCommandForDomain = \case
-  CliPrReview -> "run-pr-review"
-  CliIssueImplement -> "run-issue-implement"
-  CliIssuePlanning -> "run-issue-planning"
+  PrReview -> "run-pr-review"
+  IssueImplement -> "run-issue-implement"
+  IssuePlanning -> "run-issue-planning"
 
-guardCommandForDomain :: CliDomain -> String
+guardCommandForDomain :: Domain -> String
 guardCommandForDomain = \case
-  CliPrReview -> "guard-pr-review"
-  CliIssueImplement -> "guard-issue-implement"
-  CliIssuePlanning -> "guard-issue-planning"
+  PrReview -> "guard-pr-review"
+  IssueImplement -> "guard-issue-implement"
+  IssuePlanning -> "guard-issue-planning"
 
 boolSwitch :: Bool -> Text.Text -> [Text.Text]
 boolSwitch enabled switchText =

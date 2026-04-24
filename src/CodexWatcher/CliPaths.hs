@@ -3,13 +3,13 @@ module CodexWatcher.CliPaths
   , cliPidFileName
   ) where
 
-import CodexWatcher.Cli (CliDomain, cliDomainToDomain)
+import CodexWatcher.Types (Domain, withDomain)
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 
-cliPidFileName :: CliDomain -> FilePath
-cliPidFileName =
-  WatcherPaths.pidFileNameForDomain . cliDomainToDomain
+cliPidFileName :: Domain -> FilePath
+cliPidFileName cliDomain =
+  withDomain cliDomain WatcherPaths.pidFileNameForKnownDomain
 
-defaultCliPidPath :: CliDomain -> FilePath -> FilePath
+defaultCliPidPath :: Domain -> FilePath -> FilePath
 defaultCliPidPath cliDomain =
-  WatcherPaths.defaultPidPath (cliDomainToDomain cliDomain)
+  withDomain cliDomain WatcherPaths.defaultPidPathForKnownDomain
