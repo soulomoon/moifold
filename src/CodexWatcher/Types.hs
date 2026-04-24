@@ -13,6 +13,8 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeAbstractions #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module CodexWatcher.Types
   ( Domain (..)
@@ -72,11 +74,12 @@ module CodexWatcher.Types
   ) where
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
-import Data.Singletons (Sing, SingI (..), SingKind (..), SomeSing (..))
+import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
+import Data.Singletons.TH (genSingletons)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Control.Applicative ((<|>))
-import Data.Kind (Constraint, Type)
+import Data.Kind (Constraint)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -87,34 +90,6 @@ data Domain
   | IssueImplement
   | PrReview
   deriving stock (Eq, Show)
-
-type SDomain :: Domain -> Type
-data SDomain domain where
-  SIssuePlanning :: SDomain 'IssuePlanning
-  SIssueImplement :: SDomain 'IssueImplement
-  SPrReview :: SDomain 'PrReview
-
-type instance Sing @Domain = SDomain
-
-instance SingI 'IssuePlanning where
-  sing = SIssuePlanning
-
-instance SingI 'IssueImplement where
-  sing = SIssueImplement
-
-instance SingI 'PrReview where
-  sing = SPrReview
-
-instance SingKind Domain where
-  type Demote Domain = Domain
-
-  fromSing SIssuePlanning = IssuePlanning
-  fromSing SIssueImplement = IssueImplement
-  fromSing SPrReview = PrReview
-
-  toSing IssuePlanning = SomeSing SIssuePlanning
-  toSing IssueImplement = SomeSing SIssueImplement
-  toSing PrReview = SomeSing SPrReview
 
 type KnownDomain :: Domain -> Constraint
 type KnownDomain domain = SingI domain
@@ -133,81 +108,7 @@ data Phase
   | Stopped
   deriving stock (Eq, Show)
 
-type SPhase :: Phase -> Type
-data SPhase phase where
-  SInitialized :: SPhase 'Initialized
-  SPlanMode :: SPhase 'PlanMode
-  SImplementing :: SPhase 'Implementing
-  SCheckingReviews :: SPhase 'CheckingReviews
-  SFixingReviews :: SPhase 'FixingReviews
-  SReviewingClean :: SPhase 'ReviewingClean
-  SWaitingMergeability :: SPhase 'WaitingMergeability
-  SMerging :: SPhase 'Merging
-  SBlocked :: SPhase 'Blocked
-  SComplete :: SPhase 'Complete
-  SStopped :: SPhase 'Stopped
-
-type instance Sing @Phase = SPhase
-
-instance SingI 'Initialized where
-  sing = SInitialized
-
-instance SingI 'PlanMode where
-  sing = SPlanMode
-
-instance SingI 'Implementing where
-  sing = SImplementing
-
-instance SingI 'CheckingReviews where
-  sing = SCheckingReviews
-
-instance SingI 'FixingReviews where
-  sing = SFixingReviews
-
-instance SingI 'ReviewingClean where
-  sing = SReviewingClean
-
-instance SingI 'WaitingMergeability where
-  sing = SWaitingMergeability
-
-instance SingI 'Merging where
-  sing = SMerging
-
-instance SingI 'Blocked where
-  sing = SBlocked
-
-instance SingI 'Complete where
-  sing = SComplete
-
-instance SingI 'Stopped where
-  sing = SStopped
-
-instance SingKind Phase where
-  type Demote Phase = Phase
-
-  fromSing SInitialized = Initialized
-  fromSing SPlanMode = PlanMode
-  fromSing SImplementing = Implementing
-  fromSing SCheckingReviews = CheckingReviews
-  fromSing SFixingReviews = FixingReviews
-  fromSing SReviewingClean = ReviewingClean
-  fromSing SWaitingMergeability = WaitingMergeability
-  fromSing SMerging = Merging
-  fromSing SBlocked = Blocked
-  fromSing SComplete = Complete
-  fromSing SStopped = Stopped
-
-  toSing Initialized = SomeSing SInitialized
-  toSing PlanMode = SomeSing SPlanMode
-  toSing Implementing = SomeSing SImplementing
-  toSing CheckingReviews = SomeSing SCheckingReviews
-  toSing FixingReviews = SomeSing SFixingReviews
-  toSing ReviewingClean = SomeSing SReviewingClean
-  toSing WaitingMergeability = SomeSing SWaitingMergeability
-  toSing Merging = SomeSing SMerging
-  toSing Blocked = SomeSing SBlocked
-  toSing Complete = SomeSing SComplete
-  toSing Stopped = SomeSing SStopped
+$(genSingletons [''Domain, ''Phase])
 
 type KnownPhase :: Phase -> Constraint
 type KnownPhase phase = SingI phase
