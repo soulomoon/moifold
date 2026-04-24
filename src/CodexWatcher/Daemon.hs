@@ -275,7 +275,7 @@ runObservedDaemonDryRun
   -> ObservedPolicyTick
   -> m (Either DaemonFailure DaemonObservedTickResult)
 runObservedDaemonDryRun executor options replay observed = do
-  let compatibilityWrites = compatibilityStateWrites options.daemonRuntimeConfig.effectRuntimeStateDir observed.observedState
+  let compatibilityWrites = compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir) observed.observedState
       compiledEffects = compileEffectPlan options.daemonRuntimeConfig observed.observedEffects
   actionReports <- executeCompiledEffectPlan executor DryRunActions compiledEffects
   pure
@@ -363,7 +363,7 @@ prepareObservedCommit options priorEvents observed compiledEffects postCommitAct
   let committedEvents = [observed.observedEvent]
   finalReplay <- replayEventLogFromEvents (priorEvents <> committedEvents)
   let finalState = finalReplay.replayState
-      compatibilityWrites = compatibilityStateWrites options.daemonRuntimeConfig.effectRuntimeStateDir finalState
+      compatibilityWrites = compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir) finalState
   pure
     PreparedObservedCommit
       { preparedFinalReplay = finalReplay

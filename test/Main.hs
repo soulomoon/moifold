@@ -1536,19 +1536,20 @@ effectRuntimeConfig :: RepoName -> FilePath -> Int -> EffectRuntimeConfig
 effectRuntimeConfig repo workdir requestId =
   EffectRuntimeConfig
     { effectRuntimeRepo = repo
-    , effectRuntimeWorkdir = workdir
-    , effectRuntimeStateDir = workdir </> ".watcher"
+    , effectRuntimeWorkdir = runtimeWorkdir
+    , effectRuntimeStateDir = runtimeStateDir
     , effectRuntimeMergeMethod = "merge"
     , effectRuntimeNextRequestId = RequestId requestId
     , effectRuntimePlannerThreadInstructions = "planner developer instructions"
-    , effectRuntimePlannerTurn = mkTurnRuntime plannerCwd "planner prompt" Nothing
+    , effectRuntimePlannerTurn = mkTurnRuntime (RuntimeStateDirCwd runtimeStateDir) "planner prompt" Nothing
     , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
     , effectRuntimeIssuePlanTurn = turnRuntime "issue plan prompt" Nothing
     , effectRuntimeIssueImplementationTurn = turnRuntime "issue implementation prompt" Nothing
     , effectRuntimeReviewerTurn = turnRuntime "reviewer prompt" Nothing
     }
  where
-  plannerCwd = workdir </> ".watcher"
+  runtimeWorkdir = RuntimeWorkdir workdir
+  runtimeStateDir = RuntimeStateDir (workdir </> ".watcher")
   mkTurnRuntime cwd input collaborationMode =
     TurnRuntimeConfig
       { turnRuntimeCwd = cwd
@@ -1560,7 +1561,7 @@ effectRuntimeConfig repo workdir requestId =
       , turnRuntimeOutputSchema = Nothing
       , turnRuntimeCollaborationMode = collaborationMode
       }
-  turnRuntime = mkTurnRuntime workdir
+  turnRuntime = mkTurnRuntime (RuntimeWorkdirCwd runtimeWorkdir)
 
 actionIsTurnStartFor :: ThreadId -> PlannedAction -> Bool
 actionIsTurnStartFor threadId = \case
@@ -1978,7 +1979,7 @@ prop_effectInterpreterRecordBlockedWritesBlockState :: BlockedReason -> Bool
 prop_effectInterpreterRecordBlockedWritesBlockState reason =
   let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 30
       compiled = compileEffectPlan config [SomeEffect (RecordBlocked reason)]
-      expectedPath = config.effectRuntimeStateDir </> "block-state.json"
+      expectedPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
       expectedJson = object ["blocked" .= True, "reason" .= unBlockedReason reason]
    in compiled.compiledActions == [PlannedWriteJson expectedPath expectedJson]
         && compiled.compiledNextRequestId == RequestId 30
@@ -1987,7 +1988,7 @@ prop_effectInterpreterRecordPlanningGraphWritesState :: PlanningGraph -> Bool
 prop_effectInterpreterRecordPlanningGraphWritesState graph =
   let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 32
       compiled = compileEffectPlan config [SomeEffect (RecordPlanningGraph graph)]
-      expectedPath = config.effectRuntimeStateDir </> "planning-state.json"
+      expectedPath = runtimeStateDirFile config.effectRuntimeStateDir "planning-state.json"
    in compiled.compiledActions == [PlannedWriteJson expectedPath (toJSON graph)]
         && compiled.compiledNextRequestId == RequestId 32
 
@@ -2627,7 +2628,7 @@ actionExecutorExecuteCallsInjectedInterpreters = do
           ]
   reports <- executeCompiledEffectPlan executor ExecuteActions compiled
   calls <- getCalls
-  let expectedBlockPath = config.effectRuntimeStateDir </> "block-state.json"
+  let expectedBlockPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
       expectedBlockJson = object ["blocked" .= True, "reason" .= unBlockedReason blockedReason]
       expectedCalls =
         [ FakeCommand (GitPush "/tmp/work" (BranchName "codex/example"))
@@ -3154,7 +3155,7 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
           }
       loopConfig = DaemonLoopConfig options Nothing
       events = [IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [issueNumber])]
-      snapshotPath = runtimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
+      snapshotPath = runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "issue-snapshot.json"
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
   case result of
@@ -3235,7 +3236,7 @@ automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn = do
           }
       loopConfig = DaemonLoopConfig options Nothing
       events = [IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [issueNumber])]
-      snapshotPath = runtimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
+      snapshotPath = runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "issue-snapshot.json"
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
   case result of
@@ -3360,7 +3361,7 @@ automaticDaemonLoopPlanningGraphWaitsAndRecords = do
   case result of
     Right tick -> do
       let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
-          expectedPath = runtimeConfig.effectRuntimeStateDir </> "planning-state.json"
+          expectedPath = runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "planning-state.json"
       results <-
         sequence
           [ assert "planning graph emits graph update event" (observedEvent == Just (IssuePlanningGraphUpdated graph))
@@ -3499,7 +3500,7 @@ automaticDaemonLoopPlanningGraphCanonicalizesOpenScopeCoverage = do
       results <-
         sequence
           [ assert "canonical planning graph restores open root as ready" (observedEvent == Just (IssuePlanningGraphUpdated expectedGraph))
-          , assert "canonical planning graph records normalized state" (FakeWriteJson (runtimeConfig.effectRuntimeStateDir </> "planning-state.json") (toJSON expectedGraph) `elem` calls)
+          , assert "canonical planning graph records normalized state" (FakeWriteJson (runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "planning-state.json") (toJSON expectedGraph) `elem` calls)
           , assert "canonical planning graph fetches scoped issue snapshot" (fetchedIssue (IssueNumber 12) calls && fetchedSubIssues (IssueNumber 12) calls)
           ]
       pure (and results)

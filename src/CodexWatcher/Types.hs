@@ -5,6 +5,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -36,6 +37,9 @@ module CodexWatcher.Types
   , BranchName (..)
   , ReviewThreadId (..)
   , CommitSha (..)
+  , RuntimeWorkdir (..)
+  , RuntimeStateDir (..)
+  , RuntimeCwd (..)
   , MergeCommit (..)
   , BlockedReason (..)
   , StopReason (..)
@@ -74,6 +78,10 @@ module CodexWatcher.Types
   , unPollSeconds
   , unStaleSeconds
   , pollSecondsMicros
+  , runtimeCwdPath
+  , runtimeStateDirFile
+  , runtimeStateDirPath
+  , runtimeWorkdirPath
   ) where
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
@@ -87,6 +95,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Aeson.Types (Parser)
+import System.FilePath ((</>))
 
 data Domain
   = IssuePlanning
@@ -171,6 +180,34 @@ newtype ReviewThreadId = ReviewThreadId { unReviewThreadId :: Text }
 
 newtype CommitSha = CommitSha { unCommitSha :: Text }
   deriving stock (Eq, Show)
+
+newtype RuntimeWorkdir = RuntimeWorkdir { unRuntimeWorkdir :: FilePath }
+  deriving stock (Eq, Show)
+
+newtype RuntimeStateDir = RuntimeStateDir { unRuntimeStateDir :: FilePath }
+  deriving stock (Eq, Show)
+
+data RuntimeCwd
+  = RuntimeWorkdirCwd RuntimeWorkdir
+  | RuntimeStateDirCwd RuntimeStateDir
+  deriving stock (Eq, Show)
+
+runtimeWorkdirPath :: RuntimeWorkdir -> FilePath
+runtimeWorkdirPath =
+  unRuntimeWorkdir
+
+runtimeStateDirPath :: RuntimeStateDir -> FilePath
+runtimeStateDirPath =
+  unRuntimeStateDir
+
+runtimeStateDirFile :: RuntimeStateDir -> FilePath -> FilePath
+runtimeStateDirFile stateDir fileName =
+  unRuntimeStateDir stateDir </> fileName
+
+runtimeCwdPath :: RuntimeCwd -> FilePath
+runtimeCwdPath = \case
+  RuntimeWorkdirCwd workdir -> runtimeWorkdirPath workdir
+  RuntimeStateDirCwd stateDir -> runtimeStateDirPath stateDir
 
 newtype MergeCommit = MergeCommit { unMergeCommit :: CommitSha }
   deriving stock (Eq, Show)

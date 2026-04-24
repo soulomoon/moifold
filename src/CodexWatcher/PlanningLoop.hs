@@ -33,7 +33,6 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import System.FilePath ((</>))
 
 runPlanningReady
   :: Monad m
@@ -148,7 +147,7 @@ startPlannerThread executor config = do
       request =
         threadStartRequest
           requestId
-          (defaultThreadStartOptions runtimeConfig.effectRuntimePlannerTurn.turnRuntimeCwd runtimeConfig.effectRuntimePlannerThreadInstructions)
+          (defaultThreadStartOptions (runtimeCwdPath runtimeConfig.effectRuntimePlannerTurn.turnRuntimeCwd) runtimeConfig.effectRuntimePlannerThreadInstructions)
       nextConfig = withRuntimeNextRequestId (nextRequestId requestId) config
   report <- executePlannedAction executor config.loopDaemonOptions.daemonExecutionMode (PlannedAppServerRequest request)
   case config.loopDaemonOptions.daemonExecutionMode of
@@ -222,7 +221,7 @@ ensureIssuePlanningSnapshot executor config plannerConfig = do
 
 issuePlanningSnapshotPath :: DaemonLoopConfig -> FilePath
 issuePlanningSnapshotPath config =
-  config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
+  runtimeStateDirFile config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir "issue-snapshot.json"
 
 planningSnapshotScopeCompleted :: PlannerConfig -> Value -> Either Text Bool
 planningSnapshotScopeCompleted plannerConfig snapshotValue

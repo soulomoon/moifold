@@ -30,10 +30,9 @@ import Data.List (mapAccumL)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Generics (Generic)
-import System.FilePath ((</>))
 
 data TurnRuntimeConfig = TurnRuntimeConfig
-  { turnRuntimeCwd :: FilePath
+  { turnRuntimeCwd :: RuntimeCwd
   , turnRuntimeModel :: Text
   , turnRuntimeEffort :: Text
   , turnRuntimeApprovalPolicy :: Text
@@ -46,8 +45,8 @@ data TurnRuntimeConfig = TurnRuntimeConfig
 
 data EffectRuntimeConfig = EffectRuntimeConfig
   { effectRuntimeRepo :: RepoName
-  , effectRuntimeWorkdir :: FilePath
-  , effectRuntimeStateDir :: FilePath
+  , effectRuntimeWorkdir :: RuntimeWorkdir
+  , effectRuntimeStateDir :: RuntimeStateDir
   , effectRuntimeMergeMethod :: Text
   , effectRuntimeNextRequestId :: RequestId
   , effectRuntimePlannerThreadInstructions :: Text
@@ -109,23 +108,23 @@ compileEffect config requestId (SomeEffect effect) =
     StartReviewerTurn prConfig reviewTargetSha threadId ->
       oneAppServerRequest (reviewerTurnRuntimeConfig config prConfig reviewTargetSha) threadId
     PushBranch branch ->
-      unchanged [PlannedCommand (GitPush config.effectRuntimeWorkdir branch)]
+      unchanged [PlannedCommand (GitPush (runtimeWorkdirPath config.effectRuntimeWorkdir) branch)]
     CreateIssue repo request ->
       unchanged [PlannedCommand (GhIssueCreate repo request)]
     CreatePullRequest issueConfig ->
-      unchanged [PlannedCommand (GhCreatePullRequest config.effectRuntimeWorkdir issueConfig)]
+      unchanged [PlannedCommand (GhCreatePullRequest (runtimeWorkdirPath config.effectRuntimeWorkdir) issueConfig)]
     UpdatePullRequestBody issueConfig prNumber ->
-      unchanged [PlannedCommand (GhUpdatePullRequestBody config.effectRuntimeWorkdir issueConfig prNumber (config.effectRuntimeStateDir </> "issue-plan.md"))]
+      unchanged [PlannedCommand (GhUpdatePullRequestBody (runtimeWorkdirPath config.effectRuntimeWorkdir) issueConfig prNumber (runtimeStateDirFile config.effectRuntimeStateDir "issue-plan.md"))]
     CloseIssue issueConfig prNumber ->
       unchanged [PlannedCommand (GhIssueClose issueConfig prNumber)]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
     RecordIssuePlan issueConfig prNumber planMarkdown ->
-      unchanged [PlannedWriteText (config.effectRuntimeStateDir </> "issue-plan.md") (issuePlanFileText issueConfig prNumber planMarkdown)]
+      unchanged [PlannedWriteText (runtimeStateDirFile config.effectRuntimeStateDir "issue-plan.md") (issuePlanFileText issueConfig prNumber planMarkdown)]
     RecordPlanningGraph graph ->
-      unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "planning-state.json") (toJSON graph)]
+      unchanged [PlannedWriteJson (runtimeStateDirFile config.effectRuntimeStateDir "planning-state.json") (toJSON graph)]
     RecordBlocked reason ->
-      unchanged [PlannedWriteJson (config.effectRuntimeStateDir </> "block-state.json") (blockedStateJson reason)]
+      unchanged [PlannedWriteJson (runtimeStateDirFile config.effectRuntimeStateDir "block-state.json") (blockedStateJson reason)]
     MergePullRequest prNumber evidence ->
       unchanged [PlannedCommand (GhPrCommentReviewAndMerge config.effectRuntimeRepo prNumber evidence config.effectRuntimeMergeMethod)]
     StopDaemon ->
@@ -155,7 +154,7 @@ turnStartOptions :: TurnRuntimeConfig -> ThreadId -> TurnStartOptions
 turnStartOptions config threadId =
   TurnStartOptions
     { turnThreadId = threadId
-    , turnCwd = config.turnRuntimeCwd
+    , turnCwd = runtimeCwdPath config.turnRuntimeCwd
     , turnEffort = config.turnRuntimeEffort
     , turnModel = config.turnRuntimeModel
     , turnApprovalPolicy = config.turnRuntimeApprovalPolicy
@@ -170,8 +169,8 @@ reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
   config.effectRuntimeReviewerTurn
     { turnRuntimeInput =
         reviewerTurnInput
-          config.effectRuntimeWorkdir
-          (config.effectRuntimeStateDir </> "reviewer-state.json")
+          (runtimeWorkdirPath config.effectRuntimeWorkdir)
+          (runtimeStateDirFile config.effectRuntimeStateDir "reviewer-state.json")
           prConfig
           reviewTargetSha
     }
@@ -180,8 +179,8 @@ issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> PrNumber -> 
 issuePlanTurnRuntimeConfig config issueConfig prNumber =
   let instructions =
         issuePlanModeDeveloperInstructions
-          config.effectRuntimeWorkdir
-          config.effectRuntimeStateDir
+          (runtimeWorkdirPath config.effectRuntimeWorkdir)
+          (runtimeStateDirPath config.effectRuntimeStateDir)
           issueConfig
           prNumber
    in

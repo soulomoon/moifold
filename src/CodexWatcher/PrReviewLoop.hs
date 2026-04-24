@@ -32,7 +32,11 @@ runPrCheckingReviews
   -> ThreadId
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runPrCheckingReviews ops executor config events prConfig workerThread reviewerThread = do
-  status <- runGitWorktreeStatus executor.actionRuntime config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir prConfig.prBranch
+  status <-
+    runGitWorktreeStatus
+      executor.actionRuntime
+      (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
+      prConfig.prBranch
   case status.gitHeadSha of
     Nothing -> pure (Left (DaemonLoopExternalFailure "could not determine git HEAD for review-thread check"))
     Just commit -> do

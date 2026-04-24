@@ -92,7 +92,9 @@ idle executor config replay reason = do
   case config.loopDaemonOptions.daemonExecutionMode of
     DryRunActions -> pure ()
     ExecuteActions ->
-      mapM_ writeIdleCompatibility (compatibilityStateWrites config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+      mapM_
+        writeIdleCompatibility
+        (compatibilityStateWrites (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) replay.replayState)
   let sleepPlan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig [SomeEffect SleepUntilNextPoll]
   reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode sleepPlan
   pure (Right (idleTickResult replay reason reports))
@@ -122,7 +124,9 @@ terminalStop executor config replay reason = do
   case config.loopDaemonOptions.daemonExecutionMode of
     DryRunActions -> pure ()
     ExecuteActions ->
-      mapM_ writeTerminalCompatibility (compatibilityStateWrites config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState)
+      mapM_
+        writeTerminalCompatibility
+        (compatibilityStateWrites (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) replay.replayState)
   let stopPlan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig [SomeEffect StopDaemon]
   reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode stopPlan
   pure (Right (idleTickResult replay reason reports))

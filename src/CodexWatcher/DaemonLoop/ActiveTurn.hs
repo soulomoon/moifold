@@ -31,7 +31,6 @@ import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Generics (Generic)
-import System.FilePath ((</>))
 
 data StaleActiveTurnMarker = StaleActiveTurnMarker
   { staleMarkerDomain :: Text
@@ -186,7 +185,7 @@ clearStaleActiveTurnMarker executor config =
 
 staleActiveTurnMarkerPath :: DaemonLoopConfig -> FilePath
 staleActiveTurnMarkerPath config =
-  config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir </> "stale-active-turn.json"
+  runtimeStateDirFile config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir "stale-active-turn.json"
 
 activeTurnStateFingerprint :: SomeWatcherState -> ActiveTurn -> Text
 activeTurnStateFingerprint state activeTurn =

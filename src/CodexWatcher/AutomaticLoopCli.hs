@@ -110,7 +110,7 @@ automaticLoopAfterTick executor cli endpoint executionMode tick = do
 runLoopIterations :: IORef Bool -> ActionExecutor IO -> DaemonLoopConfig -> String -> (DaemonLoopTickResult -> IO Bool) -> Bool -> Int -> Int -> IO ()
 runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop maxIterations iteration = do
   renewRuntimeOwnerForExecution
-    loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
+    (runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir)
     loopConfig.loopDaemonOptions.daemonExecutionMode
   Log.logWatcher
     executor.actionLogger
@@ -118,7 +118,7 @@ runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop m
         Log.Debug
         "runtime_lease_renewed"
         "runtime owner lease renewed"
-        ["stateDir" .= loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir]
+        ["stateDir" .= runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir]
     )
   reconcileLoopCompatibility executor loopConfig
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
@@ -138,7 +138,7 @@ runLoopIterations stopRequested executor loopConfig domain postTick shouldLoop m
 recordInvalidReplayBlockState :: DaemonLoopConfig -> DaemonLoopFailure -> IO ()
 recordInvalidReplayBlockState loopConfig = \case
   DaemonLoopDaemonFailure (DaemonReplayFailed replayFailure) -> do
-    let stateDir = loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
+    let stateDir = runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
     createDirectoryIfMissing True stateDir
     writeJsonValue (stateDir </> "block-state.json") (repairFailureBlockStateJson replayFailure)
   _ -> pure ()
@@ -155,7 +155,7 @@ reconcileLoopCompatibility executor loopConfig =
           case replayEventLog events of
             Left _ -> pure ()
             Right replay ->
-              let writes = compatibilityStateWrites loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir replay.replayState
+              let writes = compatibilityStateWrites (runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) replay.replayState
                in do
                     mapM_
                       (writeCompatibility ioRuntimeInterpreter)
@@ -166,7 +166,7 @@ reconcileLoopCompatibility executor loopConfig =
                           Log.Debug
                           "compatibility_reconciled"
                           "compatibility state reconciled from event log"
-                          [ "stateDir" .= loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
+                          [ "stateDir" .= runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
                           , "writes" .= length writes
                           ]
                       )
