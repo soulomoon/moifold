@@ -21,6 +21,7 @@ module CodexWatcher.Effects
 import CodexWatcher.Types
 import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
 import Data.Text (Text)
+import Data.Type.Equality (TestEquality (..), (:~:) (Refl))
 
 data Effect (mutability :: Mutability) where
   ReadOpenIssues :: RepoName -> Effect 'ReadOnly
@@ -53,34 +54,10 @@ data SomeEffect where
 deriving stock instance Show SomeEffect
 
 instance Eq SomeEffect where
-  SomeEffect (ReadOpenIssues left) == SomeEffect (ReadOpenIssues right) = left == right
-  SomeEffect (ReadOpenPullRequests left) == SomeEffect (ReadOpenPullRequests right) = left == right
-  SomeEffect (ReadReviewThreads left) == SomeEffect (ReadReviewThreads right) = left == right
-  SomeEffect (StartPlannerTurn left) == SomeEffect (StartPlannerTurn right) = left == right
-  SomeEffect (StartWorkerTurn left) == SomeEffect (StartWorkerTurn right) = left == right
-  SomeEffect (StartIssuePlanWorkerTurn leftConfig leftPr leftThread) == SomeEffect (StartIssuePlanWorkerTurn rightConfig rightPr rightThread) =
-    leftConfig == rightConfig && leftPr == rightPr && leftThread == rightThread
-  SomeEffect (StartIssueImplementationWorkerTurn left) == SomeEffect (StartIssueImplementationWorkerTurn right) = left == right
-  SomeEffect (StartReviewerTurn leftConfig leftCommit leftThread) == SomeEffect (StartReviewerTurn rightConfig rightCommit rightThread) =
-    leftConfig == rightConfig && leftCommit == rightCommit && leftThread == rightThread
-  SomeEffect (PushBranch left) == SomeEffect (PushBranch right) = left == right
-  SomeEffect (CreateIssue leftRepo leftRequest) == SomeEffect (CreateIssue rightRepo rightRequest) =
-    leftRepo == rightRepo && leftRequest == rightRequest
-  SomeEffect (CreatePullRequest left) == SomeEffect (CreatePullRequest right) = left == right
-  SomeEffect (UpdatePullRequestBody leftConfig leftPr) == SomeEffect (UpdatePullRequestBody rightConfig rightPr) =
-    leftConfig == rightConfig && leftPr == rightPr
-  SomeEffect (CloseIssue leftConfig leftPr) == SomeEffect (CloseIssue rightConfig rightPr) =
-    leftConfig == rightConfig && leftPr == rightPr
-  SomeEffect (ResolveReviewThread left) == SomeEffect (ResolveReviewThread right) = left == right
-  SomeEffect (RecordIssuePlan leftConfig leftPr leftPlan) == SomeEffect (RecordIssuePlan rightConfig rightPr rightPlan) =
-    leftConfig == rightConfig && leftPr == rightPr && leftPlan == rightPlan
-  SomeEffect (RecordPlanningGraph left) == SomeEffect (RecordPlanningGraph right) = left == right
-  SomeEffect (RecordBlocked left) == SomeEffect (RecordBlocked right) = left == right
-  SomeEffect (MergePullRequest leftPr leftEvidence) == SomeEffect (MergePullRequest rightPr rightEvidence) =
-    leftPr == rightPr && leftEvidence == rightEvidence
-  SomeEffect StopDaemon == SomeEffect StopDaemon = True
-  SomeEffect SleepUntilNextPoll == SomeEffect SleepUntilNextPoll = True
-  SomeEffect _ == SomeEffect _ = False
+  SomeEffect left == SomeEffect right =
+    case testEquality (effectMutabilitySing left) (effectMutabilitySing right) of
+      Just Refl -> left == right
+      Nothing -> False
 
 type EffectPlan = [SomeEffect]
 
