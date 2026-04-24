@@ -64,7 +64,7 @@ data RunnerGuardConfig = RunnerGuardConfig
   , guardStateDir :: FilePath
   , guardWatcherPidFile :: FilePath
   , guardAppServerEndpoint :: AppServerEndpoint
-  , guardStaleSeconds :: Int
+  , guardStaleSeconds :: StaleSeconds
   , guardRepairCwd :: FilePath
   , guardRestartWatcherCommand :: Text
   , guardRestartGuardCommand :: Text
@@ -342,7 +342,7 @@ staleProblem :: RunnerGuardConfig -> Text -> [Text] -> IO (Maybe RunnerGuardProb
 staleProblem config summary' details = do
   ageSeconds <- eventLogAgeSeconds config.guardEventsPath
   pure
-    if ageSeconds > fromIntegral config.guardStaleSeconds
+    if ageSeconds > fromIntegral (unStaleSeconds config.guardStaleSeconds)
       then Just (repairProblem summary' (details <> ["event log idle seconds: " <> Text.pack (show (floor ageSeconds :: Integer)), "stale threshold seconds: " <> Text.pack (show config.guardStaleSeconds)]))
       else Nothing
 

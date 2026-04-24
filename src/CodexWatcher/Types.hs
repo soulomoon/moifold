@@ -30,6 +30,7 @@ module CodexWatcher.Types
   , StopReason (..)
   , MaxParallel
   , PollSeconds
+  , StaleSeconds
   , PlannerConfig (..)
   , IssueCreationRequest (..)
   , IssueDependency (..)
@@ -53,8 +54,10 @@ module CodexWatcher.Types
   , isTerminalPhase
   , mkMaxParallel
   , mkPollSeconds
+  , mkStaleSeconds
   , unMaxParallel
   , unPollSeconds
+  , unStaleSeconds
   , pollSecondsMicros
   ) where
 
@@ -191,6 +194,18 @@ mkPollSeconds value
 pollSecondsMicros :: PollSeconds -> Int
 pollSecondsMicros pollSeconds =
   unPollSeconds pollSeconds * 1000000
+
+newtype StaleSeconds = StaleSeconds { unStaleSeconds :: Int }
+  deriving stock (Eq, Ord)
+
+instance Show StaleSeconds where
+  show =
+    show . unStaleSeconds
+
+mkStaleSeconds :: Int -> Maybe StaleSeconds
+mkStaleSeconds value
+  | value > 0 = Just (StaleSeconds value)
+  | otherwise = Nothing
 
 data PlannerConfig = PlannerConfig
   { plannerRepo :: RepoName

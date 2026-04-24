@@ -126,7 +126,7 @@ prop_cliParsesHealthcheckAndRunLoop =
                     }
               , guardCliPidFile = Just "/tmp/state/runner-guard.pid"
               , guardCliPollSeconds = pollSecondsForTest 15
-              , guardCliStaleSeconds = 120
+              , guardCliStaleSeconds = staleSecondsForTest 120
               , guardCliRepairCwd = Just "/tmp/repo"
               }
         )
@@ -176,3 +176,9 @@ pollSecondsForTest seconds =
   case mkPollSeconds seconds of
     Just parsed -> parsed
     Nothing -> error ("invalid test poll seconds: " <> show seconds)
+
+staleSecondsForTest :: Int -> StaleSeconds
+staleSecondsForTest seconds =
+  case mkStaleSeconds seconds of
+    Just parsed -> parsed
+    Nothing -> error ("invalid test stale seconds: " <> show seconds)

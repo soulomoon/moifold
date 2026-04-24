@@ -171,6 +171,12 @@ maxParallelForTest value =
     Just parsed -> parsed
     Nothing -> error ("invalid test maxParallel: " <> show value)
 
+staleSecondsForTest :: Int -> StaleSeconds
+staleSecondsForTest value =
+  case mkStaleSeconds value of
+    Just parsed -> parsed
+    Nothing -> error ("invalid test stale seconds: " <> show value)
+
 instance Arbitrary IssueCreationRequest where
   arbitrary = do
     title <- Text.pack <$> listOf1 (elements (['a' .. 'z'] <> [' ', '-']))
@@ -2128,7 +2134,7 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
           , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
-          , guardStaleSeconds = 1
+          , guardStaleSeconds = staleSecondsForTest 1
           , guardRepairCwd = stateDir
           , guardRestartWatcherCommand = ""
           , guardRestartGuardCommand = ""
@@ -2155,7 +2161,7 @@ runnerGuardRestartsMissingPidForIncompletePlanning = do
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
           , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
-          , guardStaleSeconds = 999999
+          , guardStaleSeconds = staleSecondsForTest 999999
           , guardRepairCwd = stateDir
           , guardRestartWatcherCommand = "restart watcher"
           , guardRestartGuardCommand = "restart guard"
@@ -2189,7 +2195,7 @@ runnerGuardRestartsMissingPidForWaitingPlanning = do
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
           , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
-          , guardStaleSeconds = 999999
+          , guardStaleSeconds = staleSecondsForTest 999999
           , guardRepairCwd = stateDir
           , guardRestartWatcherCommand = "restart watcher"
           , guardRestartGuardCommand = "restart guard"
@@ -2222,7 +2228,7 @@ runnerGuardRepairsInvalidPlanningEventLog = do
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
           , guardAppServerEndpoint = AppServerEndpoint "127.0.0.1" 9 "/"
-          , guardStaleSeconds = 999999
+          , guardStaleSeconds = staleSecondsForTest 999999
           , guardRepairCwd = stateDir
           , guardRestartWatcherCommand = "restart watcher"
           , guardRestartGuardCommand = "restart guard"

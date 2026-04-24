@@ -33,10 +33,12 @@ import CodexWatcher.Types
   , PrNumber (..)
   , ReviewThreadId (..)
   , RepoName (..)
+  , StaleSeconds
   , ThreadId (..)
   , TurnId (..)
   , mkMaxParallel
   , mkPollSeconds
+  , mkStaleSeconds
   )
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -172,7 +174,7 @@ data GuardWatcherCli = GuardWatcherCli
   { guardCliLoop :: LoopCli
   , guardCliPidFile :: Maybe FilePath
   , guardCliPollSeconds :: PollSeconds
-  , guardCliStaleSeconds :: Int
+  , guardCliStaleSeconds :: StaleSeconds
   , guardCliRepairCwd :: Maybe FilePath
   }
   deriving stock (Eq, Show, Generic)
@@ -345,7 +347,7 @@ guardWatcherParser domain =
     <$> loopParser domain
     <*> optional (strOption (long "guard-pid-file" <> metavar "PATH" <> help "Runner guard pid file"))
     <*> pollSecondsOptionDefault "guard-poll-seconds" 60 "SECONDS" "Runner guard polling interval"
-    <*> intOptionDefault "stale-seconds" 1800 "SECONDS" "Maximum event-log idle time before guard triggers repair"
+    <*> staleSecondsOptionDefault "stale-seconds" 1800 "SECONDS" "Maximum event-log idle time before guard triggers repair"
     <*> optional (strOption (long "repair-cwd" <> metavar "PATH" <> help "Repository cwd for the repair thread"))
 
 requiredEndpointParser :: Parser AppServerEndpoint
@@ -443,6 +445,10 @@ pollSecondsOptionDefault :: String -> Int -> String -> String -> Parser PollSeco
 pollSecondsOptionDefault optionName defaultValue metavarName helpText =
   option pollSecondsReader (long optionName <> metavar metavarName <> value (pollSecondsDefault defaultValue) <> showDefaultWith show <> help helpText)
 
+staleSecondsOptionDefault :: String -> Int -> String -> String -> Parser StaleSeconds
+staleSecondsOptionDefault optionName defaultValue metavarName helpText =
+  option staleSecondsReader (long optionName <> metavar metavarName <> value (staleSecondsDefault defaultValue) <> showDefaultWith show <> help helpText)
+
 domainReader :: ReadM CliDomain
 domainReader =
   eitherReader \case
@@ -472,11 +478,24 @@ pollSecondsReader =
       Just parsed -> Right parsed
       Nothing -> Left ("poll seconds must be a positive integer: " <> input)
 
+staleSecondsReader :: ReadM StaleSeconds
+staleSecondsReader =
+  eitherReader \input ->
+    case readMaybe input >>= mkStaleSeconds of
+      Just parsed -> Right parsed
+      Nothing -> Left ("stale seconds must be a positive integer: " <> input)
+
 pollSecondsDefault :: Int -> PollSeconds
 pollSecondsDefault seconds =
   case mkPollSeconds seconds of
     Just parsed -> parsed
     Nothing -> error ("invalid default poll seconds: " <> show seconds)
+
+staleSecondsDefault :: Int -> StaleSeconds
+staleSecondsDefault seconds =
+  case mkStaleSeconds seconds of
+    Just parsed -> parsed
+    Nothing -> error ("invalid default stale seconds: " <> show seconds)
 
 issueNumbersReader :: String -> ReadM [IssueNumber]
 issueNumbersReader flagName =
