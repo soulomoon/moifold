@@ -2,19 +2,24 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.Effects
   ( Effect (..)
   , SomeEffect (..)
   , EffectPlan
+  , effectMutabilitySing
   , effectMutability
   , effectPlanMutabilities
+  , isMutationSing
   , isMutation
   , hasMutation
   ) where
 
 import CodexWatcher.Types
+import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
 import Data.Text (Text)
 
 data Effect (mutability :: Mutability) where
@@ -43,7 +48,7 @@ deriving stock instance Eq (Effect mutability)
 deriving stock instance Show (Effect mutability)
 
 data SomeEffect where
-  SomeEffect :: Effect mutability -> SomeEffect
+  SomeEffect :: KnownMutability mutability => Effect mutability -> SomeEffect
 
 deriving stock instance Show SomeEffect
 
@@ -79,37 +84,23 @@ instance Eq SomeEffect where
 
 type EffectPlan = [SomeEffect]
 
-effectMutability :: Effect mutability -> Mutability
-effectMutability ReadOpenIssues {} = ReadOnly
-effectMutability ReadOpenPullRequests {} = ReadOnly
-effectMutability ReadReviewThreads {} = ReadOnly
-effectMutability StartPlannerTurn {} = CanStartTurn
-effectMutability StartWorkerTurn {} = CanStartTurn
-effectMutability StartIssuePlanWorkerTurn {} = CanStartTurn
-effectMutability StartIssueImplementationWorkerTurn {} = CanStartTurn
-effectMutability StartReviewerTurn {} = CanStartTurn
-effectMutability PushBranch {} = CanMutateLocal
-effectMutability CreateIssue {} = CanMutateGitHub
-effectMutability CreatePullRequest {} = CanMutateGitHub
-effectMutability UpdatePullRequestBody {} = CanMutateGitHub
-effectMutability CloseIssue {} = CanMutateGitHub
-effectMutability ResolveReviewThread {} = CanMutateGitHub
-effectMutability RecordIssuePlan {} = CanMutateLocal
-effectMutability RecordPlanningGraph {} = CanMutateLocal
-effectMutability RecordBlocked {} = CanMutateLocal
-effectMutability MergePullRequest {} = CanMerge
-effectMutability StopDaemon = ReadOnly
-effectMutability SleepUntilNextPoll = ReadOnly
+effectMutabilitySing :: forall mutability. KnownMutability mutability => Effect mutability -> SMutability mutability
+effectMutabilitySing _ = sing @mutability
+
+effectMutability :: KnownMutability mutability => Effect mutability -> Mutability
+effectMutability = fromSing . effectMutabilitySing
 
 effectPlanMutabilities :: EffectPlan -> [Mutability]
 effectPlanMutabilities = fmap (\(SomeEffect effect) -> effectMutability effect)
 
+isMutationSing :: SMutability mutability -> Bool
+isMutationSing SReadOnly = False
+isMutationSing _ = True
+
 isMutation :: Mutability -> Bool
-isMutation ReadOnly = False
-isMutation CanStartTurn = True
-isMutation CanMutateLocal = True
-isMutation CanMutateGitHub = True
-isMutation CanMerge = True
+isMutation mutability =
+  case toSing mutability of
+    SomeSing mutability' -> isMutationSing mutability'
 
 hasMutation :: EffectPlan -> Bool
-hasMutation = any (isMutation . (\(SomeEffect effect) -> effectMutability effect))
+hasMutation = any (\(SomeEffect effect) -> isMutationSing (effectMutabilitySing effect))

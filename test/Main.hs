@@ -462,6 +462,17 @@ prop_stateSingletonReflection config activeTurn =
         && not (isTerminalPhaseSing (phaseSing activeState))
         && isTerminalPhaseSing (phaseSing completeState)
 
+prop_effectMutabilitySingletonReflection :: ThreadId -> Bool
+prop_effectMutabilitySingletonReflection threadId =
+  let startTurn = StartWorkerTurn threadId
+      readOnly = SleepUntilNextPoll
+   in effectMutability startTurn == CanStartTurn
+        && effectMutability readOnly == ReadOnly
+        && isMutationSing (effectMutabilitySing startTurn)
+        && not (isMutationSing (effectMutabilitySing readOnly))
+        && hasMutation [SomeEffect readOnly, SomeEffect startTurn]
+        && not (hasMutation [SomeEffect readOnly])
+
 prop_terminalStateHasNoImplicitEffects :: MergeCommit -> BlockedReason -> StopReason -> Bool
 prop_terminalStateHasNoImplicitEffects mergeCommit blockedReason stopReason =
   all
@@ -4458,6 +4469,7 @@ main = do
       , quickCheckResult prop_plannerGraphUpdateWaitsAndRecords
       , quickCheckResult prop_plannerIssueCreationReturnsToPlanning
       , quickCheckResult prop_stateSingletonReflection
+      , quickCheckResult prop_effectMutabilitySingletonReflection
       , quickCheckResult prop_terminalStateHasNoImplicitEffects
       , quickCheckResult prop_eventLogFullPrReviewPathCompletes
       , quickCheckResult prop_eventLogCannotReviewCleanWhileFixing

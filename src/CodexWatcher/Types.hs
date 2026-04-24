@@ -23,8 +23,10 @@ module CodexWatcher.Types
   , SPhase (..)
   , ThreadActivity (..)
   , Mutability (..)
+  , SMutability (..)
   , KnownDomain
   , KnownPhase
+  , KnownMutability
   , RepoName (..)
   , IssueNumber (..)
   , PrNumber (..)
@@ -108,8 +110,6 @@ data Phase
   | Stopped
   deriving stock (Eq, Show)
 
-$(genSingletons [''Domain, ''Phase])
-
 type KnownPhase :: Phase -> Constraint
 type KnownPhase phase = SingI phase
 
@@ -125,6 +125,11 @@ data Mutability
   | CanMutateGitHub
   | CanMerge
   deriving stock (Eq, Show)
+
+$(genSingletons [''Domain, ''Phase, ''Mutability])
+
+type KnownMutability :: Mutability -> Constraint
+type KnownMutability mutability = SingI mutability
 
 newtype RepoName = RepoName { unRepoName :: Text }
   deriving stock (Eq, Show)
