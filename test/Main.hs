@@ -1130,6 +1130,21 @@ prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers =
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
 
+prop_issuePlanningFanoutAllowsScopedDependencyClosure :: Bool
+prop_issuePlanningFanoutAllowsScopedDependencyClosure =
+  let plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 8]
+      graph =
+        PlanningGraph
+          [IssueNumber 15]
+          [BlockedPlanningIssue (IssueNumber 8) [IssueNumber 15, IssueNumber 16] "wait"]
+          [ IssueDependency (IssueNumber 8) [IssueNumber 15, IssueNumber 16]
+          , IssueDependency (IssueNumber 15) []
+          , IssueDependency (IssueNumber 16) [IssueNumber 15]
+          ]
+   in readyIssueAllowedByPlannerScope plannerConfig (Just graph) (IssueNumber 15)
+        && not (readyIssueAllowedByPlannerScope plannerConfig (Just graph) (IssueNumber 99))
+        && not (readyIssueAllowedByPlannerScope plannerConfig Nothing (IssueNumber 15))
+
 canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
@@ -4559,6 +4574,7 @@ main = do
       , quickCheckResult prop_issuePlanningFanoutDetectsCompletionBoundary
       , quickCheckResult prop_issuePlanningFanoutUsesOnlyReadyIssues
       , quickCheckResult prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers
+      , quickCheckResult prop_issuePlanningFanoutAllowsScopedDependencyClosure
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
       , quickCheckResult prop_eventLogRejectsLegacyIssuePlanAliases

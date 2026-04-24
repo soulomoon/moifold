@@ -22,6 +22,7 @@ import CodexWatcher.Core.Limits (MaxParallel (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..))
+import CodexWatcher.Domain.IssuePlanning.Scope (planningGraphIssues, scopedGraphClosure)
 import CodexWatcher.Domain.IssuePlanning.Types
   ( BlockedPlanningIssue (..)
   , IssueCreationRequest
@@ -105,8 +106,7 @@ validatePlanningGraph config graph
  where
   blockedIssues = fmap blockedPlanningIssue graph.planningBlockedIssues
   dependencyIssues = fmap dependencyIssue graph.planningDependencies
-  dependencyRefs = concatMap dependencyDependsOn graph.planningDependencies
-  graphIssues = graph.planningReadyIssues <> blockedIssues <> dependencyIssues <> dependencyRefs
+  graphIssues = planningGraphIssues graph
   outOfScopeIssue =
     case plannerScopeIssues config of
       [] -> Nothing
@@ -128,27 +128,6 @@ issueText =
 issueListText :: [IssueNumber] -> Text
 issueListText issues =
   Text.intercalate ", " (fmap (("#" <>) . issueText) issues)
-
-scopedGraphClosure :: [IssueNumber] -> PlanningGraph -> [IssueNumber]
-scopedGraphClosure scopeIssues graph =
-  go [] scopeIssues
- where
-  go seen [] = seen
-  go seen (issue : rest)
-    | issue `elem` seen = go seen rest
-    | otherwise = go (seen <> [issue]) (graphIssueDependencies issue <> rest)
-
-  graphIssueDependencies issue =
-    concat
-      [ dependency.dependencyDependsOn
-      | dependency <- graph.planningDependencies
-      , dependency.dependencyIssue == issue
-      ]
-      <> concat
-        [ blocked.blockedPlanningDependsOn
-        | blocked <- graph.planningBlockedIssues
-        , blocked.blockedPlanningIssue == issue
-        ]
 
 tick :: WatcherEvent -> Decision 'IssuePlanning -> IssuePlanningTick
 tick event decision =

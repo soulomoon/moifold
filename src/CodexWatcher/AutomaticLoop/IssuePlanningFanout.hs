@@ -92,7 +92,7 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
           DryRunActions -> Nothing
       stoppedActiveLaunches = fanoutPlan.readyIssueRestarts
       allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
-  validation <- validateReadyIssueFanout plannerConfig (zip readyIssues statuses) (launches <> stoppedActiveLaunches)
+  validation <- validateReadyIssueFanout plannerConfig (planningGraphFromState planningState) (zip readyIssues statuses) (launches <> stoppedActiveLaunches)
   case validation of
     Just reason -> do
       Log.logWatcher
@@ -172,14 +172,13 @@ childStartBlockedReason (issue, detail, status) =
         <> Text.pack (show status)
     )
 
-validateReadyIssueFanout :: PlannerConfig -> [(IssueNumber, WatcherRuntimeStatus)] -> [IssueImplementerLaunchPlan] -> IO (Maybe BlockedReason)
-validateReadyIssueFanout plannerConfig readyStatuses launchPlans =
+validateReadyIssueFanout :: PlannerConfig -> Maybe PlanningGraph -> [(IssueNumber, WatcherRuntimeStatus)] -> [IssueImplementerLaunchPlan] -> IO (Maybe BlockedReason)
+validateReadyIssueFanout plannerConfig maybeGraph readyStatuses launchPlans =
   firstInvalid <$> traverse validateIssue (fmap (\launch -> launch.launchIssueConfig.issueNumber) launchPlans)
  where
   firstInvalid = foldr (<|>) Nothing
   validateIssue issue
-    | not (null plannerConfig.plannerScopeIssues)
-    , issue `notElem` plannerConfig.plannerScopeIssues =
+    | not (readyIssueAllowedByPlannerScope plannerConfig maybeGraph issue) =
         pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is outside planner scope")))
     | otherwise =
         case lookup issue readyStatuses of
@@ -197,6 +196,10 @@ validateReadyIssueFanout plannerConfig readyStatuses launchPlans =
                     Just (BlockedReason ("ready issue #" <> issueText issue <> " is already closed on GitHub"))
                 | otherwise ->
                     Nothing
+
+planningGraphFromState :: SomeWatcherState -> Maybe PlanningGraph
+planningGraphFromState (SomeWatcherState (PlanningWaitingForReadyIssues _config graph)) = Just graph
+planningGraphFromState _ = Nothing
 
 issueText :: IssueNumber -> Text.Text
 issueText issue =

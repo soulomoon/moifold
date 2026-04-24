@@ -17,6 +17,7 @@ import CodexWatcher.Core.Kinds (Domain (..), KnownDomain, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason, StopReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), isTerminalState, someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Domain.IssuePlanning.Scope (planningGraphIssues, scopedGraphClosure)
 import CodexWatcher.Domain.IssuePlanning.Types
   ( BlockedPlanningIssue (..)
   , IssueDependency (..)
@@ -235,35 +236,13 @@ validatePlanningGraphForReplay config graph
       Right ()
  where
   blockedIssues = fmap blockedPlanningIssue graph.planningBlockedIssues
-  dependencyIssues = concatMap (\dependency -> dependency.dependencyIssue : dependency.dependencyDependsOn) graph.planningDependencies
-  graphIssues = graph.planningReadyIssues <> blockedIssues <> dependencyIssues
+  graphIssues = planningGraphIssues graph
   outOfScopeIssue =
     case plannerScopeIssues config of
       [] -> Nothing
       scopeIssues -> find (`notElem` scopedGraphClosure scopeIssues graph) graphIssues
   readyIssueHasDependency dependency =
     dependency.dependencyIssue `elem` graph.planningReadyIssues && not (null dependency.dependencyDependsOn)
-
-scopedGraphClosure :: [IssueNumber] -> PlanningGraph -> [IssueNumber]
-scopedGraphClosure scopeIssues graph =
-  go [] scopeIssues
- where
-  go seen [] = seen
-  go seen (issue : rest)
-    | issue `elem` seen = go seen rest
-    | otherwise = go (seen <> [issue]) (graphIssueDependencies issue <> rest)
-
-  graphIssueDependencies issue =
-    concat
-      [ dependency.dependencyDependsOn
-      | dependency <- graph.planningDependencies
-      , dependency.dependencyIssue == issue
-      ]
-      <> concat
-        [ blocked.blockedPlanningDependsOn
-        | blocked <- graph.planningBlockedIssues
-        , blocked.blockedPlanningIssue == issue
-        ]
 
 hasDuplicate :: Eq a => [a] -> Bool
 hasDuplicate [] = False

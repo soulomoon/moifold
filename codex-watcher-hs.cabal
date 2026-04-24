@@ -62,6 +62,7 @@ library
     CodexWatcher.Domain.IssuePlanning.Fanout
     CodexWatcher.Domain.IssuePlanning.Graph.Canonical
     CodexWatcher.Domain.IssuePlanning.Loop
+    CodexWatcher.Domain.IssuePlanning.Scope
     CodexWatcher.Domain.IssuePlanning.TurnClassifier
     CodexWatcher.Domain.IssuePlanning.Types
     CodexWatcher.Domain.IssuePlanning.Watcher

@@ -19,6 +19,7 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   , plannerConfigFromState
   , planReadyIssueFanout
   , planIssueImplementerLaunches
+  , readyIssueAllowedByPlannerScope
   , withLaunchThreadId
   ) where
 
@@ -30,7 +31,8 @@ import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), RepoName (..), 
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
-import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
+import CodexWatcher.Domain.IssuePlanning.Scope (planningGraphScopeContains)
+import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..), PlanningGraph)
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
 import Data.Char (isAlphaNum)
@@ -113,6 +115,13 @@ planReadyIssueFanout fanoutConfig plannerConfig activeIssues readyIssueStatuses 
              , status == ReadyIssueActiveStopped || status == ReadyIssueActiveRunning
              ]
       )
+
+readyIssueAllowedByPlannerScope :: PlannerConfig -> Maybe PlanningGraph -> IssueNumber -> Bool
+readyIssueAllowedByPlannerScope plannerConfig maybeGraph issue =
+  case (plannerConfig.plannerScopeIssues, maybeGraph) of
+    ([], _) -> True
+    (scopeIssues, Just graph) -> planningGraphScopeContains scopeIssues graph issue
+    (scopeIssues, Nothing) -> issue `elem` scopeIssues
 
 plannerConfigFromState :: SomeWatcherState -> Maybe PlannerConfig
 plannerConfigFromState (SomeWatcherState (PlanningReady config)) = Just config
