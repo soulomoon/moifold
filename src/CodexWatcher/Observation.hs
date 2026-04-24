@@ -13,7 +13,8 @@ module CodexWatcher.Observation
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Kinds (KnownDomain)
+import CodexWatcher.Core.State (SomeWatcherState (..), someDomain, somePhase)
 import Data.Text (Text)
 import Data.Text qualified as Text
 

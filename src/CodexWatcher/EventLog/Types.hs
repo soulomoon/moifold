@@ -11,7 +11,22 @@ module CodexWatcher.EventLog.Types
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids
+  ( BranchName (..)
+  , CommitSha (..)
+  , IssueNumber (..)
+  , PrNumber (..)
+  , RepoName (..)
+  , ReviewThreadId (..)
+  , ThreadId (..)
+  , TurnId (..)
+  )
+import CodexWatcher.Core.Limits (MaxParallel, mkMaxParallel, unMaxParallel)
+import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
+import CodexWatcher.Core.State (SomeWatcherState)
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..))
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.Types (Pair, Parser)

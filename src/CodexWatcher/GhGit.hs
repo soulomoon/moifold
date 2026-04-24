@@ -48,7 +48,8 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText, parseCommandJson)
 import CodexWatcher.JsonPath (decodeAtPath, decodeValue, valueText)
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RepoName, ReviewThreadId (..))
+import CodexWatcher.Domain.PrReview.Types (PrConfig)
 import Data.Aeson
   ( FromJSON (..)
   , Object

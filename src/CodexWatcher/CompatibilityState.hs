@@ -10,7 +10,28 @@ module CodexWatcher.CompatibilityState
   , compatibilityStateWrites
   ) where
 
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids
+  ( BranchName (..)
+  , CommitSha (..)
+  , IssueNumber (..)
+  , PrNumber (..)
+  , RepoName (..)
+  , ReviewThreadId (..)
+  , ThreadId (..)
+  , TurnId (..)
+  )
+import CodexWatcher.Core.Limits (MaxParallel (..))
+import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
+import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
+import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
+import CodexWatcher.Domain.PrReview.Types
+  ( CleanReviewEvidence (..)
+  , MergeCommit (..)
+  , PrConfig (..)
+  , ReviewEvidence (..)
+  )
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.List.NonEmpty (NonEmpty (..))

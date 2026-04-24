@@ -10,8 +10,9 @@ module CodexWatcher.EffectRuntimeCli
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.IssueText (issueNumbersText)
 import CodexWatcher.Runtime.Defaults
+import CodexWatcher.Runtime.Paths (RuntimeCwd (..), RuntimeStateDir (..), RuntimeWorkdir (..))
 import CodexWatcher.TurnOutput
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (IssueNumber, RepoName, RequestId (..))
 import Data.Text qualified as Text
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig

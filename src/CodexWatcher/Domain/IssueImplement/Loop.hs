@@ -28,7 +28,10 @@ import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText)
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..), ThreadId)
+import CodexWatcher.Core.Reason (BlockedReason (..))
+import CodexWatcher.Core.Thread (ActiveTurn)
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import Data.Aeson (Result (..), Value (..), fromJSON)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

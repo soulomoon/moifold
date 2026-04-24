@@ -19,7 +19,7 @@ import CodexWatcher.Cli.Parser.Common
   , workdirOptionDefault
   )
 import CodexWatcher.Cli.Types (LoopCli (..))
-import CodexWatcher.Core.Types (Domain)
+import CodexWatcher.Core.Kinds (Domain)
 import Options.Applicative
 
 loopParser :: Domain -> Parser LoopCli

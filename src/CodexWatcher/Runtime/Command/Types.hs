@@ -8,17 +8,16 @@ module CodexWatcher.Runtime.Command.Types
   , RuntimeCommandSpec (..)
   ) where
 
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids
   ( BranchName
-  , CleanReviewEvidence
-  , IssueConfig
-  , IssueCreationRequest
   , IssueNumber
-  , PrConfig
   , PrNumber
   , RepoName
   , ReviewThreadId
   )
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig)
 import Data.Aeson (ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)

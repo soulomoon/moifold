@@ -15,7 +15,11 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Observation
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (PrNumber, TurnId)
+import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Reason (BlockedReason)
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
+import CodexWatcher.Core.Thread (ActiveTurn (..), WorkerThread (..))
 import Data.Text (Text)
 
 data IssueImplementObservation

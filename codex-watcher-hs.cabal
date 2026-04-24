@@ -45,7 +45,6 @@ library
     CodexWatcher.Core.Reason
     CodexWatcher.Core.State
     CodexWatcher.Core.Thread
-    CodexWatcher.Core.Types
     CodexWatcher.Daemon
     CodexWatcher.DaemonControlCli
     CodexWatcher.DaemonLoop
@@ -99,6 +98,7 @@ library
     CodexWatcher.Runtime.Owner.Cli
     CodexWatcher.Runtime.Owner.Store
     CodexWatcher.Runtime.Owner.Types
+    CodexWatcher.Runtime.Paths
     CodexWatcher.Runtime.Process
     CodexWatcher.RunnerGuard
     CodexWatcher.RunnerGuardCli
@@ -124,7 +124,6 @@ library
     CodexWatcher.Cli.Parser.Observe
     CodexWatcher.Cli.Parser.Repair
     CodexWatcher.Cli.Parser.Service
-    CodexWatcher.Runtime.Paths
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,

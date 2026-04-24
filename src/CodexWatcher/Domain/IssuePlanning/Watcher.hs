@@ -16,7 +16,19 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Observation
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (IssueNumber (..), ThreadId, TurnId)
+import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Limits (MaxParallel (..))
+import CodexWatcher.Core.Reason (BlockedReason (..))
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
+import CodexWatcher.Core.Thread (ActiveTurn (..))
+import CodexWatcher.Domain.IssuePlanning.Types
+  ( BlockedPlanningIssue (..)
+  , IssueCreationRequest
+  , IssueDependency (..)
+  , PlannerConfig (..)
+  , PlanningGraph (..)
+  )
 import Data.List (find, intersect)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)

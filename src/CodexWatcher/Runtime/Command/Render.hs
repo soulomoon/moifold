@@ -8,18 +8,17 @@ module CodexWatcher.Runtime.Command.Render
   ) where
 
 import CodexWatcher.Runtime.Command.Types
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids
   ( BranchName (..)
-  , CleanReviewEvidence (..)
   , CommitSha (..)
-  , IssueConfig (..)
-  , IssueCreationRequest (..)
   , IssueNumber (..)
-  , PrConfig (..)
   , PrNumber (..)
   , RepoName (..)
   , ReviewThreadId (..)
   )
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 

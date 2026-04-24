@@ -9,7 +9,8 @@ module CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.AppServerClient
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Turn.Classifier.Common
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Reason (BlockedReason (..))
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)
 import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', withObject, (.:?), (.!=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

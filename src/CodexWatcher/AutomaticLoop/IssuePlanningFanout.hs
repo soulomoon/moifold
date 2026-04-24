@@ -33,7 +33,12 @@ import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..),
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (IssueNumber (..))
+import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Reason (BlockedReason (..))
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..), PlanningGraph (..))
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))
 import Control.Monad (when)

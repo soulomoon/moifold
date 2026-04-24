@@ -18,19 +18,17 @@ module CodexWatcher.Cli.Types
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint)
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids
   ( CommitSha
-  , Domain (..)
   , IssueNumber
-  , MaxParallel
-  , PollSeconds
   , PrNumber
   , ReviewThreadId
   , RepoName
-  , StaleSeconds
   , ThreadId
   , TurnId
   )
+import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Limits (MaxParallel, PollSeconds, StaleSeconds)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 

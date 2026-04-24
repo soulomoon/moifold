@@ -18,7 +18,11 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Domain.PrReview.Watcher
-import CodexWatcher.Core.Types
+import CodexWatcher.Runtime.Paths (runtimeWorkdirPath)
+import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ThreadId)
+import CodexWatcher.Core.Reason (BlockedReason (..))
+import CodexWatcher.Core.Thread (ActiveTurn)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..))
 import Data.Text qualified as Text
 
 runPrCheckingReviews

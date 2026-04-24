@@ -27,7 +27,10 @@ module CodexWatcher.Domain.PrReview.Protocol
   ) where
 
 import CodexWatcher.EventLog.Types
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, ThreadId, TurnId)
+import CodexWatcher.Core.Reason (BlockedReason)
+import CodexWatcher.Core.Thread (ActiveTurn (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 

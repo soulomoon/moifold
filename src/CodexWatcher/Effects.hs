@@ -13,7 +13,12 @@ module CodexWatcher.Effects
   , hasMutation
   ) where
 
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, RepoName, ReviewThreadId, ThreadId)
+import CodexWatcher.Core.Kinds (KnownMutability, Mutability (..), SMutability (..))
+import CodexWatcher.Core.Reason (BlockedReason)
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig)
 import Data.Singletons (SingI (..))
 import Data.Singletons.Decide (decideEquality)
 import Data.Text (Text)

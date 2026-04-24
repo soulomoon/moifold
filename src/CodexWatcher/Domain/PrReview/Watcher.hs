@@ -17,7 +17,12 @@ import CodexWatcher.GhGit
 import CodexWatcher.Observation
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, TurnId)
+import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Reason (BlockedReason)
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
+import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit, ReviewEvidence (..))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 

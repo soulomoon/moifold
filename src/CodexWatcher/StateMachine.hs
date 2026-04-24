@@ -14,7 +14,13 @@ module CodexWatcher.StateMachine
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (CommitSha, PrNumber (..))
+import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..))
+import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
+import CodexWatcher.Core.State (CompletionEvidence (..), WatcherState (..))
+import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, MergeCommit, ReviewEvidence, PrConfig (..))
 import Data.Foldable qualified as Foldable
 import Data.List.NonEmpty (NonEmpty)
 import Data.Kind (Constraint)

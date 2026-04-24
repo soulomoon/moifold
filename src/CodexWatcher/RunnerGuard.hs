@@ -44,7 +44,12 @@ import CodexWatcher.EventLog.Types (EventReplayResult (..), ReplayFailure (..), 
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel, defaultThreadStartOptions, defaultTurnStartOptions)
 import CodexWatcher.Turn.Classifier.Common (TurnCompletion (..), classifyTurnCompletion)
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (RepoName (..), RequestId (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Core.Kinds (Domain, KnownDomain, Phase (..))
+import CodexWatcher.Core.Limits (StaleSeconds (..))
+import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), knownDomain, someDomain, someDomainIs, somePhaseIs)
+import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import Data.Aeson
   ( FromJSON (..)
   , ToJSON (..)

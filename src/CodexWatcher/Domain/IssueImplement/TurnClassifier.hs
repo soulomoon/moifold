@@ -12,7 +12,8 @@ module CodexWatcher.Domain.IssueImplement.TurnClassifier
 import CodexWatcher.AppServerClient
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Turn.Classifier.Common
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (PrNumber)
+import CodexWatcher.Core.Reason (BlockedReason (..))
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:))
 import Data.Text (Text)
 import Data.Text qualified as Text

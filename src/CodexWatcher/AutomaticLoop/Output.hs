@@ -8,7 +8,7 @@ module CodexWatcher.AutomaticLoop.Output
 import CodexWatcher.Daemon (DaemonObservedTickResult (..))
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
 import CodexWatcher.EventLog.Types (EventReplayResult (..))
-import CodexWatcher.Core.Types (somePhase)
+import CodexWatcher.Core.State (somePhase)
 import Data.Text qualified as Text
 
 printLoopTick :: String -> Int -> DaemonLoopTickResult -> IO ()

@@ -16,7 +16,7 @@ module CodexWatcher.Turn.Classifier.Common
   ) where
 
 import CodexWatcher.AppServerClient
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Reason (BlockedReason (..))
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
 import Data.List (find)
 import Data.Text (Text)

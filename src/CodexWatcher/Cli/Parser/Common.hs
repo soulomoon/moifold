@@ -38,16 +38,18 @@ module CodexWatcher.Cli.Parser.Common
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
-import CodexWatcher.Core.Types
-  ( Domain (..)
-  , IssueNumber (..)
-  , MaxParallel
-  , PollSeconds
+import CodexWatcher.Core.Ids
+  ( IssueNumber (..)
   , RepoName (..)
   , ReviewThreadId (..)
-  , StaleSeconds
   , ThreadId (..)
   , TurnId (..)
+  )
+import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Limits
+  ( MaxParallel
+  , PollSeconds
+  , StaleSeconds
   , mkMaxParallel
   , mkPollSeconds
   , mkStaleSeconds

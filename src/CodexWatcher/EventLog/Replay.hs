@@ -12,7 +12,18 @@ module CodexWatcher.EventLog.Replay
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids (IssueNumber (..))
+import CodexWatcher.Core.Kinds (Domain (..), KnownDomain, Phase (..))
+import CodexWatcher.Core.Reason (BlockedReason, StopReason (..))
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), isTerminalState, someDomain, somePhase)
+import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Domain.IssuePlanning.Types
+  ( BlockedPlanningIssue (..)
+  , IssueDependency (..)
+  , PlannerConfig (..)
+  , PlanningGraph (..)
+  )
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), ReviewEvidence (..))
 import Data.List (find, intersect)
 import Data.Text (Text)
 import Data.Text qualified as Text

@@ -38,7 +38,15 @@ import CodexWatcher.PromptTemplates
   , validationProtocolTemplate
   )
 import CodexWatcher.IssueText (issueNumbersText)
-import CodexWatcher.Core.Types
+import CodexWatcher.Core.Ids
+  ( BranchName (..)
+  , CommitSha (..)
+  , IssueNumber (..)
+  , PrNumber (..)
+  , RepoName (..)
+  )
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key
