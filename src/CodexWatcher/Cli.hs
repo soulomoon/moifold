@@ -29,12 +29,14 @@ import CodexWatcher.Types
   , Domain (..)
   , IssueNumber (..)
   , MaxParallel
+  , PollSeconds
   , PrNumber (..)
   , ReviewThreadId (..)
   , RepoName (..)
   , ThreadId (..)
   , TurnId (..)
   , mkMaxParallel
+  , mkPollSeconds
   )
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -85,7 +87,7 @@ data RenderServiceCli = RenderServiceCli
   , renderServiceCliEndpoint :: AppServerEndpoint
   , renderServiceCliExecutable :: Maybe FilePath
   , renderServiceCliPlannerThread :: Maybe ThreadId
-  , renderServiceCliPollSeconds :: Int
+  , renderServiceCliPollSeconds :: PollSeconds
   , renderServiceCliLogDir :: Maybe FilePath
   , renderServiceCliRestartSeconds :: Int
   , renderServiceCliRotateCount :: Int
@@ -106,8 +108,8 @@ data IssueFanoutCli = IssueFanoutCli
   , issueFanoutCliWorkdirRoot :: Maybe FilePath
   , issueFanoutCliBranchPrefix :: Text
   , issueFanoutCliThreadPrefix :: Text
-  , issueFanoutCliPollSeconds :: Maybe Int
-  , issueFanoutCliChildPollSeconds :: Maybe Int
+  , issueFanoutCliPollSeconds :: Maybe PollSeconds
+  , issueFanoutCliChildPollSeconds :: Maybe PollSeconds
   }
   deriving stock (Eq, Show, Generic)
 
@@ -147,7 +149,7 @@ data LoopCli = LoopCli
   , loopCliRepo :: RepoName
   , loopCliWorkdir :: FilePath
   , loopCliEndpoint :: AppServerEndpoint
-  , loopCliPollSeconds :: Int
+  , loopCliPollSeconds :: PollSeconds
   , loopCliExecute :: Bool
   , loopCliLoop :: Bool
   , loopCliIterations :: Maybe Int
@@ -162,14 +164,14 @@ data LoopCli = LoopCli
   , loopCliBranchPrefix :: Text
   , loopCliThreadPrefix :: Text
   , loopCliStartChildren :: Bool
-  , loopCliChildPollSeconds :: Maybe Int
+  , loopCliChildPollSeconds :: Maybe PollSeconds
   }
   deriving stock (Eq, Show, Generic)
 
 data GuardWatcherCli = GuardWatcherCli
   { guardCliLoop :: LoopCli
   , guardCliPidFile :: Maybe FilePath
-  , guardCliPollSeconds :: Int
+  , guardCliPollSeconds :: PollSeconds
   , guardCliStaleSeconds :: Int
   , guardCliRepairCwd :: Maybe FilePath
   }
@@ -254,7 +256,7 @@ renderServiceParser =
     <*> requiredEndpointParser
     <*> optional (strOption (long "executable" <> metavar "PATH" <> help "Executable path to embed in the service"))
     <*> optional plannerThreadOption
-    <*> intOptionDefault "poll-seconds" 30 "SECONDS" "Polling interval for daemon loop"
+    <*> pollSecondsOptionDefault "poll-seconds" 30 "SECONDS" "Polling interval for daemon loop"
     <*> optional (strOption (long "log-dir" <> metavar "PATH" <> help "Directory for daemon logs"))
     <*> intOptionDefault "restart-seconds" 10 "SECONDS" "systemd restart delay"
     <*> intOptionDefault "rotate" 14 "COUNT" "logrotate retention count"
@@ -275,8 +277,8 @@ issueFanoutParser =
     <*> optional (strOption (long "workdir-root" <> metavar "PATH" <> help "Root for child workdirs"))
     <*> textOptionDefault "branch-prefix" "codex/issue-" "PREFIX" "Child branch prefix"
     <*> textOptionDefault "thread-prefix" "issue-worker-" "PREFIX" "Child app-server thread prefix"
-    <*> optional (intOption "poll-seconds" "SECONDS" "Child polling interval")
-    <*> optional (intOption "child-poll-seconds" "SECONDS" "Child polling interval override")
+    <*> optional (pollSecondsOption "poll-seconds" "SECONDS" "Child polling interval")
+    <*> optional (pollSecondsOption "child-poll-seconds" "SECONDS" "Child polling interval override")
 
 observeOnceParser :: Parser ObserveOnceCli
 observeOnceParser =
@@ -316,7 +318,7 @@ loopParser domain =
     <*> repoOption
     <*> workdirOptionDefault
     <*> requiredEndpointParser
-    <*> intOptionDefault "poll-seconds" 30 "SECONDS" "Polling interval for daemon loop"
+    <*> pollSecondsOptionDefault "poll-seconds" 30 "SECONDS" "Polling interval for daemon loop"
     <*> switch (long "execute" <> help "Append observed events and execute compiled effects")
     <*> switch (long "loop" <> help "Continue polling until stopped")
     <*> optional (intOption "iterations" "N" "Maximum loop iterations")
@@ -331,7 +333,7 @@ loopParser domain =
     <*> textOptionDefault "branch-prefix" "codex/issue-" "PREFIX" "Issue implementer branch prefix"
     <*> textOptionDefault "thread-prefix" "issue-worker-" "PREFIX" "Issue implementer thread prefix"
     <*> switch (long "start-children" <> help "Print or start child watcher loop commands after planning fanout")
-    <*> optional (intOption "child-poll-seconds" "SECONDS" "Child polling interval override")
+    <*> optional (pollSecondsOption "child-poll-seconds" "SECONDS" "Child polling interval override")
 
 guardIssuePlanningParser :: Parser GuardWatcherCli
 guardIssuePlanningParser =
@@ -342,7 +344,7 @@ guardWatcherParser domain =
   GuardWatcherCli
     <$> loopParser domain
     <*> optional (strOption (long "guard-pid-file" <> metavar "PATH" <> help "Runner guard pid file"))
-    <*> intOptionDefault "guard-poll-seconds" 60 "SECONDS" "Runner guard polling interval"
+    <*> pollSecondsOptionDefault "guard-poll-seconds" 60 "SECONDS" "Runner guard polling interval"
     <*> intOptionDefault "stale-seconds" 1800 "SECONDS" "Maximum event-log idle time before guard triggers repair"
     <*> optional (strOption (long "repair-cwd" <> metavar "PATH" <> help "Repository cwd for the repair thread"))
 
@@ -433,6 +435,14 @@ maxParallelOption :: String -> String -> String -> Parser MaxParallel
 maxParallelOption optionName metavarName helpText =
   option maxParallelReader (long optionName <> metavar metavarName <> help helpText)
 
+pollSecondsOption :: String -> String -> String -> Parser PollSeconds
+pollSecondsOption optionName metavarName helpText =
+  option pollSecondsReader (long optionName <> metavar metavarName <> help helpText)
+
+pollSecondsOptionDefault :: String -> Int -> String -> String -> Parser PollSeconds
+pollSecondsOptionDefault optionName defaultValue metavarName helpText =
+  option pollSecondsReader (long optionName <> metavar metavarName <> value (pollSecondsDefault defaultValue) <> showDefaultWith show <> help helpText)
+
 domainReader :: ReadM CliDomain
 domainReader =
   eitherReader \case
@@ -454,6 +464,19 @@ maxParallelReader =
     case readMaybe input >>= mkMaxParallel of
       Just parsed -> Right parsed
       Nothing -> Left ("max-parallel must be a positive integer: " <> input)
+
+pollSecondsReader :: ReadM PollSeconds
+pollSecondsReader =
+  eitherReader \input ->
+    case readMaybe input >>= mkPollSeconds of
+      Just parsed -> Right parsed
+      Nothing -> Left ("poll seconds must be a positive integer: " <> input)
+
+pollSecondsDefault :: Int -> PollSeconds
+pollSecondsDefault seconds =
+  case mkPollSeconds seconds of
+    Just parsed -> parsed
+    Nothing -> error ("invalid default poll seconds: " <> show seconds)
 
 issueNumbersReader :: String -> ReadM [IssueNumber]
 issueNumbersReader flagName =

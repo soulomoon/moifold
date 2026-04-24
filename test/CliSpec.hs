@@ -53,7 +53,7 @@ prop_cliParsesHealthcheckAndRunLoop =
               , loopCliRepo = RepoName "owner/name"
               , loopCliWorkdir = "."
               , loopCliEndpoint = AppServerEndpoint "127.0.0.1" 3000 "/"
-              , loopCliPollSeconds = 30
+              , loopCliPollSeconds = pollSecondsForTest 30
               , loopCliExecute = False
               , loopCliLoop = True
               , loopCliIterations = Just 2
@@ -107,7 +107,7 @@ prop_cliParsesHealthcheckAndRunLoop =
                     , loopCliRepo = RepoName "owner/name"
                     , loopCliWorkdir = "."
                     , loopCliEndpoint = AppServerEndpoint "127.0.0.1" 3000 "/"
-                    , loopCliPollSeconds = 30
+                    , loopCliPollSeconds = pollSecondsForTest 30
                     , loopCliExecute = True
                     , loopCliLoop = True
                     , loopCliIterations = Nothing
@@ -125,7 +125,7 @@ prop_cliParsesHealthcheckAndRunLoop =
                     , loopCliChildPollSeconds = Nothing
                     }
               , guardCliPidFile = Just "/tmp/state/runner-guard.pid"
-              , guardCliPollSeconds = 15
+              , guardCliPollSeconds = pollSecondsForTest 15
               , guardCliStaleSeconds = 120
               , guardCliRepairCwd = Just "/tmp/repo"
               }
@@ -170,3 +170,9 @@ prop_cliParsesGenericRunnerGuardDomains =
       ] of
       Right (CliGuardWatcher guard) -> Just guard.guardCliLoop.loopCliDomain
       _ -> Nothing
+
+pollSecondsForTest :: Int -> PollSeconds
+pollSecondsForTest seconds =
+  case mkPollSeconds seconds of
+    Just parsed -> parsed
+    Nothing -> error ("invalid test poll seconds: " <> show seconds)

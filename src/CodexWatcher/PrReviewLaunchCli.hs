@@ -125,7 +125,7 @@ withPrReviewThreadIds workerThread reviewerThread launch =
  where
   initialState = SomeWatcherState (PrCheckingReviews launch.reviewLaunchPrConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
 
-launchPrReviewWatcher :: ActionExecutionMode -> Maybe AppServerEndpoint -> Int -> Bool -> PrReviewWatcherLaunchPlan -> IO ()
+launchPrReviewWatcher :: ActionExecutionMode -> Maybe AppServerEndpoint -> PollSeconds -> Bool -> PrReviewWatcherLaunchPlan -> IO ()
 launchPrReviewWatcher DryRunActions maybeEndpoint pollSeconds startChildren launch = do
   printPrReviewWatcherLaunch launch
   maybe (pure ()) (\endpoint -> when startChildren (printPrReviewWatcherChildLaunch endpoint pollSeconds launch)) maybeEndpoint
@@ -246,18 +246,18 @@ printPrReviewWatcherLaunch launch =
         <> Text.unpack (unThreadId launch.reviewLaunchReviewerThreadId)
     )
 
-printPrReviewWatcherChildLaunch :: AppServerEndpoint -> Int -> PrReviewWatcherLaunchPlan -> IO ()
+printPrReviewWatcherChildLaunch :: AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
 printPrReviewWatcherChildLaunch endpoint pollSeconds launch = do
   executable <- stableExecutablePath
   putStrLn ("PR review child command: " <> unwords (executable : prReviewWatcherChildArgs endpoint pollSeconds launch))
 
-startPrReviewWatcherChildIfEnabled :: Bool -> AppServerEndpoint -> Int -> PrReviewWatcherLaunchPlan -> IO ()
+startPrReviewWatcherChildIfEnabled :: Bool -> AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
 startPrReviewWatcherChildIfEnabled False _endpoint _pollSeconds _launch =
   pure ()
 startPrReviewWatcherChildIfEnabled True endpoint pollSeconds launch =
   startPrReviewWatcherChild endpoint pollSeconds launch
 
-startPrReviewWatcherChild :: AppServerEndpoint -> Int -> PrReviewWatcherLaunchPlan -> IO ()
+startPrReviewWatcherChild :: AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
 startPrReviewWatcherChild endpoint pollSeconds launch =
   startChildDaemon
     ( "PR review watcher "
@@ -267,7 +267,7 @@ startPrReviewWatcherChild endpoint pollSeconds launch =
     "watcher.pid"
     (prReviewWatcherChildArgs endpoint pollSeconds launch)
 
-prReviewWatcherChildArgs :: AppServerEndpoint -> Int -> PrReviewWatcherLaunchPlan -> [String]
+prReviewWatcherChildArgs :: AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> [String]
 prReviewWatcherChildArgs endpoint pollSeconds launch =
   [ "run-pr-review"
   , "--events"

@@ -140,8 +140,8 @@ issueImplementerStateIsActive stateDir = do
 
 data IssueImplementerChildLaunch
   = DoNotLaunchChildren
-  | PrintChildLaunchCommands AppServerEndpoint Int
-  | StartChildLaunches AppServerEndpoint Int
+  | PrintChildLaunchCommands AppServerEndpoint PollSeconds
+  | StartChildLaunches AppServerEndpoint PollSeconds
 
 data IssueImplementerChildStartResult
   = IssueImplementerChildStarted IssueNumber
@@ -149,12 +149,12 @@ data IssueImplementerChildStartResult
   | IssueImplementerChildStartProblem IssueNumber Text.Text WatcherRuntimeStatus
   deriving stock (Eq, Show)
 
-issueImplementerChildLaunchMode :: Bool -> Maybe Int -> Maybe Int -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
+issueImplementerChildLaunchMode :: Bool -> Maybe PollSeconds -> Maybe PollSeconds -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
 issueImplementerChildLaunchMode startChildren maybePollSeconds maybeChildPollSeconds executionMode maybeEndpoint
   | not startChildren = pure DoNotLaunchChildren
   | otherwise = do
       endpoint <- maybe (die "--start-children requires --app-server-host and --app-server-port") pure maybeEndpoint
-      let pollSeconds = fromMaybe 30 (maybeChildPollSeconds <|> maybePollSeconds)
+      let pollSeconds = fromMaybe defaultChildPollSeconds (maybeChildPollSeconds <|> maybePollSeconds)
       pure case executionMode of
         DryRunActions -> PrintChildLaunchCommands endpoint pollSeconds
         ExecuteActions -> StartChildLaunches endpoint pollSeconds
@@ -385,7 +385,7 @@ startIssueImplementerChildDetailed (StartChildLaunches endpoint pollSeconds) lau
   issue = launchIssueNumber launch
   label = "issue implementer " <> show (unIssueNumber issue)
 
-issueImplementerChildArgs :: AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> [String]
+issueImplementerChildArgs :: AppServerEndpoint -> PollSeconds -> IssueImplementerLaunchPlan -> [String]
 issueImplementerChildArgs endpoint pollSeconds launch =
   [ "run-issue-implement"
   , "--events"
@@ -409,6 +409,12 @@ issueImplementerChildArgs endpoint pollSeconds launch =
   , "--start-children"
   ]
     <> if endpoint.appServerPath == "/" then [] else ["--app-server-path", endpoint.appServerPath]
+
+defaultChildPollSeconds :: PollSeconds
+defaultChildPollSeconds =
+  case mkPollSeconds 30 of
+    Just parsed -> parsed
+    Nothing -> error "invalid default child poll seconds"
 
 readyIssueStatusFromRuntime :: WatcherRuntimeStatus -> ReadyIssueStatus
 readyIssueStatusFromRuntime = \case

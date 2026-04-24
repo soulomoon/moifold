@@ -81,7 +81,7 @@ runAutomaticLoop cli = do
         ioActionExecutorWithLogger
           logger
           (appServerInterpreterFromEndpoint endpoint defaultAppServerClientOptions)
-          (threadDelay (cli.loopCliPollSeconds * 1000000))
+          (threadDelay (pollSecondsMicros cli.loopCliPollSeconds))
           (writeIORef stopRequested True)
       postTick = automaticLoopAfterTick executor cli endpoint executionMode
   Log.logWatcher

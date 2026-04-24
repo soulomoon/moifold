@@ -51,18 +51,18 @@ runWatcherRunnerGuard cli = do
           }
   runWithOptionalPidFile (Just guardPidFile) (runnerGuardLoop guardConfig cli.guardCliPollSeconds)
 
-runnerGuardLoop :: RunnerGuardConfig -> Int -> IO ()
+runnerGuardLoop :: RunnerGuardConfig -> PollSeconds -> IO ()
 runnerGuardLoop config pollSeconds = do
   checkRunnerGuard config >>= \case
     Nothing -> do
-      threadDelay (pollSeconds * 1000000)
+      threadDelay (pollSecondsMicros pollSeconds)
       runnerGuardLoop config pollSeconds
     Just guardProblem -> do
       createDirectoryIfMissing True config.guardStateDir
       writeJsonValue (config.guardStateDir </> "runner-guard-problem.json") (toJSON guardProblem)
       handleRunnerGuardProblem config pollSeconds guardProblem
 
-handleRunnerGuardProblem :: RunnerGuardConfig -> Int -> RunnerGuardProblem -> IO ()
+handleRunnerGuardProblem :: RunnerGuardConfig -> PollSeconds -> RunnerGuardProblem -> IO ()
 handleRunnerGuardProblem config pollSeconds guardProblem =
   case guardProblem.runnerGuardProblemAction of
     RestartWatcher -> do
@@ -78,7 +78,7 @@ handleRunnerGuardProblem config pollSeconds guardProblem =
       if report.ok
         then do
           putStrLn "runner guard restarted watcher"
-          threadDelay (pollSeconds * 1000000)
+          threadDelay (pollSecondsMicros pollSeconds)
           runnerGuardLoop config pollSeconds
         else do
           let repairProblem =

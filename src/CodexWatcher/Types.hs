@@ -29,6 +29,7 @@ module CodexWatcher.Types
   , BlockedReason (..)
   , StopReason (..)
   , MaxParallel
+  , PollSeconds
   , PlannerConfig (..)
   , IssueCreationRequest (..)
   , IssueDependency (..)
@@ -51,7 +52,10 @@ module CodexWatcher.Types
   , somePhase
   , isTerminalPhase
   , mkMaxParallel
+  , mkPollSeconds
   , unMaxParallel
+  , unPollSeconds
+  , pollSecondsMicros
   ) where
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
@@ -171,6 +175,22 @@ mkMaxParallel :: Int -> Maybe MaxParallel
 mkMaxParallel value
   | value > 0 = Just (MaxParallel value)
   | otherwise = Nothing
+
+newtype PollSeconds = PollSeconds { unPollSeconds :: Int }
+  deriving stock (Eq, Ord)
+
+instance Show PollSeconds where
+  show =
+    show . unPollSeconds
+
+mkPollSeconds :: Int -> Maybe PollSeconds
+mkPollSeconds value
+  | value > 0 = Just (PollSeconds value)
+  | otherwise = Nothing
+
+pollSecondsMicros :: PollSeconds -> Int
+pollSecondsMicros pollSeconds =
+  unPollSeconds pollSeconds * 1000000
 
 data PlannerConfig = PlannerConfig
   { plannerRepo :: RepoName
