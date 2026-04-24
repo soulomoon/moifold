@@ -25,7 +25,7 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
     , effectRuntimeWorkdir = workdir
     , effectRuntimeStateDir = stateDir
     , effectRuntimeMergeMethod = "merge"
-    , effectRuntimeNextRequestId = 1
+    , effectRuntimeNextRequestId = RequestId 1
     , effectRuntimePlannerThreadInstructions = issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues
     , effectRuntimePlannerTurn =
         (turnConfig (plannerTurnInputForScope scopeIssues) (Just plannerTurnOutputSchema))

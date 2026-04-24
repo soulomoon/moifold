@@ -180,9 +180,9 @@ runIssueImplementerLaunchesDetailed DryRunActions _endpoint childLaunch launches
   mapM_ (printIssueImplementerChildLaunch childLaunch) launches
   pure (fmap (IssueImplementerChildStarted . launchIssueNumber) launches)
 runIssueImplementerLaunchesDetailed ExecuteActions maybeEndpoint childLaunch launches =
-  traverse (uncurry (runIssueImplementerLaunch maybeEndpoint childLaunch)) (zip [8000 ..] launches)
+  traverse (uncurry (runIssueImplementerLaunch maybeEndpoint childLaunch)) (zip (RequestId <$> [8000 ..]) launches)
 
-runIssueImplementerLaunch :: Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> Int -> IssueImplementerLaunchPlan -> IO IssueImplementerChildStartResult
+runIssueImplementerLaunch :: Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> RequestId -> IssueImplementerLaunchPlan -> IO IssueImplementerChildStartResult
 runIssueImplementerLaunch maybeEndpoint childLaunch requestId launch = do
   ensureIssueImplementerLaunchWritable launch
   prepareIssueImplementerWorkdir launch
@@ -242,7 +242,7 @@ ensureLaunchCommand launch command = do
           <> Text.unpack (commandText report)
       )
 
-prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> Int -> IssueImplementerLaunchPlan -> IO IssueImplementerLaunchPlan
+prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> RequestId -> IssueImplementerLaunchPlan -> IO IssueImplementerLaunchPlan
 prepareIssueImplementerLaunch Nothing _requestId launch =
   pure launch
 prepareIssueImplementerLaunch (Just endpoint) requestId launch = do
@@ -469,7 +469,7 @@ githubIssueClosed repo issueNumber' = do
   remoteIssue <- runGhIssueView ioRuntimeInterpreter repo issueNumber'
   case remoteIssue of
     Right issue ->
-      pure (issue.remoteIssueClosed || Text.toUpper issue.remoteIssueState == "CLOSED")
+      pure (remoteIssueIsClosed issue)
     Left errorMessage -> do
       putStrLn ("planner could not verify issue " <> show (unIssueNumber issueNumber') <> " remote state: " <> Text.unpack errorMessage)
       pure False

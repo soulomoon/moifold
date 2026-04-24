@@ -28,11 +28,13 @@ import CodexWatcher.Types
   ( CommitSha (..)
   , Domain (..)
   , IssueNumber (..)
+  , MaxParallel
   , PrNumber (..)
   , ReviewThreadId (..)
   , RepoName (..)
   , ThreadId (..)
   , TurnId (..)
+  , mkMaxParallel
   )
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -95,7 +97,7 @@ data RenderServiceCli = RenderServiceCli
 data IssueFanoutCli = IssueFanoutCli
   { issueFanoutCliRepo :: RepoName
   , issueFanoutCliImplementersRoot :: FilePath
-  , issueFanoutCliMaxParallel :: Int
+  , issueFanoutCliMaxParallel :: MaxParallel
   , issueFanoutCliOpenIssues :: Maybe [IssueNumber]
   , issueFanoutCliActiveIssues :: Maybe [IssueNumber]
   , issueFanoutCliExecute :: Bool
@@ -264,7 +266,7 @@ issueFanoutParser =
   IssueFanoutCli
     <$> repoOption
     <*> strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root")
-    <*> intOption "max-parallel" "N" "Maximum concurrent implementers"
+    <*> maxParallelOption "max-parallel" "N" "Maximum concurrent implementers"
     <*> optional (option (issueNumbersReader "--open-issues") (long "open-issues" <> metavar "1,2" <> help "Open issue numbers to consider"))
     <*> optional (option (issueNumbersReader "--active-issues") (long "active-issues" <> metavar "1,2" <> help "Issue numbers already active"))
     <*> switch (long "execute" <> help "Write child watcher state instead of printing it")
@@ -427,6 +429,10 @@ intOptionDefault :: String -> Int -> String -> String -> Parser Int
 intOptionDefault optionName defaultValue metavarName helpText =
   option intReader (long optionName <> metavar metavarName <> value defaultValue <> showDefault <> help helpText)
 
+maxParallelOption :: String -> String -> String -> Parser MaxParallel
+maxParallelOption optionName metavarName helpText =
+  option maxParallelReader (long optionName <> metavar metavarName <> help helpText)
+
 domainReader :: ReadM CliDomain
 domainReader =
   eitherReader \case
@@ -441,6 +447,13 @@ intReader =
     case readMaybe input of
       Just parsed -> Right parsed
       Nothing -> Left ("invalid integer: " <> input)
+
+maxParallelReader :: ReadM MaxParallel
+maxParallelReader =
+  eitherReader \input ->
+    case readMaybe input >>= mkMaxParallel of
+      Just parsed -> Right parsed
+      Nothing -> Left ("max-parallel must be a positive integer: " <> input)
 
 issueNumbersReader :: String -> ReadM [IssueNumber]
 issueNumbersReader flagName =

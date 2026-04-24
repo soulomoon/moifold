@@ -38,7 +38,7 @@ module CodexWatcher.AppServerClient
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerProtocol (AppServerRequest (..), ThreadStartOptions, initializeRequest, initializedNotification, threadReadRequest, threadStartRequest)
 import CodexWatcher.JsonPath (lookupPath, renderedTextAtPath)
-import CodexWatcher.Types (ThreadId (..), TurnId (..))
+import CodexWatcher.Types (RequestId (..), ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
 import Control.Exception (AsyncException, SomeException, displayException, fromException, throwIO, try)
 import Data.Aeson
@@ -104,8 +104,8 @@ instance FromJSON JsonRpcError where
       <*> objectValue .:? "data"
 
 data AppServerIncoming
-  = AppServerResponse Int Value
-  | AppServerErrorResponse Int JsonRpcError
+  = AppServerResponse RequestId Value
+  | AppServerErrorResponse RequestId JsonRpcError
   | AppServerNotification Text Value
   deriving stock (Eq, Show, Generic)
 
@@ -129,8 +129,8 @@ instance FromJSON AppServerIncoming where
     maybeResponseId <- objectValue .:? "id"
     case maybeResponseId :: Maybe Int of
       Just responseId ->
-        (AppServerErrorResponse responseId <$> objectValue .: "error")
-          <|> (AppServerResponse responseId <$> objectValue .:? "result" .!= Null)
+        (AppServerErrorResponse (RequestId responseId) <$> objectValue .: "error")
+          <|> (AppServerResponse (RequestId responseId) <$> objectValue .:? "result" .!= Null)
       Nothing ->
         AppServerNotification
           <$> objectValue .: "method"
@@ -139,9 +139,9 @@ instance FromJSON AppServerIncoming where
 data AppServerClientFailure
   = AppServerDecodeFailure Text
   | AppServerTransportFailure Text
-  | AppServerResponseTimedOut Int
-  | AppServerResponseIdMismatch Int Int
-  | AppServerJsonRpcFailure Int JsonRpcError
+  | AppServerResponseTimedOut RequestId
+  | AppServerResponseIdMismatch RequestId RequestId
+  | AppServerJsonRpcFailure RequestId JsonRpcError
   deriving stock (Eq, Show, Generic)
 
 connectAppServer :: AppServerEndpoint -> (AppServerConnection -> IO a) -> IO a
@@ -170,18 +170,18 @@ sendOneAppServerRequestOnce endpoint options request =
     Left message -> pure (Left (AppServerTransportFailure message))
     Right result -> pure result
 
-startThreadWithEndpoint :: AppServerEndpoint -> AppServerClientOptions -> Int -> ThreadStartOptions -> IO (Either AppServerClientFailure ThreadId)
+startThreadWithEndpoint :: AppServerEndpoint -> AppServerClientOptions -> RequestId -> ThreadStartOptions -> IO (Either AppServerClientFailure ThreadId)
 startThreadWithEndpoint endpoint options =
   startThreadWithSender (sendOneAppServerRequest endpoint options)
 
-startThreadWithInterpreter :: Monad m => AppServerInterpreter m -> Int -> ThreadStartOptions -> m (Either AppServerClientFailure ThreadId)
+startThreadWithInterpreter :: Monad m => AppServerInterpreter m -> RequestId -> ThreadStartOptions -> m (Either AppServerClientFailure ThreadId)
 startThreadWithInterpreter interpreter =
   startThreadWithSender (\request -> Right <$> interpreter.appServerSendRequest request)
 
 appServerRequestSession :: AppServerRequest -> [AppServerRequest]
 appServerRequestSession request
   | request.requestMethod == "initialize" = [request]
-  | otherwise = [initializeRequest 0 "codex-watcher-hs" "0.1.0", request]
+  | otherwise = [initializeRequest (RequestId 0) "codex-watcher-hs" "0.1.0", request]
 
 sendAppServerRequestSession :: AppServerConnection -> AppServerClientOptions -> [AppServerRequest] -> IO (Either AppServerClientFailure Value)
 sendAppServerRequestSession _connection _options [] =
@@ -231,7 +231,7 @@ sendAppServerNotification connection notification =
 startThreadWithSender
   :: Monad m
   => (AppServerRequest -> m (Either AppServerClientFailure Value))
-  -> Int
+  -> RequestId
   -> ThreadStartOptions
   -> m (Either AppServerClientFailure ThreadId)
 startThreadWithSender send requestId options =

@@ -39,7 +39,7 @@ import Data.Text (Text)
 
 prop_appServerInitializeRequestMatchesJsonRpc :: Bool
 prop_appServerInitializeRequestMatchesJsonRpc =
-  toJSON (initializeRequest 1 "codex-script" "0.1.0")
+  toJSON (initializeRequest (RequestId 1) "codex-script" "0.1.0")
     == object
       [ "jsonrpc" .= ("2.0" :: Text)
       , "id" .= (1 :: Int)
@@ -63,7 +63,7 @@ prop_appServerThreadStartKeepsNodeNullFields :: Bool
 prop_appServerThreadStartKeepsNodeNullFields =
   let request =
         threadStartRequest
-          2
+          (RequestId 2)
           (defaultThreadStartOptions "/workspace/repo" "developer")
    in request.requestMethod == "thread/start"
         && all
@@ -76,7 +76,7 @@ prop_appServerTurnStartPlanModeEncodesCollaborationMode threadId =
   let collaborationMode = planCollaborationMode "plan only" defaultModel defaultEffort
       request =
         turnStartRequest
-          3
+          (RequestId 3)
           ( (defaultTurnStartOptions threadId "/workspace/repo" "write the plan")
               { turnOutputSchema = Just structuredTurnOutputSchema
               , turnCollaborationMode = Just collaborationMode
@@ -94,7 +94,7 @@ prop_appServerTurnStartOmitsAbsentOutputSchema :: ThreadId -> Bool
 prop_appServerTurnStartOmitsAbsentOutputSchema threadId =
   let request =
         turnStartRequest
-          4
+          (RequestId 4)
           (defaultTurnStartOptions threadId "/workspace/repo" "write the plan")
    in request.requestMethod == "turn/start"
         && lookupValue "threadId" request.requestParams == Just (String (unThreadId threadId))
@@ -103,8 +103,8 @@ prop_appServerTurnStartOmitsAbsentOutputSchema threadId =
 
 prop_appServerThreadReadAndInterruptUseThreadIds :: ThreadId -> TurnId -> Bool
 prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
-  let readRequest = threadReadRequest 4 threadId True
-      interruptRequest = turnInterruptRequest 5 threadId turnId
+  let readRequest = threadReadRequest (RequestId 4) threadId True
+      interruptRequest = turnInterruptRequest (RequestId 5) threadId turnId
    in readRequest.requestMethod == "thread/read"
         && lookupValue "threadId" readRequest.requestParams == Just (String (unThreadId threadId))
         && lookupValue "includeTurns" readRequest.requestParams == Just (Bool True)
@@ -114,11 +114,11 @@ prop_appServerThreadReadAndInterruptUseThreadIds threadId turnId =
 
 prop_appServerClientInitializesSingleRequestSessions :: ThreadId -> Bool
 prop_appServerClientInitializesSingleRequestSessions threadId =
-  let request = threadReadRequest 4 threadId True
+  let request = threadReadRequest (RequestId 4) threadId True
       session = appServerRequestSession request
    in fmap requestMethod session == ["initialize", "thread/read"]
-        && fmap requestId session == [0, 4]
-        && appServerRequestSession (initializeRequest 10 "client" "1") == [initializeRequest 10 "client" "1"]
+        && fmap requestId session == [RequestId 0, RequestId 4]
+        && appServerRequestSession (initializeRequest (RequestId 10) "client" "1") == [initializeRequest (RequestId 10) "client" "1"]
 
 prop_appServerClientDetectsSystemErrorThreadStatus :: Bool
 prop_appServerClientDetectsSystemErrorThreadStatus =
@@ -140,7 +140,7 @@ prop_appServerClientDetectsSystemErrorThreadStatus =
 
 prop_appServerClientMatchesSuccessResponse :: Bool
 prop_appServerClientMatchesSuccessResponse =
-  let request = initializeRequest 80 "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 80) "codex-watcher-hs" "0.1.0"
       result = object ["server" .= ("ready" :: Text)]
       response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (80 :: Int), "result" .= result]
    in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
@@ -149,7 +149,7 @@ prop_appServerClientMatchesSuccessResponse =
 
 prop_appServerClientSkipsNotifications :: Bool
 prop_appServerClientSkipsNotifications =
-  let request = initializeRequest 81 "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 81) "codex-watcher-hs" "0.1.0"
       notification = object ["jsonrpc" .= ("2.0" :: Text), "method" .= ("turn/update" :: Text), "params" .= object ["status" .= ("running" :: Text)]]
    in case decodeAppServerIncomingValue notification >>= matchAppServerIncoming request of
         Right Nothing -> True
@@ -157,15 +157,15 @@ prop_appServerClientSkipsNotifications =
 
 prop_appServerClientRejectsMismatchedResponseIds :: Bool
 prop_appServerClientRejectsMismatchedResponseIds =
-  let request = initializeRequest 82 "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 82) "codex-watcher-hs" "0.1.0"
       response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (83 :: Int), "result" .= object []]
    in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
-        Left (AppServerResponseIdMismatch 82 83) -> True
+        Left (AppServerResponseIdMismatch (RequestId 82) (RequestId 83)) -> True
         _ -> False
 
 prop_appServerClientSurfacesJsonRpcErrors :: Bool
 prop_appServerClientSurfacesJsonRpcErrors =
-  let request = initializeRequest 84 "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 84) "codex-watcher-hs" "0.1.0"
       response =
         object
           [ "jsonrpc" .= ("2.0" :: Text)
@@ -173,18 +173,18 @@ prop_appServerClientSurfacesJsonRpcErrors =
           , "error" .= object ["code" .= (-32000 :: Int), "message" .= ("boom" :: Text)]
           ]
    in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
-        Left (AppServerJsonRpcFailure 84 errorValue) ->
+        Left (AppServerJsonRpcFailure (RequestId 84) errorValue) ->
           jsonRpcErrorCode errorValue == -32000 && jsonRpcErrorMessage errorValue == "boom"
         _ -> False
 
 prop_appServerClientMaterializationFallbackRetriesWithoutTurns :: ThreadId -> Bool
 prop_appServerClientMaterializationFallbackRetriesWithoutTurns threadId =
-  let request = threadReadRequest 86 threadId True
+  let request = threadReadRequest (RequestId 86) threadId True
       failure =
         AppServerJsonRpcFailure
-          86
+          (RequestId 86)
           (JsonRpcError (-32000) "thread is not materialized yet; includeTurns is unavailable before first user message" Nothing)
-   in threadReadFallbackRequest request failure == Just (threadReadRequest 86 threadId False)
+   in threadReadFallbackRequest request failure == Just (threadReadRequest (RequestId 86) threadId False)
 
 prop_appServerClientMaterializationFallbackMarksSyntheticResponse :: Bool
 prop_appServerClientMaterializationFallbackMarksSyntheticResponse =
@@ -269,7 +269,7 @@ prop_appServerClientParsesThreadStartThreadId =
 prop_appServerClientStartsThreadWithInterpreter :: Bool
 prop_appServerClientStartsThreadWithInterpreter =
   let options = defaultThreadStartOptions "/workspace/repo" "developer"
-      expectedRequest = threadStartRequest 17 options
+      expectedRequest = threadStartRequest (RequestId 17) options
       interpreter =
         AppServerInterpreter
           ( \request ->
@@ -278,7 +278,7 @@ prop_appServerClientStartsThreadWithInterpreter =
                   then object ["thread" .= object ["id" .= ("thread-created" :: Text)]]
                   else error "unexpected thread/start request"
           )
-   in runIdentity (startThreadWithInterpreter interpreter 17 options)
+   in runIdentity (startThreadWithInterpreter interpreter (RequestId 17) options)
         == Right (ThreadId "thread-created")
 
 prop_appServerClientParsesNestedThreadReadTurns :: Bool

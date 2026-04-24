@@ -13,7 +13,9 @@ module CodexWatcher.GhGit
   , GhPullRequestCreateResult (..)
   , GitWorktreeStatus (..)
   , RemoteIssue (..)
+  , RemoteIssueState (..)
   , RemotePullRequest (..)
+  , RemotePullRequestState (..)
   , ReviewComment (..)
   , ReviewThread (..)
   , ReviewThreadsReport (..)
@@ -28,7 +30,10 @@ module CodexWatcher.GhGit
   , parseGitSha
   , parseLsRemoteBranch
   , remoteIssueIsClosed
+  , remotePullRequestIsOpen
   , remotePullRequestIsMerged
+  , renderRemoteIssueState
+  , renderRemotePullRequestState
   , runGitWorktreeStatus
   , runGhIssueListOpen
   , runGhIssueView
@@ -70,21 +75,40 @@ instance FromJSON GhIssue where
       <*> objectValue .: "title"
 
 data RemoteIssue = RemoteIssue
-  { remoteIssueState :: Text
+  { remoteIssueState :: RemoteIssueState
   , remoteIssueClosed :: Bool
   , remoteIssueUrl :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
+data RemoteIssueState
+  = RemoteIssueOpen
+  | RemoteIssueClosed
+  | RemoteIssueOther Text
+  deriving stock (Eq, Show, Generic)
+
 instance FromJSON RemoteIssue where
   parseJSON = withObject "RemoteIssue" \objectValue -> do
-    state <- objectValue .: "state"
-    closed <- objectValue .:? "closed" .!= (state == "CLOSED")
+    state <- parseRemoteIssueState <$> objectValue .: "state"
+    closed <- objectValue .:? "closed" .!= (state == RemoteIssueClosed)
     RemoteIssue state closed <$> objectValue .:? "url"
 
 remoteIssueIsClosed :: RemoteIssue -> Bool
 remoteIssueIsClosed issue =
-  issue.remoteIssueClosed || Text.toUpper issue.remoteIssueState == "CLOSED"
+  issue.remoteIssueClosed || issue.remoteIssueState == RemoteIssueClosed
+
+parseRemoteIssueState :: Text -> RemoteIssueState
+parseRemoteIssueState state =
+  case Text.toUpper state of
+    "OPEN" -> RemoteIssueOpen
+    "CLOSED" -> RemoteIssueClosed
+    _ -> RemoteIssueOther state
+
+renderRemoteIssueState :: RemoteIssueState -> Text
+renderRemoteIssueState = \case
+  RemoteIssueOpen -> "OPEN"
+  RemoteIssueClosed -> "CLOSED"
+  RemoteIssueOther state -> state
 
 data GhPullRequest = GhPullRequest
   { ghPullRequestNumber :: PrNumber
@@ -141,7 +165,7 @@ instance FromJSON GhPullRequestCheck where
       <*> objectValue .:? "bucket"
 
 data RemotePullRequest = RemotePullRequest
-  { remotePullRequestState :: Text
+  { remotePullRequestState :: RemotePullRequestState
   , remotePullRequestUrl :: Maybe Text
   , remotePullRequestHeadRefOid :: Maybe CommitSha
   , remotePullRequestMergeCommit :: Maybe CommitSha
@@ -150,19 +174,45 @@ data RemotePullRequest = RemotePullRequest
   }
   deriving stock (Eq, Show, Generic)
 
+data RemotePullRequestState
+  = RemotePullRequestOpen
+  | RemotePullRequestClosed
+  | RemotePullRequestMerged
+  | RemotePullRequestOther Text
+  deriving stock (Eq, Show, Generic)
+
 instance FromJSON RemotePullRequest where
   parseJSON = withObject "RemotePullRequest" \objectValue ->
     RemotePullRequest
-      <$> objectValue .: "state"
+      <$> (parseRemotePullRequestState <$> objectValue .: "state")
       <*> objectValue .:? "url"
       <*> (fmap CommitSha <$> objectValue .:? "headRefOid")
       <*> parseMergeCommit objectValue
       <*> objectValue .:? "mergedAt"
       <*> objectValue .:? "mergeStateStatus"
 
+remotePullRequestIsOpen :: RemotePullRequest -> Bool
+remotePullRequestIsOpen pullRequest =
+  pullRequest.remotePullRequestState == RemotePullRequestOpen
+
 remotePullRequestIsMerged :: RemotePullRequest -> Bool
 remotePullRequestIsMerged pullRequest =
-  Text.toUpper pullRequest.remotePullRequestState == "MERGED"
+  pullRequest.remotePullRequestState == RemotePullRequestMerged
+
+parseRemotePullRequestState :: Text -> RemotePullRequestState
+parseRemotePullRequestState state =
+  case Text.toUpper state of
+    "OPEN" -> RemotePullRequestOpen
+    "CLOSED" -> RemotePullRequestClosed
+    "MERGED" -> RemotePullRequestMerged
+    _ -> RemotePullRequestOther state
+
+renderRemotePullRequestState :: RemotePullRequestState -> Text
+renderRemotePullRequestState = \case
+  RemotePullRequestOpen -> "OPEN"
+  RemotePullRequestClosed -> "CLOSED"
+  RemotePullRequestMerged -> "MERGED"
+  RemotePullRequestOther state -> state
 
 data ReviewComment = ReviewComment
   { reviewCommentId :: Text

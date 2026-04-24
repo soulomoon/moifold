@@ -74,7 +74,7 @@ selectIssueImplementationStarts :: PlannerConfig -> [IssueNumber] -> [IssueNumbe
 selectIssueImplementationStarts config activeIssues openIssues =
   take availableCapacity (filter (`notElem` activeIssues) openIssues)
  where
-  availableCapacity = max 0 (plannerMaxParallel config - length activeIssues)
+  availableCapacity = max 0 (unMaxParallel (plannerMaxParallel config) - length activeIssues)
 
 validatePlanningGraph :: PlannerConfig -> PlanningGraph -> Either Text ()
 validatePlanningGraph config graph

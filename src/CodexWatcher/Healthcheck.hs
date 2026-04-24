@@ -23,7 +23,7 @@ import CodexWatcher.Healthcheck.Analysis
 import CodexWatcher.Healthcheck.Types
 import CodexWatcher.Runtime
 import CodexWatcher.Runtime.Json (commandJsonValue)
-import CodexWatcher.Types (BranchName (..), PrNumber (..), RepoName (..), ThreadId (..), TurnId (..), someDomain, somePhase)
+import CodexWatcher.Types (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..), someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 import Control.Applicative ((<|>))
@@ -373,7 +373,7 @@ checkAppServerThread (Just endpoint) (Just threadId') = do
     sendOneAppServerRequest
       endpoint
       defaultAppServerClientOptions {appServerResponseTimeoutMicros = Just 5000000}
-      (threadReadRequest 9001 (ThreadId threadId') True)
+      (threadReadRequest (RequestId 9001) (ThreadId threadId') True)
   pure case result of
     Left failure ->
       failedAppServerThread threadId' (formatAppServerClientFailure failure)

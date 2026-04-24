@@ -21,12 +21,14 @@ module CodexWatcher.Types
   , PrNumber (..)
   , ThreadId (..)
   , TurnId (..)
+  , RequestId (..)
   , BranchName (..)
   , ReviewThreadId (..)
   , CommitSha (..)
   , MergeCommit (..)
   , BlockedReason (..)
   , StopReason (..)
+  , MaxParallel
   , PlannerConfig (..)
   , IssueCreationRequest (..)
   , IssueDependency (..)
@@ -44,9 +46,12 @@ module CodexWatcher.Types
   , SomeWatcherState (..)
   , domainOf
   , phaseOf
+  , nextRequestId
   , someDomain
   , somePhase
   , isTerminalPhase
+  , mkMaxParallel
+  , unMaxParallel
   ) where
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
@@ -118,6 +123,21 @@ newtype ThreadId = ThreadId { unThreadId :: Text }
 newtype TurnId = TurnId { unTurnId :: Text }
   deriving stock (Eq, Show)
 
+newtype RequestId = RequestId { unRequestId :: Int }
+  deriving stock (Eq, Ord)
+
+instance Show RequestId where
+  show =
+    show . unRequestId
+
+instance ToJSON RequestId where
+  toJSON =
+    toJSON . unRequestId
+
+nextRequestId :: RequestId -> RequestId
+nextRequestId requestId =
+  RequestId (unRequestId requestId + 1)
+
 newtype BranchName = BranchName { unBranchName :: Text }
   deriving stock (Eq, Show)
 
@@ -136,9 +156,25 @@ newtype BlockedReason = BlockedReason { unBlockedReason :: Text }
 newtype StopReason = StopReason { unStopReason :: Text }
   deriving stock (Eq, Show)
 
+newtype MaxParallel = MaxParallel { unMaxParallel :: Int }
+  deriving stock (Eq, Ord)
+
+instance Show MaxParallel where
+  show =
+    show . unMaxParallel
+
+instance ToJSON MaxParallel where
+  toJSON =
+    toJSON . unMaxParallel
+
+mkMaxParallel :: Int -> Maybe MaxParallel
+mkMaxParallel value
+  | value > 0 = Just (MaxParallel value)
+  | otherwise = Nothing
+
 data PlannerConfig = PlannerConfig
   { plannerRepo :: RepoName
-  , plannerMaxParallel :: Int
+  , plannerMaxParallel :: MaxParallel
   , plannerScopeIssues :: [IssueNumber]
   }
   deriving stock (Eq, Show)

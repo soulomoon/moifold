@@ -412,8 +412,8 @@ runPreMergeGate executor prConfig evidence = do
   case remoteResult of
     Left reason -> pure (PreMergeGateBlocked ("pre-merge PR read failed: " <> reason))
     Right remote
-      | Text.toUpper remote.remotePullRequestState /= "OPEN" ->
-          pure (PreMergeGateBlocked ("pre-merge PR state is " <> remote.remotePullRequestState <> ", expected OPEN"))
+      | not (remotePullRequestIsOpen remote) ->
+          pure (PreMergeGateBlocked ("pre-merge PR state is " <> renderRemotePullRequestState remote.remotePullRequestState <> ", expected OPEN"))
       | remote.remotePullRequestHeadRefOid /= Just evidence.cleanReviewCommit ->
           pure
             ( PreMergeGateRecheck

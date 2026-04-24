@@ -49,7 +49,7 @@ data EffectRuntimeConfig = EffectRuntimeConfig
   , effectRuntimeWorkdir :: FilePath
   , effectRuntimeStateDir :: FilePath
   , effectRuntimeMergeMethod :: Text
-  , effectRuntimeNextRequestId :: Int
+  , effectRuntimeNextRequestId :: RequestId
   , effectRuntimePlannerThreadInstructions :: Text
   , effectRuntimePlannerTurn :: TurnRuntimeConfig
   , effectRuntimeWorkerTurn :: TurnRuntimeConfig
@@ -70,13 +70,13 @@ data PlannedAction
 
 data CompiledEffectPlan = CompiledEffectPlan
   { compiledActions :: [PlannedAction]
-  , compiledNextRequestId :: Int
+  , compiledNextRequestId :: RequestId
   }
   deriving stock (Eq, Show, Generic)
 
 compileEffectPlan :: EffectRuntimeConfig -> EffectPlan -> CompiledEffectPlan
 compileEffectPlan config effects =
-  let (nextRequestId, actionBatches) =
+  let (finalRequestId, actionBatches) =
         mapAccumL
           ( \requestId effect ->
               let (actions, requestId') = compileEffect config requestId effect
@@ -86,10 +86,10 @@ compileEffectPlan config effects =
           effects
    in CompiledEffectPlan
         { compiledActions = concat actionBatches
-        , compiledNextRequestId = nextRequestId
+        , compiledNextRequestId = finalRequestId
         }
 
-compileEffect :: EffectRuntimeConfig -> Int -> SomeEffect -> ([PlannedAction], Int)
+compileEffect :: EffectRuntimeConfig -> RequestId -> SomeEffect -> ([PlannedAction], RequestId)
 compileEffect config requestId (SomeEffect effect) =
   case effect of
     ReadOpenIssues repo ->
@@ -136,7 +136,7 @@ compileEffect config requestId (SomeEffect effect) =
   unchanged actions = (actions, requestId)
   oneAppServerRequest turnConfig threadId =
     ( [PlannedAppServerRequest (turnStartRequest requestId (turnStartOptions turnConfig threadId))]
-    , requestId + 1
+    , nextRequestId requestId
     )
 
 issuePlanFileText :: IssueConfig -> PrNumber -> Text -> Text

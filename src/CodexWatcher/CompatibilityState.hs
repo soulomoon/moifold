@@ -119,7 +119,7 @@ plannerStateJson :: PlannerConfig -> Text -> Value
 plannerStateJson config statusValue =
   object
     [ "repoFullName" .= unRepoName (plannerRepo config)
-    , "maxParallel" .= plannerMaxParallel config
+    , "maxParallel" .= unMaxParallel (plannerMaxParallel config)
     , "scopeIssueNumbers" .= fmap unIssueNumber (plannerScopeIssues config)
     , "status" .= statusValue
     ]

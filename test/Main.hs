@@ -163,7 +163,13 @@ instance Arbitrary StopReason where
   arbitrary = StopReason . Text.pack <$> listOf1 (elements (['a' .. 'z'] <> [' ']))
 
 instance Arbitrary PlannerConfig where
-  arbitrary = PlannerConfig <$> arbitrary <*> (getPositive <$> arbitrary) <*> arbitrary
+  arbitrary = PlannerConfig <$> arbitrary <*> (maxParallelForTest . getPositive <$> arbitrary) <*> arbitrary
+
+maxParallelForTest :: Int -> MaxParallel
+maxParallelForTest value =
+  case mkMaxParallel value of
+    Just parsed -> parsed
+    Nothing -> error ("invalid test maxParallel: " <> show value)
 
 instance Arbitrary IssueCreationRequest where
   arbitrary = do
@@ -891,7 +897,7 @@ prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits config threadId turnId
 
 prop_issuePlanningWatcherBlocksOutOfScopeGraph :: ThreadId -> TurnId -> Bool
 prop_issuePlanningWatcherBlocksOutOfScopeGraph threadId turnId =
-  let config = PlannerConfig (RepoName "owner/name") 8 [IssueNumber 12]
+  let config = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 12]
       ready = SomeWatcherState (PlanningReady config)
       graph = PlanningGraph [IssueNumber 26] [] []
    in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
@@ -908,7 +914,7 @@ prop_canonicalPlanningGraphUsesDependencyHintsAndOpenChildren :: Bool
 prop_canonicalPlanningGraphUsesDependencyHintsAndOpenChildren =
   canonicalPlanningGraph plannerConfig facts plannerOutput == expected
  where
-  plannerConfig = PlannerConfig (RepoName "owner/name") 8 [IssueNumber 12, IssueNumber 26, IssueNumber 27]
+  plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 12, IssueNumber 26, IssueNumber 27]
   facts =
     [ PlanningIssueFact (IssueNumber 12) False Nothing [IssueNumber 26, IssueNumber 27]
     , PlanningIssueFact (IssueNumber 26) False (Just (IssueNumber 12)) []
@@ -942,14 +948,14 @@ prop_canonicalPlanningGraphUsesDependencyHintsAndOpenChildren =
 
 prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive :: Bool
 prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive =
-  let config = PlannerConfig (RepoName "owner/name") 3 []
+  let config = PlannerConfig (RepoName "owner/name") (maxParallelForTest 3) []
       active = [IssueNumber 2]
       open = [IssueNumber 1, IssueNumber 2, IssueNumber 3, IssueNumber 4]
    in selectIssueImplementationStarts config active open == [IssueNumber 1, IssueNumber 3]
 
 prop_issuePlanningFanoutBuildsLaunchPlans :: Bool
 prop_issuePlanningFanoutBuildsLaunchPlans =
-  let plannerConfig = PlannerConfig (RepoName "owner/name") 3 []
+  let plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 3) []
       fanoutConfig =
         (defaultIssuePlanningFanoutConfig "/tmp/implementers")
           { fanoutWorkdirRoot = Just "/tmp/worktrees"
@@ -993,7 +999,7 @@ prop_issuePlanningFanoutParsesImplementerConfig =
 
 prop_issuePlanningFanoutDetectsCompletionBoundary :: Bool
 prop_issuePlanningFanoutDetectsCompletionBoundary =
-  let config = PlannerConfig (RepoName "owner/name") 3 []
+  let config = PlannerConfig (RepoName "owner/name") (maxParallelForTest 3) []
       planningReady = SomeWatcherState (PlanningReady config)
       planningActive = SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn")))
       planningWaiting = SomeWatcherState (PlanningWaitingForReadyIssues config graph)
@@ -1011,7 +1017,7 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
 
 prop_issuePlanningFanoutUsesOnlyReadyIssues :: Bool
 prop_issuePlanningFanoutUsesOnlyReadyIssues =
-  let plannerConfig = PlannerConfig (RepoName "owner/name") 8 []
+  let plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) []
       fanoutConfig = defaultIssuePlanningFanoutConfig "/tmp/implementers"
       ready = [IssueNumber 10, IssueNumber 12]
       active = [IssueNumber 12]
@@ -1022,7 +1028,7 @@ prop_issuePlanningFanoutUsesOnlyReadyIssues =
 
 prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers :: Bool
 prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers =
-  let plannerConfig = PlannerConfig (RepoName "owner/name") 2 []
+  let plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 2) []
       fanoutConfig = defaultIssuePlanningFanoutConfig "/tmp/implementers"
       terminalOnly =
         planReadyIssueFanout
@@ -1095,7 +1101,7 @@ canonicalEventExamples =
   ]
  where
   repo = RepoName "owner/name"
-  plannerConfig = PlannerConfig repo 8 []
+  plannerConfig = PlannerConfig repo (maxParallelForTest 8) []
   issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
   prNumber = PrNumber 7
   prConfig = PrConfig repo prNumber (BranchName "codex/pr-7")
@@ -1215,7 +1221,7 @@ prop_eventLogRepairDropsCompletionWithoutImplementationTurn =
 
 prop_eventLogRepairDropsStalePlanningReadyIssuesFixed :: Bool
 prop_eventLogRepairDropsStalePlanningReadyIssuesFixed =
-  let config = PlannerConfig (RepoName "owner/name") 8 [IssueNumber 12]
+  let config = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 12]
       plannerThread = ThreadId "planner-thread"
       firstTurn = TurnId "planner-turn-1"
       secondTurn = TurnId "planner-turn-2"
@@ -1507,7 +1513,7 @@ effectRuntimeConfig repo workdir requestId =
     , effectRuntimeWorkdir = workdir
     , effectRuntimeStateDir = workdir </> ".watcher"
     , effectRuntimeMergeMethod = "merge"
-    , effectRuntimeNextRequestId = requestId
+    , effectRuntimeNextRequestId = RequestId requestId
     , effectRuntimePlannerThreadInstructions = "planner developer instructions"
     , effectRuntimePlannerTurn = mkTurnRuntime plannerCwd "planner prompt" Nothing
     , effectRuntimeWorkerTurn = turnRuntime "worker prompt" Nothing
@@ -1595,14 +1601,14 @@ prop_effectInterpreterIssuePlanCompletionRecordsPlan config prNumber planningTur
             == [ PlannedWriteText "/tmp/work/.watcher/issue-plan.md" (sampleIssuePlanFile config prNumber)
                , PlannedSleepUntilNextPoll
                ]
-            && compiled.compiledNextRequestId == 10
+            && compiled.compiledNextRequestId == RequestId 10
 
 prop_effectInterpreterPrBodyUpdateUsesIssuePlan :: IssueConfig -> PrNumber -> Bool
 prop_effectInterpreterPrBodyUpdateUsesIssuePlan issueConfig prNumber =
   let config = effectRuntimeConfig issueConfig.issueRepo "/tmp/work" 11
       compiled = compileEffectPlan config [SomeEffect (UpdatePullRequestBody issueConfig prNumber)]
    in compiled.compiledActions == [PlannedCommand (GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md")]
-        && compiled.compiledNextRequestId == 11
+        && compiled.compiledNextRequestId == RequestId 11
 
 prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts :: ThreadId -> Bool
 prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
@@ -1634,7 +1640,7 @@ prop_effectInterpreterIssueTurnsUsePhaseSpecificPrompts threadId =
         && actionTurnCollaborationMode (actions !! 0) == Nothing
         && actionIsTurnStartWithInput threadId "issue implementation prompt" (actions !! 1)
         && actionIsTurnStartWithInput threadId "worker prompt" (actions !! 2)
-        && compiled.compiledNextRequestId == 19
+            && compiled.compiledNextRequestId == RequestId 19
 
 prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas :: Bool
 prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
@@ -1905,7 +1911,7 @@ prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =
               )
               (actionTurnInputText action)
             && lookupValue "collaborationMode" request.requestParams == Nothing
-            && compiled.compiledNextRequestId == 41
+            && compiled.compiledNextRequestId == RequestId 41
         _ -> False
 
 promptContainsAll :: Text -> [Text] -> Bool
@@ -1940,7 +1946,7 @@ prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerT
           , SomeEffect (StartReviewerTurn (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 7) (BranchName "codex/issue-7")) (CommitSha "abc123") reviewerThread)
           ]
    in fmap appServerRequestId compiled.compiledActions == [Just 20, Just 21]
-        && compiled.compiledNextRequestId == 22
+        && compiled.compiledNextRequestId == RequestId 22
 
 prop_effectInterpreterRecordBlockedWritesBlockState :: BlockedReason -> Bool
 prop_effectInterpreterRecordBlockedWritesBlockState reason =
@@ -1949,7 +1955,7 @@ prop_effectInterpreterRecordBlockedWritesBlockState reason =
       expectedPath = config.effectRuntimeStateDir </> "block-state.json"
       expectedJson = object ["blocked" .= True, "reason" .= unBlockedReason reason]
    in compiled.compiledActions == [PlannedWriteJson expectedPath expectedJson]
-        && compiled.compiledNextRequestId == 30
+        && compiled.compiledNextRequestId == RequestId 30
 
 prop_effectInterpreterRecordPlanningGraphWritesState :: PlanningGraph -> Bool
 prop_effectInterpreterRecordPlanningGraphWritesState graph =
@@ -1957,14 +1963,14 @@ prop_effectInterpreterRecordPlanningGraphWritesState graph =
       compiled = compileEffectPlan config [SomeEffect (RecordPlanningGraph graph)]
       expectedPath = config.effectRuntimeStateDir </> "planning-state.json"
    in compiled.compiledActions == [PlannedWriteJson expectedPath (toJSON graph)]
-        && compiled.compiledNextRequestId == 32
+        && compiled.compiledNextRequestId == RequestId 32
 
 prop_effectInterpreterCreateIssueUsesConfiguredEffect :: RepoName -> IssueCreationRequest -> Bool
 prop_effectInterpreterCreateIssueUsesConfiguredEffect repo request =
   let config = effectRuntimeConfig repo "/tmp/work" 35
       compiled = compileEffectPlan config [SomeEffect (CreateIssue repo request)]
    in compiled.compiledActions == [PlannedCommand (GhIssueCreate repo request)]
-        && compiled.compiledNextRequestId == 35
+        && compiled.compiledNextRequestId == RequestId 35
 
 prop_effectInterpreterMergeUsesConfiguredRepoAndMethod :: PrNumber -> CleanReviewEvidence -> Bool
 prop_effectInterpreterMergeUsesConfiguredRepoAndMethod prNumber cleanEvidence =
@@ -2110,7 +2116,7 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
       events =
-        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
         , IssuePlanningTurnCompleted
         ]
@@ -2140,7 +2146,7 @@ runnerGuardRestartsMissingPidForIncompletePlanning = do
   let stateDir = "/tmp/codex-watcher-hs-runner-guard-restart"
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [])]
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
@@ -2171,7 +2177,7 @@ runnerGuardRestartsMissingPidForWaitingPlanning = do
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
       events =
-        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
         , IssuePlanningGraphUpdated (PlanningGraph [IssueNumber 42] [] [])
         ]
@@ -2205,7 +2211,7 @@ runnerGuardRepairsInvalidPlanningEventLog = do
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
       events =
-        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") 8 [])
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [])
         , IssuePlanningTurnCompleted
         ]
       config =
@@ -2239,7 +2245,7 @@ runtimeStatusHelperCoversCommonCases = do
       configPath = stateDir </> "config.json"
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
-      plannerConfig = PlannerConfig (RepoName "owner/name") 8 []
+      plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) []
       stoppedEvents =
         [ IssuePlanningInitialized plannerConfig
         , WatcherStopped (StopReason "done")
@@ -2302,7 +2308,7 @@ runtimeStatusHelperCoversCommonCases = do
 
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
-  PlannedAppServerRequest request -> Just request.requestId
+  PlannedAppServerRequest request -> Just (unRequestId request.requestId)
   _ -> Nothing
 
 lookupValue :: Text -> Value -> Maybe Value
@@ -2599,7 +2605,7 @@ actionExecutorExecuteCallsInjectedInterpreters = do
       expectedBlockJson = object ["blocked" .= True, "reason" .= unBlockedReason blockedReason]
       expectedCalls =
         [ FakeCommand (GitPush "/tmp/work" (BranchName "codex/example"))
-        , FakeAppServer (turnStartRequest 70 (turnStartOptionsForTest (ThreadId "worker-thread")))
+        , FakeAppServer (turnStartRequest (RequestId 70) (turnStartOptionsForTest (ThreadId "worker-thread")))
         , FakeWriteJson expectedBlockPath expectedBlockJson
         , FakeSleep
         , FakeStop
@@ -2703,7 +2709,7 @@ daemonTickDryRunReplaysEventsAndDoesNotExecute = do
   (executor, getCalls) <- fakeActionExecutor
   let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 90
       events =
-        [ IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])
+        [ IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 8) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         , IssuePlanningTurnCompleted
         ]
@@ -2738,7 +2744,7 @@ daemonTickExecuteStopsOnCommandFailure = do
       defaultFakeAppServer
   let runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 95
       branch = BranchName "codex/example"
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 8) [])]
       nextEffects =
         [ SomeEffect (PushBranch branch)
         , SomeEffect SleepUntilNextPoll
@@ -2762,7 +2768,7 @@ observedDaemonTickDryRunDoesNotMutate = do
           , daemonRuntimeConfig = runtimeConfig
           , daemonExecutionMode = DryRunActions
           }
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 8) [])]
       observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
   result <- runObservedDaemonTickWithEvents executor options events observation
   calls <- getCalls
@@ -2790,7 +2796,7 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
           , daemonRuntimeConfig = runtimeConfig
           , daemonExecutionMode = ExecuteActions
           }
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 8) [])]
       observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
   result <- runObservedDaemonTickWithEvents executor options events observation
   calls <- getCalls
@@ -2816,7 +2822,7 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
 observedDaemonTickExecuteCommandFailureDoesNotAppendEvent :: IO Bool
 observedDaemonTickExecuteCommandFailureDoesNotAppendEvent = do
   let repo = RepoName "soulomoon/mlf2"
-      plannerConfig = PlannerConfig repo 4 []
+      plannerConfig = PlannerConfig repo (maxParallelForTest 4) []
       issueRequest = IssueCreationRequest "child issue" "body" Nothing
   (executor, getCalls) <-
     fakeActionExecutorWith
@@ -3059,7 +3065,7 @@ automaticDaemonLoopPlanningDryRunStartsSyntheticTurn = do
           , daemonExecutionMode = DryRunActions
           }
       loopConfig = DaemonLoopConfig options Nothing
-      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") 8 [])]
+      events = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 8) [])]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
   case result of
@@ -3121,7 +3127,7 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
           , daemonExecutionMode = ExecuteActions
           }
       loopConfig = DaemonLoopConfig options Nothing
-      events = [IssuePlanningInitialized (PlannerConfig repo 8 [issueNumber])]
+      events = [IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [issueNumber])]
       snapshotPath = runtimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
@@ -3202,7 +3208,7 @@ automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn = do
           , daemonExecutionMode = ExecuteActions
           }
       loopConfig = DaemonLoopConfig options Nothing
-      events = [IssuePlanningInitialized (PlannerConfig repo 8 [issueNumber])]
+      events = [IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [issueNumber])]
       snapshotPath = runtimeConfig.effectRuntimeStateDir </> "issue-snapshot.json"
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
@@ -3263,7 +3269,7 @@ automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 8 [])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -3320,7 +3326,7 @@ automaticDaemonLoopPlanningGraphWaitsAndRecords = do
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 8 [])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -3389,7 +3395,7 @@ automaticDaemonLoopPlanningGraphDropsClosedDependencies = do
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 8 [IssueNumber 12, IssueNumber 26, IssueNumber 27, IssueNumber 28])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [IssueNumber 12, IssueNumber 26, IssueNumber 27, IssueNumber 28])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -3456,7 +3462,7 @@ automaticDaemonLoopPlanningGraphCanonicalizesOpenScopeCoverage = do
           }
       loopConfig = DaemonLoopConfig options (Just (ThreadId "planner-thread"))
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 8 [IssueNumber 12, IssueNumber 26, IssueNumber 27, IssueNumber 28])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [IssueNumber 12, IssueNumber 26, IssueNumber 27, IssueNumber 28])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -3697,7 +3703,7 @@ automaticPlanningSystemErrorRetriesWatcher = do
       loopConfig = DaemonLoopConfig options Nothing
       expectedEvent = IssuePlanningTurnRetryRequested (BlockedReason "retrying planner turn after app-server systemError: systemError")
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 1 [])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 1) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
         ]
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -3747,7 +3753,7 @@ automaticPlanningSystemErrorBlocksAfterRetryLimit = do
       loopConfig = DaemonLoopConfig options Nothing
       expectedReason = BlockedReason "app-server thread entered systemError: systemError"
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 1 [])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 1) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread-1") (TurnId "planner-turn-1")
         , IssuePlanningTurnRetryRequested (BlockedReason "retrying planner turn after app-server systemError: systemError")
         , IssuePlanningTurnStarted (ThreadId "planner-thread-2") (TurnId "planner-turn-2")
@@ -4024,7 +4030,7 @@ automaticStalePlanningTurnRetriesAfterThreeMisses = do
           }
       loopConfig = DaemonLoopConfig options Nothing
       events =
-        [ IssuePlanningInitialized (PlannerConfig repo 1 [])
+        [ IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 1) [])
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "missing-turn")
         ]
       runOnce = runAutomaticDaemonLoopOnceWithEvents executor loopConfig events

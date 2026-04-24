@@ -60,8 +60,8 @@ prop_ghGitParsesRemoteIssueView =
               ]
           )
    in parseGhIssueView closedIssueJson
-        == Right (RemoteIssue "CLOSED" True (Just "https://github.com/owner/name/issues/42"))
-        && parseGhIssueView legacyIssueJson == Right (RemoteIssue "CLOSED" True Nothing)
+        == Right (RemoteIssue RemoteIssueClosed True (Just "https://github.com/owner/name/issues/42"))
+        && parseGhIssueView legacyIssueJson == Right (RemoteIssue RemoteIssueClosed True Nothing)
 
 prop_ghGitParsesRemotePrView :: Bool
 prop_ghGitParsesRemotePrView =
@@ -79,7 +79,7 @@ prop_ghGitParsesRemotePrView =
    in parseGhPrView prJson
         == Right
           RemotePullRequest
-            { remotePullRequestState = "MERGED"
+            { remotePullRequestState = RemotePullRequestMerged
             , remotePullRequestUrl = Just "https://github.com/owner/name/pull/7"
             , remotePullRequestHeadRefOid = Just (CommitSha "head-sha")
             , remotePullRequestMergeCommit = Just (CommitSha "merge-sha")

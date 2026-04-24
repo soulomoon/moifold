@@ -139,15 +139,15 @@ startRunnerGuardRepairThread config problem' = do
       =<< startThreadWithEndpoint
         config.guardAppServerEndpoint
         defaultAppServerClientOptions
-        1
+        (RequestId 1)
         (defaultThreadStartOptions config.guardRepairCwd repairDeveloperInstructions)
   _ <-
     sendOrFail
-      (threadNameSetRequest 2 threadId ("runner-guard repair " <> unRepoName config.guardRepo))
+      (threadNameSetRequest (RequestId 2) threadId ("runner-guard repair " <> unRepoName config.guardRepo))
   turnResponse <-
     sendOrFail
       ( turnStartRequest
-          3
+          (RequestId 3)
           (defaultTurnStartOptions threadId config.guardRepairCwd (runnerGuardRepairPrompt config problem'))
       )
   turnId <- either (failText . formatAppServerClientFailure) pure (parseTurnStartTurnId turnResponse)
@@ -296,7 +296,7 @@ checkReplayState config events = \case
 
 checkActiveTurn :: RunnerGuardConfig -> Text -> ActiveTurn -> IO (Maybe RunnerGuardProblem)
 checkActiveTurn config role activeTurn = do
-  response <- sendOneAppServerRequest config.guardAppServerEndpoint defaultAppServerClientOptions (threadReadRequest 1 activeTurn.activeThreadId True)
+  response <- sendOneAppServerRequest config.guardAppServerEndpoint defaultAppServerClientOptions (threadReadRequest (RequestId 1) activeTurn.activeThreadId True)
   case response of
     Left failure ->
       pure (Just (repairProblem ("guard cannot read " <> role <> " app-server thread") ["thread: " <> unThreadId activeTurn.activeThreadId, formatAppServerClientFailure failure]))

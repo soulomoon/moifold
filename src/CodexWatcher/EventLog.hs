@@ -524,7 +524,7 @@ parsePlannerConfig :: Object -> Parser PlannerConfig
 parsePlannerConfig objectValue =
   PlannerConfig
     <$> (RepoName <$> nonEmptyTextField objectValue "repoFullName")
-    <*> positiveIntField objectValue "maxParallel"
+    <*> maxParallelField objectValue "maxParallel"
     <*> scopeIssueNumbersField objectValue
 
 parsePrConfig :: Object -> Parser PrConfig
@@ -567,6 +567,11 @@ positiveIntField objectValue key = do
     then pure value
     else fail (Key.toString key <> " must be positive")
 
+maxParallelField :: Object -> Key.Key -> Parser MaxParallel
+maxParallelField objectValue key = do
+  value <- positiveIntField objectValue key
+  maybe (fail (Key.toString key <> " must be positive")) pure (mkMaxParallel value)
+
 nonEmptyTurnId :: Text -> Parser TurnId
 nonEmptyTurnId value = TurnId <$> nonEmptyText "implementationTurnId" value
 
@@ -576,7 +581,7 @@ eventType event = ["type" .= eventName event]
 plannerConfigFields :: PlannerConfig -> [Pair]
 plannerConfigFields config =
   [ "repoFullName" .= unRepoName (plannerRepo config)
-  , "maxParallel" .= plannerMaxParallel config
+  , "maxParallel" .= unMaxParallel (plannerMaxParallel config)
   , "scopeIssueNumbers" .= fmap unIssueNumber (plannerScopeIssues config)
   ]
 

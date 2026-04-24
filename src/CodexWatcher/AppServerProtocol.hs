@@ -18,7 +18,8 @@ module CodexWatcher.AppServerProtocol
   ) where
 
 import CodexWatcher.Types
-  ( ThreadId (..)
+  ( RequestId (..)
+  , ThreadId (..)
   , TurnId (..)
   )
 import Data.Aeson
@@ -31,7 +32,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 data AppServerRequest = AppServerRequest
-  { requestId :: Int
+  { requestId :: RequestId
   , requestMethod :: Text
   , requestParams :: Value
   }
@@ -41,7 +42,7 @@ instance ToJSON AppServerRequest where
   toJSON request =
     object
       [ "jsonrpc" .= String "2.0"
-      , "id" .= request.requestId
+      , "id" .= unRequestId request.requestId
       , "method" .= request.requestMethod
       , "params" .= request.requestParams
       ]
@@ -68,7 +69,7 @@ data TurnStartOptions = TurnStartOptions
   }
   deriving stock (Eq, Show, Generic)
 
-initializeRequest :: Int -> Text -> Text -> AppServerRequest
+initializeRequest :: RequestId -> Text -> Text -> AppServerRequest
 initializeRequest requestId clientName clientVersion =
   AppServerRequest
     { requestId
@@ -88,7 +89,7 @@ initializedNotification =
     , "params" .= object []
     ]
 
-threadStartRequest :: Int -> ThreadStartOptions -> AppServerRequest
+threadStartRequest :: RequestId -> ThreadStartOptions -> AppServerRequest
 threadStartRequest requestId options =
   AppServerRequest
     { requestId
@@ -110,7 +111,7 @@ threadStartRequest requestId options =
           ]
     }
 
-threadNameSetRequest :: Int -> ThreadId -> Text -> AppServerRequest
+threadNameSetRequest :: RequestId -> ThreadId -> Text -> AppServerRequest
 threadNameSetRequest requestId threadId name =
   AppServerRequest
     { requestId
@@ -118,7 +119,7 @@ threadNameSetRequest requestId threadId name =
     , requestParams = object ["threadId" .= unThreadId threadId, "name" .= name]
     }
 
-threadReadRequest :: Int -> ThreadId -> Bool -> AppServerRequest
+threadReadRequest :: RequestId -> ThreadId -> Bool -> AppServerRequest
 threadReadRequest requestId threadId includeTurns =
   AppServerRequest
     { requestId
@@ -126,7 +127,7 @@ threadReadRequest requestId threadId includeTurns =
     , requestParams = object ["threadId" .= unThreadId threadId, "includeTurns" .= includeTurns]
     }
 
-turnStartRequest :: Int -> TurnStartOptions -> AppServerRequest
+turnStartRequest :: RequestId -> TurnStartOptions -> AppServerRequest
 turnStartRequest requestId options =
   AppServerRequest
     { requestId
@@ -150,7 +151,7 @@ turnStartRequest requestId options =
          in object fields
     }
 
-turnInterruptRequest :: Int -> ThreadId -> TurnId -> AppServerRequest
+turnInterruptRequest :: RequestId -> ThreadId -> TurnId -> AppServerRequest
 turnInterruptRequest requestId threadId turnId =
   AppServerRequest
     { requestId

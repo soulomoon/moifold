@@ -41,7 +41,9 @@ library
     CodexWatcher.Daemon
     CodexWatcher.DaemonControlCli
     CodexWatcher.DaemonLoop
+    CodexWatcher.DaemonLoop.ActiveTurn
     CodexWatcher.DaemonLoop.Runtime
+    CodexWatcher.DaemonLoop.TurnStart
     CodexWatcher.DaemonLoop.Types
     CodexWatcher.EffectInterpreter
     CodexWatcher.EffectRuntimeCli

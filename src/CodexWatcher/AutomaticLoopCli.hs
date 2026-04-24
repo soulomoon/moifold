@@ -206,7 +206,7 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
             instructions = issueImplementerThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir issueConfig
         threadId <- startFreshThread executor requestId cli.loopCliWorkdir instructions
         appendStartupThreadRefresh (IssueWorkerThreadRefreshed threadId)
-        pure (withNextRequestId (requestId + 1) loopConfig)
+        pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
   refreshPrReviewThreads replay =
     case idlePrReviewConfig replay.replayState of
@@ -215,9 +215,9 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
       Just prConfig -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
         workerThread <- startFreshThread executor requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
-        reviewerThread <- startFreshThread executor (requestId + 1) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        reviewerThread <- startFreshThread executor (nextRequestId requestId) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
         appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
-        pure (withNextRequestId (requestId + 2) loopConfig)
+        pure (withNextRequestId (nextRequestId (nextRequestId requestId)) loopConfig)
 
   appendStartupThreadRefresh event = do
     events <- either die pure =<< loadEventLogFile cli.loopCliEventsPath
@@ -225,7 +225,7 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
     replay <- either (die . formatReplayFailure) pure (replayEventLog (events <> [event]))
     mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir replay.replayState)
 
-startFreshThread :: ActionExecutor IO -> Int -> FilePath -> Text.Text -> IO ThreadId
+startFreshThread :: ActionExecutor IO -> RequestId -> FilePath -> Text.Text -> IO ThreadId
 startFreshThread executor requestId cwd developerInstructions = do
   result <-
     startThreadWithInterpreter
@@ -236,7 +236,7 @@ startFreshThread executor requestId cwd developerInstructions = do
     Left failure -> die (Text.unpack (formatAppServerClientFailure failure))
     Right threadId -> pure threadId
 
-withNextRequestId :: Int -> DaemonLoopConfig -> DaemonLoopConfig
+withNextRequestId :: RequestId -> DaemonLoopConfig -> DaemonLoopConfig
 withNextRequestId requestId loopConfig =
   loopConfig
     { loopDaemonOptions =
@@ -462,7 +462,7 @@ validateReadyIssueFanout plannerConfig readyStatuses launchPlans =
               Left reason ->
                 Just (BlockedReason ("ready issue #" <> issueText issue <> " could not be read from GitHub: " <> reason))
               Right remoteIssue
-                | remoteIssue.remoteIssueClosed || Text.toUpper remoteIssue.remoteIssueState == "CLOSED" ->
+                | remoteIssueIsClosed remoteIssue ->
                     Just (BlockedReason ("ready issue #" <> issueText issue <> " is already closed on GitHub"))
                 | otherwise ->
                     Nothing

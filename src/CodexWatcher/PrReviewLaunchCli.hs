@@ -141,11 +141,11 @@ preparePrReviewWatcherLaunch :: Maybe AppServerEndpoint -> PrReviewWatcherLaunch
 preparePrReviewWatcherLaunch Nothing launch =
   pure launch
 preparePrReviewWatcherLaunch (Just endpoint) launch = do
-  workerThread <- startPrReviewThread endpoint 9000 launch "worker"
-  reviewerThread <- startPrReviewThread endpoint 9001 launch "reviewer"
+  workerThread <- startPrReviewThread endpoint (RequestId 9000) launch "worker"
+  reviewerThread <- startPrReviewThread endpoint (RequestId 9001) launch "reviewer"
   pure (withPrReviewThreadIds workerThread reviewerThread launch)
 
-startPrReviewThread :: AppServerEndpoint -> Int -> PrReviewWatcherLaunchPlan -> Text.Text -> IO ThreadId
+startPrReviewThread :: AppServerEndpoint -> RequestId -> PrReviewWatcherLaunchPlan -> Text.Text -> IO ThreadId
 startPrReviewThread endpoint requestId launch role = do
   result <-
     startThreadWithEndpoint

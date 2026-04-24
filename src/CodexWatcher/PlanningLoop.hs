@@ -149,7 +149,7 @@ startPlannerThread executor config = do
         threadStartRequest
           requestId
           (defaultThreadStartOptions runtimeConfig.effectRuntimePlannerTurn.turnRuntimeCwd runtimeConfig.effectRuntimePlannerThreadInstructions)
-      nextConfig = withRuntimeNextRequestId (requestId + 1) config
+      nextConfig = withRuntimeNextRequestId (nextRequestId requestId) config
   report <- executePlannedAction executor config.loopDaemonOptions.daemonExecutionMode (PlannedAppServerRequest request)
   case config.loopDaemonOptions.daemonExecutionMode of
     DryRunActions ->
@@ -163,11 +163,11 @@ startPlannerThread executor config = do
         _ ->
           pure (Left (DaemonLoopUnexpectedStartPlan ("planner thread start returned unexpected action result: " <> Text.pack (show report.actionExecutionResult))))
 
-syntheticPlannerThreadId :: Int -> ThreadId
+syntheticPlannerThreadId :: RequestId -> ThreadId
 syntheticPlannerThreadId requestId =
-  ThreadId ("dry-run-planner-thread-" <> Text.pack (show requestId))
+  ThreadId ("dry-run-planner-thread-" <> Text.pack (show (unRequestId requestId)))
 
-withRuntimeNextRequestId :: Int -> DaemonLoopConfig -> DaemonLoopConfig
+withRuntimeNextRequestId :: RequestId -> DaemonLoopConfig -> DaemonLoopConfig
 withRuntimeNextRequestId requestId config =
   config
     { loopDaemonOptions =
