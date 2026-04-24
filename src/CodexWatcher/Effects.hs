@@ -10,16 +10,11 @@ module CodexWatcher.Effects
   ( Effect (..)
   , SomeEffect (..)
   , EffectPlan
-  , effectMutabilitySing
-  , effectMutability
-  , effectPlanMutabilities
-  , isMutationSing
-  , isMutation
   , hasMutation
   ) where
 
 import CodexWatcher.Types
-import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
+import Data.Singletons (SingI (..))
 import Data.Singletons.Decide (decideEquality)
 import Data.Text (Text)
 import Data.Type.Equality ((:~:) (Refl))
@@ -65,20 +60,9 @@ type EffectPlan = [SomeEffect]
 effectMutabilitySing :: forall mutability. KnownMutability mutability => Effect mutability -> SMutability mutability
 effectMutabilitySing _ = sing @mutability
 
-effectMutability :: KnownMutability mutability => Effect mutability -> Mutability
-effectMutability = fromSing . effectMutabilitySing
-
-effectPlanMutabilities :: EffectPlan -> [Mutability]
-effectPlanMutabilities = fmap (\(SomeEffect effect) -> effectMutability effect)
-
 isMutationSing :: SMutability mutability -> Bool
 isMutationSing SReadOnly = False
 isMutationSing _ = True
-
-isMutation :: Mutability -> Bool
-isMutation mutability =
-  case toSing mutability of
-    SomeSing mutability' -> isMutationSing mutability'
 
 hasMutation :: EffectPlan -> Bool
 hasMutation = any (\(SomeEffect effect) -> isMutationSing (effectMutabilitySing effect))

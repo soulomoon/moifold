@@ -223,6 +223,9 @@ instance Arbitrary ActiveTurn where
 instance Arbitrary ReviewEvidence where
   arbitrary = ReviewEvidence <$> ((:|) <$> arbitrary <*> listOf arbitrary) <*> arbitrary
 
+instance Arbitrary a => Arbitrary (NonEmpty a) where
+  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
+
 instance Arbitrary CleanReviewEvidence where
   arbitrary = CleanReviewEvidence <$> arbitrary <*> pure "LGTM"
 
@@ -459,28 +462,8 @@ prop_stateSingletonReflection config activeTurn =
       completeState = CompleteState PlanningComplete :: WatcherState 'IssuePlanning 'Complete
    in domainOf activeState == IssuePlanning
         && phaseOf activeState == PlanMode
-        && not (isTerminalPhaseSing (phaseSing activeState))
-        && isTerminalPhaseSing (phaseSing completeState)
-
-prop_effectMutabilitySingletonReflection :: ThreadId -> Bool
-prop_effectMutabilitySingletonReflection threadId =
-  let startTurn = StartWorkerTurn threadId
-      readOnly = SleepUntilNextPoll
-   in effectMutability startTurn == CanStartTurn
-        && effectMutability readOnly == ReadOnly
-        && isMutationSing (effectMutabilitySing startTurn)
-        && not (isMutationSing (effectMutabilitySing readOnly))
-        && hasMutation [SomeEffect readOnly, SomeEffect startTurn]
-        && not (hasMutation [SomeEffect readOnly])
-
-prop_terminalStateHasNoImplicitEffects :: MergeCommit -> BlockedReason -> StopReason -> Bool
-prop_terminalStateHasNoImplicitEffects mergeCommit blockedReason stopReason =
-  all
-    (not . hasMutation)
-    [ effectsForTerminalState (CompleteState (PrMerged mergeCommit))
-    , effectsForTerminalState (BlockedState blockedReason :: WatcherState 'PrReview 'Blocked)
-    , effectsForTerminalState (StoppedState stopReason :: WatcherState 'PrReview 'Stopped)
-    ]
+        && not (isTerminalState (SomeWatcherState activeState))
+        && isTerminalState (SomeWatcherState completeState)
 
 prop_eventLogFullPrReviewPathCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> CleanReviewEvidence -> MergeCommit -> Bool
 prop_eventLogFullPrReviewPathCompletes config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reviewerTurn cleanEvidence mergeCommit =
@@ -4470,8 +4453,6 @@ main = do
       , quickCheckResult prop_plannerGraphUpdateWaitsAndRecords
       , quickCheckResult prop_plannerIssueCreationReturnsToPlanning
       , quickCheckResult prop_stateSingletonReflection
-      , quickCheckResult prop_effectMutabilitySingletonReflection
-      , quickCheckResult prop_terminalStateHasNoImplicitEffects
       , quickCheckResult prop_eventLogFullPrReviewPathCompletes
       , quickCheckResult prop_eventLogCannotReviewCleanWhileFixing
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview

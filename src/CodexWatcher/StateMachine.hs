@@ -2,7 +2,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -11,9 +10,7 @@ module CodexWatcher.StateMachine
   ( CanBlock
   , Event (..)
   , Decision (..)
-  , nextPhase
   , step
-  , effectsForTerminalState
   ) where
 
 import CodexWatcher.Effects
@@ -75,9 +72,6 @@ data Decision (domain :: Domain) where
     => WatcherState domain nextPhase
     -> EffectPlan
     -> Decision domain
-
-nextPhase :: Decision domain -> Phase
-nextPhase (Decision state _) = phaseOf state
 
 step :: WatcherState domain phase -> Event domain phase -> Decision domain
 step _ (MarkBlocked reason) =
@@ -271,13 +265,6 @@ step _ _ =
    in Decision
         (BlockedState reason)
         [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
-
-effectsForTerminalState :: WatcherState domain phase -> EffectPlan
-effectsForTerminalState = \case
-  BlockedState {} -> []
-  CompleteState {} -> []
-  StoppedState {} -> []
-  _ -> []
 
 prMatchesKnownStrict :: Maybe PrNumber -> PrNumber -> Bool
 prMatchesKnownStrict Nothing _ = False

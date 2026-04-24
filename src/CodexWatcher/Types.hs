@@ -62,14 +62,10 @@ module CodexWatcher.Types
   , WatcherState (..)
   , SomeWatcherState (..)
   , domainOf
-  , domainSing
   , phaseOf
-  , phaseSing
   , nextRequestId
   , someDomain
   , somePhase
-  , isTerminalPhase
-  , isTerminalPhaseSing
   , isTerminalState
   , mkMaxParallel
   , mkPollSeconds
@@ -85,7 +81,7 @@ module CodexWatcher.Types
   ) where
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
-import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
+import Data.Singletons (SingI (..), SingKind (..))
 import Data.Singletons.TH (genSingletons, singDecideInstances)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -569,27 +565,16 @@ data SomeWatcherState where
 deriving stock instance Show SomeWatcherState
 
 domainOf :: forall domain phase. KnownDomain domain => WatcherState domain phase -> Domain
-domainOf = fromSing . domainSing
+domainOf _ = fromSing (sing @domain)
 
-domainSing :: forall domain phase. KnownDomain domain => WatcherState domain phase -> SDomain domain
-domainSing _ = sing @domain
-
-phaseOf :: KnownPhase phase => WatcherState domain phase -> Phase
-phaseOf = fromSing . phaseSing
-
-phaseSing :: forall domain phase. KnownPhase phase => WatcherState domain phase -> SPhase phase
-phaseSing _ = sing @phase
+phaseOf :: forall domain phase. KnownPhase phase => WatcherState domain phase -> Phase
+phaseOf _ = fromSing (sing @phase)
 
 someDomain :: SomeWatcherState -> Domain
 someDomain (SomeWatcherState state) = domainOf state
 
 somePhase :: SomeWatcherState -> Phase
 somePhase (SomeWatcherState state) = phaseOf state
-
-isTerminalPhase :: Phase -> Bool
-isTerminalPhase phase =
-  case toSing phase of
-    SomeSing phase' -> isTerminalPhaseSing phase'
 
 isTerminalPhaseSing :: SPhase phase -> Bool
 isTerminalPhaseSing SBlocked = True
@@ -598,4 +583,4 @@ isTerminalPhaseSing SStopped = True
 isTerminalPhaseSing _ = False
 
 isTerminalState :: SomeWatcherState -> Bool
-isTerminalState (SomeWatcherState state) = isTerminalPhaseSing (phaseSing state)
+isTerminalState (SomeWatcherState (_ :: WatcherState domain phase)) = isTerminalPhaseSing (sing @phase)
