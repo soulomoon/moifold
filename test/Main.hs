@@ -102,6 +102,9 @@ import CliSpec
 import HealthcheckSpec
   ( prop_healthcheckDaemonRequiredStatuses
   , prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
+  , prop_healthcheckSingletonDomains
+  , prop_healthcheckSummaryJsonKeepsKindField
+  , prop_healthcheckTypedAnalyzerDispatch
   )
 import GhGitSpec
   ( prop_ghGitParsesGitOutputs
@@ -2130,10 +2133,10 @@ runnerGuardIgnoresMissingPidForCompletePlanning = do
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
         , IssuePlanningTurnCompleted
         ]
+      config :: RunnerGuardConfig 'IssuePlanning
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
-          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2157,10 +2160,10 @@ runnerGuardRestartsMissingPidForIncompletePlanning = do
       eventsPath = stateDir </> "events.jsonl"
       pidPath = stateDir </> "watcher.pid"
       events = [IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [])]
+      config :: RunnerGuardConfig 'IssuePlanning
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
-          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2191,10 +2194,10 @@ runnerGuardRestartsMissingPidForWaitingPlanning = do
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")
         , IssuePlanningGraphUpdated (PlanningGraph [IssueNumber 42] [] [])
         ]
+      config :: RunnerGuardConfig 'IssuePlanning
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
-          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2224,10 +2227,10 @@ runnerGuardRepairsInvalidPlanningEventLog = do
         [ IssuePlanningInitialized (PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [])
         , IssuePlanningTurnCompleted
         ]
+      config :: RunnerGuardConfig 'IssuePlanning
       config =
         RunnerGuardConfig
           { guardRepo = RepoName "owner/name"
-          , guardDomain = IssuePlanning
           , guardEventsPath = eventsPath
           , guardStateDir = stateDir
           , guardWatcherPidFile = pidPath
@@ -2270,19 +2273,19 @@ runtimeStatusHelperCoversCommonCases = do
         , IssuePlanningTurnCompleted
         ]
       status missingIsTerminal terminalIsTerminal =
-        watcherRuntimeStatus
-          WatcherRuntimeStatusConfig
-            { watcherRuntimeExpectedDomain = IssuePlanning
-            , watcherRuntimeConfigPath = configPath
-            , watcherRuntimeEventsPath = eventsPath
-            , watcherRuntimePidPath = pidPath
-            , watcherRuntimeMissingIsTerminal = pure missingIsTerminal
-            , watcherRuntimeReplayTerminalIsTerminal = \replay ->
-                pure $
-                  terminalIsTerminal
-                    && someDomain replay.replayState == IssuePlanning
-                    && isTerminalState replay.replayState
-            }
+        let statusConfig :: WatcherRuntimeStatusConfig 'IssuePlanning
+            statusConfig =
+              WatcherRuntimeStatusConfig
+                { watcherRuntimeConfigPath = configPath
+                , watcherRuntimeEventsPath = eventsPath
+                , watcherRuntimePidPath = pidPath
+                , watcherRuntimeMissingIsTerminal = pure missingIsTerminal
+                , watcherRuntimeReplayTerminalIsTerminal = \replay ->
+                    pure $
+                      terminalIsTerminal
+                        && isTerminalState replay.replayState
+                }
+         in watcherRuntimeStatus statusConfig
   exists <- doesDirectoryExist stateDir
   when exists (removePathForcibly stateDir)
   missing <- status False True
@@ -4578,6 +4581,9 @@ main = do
       , quickCheckResult prop_runtimeOwnerJsonAndParsing
       , quickCheckResult prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
       , quickCheckResult prop_healthcheckDaemonRequiredStatuses
+      , quickCheckResult prop_healthcheckSingletonDomains
+      , quickCheckResult prop_healthcheckSummaryJsonKeepsKindField
+      , quickCheckResult prop_healthcheckTypedAnalyzerDispatch
       , quickCheckResult prop_cliParsesHealthcheckAndRunLoop
       , quickCheckResult prop_cliRejectsBadDomain
       , quickCheckResult prop_cliParsesGenericRunnerGuardDomains

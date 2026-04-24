@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -296,12 +297,14 @@ prReviewWatcherRuntimeStatus stateDir = do
   let configPath = stateDir </> "config.json"
       eventsPath = stateDir </> "events.jsonl"
       pidPath = WatcherPaths.defaultPidPath PrReview stateDir
+      statusConfig :: WatcherRuntimeStatusConfig 'PrReview
+      statusConfig =
+        WatcherRuntimeStatusConfig
+          { watcherRuntimeConfigPath = configPath
+          , watcherRuntimeEventsPath = eventsPath
+          , watcherRuntimePidPath = pidPath
+          , watcherRuntimeMissingIsTerminal = pure False
+          , watcherRuntimeReplayTerminalIsTerminal = \replay -> pure (somePhase replay.replayState == Complete)
+          }
   watcherRuntimeStatus
-    WatcherRuntimeStatusConfig
-      { watcherRuntimeExpectedDomain = PrReview
-      , watcherRuntimeConfigPath = configPath
-      , watcherRuntimeEventsPath = eventsPath
-      , watcherRuntimePidPath = pidPath
-      , watcherRuntimeMissingIsTerminal = pure False
-      , watcherRuntimeReplayTerminalIsTerminal = \replay -> pure (somePhase replay.replayState == Complete)
-      }
+    statusConfig

@@ -1,6 +1,9 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.RunnerGuardCli
   ( boolSwitch
@@ -24,22 +27,30 @@ import CodexWatcher.Runtime (CommandReport (..), commandSummary, commandText, wr
 import CodexWatcher.Types
 import Control.Concurrent (threadDelay)
 import Data.Aeson (object, toJSON, (.=))
+import Data.Proxy (Proxy (..))
 import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing, getCurrentDirectory)
 import System.FilePath ((</>))
 
 runWatcherRunnerGuard :: GuardWatcherCli -> IO ()
-runWatcherRunnerGuard cli = do
+runWatcherRunnerGuard cli =
+  case cli.guardCliLoop.loopCliDomain of
+    CliPrReview -> runWatcherRunnerGuardTyped (Proxy @'PrReview) cli
+    CliIssueImplement -> runWatcherRunnerGuardTyped (Proxy @'IssueImplement) cli
+    CliIssuePlanning -> runWatcherRunnerGuardTyped (Proxy @'IssuePlanning) cli
+
+runWatcherRunnerGuardTyped :: forall domain. KnownDomain domain => Proxy domain -> GuardWatcherCli -> IO ()
+runWatcherRunnerGuardTyped _ cli = do
   executable <- stableExecutablePath
   defaultRepairCwd <- getCurrentDirectory
   let loopCli = cli.guardCliLoop
       guardPidFile = maybe (loopCli.loopCliStateDir </> "runner-guard.pid") id cli.guardCliPidFile
       watcherPidFile = maybe (defaultCliPidPath loopCli.loopCliDomain loopCli.loopCliStateDir) id loopCli.loopCliPidFile
       repairCwd = maybe defaultRepairCwd id cli.guardCliRepairCwd
+      guardConfig :: RunnerGuardConfig domain
       guardConfig =
         RunnerGuardConfig
           { guardRepo = loopCli.loopCliRepo
-          , guardDomain = cliDomainToDomain loopCli.loopCliDomain
           , guardEventsPath = loopCli.loopCliEventsPath
           , guardStateDir = loopCli.loopCliStateDir
           , guardWatcherPidFile = watcherPidFile
@@ -51,7 +62,7 @@ runWatcherRunnerGuard cli = do
           }
   runWithOptionalPidFile (Just guardPidFile) (runnerGuardLoop guardConfig cli.guardCliPollSeconds)
 
-runnerGuardLoop :: RunnerGuardConfig -> PollSeconds -> IO ()
+runnerGuardLoop :: KnownDomain domain => RunnerGuardConfig domain -> PollSeconds -> IO ()
 runnerGuardLoop config pollSeconds = do
   checkRunnerGuard config >>= \case
     Nothing -> do
@@ -62,7 +73,7 @@ runnerGuardLoop config pollSeconds = do
       writeJsonValue (config.guardStateDir </> "runner-guard-problem.json") (toJSON guardProblem)
       handleRunnerGuardProblem config pollSeconds guardProblem
 
-handleRunnerGuardProblem :: RunnerGuardConfig -> PollSeconds -> RunnerGuardProblem -> IO ()
+handleRunnerGuardProblem :: KnownDomain domain => RunnerGuardConfig domain -> PollSeconds -> RunnerGuardProblem -> IO ()
 handleRunnerGuardProblem config pollSeconds guardProblem =
   case guardProblem.runnerGuardProblemAction of
     RestartWatcher -> do
@@ -96,7 +107,7 @@ handleRunnerGuardProblem config pollSeconds guardProblem =
     LaunchRepairThread ->
       launchRunnerGuardRepair config guardProblem
 
-launchRunnerGuardRepair :: RunnerGuardConfig -> RunnerGuardProblem -> IO ()
+launchRunnerGuardRepair :: KnownDomain domain => RunnerGuardConfig domain -> RunnerGuardProblem -> IO ()
 launchRunnerGuardRepair config guardProblem = do
   repair <- startRunnerGuardRepairThread config guardProblem
   writeJsonValue (config.guardStateDir </> "runner-guard-repair.json") (toJSON repair)

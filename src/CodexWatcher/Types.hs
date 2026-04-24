@@ -63,9 +63,13 @@ module CodexWatcher.Types
   , SomeWatcherState (..)
   , domainOf
   , phaseOf
+  , knownDomain
+  , knownPhase
   , nextRequestId
   , someDomain
+  , someDomainIs
   , somePhase
+  , somePhaseIs
   , isTerminalState
   , mkMaxParallel
   , mkPollSeconds
@@ -564,17 +568,33 @@ data SomeWatcherState where
 
 deriving stock instance Show SomeWatcherState
 
+knownDomain :: forall domain. KnownDomain domain => Domain
+knownDomain =
+  fromSing (sing @domain)
+
+knownPhase :: forall phase. KnownPhase phase => Phase
+knownPhase =
+  fromSing (sing @phase)
+
 domainOf :: forall domain phase. KnownDomain domain => WatcherState domain phase -> Domain
-domainOf _ = fromSing (sing @domain)
+domainOf _ = knownDomain @domain
 
 phaseOf :: forall domain phase. KnownPhase phase => WatcherState domain phase -> Phase
-phaseOf _ = fromSing (sing @phase)
+phaseOf _ = knownPhase @phase
 
 someDomain :: SomeWatcherState -> Domain
 someDomain (SomeWatcherState state) = domainOf state
 
 somePhase :: SomeWatcherState -> Phase
 somePhase (SomeWatcherState state) = phaseOf state
+
+someDomainIs :: forall domain. KnownDomain domain => SomeWatcherState -> Bool
+someDomainIs state =
+  someDomain state == knownDomain @domain
+
+somePhaseIs :: forall phase. KnownPhase phase => SomeWatcherState -> Bool
+somePhaseIs state =
+  somePhase state == knownPhase @phase
 
 isTerminalPhaseSing :: SPhase phase -> Bool
 isTerminalPhaseSing SBlocked = True

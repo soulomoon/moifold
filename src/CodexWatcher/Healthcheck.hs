@@ -1,6 +1,8 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -81,18 +83,28 @@ runHealthcheck options = do
 defaultStateRoot :: FilePath
 defaultStateRoot = "/workspace/artifacts"
 
-loadInventory :: HealthcheckOptions -> IO [ConfigItem]
+loadInventory :: HealthcheckOptions -> IO [SomeConfigItem]
 loadInventory options = do
   let root = if null options.stateRoot then defaultStateRoot else options.stateRoot
   concat
     <$> sequence
-      [ loadConfigs IssuePlanningKind (root </> "issue-planners") options.repoFilter
-      , loadConfigs IssueImplementKind (root </> "issue-implementers") options.repoFilter
-      , loadConfigs PrReviewKind (root </> "pr-review-watchers") options.repoFilter
+      [ loadSomeConfigs SIssuePlanningKind root options.repoFilter
+      , loadSomeConfigs SIssueImplementKind root options.repoFilter
+      , loadSomeConfigs SPrReviewKind root options.repoFilter
       ]
 
-loadConfigs :: WatcherKind -> FilePath -> Maybe Text -> IO [ConfigItem]
-loadConfigs kind root repoFilter' = do
+loadSomeConfigs :: SWatcherKind kind -> FilePath -> Maybe Text -> IO [SomeConfigItem]
+loadSomeConfigs kind stateRoot repoFilter' =
+  fmap (SomeConfigItem kind) <$> loadConfigs kind (stateRoot </> watcherKindStateSubdir kind) repoFilter'
+
+watcherKindStateSubdir :: SWatcherKind kind -> FilePath
+watcherKindStateSubdir = \case
+  SIssuePlanningKind -> "issue-planners"
+  SIssueImplementKind -> "issue-implementers"
+  SPrReviewKind -> "pr-review-watchers"
+
+loadConfigs :: SWatcherKind kind -> FilePath -> Maybe Text -> IO [ConfigItem kind]
+loadConfigs _kind root repoFilter' = do
   dirs <- listConfigDirs root
   fmap catMaybes $
     traverse
@@ -108,7 +120,7 @@ loadConfigs kind root repoFilter' = do
                       (Nothing, _) -> True
                       (Just expected, Right config) -> config.repoFullName == Just expected
                       (Just _, Left _) -> False
-              pure if include then Just ConfigItem {kind, dir, configPath, config = decoded} else Nothing
+              pure if include then Just ConfigItem {dir, configPath, config = decoded} else Nothing
       )
       dirs
 
@@ -134,19 +146,23 @@ listConfigDirs root = do
           let dirs = fmap (root </>) entries
           filterM doesDirectoryExist dirs
 
-summarizeItem :: HealthcheckOptions -> ConfigItem -> IO WatcherSummary
-summarizeItem options item =
-  case item.config of
-    Left error' -> summarizeBrokenItem item error'
-    Right config -> summarizeLoadedItem options item config
+summarizeItem :: HealthcheckOptions -> SomeConfigItem -> IO SomeWatcherSummary
+summarizeItem options (SomeConfigItem kind item) =
+  SomeWatcherSummary kind
+    <$> summarizeTypedItem kind options item
 
-summarizeBrokenItem :: ConfigItem -> Text -> IO WatcherSummary
-summarizeBrokenItem item error' = do
-  let pid = PidReport (fallbackPidPath item.kind item.dir Nothing) Nothing False
+summarizeTypedItem :: SWatcherKind kind -> HealthcheckOptions -> ConfigItem kind -> IO (WatcherSummary kind)
+summarizeTypedItem kind options item =
+  case item.config of
+    Left error' -> summarizeBrokenItem kind item error'
+    Right config -> summarizeLoadedItem kind options item config
+
+summarizeBrokenItem :: SWatcherKind kind -> ConfigItem kind -> Text -> IO (WatcherSummary kind)
+summarizeBrokenItem kind item error' = do
+  let pid = PidReport (fallbackPidPath kind item.dir Nothing) Nothing False
   pure
     WatcherSummary
-      { kind = item.kind
-      , label = itemLabel item.kind Nothing Nothing Nothing
+      { label = itemLabel kind Nothing Nothing Nothing
       , configPath = item.configPath
       , configLoadError = Just error'
       , repoFullName = Nothing
@@ -172,27 +188,26 @@ summarizeBrokenItem item error' = do
       , states = Null
       }
 
-summarizeLoadedItem :: HealthcheckOptions -> ConfigItem -> GenericConfig -> IO WatcherSummary
-summarizeLoadedItem options item config = do
+summarizeLoadedItem :: SWatcherKind kind -> HealthcheckOptions -> ConfigItem kind -> GenericConfig -> IO (WatcherSummary kind)
+summarizeLoadedItem kind options item config = do
   let stateDir' = fromMaybe item.dir config.stateDir
-      pidPath' = fallbackPidPath item.kind stateDir' config.pidPath
+      pidPath' = fallbackPidPath kind stateDir' config.pidPath
       eventsPath' = config.eventsPath <|> Just (stateDir' </> "events.jsonl")
   pid <- readPid pidPath'
-  states <- readStateFiles item.kind stateDir'
+  states <- readStateFiles kind stateDir'
   let issueStatus' = lookupStateText ["issueState", "issue_status"] states
       blocked' = lookupStateBool ["blockedState", "blocked"] states
       blockedReason' = lookupStateText ["blockedState", "reason"] states
       runtimeOwner' = config.runtimeOwner <|> lookupStateText ["runtimeOwner", "owner"] states
   workdirReport <- checkWorkdir config
   gitPush <- checkGitPushDryRun config workdirReport
-  remotePrReport <- checkRemotePr config
-  eventReplayReport <- checkEventReplay item.kind eventsPath'
+  remotePrReport <- checkRemotePr kind config
+  eventReplayReport <- checkEventReplay kind eventsPath'
   workerThreadReport <- checkAppServerThread options.appServerEndpoint config.threadId
-  reviewerThreadReport <- checkAppServerThread options.appServerEndpoint config.reviewerThreadId
+  reviewerThreadReport <- checkReviewerThread kind options.appServerEndpoint config
   pure
     WatcherSummary
-      { kind = item.kind
-      , label = itemLabel item.kind config.repoFullName config.issueNumber config.prNumber
+      { label = itemLabel kind config.repoFullName config.issueNumber config.prNumber
       , configPath = item.configPath
       , configLoadError = Nothing
       , repoFullName = config.repoFullName
@@ -218,7 +233,7 @@ summarizeLoadedItem options item config = do
       , states
       }
 
-readStateFiles :: WatcherKind -> FilePath -> IO Value
+readStateFiles :: SWatcherKind kind -> FilePath -> IO Value
 readStateFiles kind stateDir' =
   object <$> traverse readStateFile (stateFileSpecs kind)
  where
@@ -226,17 +241,17 @@ readStateFiles kind stateDir' =
     value <- readOptionalValueFile (stateDir' </> fileName)
     pure (Key.fromText key .= fromMaybe Null value)
 
-stateFileSpecs :: WatcherKind -> [(Text, FilePath)]
+stateFileSpecs :: SWatcherKind kind -> [(Text, FilePath)]
 stateFileSpecs = \case
-  IssuePlanningKind ->
+  SIssuePlanningKind ->
     sharedStateFiles
       [ ("plannerState", "planner-state.json")
       ]
-  IssueImplementKind ->
+  SIssueImplementKind ->
     sharedStateFiles
       [ ("issueState", "issue-state.json")
       ]
-  PrReviewKind ->
+  SPrReviewKind ->
     [ ("watcherState", "watcher-state.json")
     , ("checkerState", "checker-state.json")
     , ("agentState", "agent-state.json")
@@ -260,7 +275,7 @@ readOptionalValueFile path = do
     then pure Nothing
     else either (const Nothing) Just <$> readJsonValue path
 
-fallbackPidPath :: WatcherKind -> FilePath -> Maybe FilePath -> FilePath
+fallbackPidPath :: SWatcherKind kind -> FilePath -> Maybe FilePath -> FilePath
 fallbackPidPath kind stateDir' configured =
   fromMaybe (WatcherPaths.defaultPidPath (expectedDomain kind) stateDir') configured
 
@@ -310,8 +325,8 @@ checkGitPushDryRun config workdirReport =
       runRuntimeCommand (GitPushDryRun path' (BranchName branchName))
     _ -> pure (skippedCommand "missing branch or git checkout")
 
-checkRemotePr :: GenericConfig -> IO RemotePrReport
-checkRemotePr config =
+checkRemotePr :: SWatcherKind kind -> GenericConfig -> IO RemotePrReport
+checkRemotePr SPrReviewKind config =
   case (config.repoFullName, config.prNumber) of
     (Just repo, Just prNumber') -> do
       report <-
@@ -327,9 +342,17 @@ checkRemotePr config =
           pure case commandJsonValue report of
             Left error' -> RemotePrReport {skipped = False, ok = False, errorMessage = Just error', raw = Null, merged = False}
             Right value -> RemotePrReport {skipped = False, ok = True, errorMessage = Nothing, raw = value, merged = remotePrMerged value}
-    _ -> pure (skippedRemotePr "not a PR watcher")
+    _ -> pure (skippedRemotePr "missing repoFullName or prNumber")
+checkRemotePr _ _ =
+  pure (skippedRemotePr "not a PR watcher")
 
-checkEventReplay :: WatcherKind -> Maybe FilePath -> IO EventReplayReport
+checkReviewerThread :: SWatcherKind kind -> Maybe AppServerEndpoint -> GenericConfig -> IO AppServerThreadReport
+checkReviewerThread SPrReviewKind endpoint config =
+  checkAppServerThread endpoint config.reviewerThreadId
+checkReviewerThread _ _ config =
+  pure (skippedAppServerThread "not a PR watcher" config.reviewerThreadId)
+
+checkEventReplay :: SWatcherKind kind -> Maybe FilePath -> IO EventReplayReport
 checkEventReplay kind (Just path') = do
   exists <- doesFileExist path'
   if not exists
@@ -348,7 +371,7 @@ checkEventReplay kind (Just path') = do
                     ( "events replayed as "
                         <> Text.pack (show (someDomain replay.replayState))
                         <> " but config is "
-                        <> Text.pack (show kind)
+                        <> Text.pack (show (watcherKindValue kind))
                     )
               | otherwise ->
                   EventReplayReport
@@ -361,7 +384,7 @@ checkEventReplay kind (Just path') = do
                     , eventCount = Just (length events)
                     , effectBatchCount = Just (length replay.replayEffects)
                     }
-checkEventReplay _ Nothing = pure (skippedEventReplay "missing eventsPath" Nothing)
+checkEventReplay _kind Nothing = pure (skippedEventReplay "missing eventsPath" Nothing)
 
 checkAppServerThread :: Maybe AppServerEndpoint -> Maybe Text -> IO AppServerThreadReport
 checkAppServerThread Nothing maybeThreadId =

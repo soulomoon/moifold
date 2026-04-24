@@ -1,11 +1,21 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module CodexWatcher.Healthcheck.Types
   ( AppServerThreadReport (..)
@@ -16,16 +26,32 @@ module CodexWatcher.Healthcheck.Types
   , PidReport (..)
   , Problem (..)
   , RemotePrReport (..)
+  , SWatcherKind (..)
+  , SomeConfigItem
+  , SomeWatcherSummary
   , WatcherKind (..)
+  , WatcherKindDomain
   , WatcherSummary (..)
   , WorkdirReport (..)
   , expectedDomain
+  , pattern SomeConfigItem
+  , pattern SomeWatcherSummary
+  , someConfigKind
+  , someSummaryKind
+  , someWatcherKind
+  , watcherKindValue
+  , withSomeWatcher
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint)
 import CodexWatcher.Runtime (CommandReport)
-import CodexWatcher.Types (Domain (..))
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, withObject, (.:?))
+import CodexWatcher.Types (Domain (..), SDomain (..))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withObject, (.:?))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Kind (Type)
+import Data.Singletons (SingKind (..))
+import Data.Singletons.TH (genSingletons)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -42,11 +68,33 @@ data WatcherKind
   | PrReviewKind
   deriving stock (Eq, Ord, Show, Generic)
 
+$(genSingletons [''WatcherKind])
+
+type WatcherKindDomain :: WatcherKind -> Domain
+type family WatcherKindDomain kind where
+  WatcherKindDomain 'IssuePlanningKind = 'IssuePlanning
+  WatcherKindDomain 'IssueImplementKind = 'IssueImplement
+  WatcherKindDomain 'PrReviewKind = 'PrReview
+
 instance ToJSON WatcherKind where
   toJSON = \case
     IssuePlanningKind -> "issue-planning"
     IssueImplementKind -> "issue-implement"
     PrReviewKind -> "pr-review"
+
+watcherKindValue :: SWatcherKind kind -> WatcherKind
+watcherKindValue =
+  fromSing
+
+watcherKindDomainSing :: SWatcherKind kind -> SDomain (WatcherKindDomain kind)
+watcherKindDomainSing = \case
+  SIssuePlanningKind -> SIssuePlanning
+  SIssueImplementKind -> SIssueImplement
+  SPrReviewKind -> SPrReview
+
+expectedDomain :: SWatcherKind kind -> Domain
+expectedDomain =
+  fromSing . watcherKindDomainSing
 
 data GenericConfig = GenericConfig
   { repoFullName :: Maybe Text
@@ -84,13 +132,33 @@ instance FromJSON GenericConfig where
       <*> object' .:? "handoffReview"
       <*> object' .:? "runtimeOwner"
 
-data ConfigItem = ConfigItem
-  { kind :: WatcherKind
-  , dir :: FilePath
+data ConfigItem (kind :: WatcherKind) = ConfigItem
+  { dir :: FilePath
   , configPath :: FilePath
   , config :: Either Text GenericConfig
   }
   deriving stock (Eq, Show, Generic)
+
+data SomeWatcher (payload :: WatcherKind -> Type) where
+  SomeWatcher :: SWatcherKind kind -> payload kind -> SomeWatcher payload
+
+withSomeWatcher :: SomeWatcher payload -> (forall kind. SWatcherKind kind -> payload kind -> result) -> result
+withSomeWatcher (SomeWatcher kind payload) usePayload =
+  usePayload kind payload
+
+someWatcherKind :: SomeWatcher payload -> WatcherKind
+someWatcherKind (SomeWatcher kind _) =
+  watcherKindValue kind
+
+type SomeConfigItem = SomeWatcher ConfigItem
+
+pattern SomeConfigItem :: SWatcherKind kind -> ConfigItem kind -> SomeConfigItem
+pattern SomeConfigItem kind item = SomeWatcher kind item
+{-# COMPLETE SomeConfigItem #-}
+
+someConfigKind :: SomeConfigItem -> WatcherKind
+someConfigKind =
+  someWatcherKind
 
 data WorkdirReport = WorkdirReport
   { skipped :: Bool
@@ -151,9 +219,8 @@ data AppServerThreadReport = AppServerThreadReport
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
-data WatcherSummary = WatcherSummary
-  { kind :: WatcherKind
-  , label :: Text
+data WatcherSummary (kind :: WatcherKind) = WatcherSummary
+  { label :: Text
   , configPath :: FilePath
   , configLoadError :: Maybe Text
   , repoFullName :: Maybe Text
@@ -181,6 +248,23 @@ data WatcherSummary = WatcherSummary
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
+type SomeWatcherSummary = SomeWatcher WatcherSummary
+
+pattern SomeWatcherSummary :: SWatcherKind kind -> WatcherSummary kind -> SomeWatcherSummary
+pattern SomeWatcherSummary kind summary = SomeWatcher kind summary
+{-# COMPLETE SomeWatcherSummary #-}
+
+someSummaryKind :: SomeWatcherSummary -> WatcherKind
+someSummaryKind =
+  someWatcherKind
+
+instance ToJSON (SomeWatcher WatcherSummary) where
+  toJSON (SomeWatcherSummary kind summary) =
+    case toJSON summary of
+      Object object' ->
+        Object (KeyMap.insert (Key.fromString "kind") (toJSON (watcherKindValue kind)) object')
+      value -> value
+
 data Problem = Problem
   { severity :: Text
   , component :: Text
@@ -189,8 +273,3 @@ data Problem = Problem
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
-
-expectedDomain :: WatcherKind -> Domain
-expectedDomain IssuePlanningKind = IssuePlanning
-expectedDomain IssueImplementKind = IssueImplement
-expectedDomain PrReviewKind = PrReview

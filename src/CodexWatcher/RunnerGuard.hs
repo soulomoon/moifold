@@ -1,10 +1,14 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.RunnerGuard
   ( RunnerGuardConfig (..)
@@ -57,9 +61,8 @@ import Data.Time.Clock (NominalDiffTime, diffUTCTime, getCurrentTime)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist, getModificationTime)
 
-data RunnerGuardConfig = RunnerGuardConfig
+data RunnerGuardConfig (domain :: Domain) = RunnerGuardConfig
   { guardRepo :: RepoName
-  , guardDomain :: Domain
   , guardEventsPath :: FilePath
   , guardStateDir :: FilePath
   , guardWatcherPidFile :: FilePath
@@ -122,9 +125,9 @@ instance ToJSON RunnerGuardRepair where
       , "turnId" .= unTurnId repair.runnerGuardRepairTurnId
       ]
 
-checkRunnerGuard :: RunnerGuardConfig -> IO (Maybe RunnerGuardProblem)
+checkRunnerGuard :: forall domain. KnownDomain domain => RunnerGuardConfig domain -> IO (Maybe RunnerGuardProblem)
 checkRunnerGuard config = do
-  complete <- watcherEventLogTerminal config.guardDomain config.guardEventsPath
+  complete <- watcherEventLogTerminal config
   if complete
     then pure Nothing
     else do
@@ -132,7 +135,7 @@ checkRunnerGuard config = do
       eventProblem <- checkEventLogAndActiveTurn config
       pure (combineProblems (catMaybes [pidProblem, eventProblem]))
 
-startRunnerGuardRepairThread :: RunnerGuardConfig -> RunnerGuardProblem -> IO RunnerGuardRepair
+startRunnerGuardRepairThread :: KnownDomain domain => RunnerGuardConfig domain -> RunnerGuardProblem -> IO RunnerGuardRepair
 startRunnerGuardRepairThread config problem' = do
   threadId <-
     either (failText . formatAppServerClientFailure) pure
@@ -165,7 +168,7 @@ repairDeveloperInstructions =
     , "Use " <> defaultModel <> " " <> defaultEffort <> " level rigor: inspect code, patch, run tests, commit, push, then restart the watcher and guard."
     ]
 
-runnerGuardRepairPrompt :: RunnerGuardConfig -> RunnerGuardProblem -> Text
+runnerGuardRepairPrompt :: KnownDomain domain => RunnerGuardConfig domain -> RunnerGuardProblem -> Text
 runnerGuardRepairPrompt config problem' =
   Text.unlines
     [ "Runner guard detected a problem in the " <> guardDomainText config <> " watcher."
@@ -208,7 +211,7 @@ checkWatcherPid pidPath = do
           then Nothing
           else Just (restartProblem "watcher process is not running" ["pid file: " <> Text.pack pidPath, "pid: " <> pidText])
 
-checkEventLogAndActiveTurn :: RunnerGuardConfig -> IO (Maybe RunnerGuardProblem)
+checkEventLogAndActiveTurn :: forall domain. KnownDomain domain => RunnerGuardConfig domain -> IO (Maybe RunnerGuardProblem)
 checkEventLogAndActiveTurn config = do
   exists <- doesFileExist config.guardEventsPath
   if not exists
@@ -223,7 +226,7 @@ checkEventLogAndActiveTurn config = do
             Left failure ->
               pure (Just (eventReplayProblem failure))
             Right replay ->
-              if someDomain replay.replayState /= config.guardDomain
+              if not (someDomainIs @domain replay.replayState)
                 then
                   pure
                     ( Just
@@ -236,8 +239,9 @@ checkEventLogAndActiveTurn config = do
                     )
                 else checkReplayState config events replay.replayState
 
-watcherEventLogTerminal :: Domain -> FilePath -> IO Bool
-watcherEventLogTerminal expectedDomain eventsPath = do
+watcherEventLogTerminal :: forall domain. KnownDomain domain => RunnerGuardConfig domain -> IO Bool
+watcherEventLogTerminal config = do
+  let eventsPath = config.guardEventsPath
   exists <- doesFileExist eventsPath
   if not exists
     then pure False
@@ -249,9 +253,9 @@ watcherEventLogTerminal expectedDomain eventsPath = do
           case replayEventLog events of
             Left _ -> pure False
             Right replay ->
-              pure (someDomain replay.replayState == expectedDomain && somePhase replay.replayState == Complete)
+              pure (someDomainIs @domain replay.replayState && somePhaseIs @'Complete replay.replayState)
 
-checkReplayState :: RunnerGuardConfig -> [WatcherEvent] -> SomeWatcherState -> IO (Maybe RunnerGuardProblem)
+checkReplayState :: RunnerGuardConfig domain -> [WatcherEvent] -> SomeWatcherState -> IO (Maybe RunnerGuardProblem)
 checkReplayState config events = \case
   SomeWatcherState (BlockedState reason) ->
     pure (Just (repairProblem "watcher is blocked" ["reason: " <> unBlockedReason reason]))
@@ -294,7 +298,7 @@ checkReplayState config events = \case
   SomeWatcherState (CompleteState {}) ->
     pure Nothing
 
-checkActiveTurn :: RunnerGuardConfig -> Text -> ActiveTurn -> IO (Maybe RunnerGuardProblem)
+checkActiveTurn :: RunnerGuardConfig domain -> Text -> ActiveTurn -> IO (Maybe RunnerGuardProblem)
 checkActiveTurn config role activeTurn = do
   response <- sendOneAppServerRequest config.guardAppServerEndpoint defaultAppServerClientOptions (threadReadRequest (RequestId 1) activeTurn.activeThreadId True)
   case response of
@@ -323,7 +327,7 @@ checkActiveTurn config role activeTurn = do
                 Just turn ->
                   checkTurn config role turn
 
-checkTurn :: RunnerGuardConfig -> Text -> AppServerTurn -> IO (Maybe RunnerGuardProblem)
+checkTurn :: RunnerGuardConfig domain -> Text -> AppServerTurn -> IO (Maybe RunnerGuardProblem)
 checkTurn config role turn =
   case classifyTurnCompletion turn of
     TurnStillRunning ->
@@ -338,7 +342,7 @@ checkTurn config role turn =
       | otherwise ->
           staleProblem config ("completed " <> role <> " turn has not been observed by watcher") ["turn: " <> unTurnId turn.appServerTurnId, "status: " <> turn.appServerTurnStatus]
 
-staleProblem :: RunnerGuardConfig -> Text -> [Text] -> IO (Maybe RunnerGuardProblem)
+staleProblem :: RunnerGuardConfig domain -> Text -> [Text] -> IO (Maybe RunnerGuardProblem)
 staleProblem config summary' details = do
   ageSeconds <- eventLogAgeSeconds config.guardEventsPath
   pure
@@ -402,9 +406,9 @@ bulletList :: [Text] -> Text
 bulletList [] = "- none"
 bulletList items = Text.unlines (fmap ("- " <>) items)
 
-guardDomainText :: RunnerGuardConfig -> Text
-guardDomainText config =
-  Text.pack (show config.guardDomain)
+guardDomainText :: forall domain. KnownDomain domain => RunnerGuardConfig domain -> Text
+guardDomainText _ =
+  Text.pack (show (knownDomain @domain))
 
 failText :: Text -> IO a
 failText = fail . Text.unpack

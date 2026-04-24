@@ -1,11 +1,26 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module HealthcheckSpec
   ( prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
   , prop_healthcheckDaemonRequiredStatuses
+  , prop_healthcheckSingletonDomains
+  , prop_healthcheckSummaryJsonKeepsKindField
+  , prop_healthcheckTypedAnalyzerDispatch
   ) where
 
 import CodexWatcher.Healthcheck
+import CodexWatcher.Healthcheck.Analysis (analyzeItem)
+import CodexWatcher.Healthcheck.Types
+import CodexWatcher.Runtime (skippedCommand)
+import CodexWatcher.Types (Domain (..))
+import Data.Aeson (Value (..), toJSON)
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Text (Text)
 
 prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork :: Bool
 prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork =
@@ -31,3 +46,115 @@ prop_healthcheckDaemonRequiredStatuses =
     && prReviewRequiresDaemon False (Just "Reviewing")
     && not (prReviewRequiresDaemon True (Just "Reviewing"))
     && not (prReviewRequiresDaemon False (Just "Complete"))
+
+prop_healthcheckSingletonDomains :: Bool
+prop_healthcheckSingletonDomains =
+  expectedDomain SIssuePlanningKind == IssuePlanning
+    && expectedDomain SIssueImplementKind == IssueImplement
+    && expectedDomain SPrReviewKind == PrReview
+
+prop_healthcheckSummaryJsonKeepsKindField :: Bool
+prop_healthcheckSummaryJsonKeepsKindField =
+  kindField (SomeWatcherSummary SIssuePlanningKind sampleSummary) == Just (String "issue-planning")
+    && kindField (SomeWatcherSummary SIssueImplementKind sampleSummary) == Just (String "issue-implement")
+    && kindField (SomeWatcherSummary SPrReviewKind sampleSummary) == Just (String "pr-review")
+
+prop_healthcheckTypedAnalyzerDispatch :: Bool
+prop_healthcheckTypedAnalyzerDispatch =
+  containsMessage "maxParallel is less than 1" planningProblems
+    && not (containsMessage "missing worker threadId" planningProblems)
+    && containsMessage "missing worker threadId" implementProblems
+    && not (containsMessage "reviewWhenClean is enabled but reviewerThreadId is missing" implementProblems)
+    && containsMessage "missing PR worker threadId" reviewProblems
+    && containsMessage "reviewWhenClean is enabled but reviewerThreadId is missing" reviewProblems
+ where
+  planningProblems =
+    analyzeItem (SomeWatcherSummary SIssuePlanningKind planningSummary)
+  implementProblems =
+    analyzeItem (SomeWatcherSummary SIssueImplementKind implementSummary)
+  reviewProblems =
+    analyzeItem (SomeWatcherSummary SPrReviewKind reviewSummary)
+  planningSummary :: WatcherSummary 'IssuePlanningKind
+  planningSummary = sampleSummaryWith Nothing (Just "reviewer-thread") (Just False) (Just 0)
+  implementSummary :: WatcherSummary 'IssueImplementKind
+  implementSummary = sampleSummaryWith Nothing Nothing (Just False) (Just 8)
+  reviewSummary :: WatcherSummary 'PrReviewKind
+  reviewSummary = sampleSummaryWith Nothing Nothing (Just True) (Just 8)
+
+kindField :: SomeWatcherSummary -> Maybe Value
+kindField summary =
+  case toJSON summary of
+    Object object' -> KeyMap.lookup (Key.fromString "kind") object'
+    _ -> Nothing
+
+containsMessage :: Text -> [Problem] -> Bool
+containsMessage message' =
+  any ((== message') . (.message))
+
+sampleSummary :: WatcherSummary kind
+sampleSummary =
+  sampleSummaryWith (Just "worker-thread") (Just "reviewer-thread") (Just False) (Just 8)
+
+sampleSummaryWith :: Maybe Text -> Maybe Text -> Maybe Bool -> Maybe Int -> WatcherSummary kind
+sampleSummaryWith threadId' reviewerThreadId' reviewWhenClean' maxParallel' =
+  WatcherSummary
+    { label = "owner/repo#1"
+    , configPath = "config.json"
+    , configLoadError = Nothing
+    , repoFullName = Just "owner/repo"
+    , issueNumber = Just 1
+    , prNumber = Just 2
+    , branch = Just "main"
+    , workdirPath = Just "/tmp/workdir"
+    , threadId = threadId'
+    , reviewerThreadId = reviewerThreadId'
+    , reviewWhenClean = reviewWhenClean'
+    , maxParallel = maxParallel'
+    , runtimeOwner = Nothing
+    , pid = PidReport "watcher.pid" Nothing False
+    , issueStatus = Nothing
+    , blocked = False
+    , blockedReason = Nothing
+    , workdir =
+        WorkdirReport
+          { skipped = True
+          , reason = Just "test"
+          , path = Nothing
+          , exists = False
+          , isGitCheckout = False
+          , currentBranch = Nothing
+          , headSha = Nothing
+          , remoteHeadSha = Nothing
+          , localDiffersFromRemote = False
+          , dirty = False
+          , dirtyStatus = Nothing
+          }
+    , gitPushDryRun = skippedCommand "test"
+    , remotePr = RemotePrReport {skipped = True, ok = False, errorMessage = Just "test", raw = Null, merged = False}
+    , eventReplay =
+        EventReplayReport
+          { skipped = True
+          , ok = False
+          , reason = Just "test"
+          , eventsPath = Nothing
+          , domain = Nothing
+          , phase = Just "Complete"
+          , eventCount = Nothing
+          , effectBatchCount = Nothing
+          }
+    , workerThreadInspection = sampleThreadReport
+    , reviewerThreadInspection = sampleThreadReport
+    , states = Null
+    }
+
+sampleThreadReport :: AppServerThreadReport
+sampleThreadReport =
+  AppServerThreadReport
+    { skipped = True
+    , ok = True
+    , threadId = Nothing
+    , reason = Just "test"
+    , turnCount = Nothing
+    , latestTurnId = Nothing
+    , latestTurnStatus = Nothing
+    }

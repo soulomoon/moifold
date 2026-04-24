@@ -1,8 +1,12 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module CodexWatcher.WatcherRuntimeStatus
   ( WatcherTerminalReason (..)
@@ -17,7 +21,7 @@ module CodexWatcher.WatcherRuntimeStatus
 
 import CodexWatcher.ChildDaemon (readPidFile, isPidRunning)
 import CodexWatcher.EventLog (EventReplayResult (..), loadEventLogFile, replayEventLog)
-import CodexWatcher.Types (BlockedReason (..), Domain, SomeWatcherState (..), StopReason (..), WatcherState (..), isTerminalState, someDomain)
+import CodexWatcher.Types (BlockedReason (..), Domain, KnownDomain, SomeWatcherState (..), StopReason (..), WatcherState (..), isTerminalState, someDomainIs)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
@@ -35,16 +39,15 @@ data WatcherRuntimeStatus
   | WatcherTerminal WatcherTerminalReason
   deriving stock (Eq, Show, Generic)
 
-data WatcherRuntimeStatusConfig = WatcherRuntimeStatusConfig
-  { watcherRuntimeExpectedDomain :: Domain
-  , watcherRuntimeConfigPath :: FilePath
+data WatcherRuntimeStatusConfig (domain :: Domain) = WatcherRuntimeStatusConfig
+  { watcherRuntimeConfigPath :: FilePath
   , watcherRuntimeEventsPath :: FilePath
   , watcherRuntimePidPath :: FilePath
   , watcherRuntimeMissingIsTerminal :: IO Bool
   , watcherRuntimeReplayTerminalIsTerminal :: EventReplayResult -> IO Bool
   }
 
-watcherRuntimeStatus :: WatcherRuntimeStatusConfig -> IO WatcherRuntimeStatus
+watcherRuntimeStatus :: forall domain. KnownDomain domain => WatcherRuntimeStatusConfig domain -> IO WatcherRuntimeStatus
 watcherRuntimeStatus config = do
   configExists <- doesFileExist config.watcherRuntimeConfigPath
   eventsExists <- doesFileExist config.watcherRuntimeEventsPath
@@ -66,7 +69,7 @@ watcherRuntimeStatus config = do
                 Left _failure ->
                   pure (runningStatus running)
                 Right replay
-                  | someDomain replay.replayState == config.watcherRuntimeExpectedDomain
+                  | someDomainIs @domain replay.replayState
                   , isTerminalState replay.replayState -> do
                       terminal <- config.watcherRuntimeReplayTerminalIsTerminal replay
                       pure (if terminal then WatcherTerminal (terminalReason replay.replayState) else runningStatus running)

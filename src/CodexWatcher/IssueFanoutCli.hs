@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
@@ -445,15 +446,17 @@ issueImplementerRuntimeStatusForLaunch launch = do
       pidPath = WatcherPaths.defaultPidPath IssueImplement stateDir
       stateDir = launch.launchStateDir
       issueClosed = githubIssueClosed repo issueNumber'
+      statusConfig :: WatcherRuntimeStatusConfig 'IssueImplement
+      statusConfig =
+        WatcherRuntimeStatusConfig
+          { watcherRuntimeConfigPath = configPath
+          , watcherRuntimeEventsPath = eventsPath
+          , watcherRuntimePidPath = pidPath
+          , watcherRuntimeMissingIsTerminal = issueClosed
+          , watcherRuntimeReplayTerminalIsTerminal = issueImplementReplayTerminalSucceeded repo issueNumber'
+          }
   watcherRuntimeStatus
-    WatcherRuntimeStatusConfig
-      { watcherRuntimeExpectedDomain = IssueImplement
-      , watcherRuntimeConfigPath = configPath
-      , watcherRuntimeEventsPath = eventsPath
-      , watcherRuntimePidPath = pidPath
-      , watcherRuntimeMissingIsTerminal = issueClosed
-      , watcherRuntimeReplayTerminalIsTerminal = issueImplementReplayTerminalSucceeded repo issueNumber'
-      }
+    statusConfig
 
 firstChildStartProblem :: [IssueImplementerChildStartResult] -> Maybe (IssueNumber, Text.Text, WatcherRuntimeStatus)
 firstChildStartProblem [] = Nothing
