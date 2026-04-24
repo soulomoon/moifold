@@ -23,7 +23,8 @@ module CodexWatcher.Healthcheck.Analysis
 
 import CodexWatcher.Healthcheck.Types
 import CodexWatcher.JsonPath (boolAtPath, textAtPath)
-import CodexWatcher.Runtime (CommandReport (..), commandText)
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Types (Domain (..))
 import CodexWatcher.WatcherLiveness
 import Data.Aeson (Value (..), object, (.=))

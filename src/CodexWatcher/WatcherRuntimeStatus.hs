@@ -20,7 +20,9 @@ module CodexWatcher.WatcherRuntimeStatus
   ) where
 
 import CodexWatcher.ChildDaemon (readPidFile, isPidRunning)
-import CodexWatcher.EventLog (EventReplayResult (..), loadEventLogFile, replayEventLog)
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types (EventReplayResult (..))
 import CodexWatcher.Types (BlockedReason (..), Domain, KnownDomain, SomeWatcherState (..), StopReason (..), WatcherState (..), isTerminalState, someDomainIs)
 import Data.Text (Text)
 import GHC.Generics (Generic)

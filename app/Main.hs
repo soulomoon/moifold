@@ -4,7 +4,8 @@
 module Main (main) where
 
 import CodexWatcher.AutomaticLoop.Runner (runAutomaticLoop)
-import CodexWatcher.Cli
+import CodexWatcher.Cli.Parser (execCliCommandParser)
+import CodexWatcher.Cli.Types
 import CodexWatcher.DaemonControlCli (stopDaemon)
 import CodexWatcher.Healthcheck
 import CodexWatcher.IssueFanoutCli (issueFanout)

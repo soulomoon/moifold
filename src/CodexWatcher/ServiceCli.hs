@@ -9,7 +9,7 @@ module CodexWatcher.ServiceCli
 
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.ChildDaemon (stableExecutablePath)
-import CodexWatcher.Cli
+import CodexWatcher.Cli.Types
 import CodexWatcher.Supervisor
 import CodexWatcher.Types (unRepoName)
 import Data.Text qualified as Text

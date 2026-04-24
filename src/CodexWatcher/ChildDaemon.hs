@@ -19,7 +19,8 @@ module CodexWatcher.ChildDaemon
   , waitForStartedDaemonStatus
   ) where
 
-import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (KillZero), runRuntimeCommand)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (KillZero))
+import CodexWatcher.Runtime.Process (runRuntimeCommand)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (IOException, finally, try)
 import Control.Monad (unless, void, when)

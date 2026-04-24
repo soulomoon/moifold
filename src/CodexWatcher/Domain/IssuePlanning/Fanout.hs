@@ -23,9 +23,9 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   ) where
 
 import CodexWatcher.CompatibilityState
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.Domain.IssuePlanning.Watcher
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
 import CodexWatcher.Types
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)

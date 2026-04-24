@@ -38,7 +38,9 @@ import CodexWatcher.AppServerProtocol
   , threadReadRequest
   , turnStartRequest
   )
-import CodexWatcher.EventLog (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName, loadEventLogFile, replayEventLog)
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName)
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel, defaultThreadStartOptions, defaultTurnStartOptions)
 import CodexWatcher.Turn.Classifier.Common (TurnCompletion (..), classifyTurnCompletion)

@@ -11,7 +11,7 @@ module CodexWatcher.Observation
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.Text (Text)

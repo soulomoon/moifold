@@ -8,7 +8,8 @@ module CliSpec
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
-import CodexWatcher.Cli
+import CodexWatcher.Cli.Parser (parseCliCommand)
+import CodexWatcher.Cli.Types
 import CodexWatcher.Types
 
 prop_cliParsesHealthcheckAndRunLoop :: Bool

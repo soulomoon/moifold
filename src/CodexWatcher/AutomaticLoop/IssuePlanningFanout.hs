@@ -15,7 +15,9 @@ import CodexWatcher.CompatibilityRuntime (writeCompatibility)
 import CodexWatcher.CompatibilityState (compatibilityStateWrites)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
-import CodexWatcher.EventLog (EventReplayResult (..), WatcherEvent (..), loadEventLogFile, replayEventLog)
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
 import CodexWatcher.GhGit (remoteIssueIsClosed, runGhIssueView)
 import CodexWatcher.IssueFanoutCli
   ( IssueImplementerChildStartResult (..)
@@ -30,7 +32,7 @@ import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..), IssuePlanningTick (..), issuePlanningObserve)
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.ReplayCli (formatReplayFailure)
-import CodexWatcher.Runtime (ioRuntimeInterpreter)
+import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Types
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))

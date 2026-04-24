@@ -15,7 +15,7 @@ import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.Types
 import Data.Aeson (Value)
 import Data.Text (Text)

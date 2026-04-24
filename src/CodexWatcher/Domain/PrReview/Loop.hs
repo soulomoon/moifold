@@ -14,7 +14,7 @@ import CodexWatcher.ActionExecutor
 import CodexWatcher.Daemon (DaemonObservation (..), DaemonOptions (..), PreMergeGateResult (..), runPreMergeGate)
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Domain.PrReview.Watcher

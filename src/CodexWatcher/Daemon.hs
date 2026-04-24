@@ -27,13 +27,17 @@ import CodexWatcher.ActionExecutor
 import CodexWatcher.CompatibilityState
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.PrReview.Watcher
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..))
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Types
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))

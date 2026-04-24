@@ -12,7 +12,7 @@ module CodexWatcher.Domain.IssueImplement.Watcher
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.Observation
 import CodexWatcher.StateMachine
 import CodexWatcher.Types

@@ -17,7 +17,7 @@ module CodexWatcher.GoldenReplay
   , bootstrapNodeIssueImplementSnapshotEvents
   ) where
 
-import CodexWatcher.EventLog (WatcherEvent (..))
+import CodexWatcher.EventLog.Types (WatcherEvent (..))
 import CodexWatcher.Snapshot
 import CodexWatcher.Types
 import Control.Applicative (asum)

@@ -7,11 +7,13 @@ module CodexWatcher.ReplayCli
   , formatReplayFailure
   ) where
 
-import CodexWatcher.Cli (RepairInvalidStateCli (..))
+import CodexWatcher.Cli.Types (RepairInvalidStateCli (..))
 import CodexWatcher.CompatibilityState (CompatibilityWrite (..), compatibilityStateWrites)
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
-import CodexWatcher.Runtime (writeJsonValue)
+import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Types
 import Control.Monad (when)
 import Data.Aeson (encode, object, (.=))

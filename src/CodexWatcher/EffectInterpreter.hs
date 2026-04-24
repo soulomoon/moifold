@@ -17,7 +17,7 @@ module CodexWatcher.EffectInterpreter
 
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
 import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput)
 import CodexWatcher.Types
 import Data.Aeson

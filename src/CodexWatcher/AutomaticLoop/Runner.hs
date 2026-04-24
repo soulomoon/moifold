@@ -25,10 +25,13 @@ import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
 import CodexWatcher.EffectRuntimeCli (defaultEffectRuntimeConfigWithPlannerScope)
-import CodexWatcher.EventLog (EventReplayResult (..), loadEventLogFile, replayEventLog)
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types (EventReplayResult (..))
 import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Runtime (ioRuntimeInterpreter, writeJsonValue)
+import CodexWatcher.Runtime.File (writeJsonValue)
+import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Cli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Types
 import Control.Concurrent (threadDelay)

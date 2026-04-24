@@ -13,10 +13,10 @@ import CodexWatcher.CompatibilityRuntime (writeCompatibility)
 import CodexWatcher.CompatibilityState (compatibilityStateWrites)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
-import CodexWatcher.EventLog (EventReplayResult (..), WatcherEvent (..))
+import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
 import CodexWatcher.Domain.IssueImplement.Watcher (IssueImplementObservation (..), IssueImplementTick (..), issueImplementObserve)
 import CodexWatcher.Domain.PrReview.LaunchCli (ensurePrReviewWatcherForHandoff)
-import CodexWatcher.Runtime (ioRuntimeInterpreter)
+import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Types
 import Data.Text qualified as Text
 import System.Exit (die)

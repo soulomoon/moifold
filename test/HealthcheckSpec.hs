@@ -15,7 +15,7 @@ module HealthcheckSpec
 import CodexWatcher.Healthcheck
 import CodexWatcher.Healthcheck.Analysis (analyzeItem)
 import CodexWatcher.Healthcheck.Types
-import CodexWatcher.Runtime (skippedCommand)
+import CodexWatcher.Runtime.Process (skippedCommand)
 import CodexWatcher.Types (Domain (..))
 import Data.Aeson (Value (..), toJSON)
 import Data.Aeson.Key qualified as Key

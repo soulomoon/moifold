@@ -20,7 +20,8 @@ module CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..), ioRuntimeInterpreter)
 import Data.Aeson (Value (..), (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

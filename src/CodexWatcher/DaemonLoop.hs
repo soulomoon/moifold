@@ -18,7 +18,9 @@ import CodexWatcher.AppServerClient (formatAppServerClientFailure)
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Runtime
 import CodexWatcher.DaemonLoop.Types
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types
 import CodexWatcher.Domain.IssueImplement.Loop qualified as IssueImplementationLoop
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop

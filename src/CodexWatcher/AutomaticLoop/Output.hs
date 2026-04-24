@@ -7,7 +7,7 @@ module CodexWatcher.AutomaticLoop.Output
 
 import CodexWatcher.Daemon (DaemonObservedTickResult (..))
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
-import CodexWatcher.EventLog (EventReplayResult (..))
+import CodexWatcher.EventLog.Types (EventReplayResult (..))
 import CodexWatcher.Types (somePhase)
 import Data.Text qualified as Text
 

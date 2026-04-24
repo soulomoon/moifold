@@ -13,14 +13,16 @@ module Main (main) where
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
-import CodexWatcher.Cli
+import CodexWatcher.Cli.Types
 import CodexWatcher.CompatibilityState
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.EffectRuntimeCli
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
@@ -34,8 +36,9 @@ import CodexWatcher.ObserveCli (parseDaemonObservation)
 import CodexWatcher.Domain.IssuePlanning.Graph.Canonical
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Domain.PrReview.Watcher
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Defaults
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
 import CodexWatcher.Runtime.Owner.Store
 import CodexWatcher.Runtime.Owner.Types

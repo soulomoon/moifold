@@ -9,7 +9,7 @@ module CodexWatcher.ObserveCli
 
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
-import CodexWatcher.Cli
+import CodexWatcher.Cli.Types
 import CodexWatcher.Daemon
 import CodexWatcher.EffectRuntimeCli
 import CodexWatcher.GhGit

@@ -5,9 +5,11 @@ module CodexWatcher.DaemonControlCli
   ) where
 
 import CodexWatcher.ChildDaemon (isPidRunning)
-import CodexWatcher.Cli (StopDaemonCli (..))
+import CodexWatcher.Cli.Types (StopDaemonCli (..))
 import CodexWatcher.CliPaths (defaultCliPidPath)
-import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (KillTerm), commandText, runRuntimeCommand)
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (KillTerm))
+import CodexWatcher.Runtime.Process (runRuntimeCommand)
 import Control.Monad (when)
 import Data.Text qualified as Text
 import System.Directory (doesFileExist)

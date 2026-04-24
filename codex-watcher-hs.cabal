@@ -34,7 +34,8 @@ library
     CodexWatcher.AppServerProtocol
     CodexWatcher.AutomaticLoop.Runner
     CodexWatcher.ChildDaemon
-    CodexWatcher.Cli
+    CodexWatcher.Cli.Parser
+    CodexWatcher.Cli.Types
     CodexWatcher.CliPaths
     CodexWatcher.CompatibilityRuntime
     CodexWatcher.CompatibilityState
@@ -64,7 +65,9 @@ library
     CodexWatcher.EffectInterpreter
     CodexWatcher.EffectRuntimeCli
     CodexWatcher.Effects
-    CodexWatcher.EventLog
+    CodexWatcher.EventLog.File
+    CodexWatcher.EventLog.Replay
+    CodexWatcher.EventLog.Types
     CodexWatcher.EventLogRepair
     CodexWatcher.GhGit
     CodexWatcher.GoldenReplay
@@ -80,12 +83,16 @@ library
     CodexWatcher.ObserveCli
     CodexWatcher.PromptTemplates
     CodexWatcher.ReplayCli
-    CodexWatcher.Runtime
+    CodexWatcher.Runtime.Command.Render
+    CodexWatcher.Runtime.Command.Types
     CodexWatcher.Runtime.Json
     CodexWatcher.Runtime.Defaults
+    CodexWatcher.Runtime.File
+    CodexWatcher.Runtime.Interpreter
     CodexWatcher.Runtime.Owner.Cli
     CodexWatcher.Runtime.Owner.Store
     CodexWatcher.Runtime.Owner.Types
+    CodexWatcher.Runtime.Process
     CodexWatcher.RunnerGuard
     CodexWatcher.RunnerGuardCli
     CodexWatcher.Snapshot
@@ -103,7 +110,6 @@ library
     CodexWatcher.AutomaticLoop.Output
     CodexWatcher.AutomaticLoop.PrReviewHandoff
     CodexWatcher.AutomaticLoop.StartupThreads
-    CodexWatcher.Cli.Parser
     CodexWatcher.Cli.Parser.Common
     CodexWatcher.Cli.Parser.Fanout
     CodexWatcher.Cli.Parser.Guard
@@ -112,19 +118,10 @@ library
     CodexWatcher.Cli.Parser.Observe
     CodexWatcher.Cli.Parser.Repair
     CodexWatcher.Cli.Parser.Service
-    CodexWatcher.Cli.Types
     CodexWatcher.Core.Ids
     CodexWatcher.Core.Kinds
     CodexWatcher.Core.Limits
-    CodexWatcher.EventLog.File
-    CodexWatcher.EventLog.Replay
-    CodexWatcher.EventLog.Types
-    CodexWatcher.Runtime.Command.Render
-    CodexWatcher.Runtime.Command.Types
-    CodexWatcher.Runtime.File
-    CodexWatcher.Runtime.Interpreter
     CodexWatcher.Runtime.Paths
-    CodexWatcher.Runtime.Process
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,

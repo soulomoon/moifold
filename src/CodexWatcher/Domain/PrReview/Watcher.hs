@@ -12,7 +12,7 @@ module CodexWatcher.Domain.PrReview.Watcher
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Observation
 import CodexWatcher.Domain.PrReview.Protocol

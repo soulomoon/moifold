@@ -7,7 +7,8 @@ module CodexWatcher.Runtime.Json
   , parseCommandJson
   ) where
 
-import CodexWatcher.Runtime (CommandReport (..), commandText)
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import Data.Aeson (FromJSON, Value, eitherDecodeStrict')
 import Data.Text (Text)
 import Data.Text qualified as Text

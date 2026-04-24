@@ -38,7 +38,7 @@ module CodexWatcher.Healthcheck.Types
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint)
-import CodexWatcher.Runtime (CommandReport)
+import CodexWatcher.Runtime.Command.Types (CommandReport)
 import CodexWatcher.Types (Domain (..), SDomain (..), SomeWatcherState, someDomain)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withObject, (.:?))
 import Data.Aeson.Key qualified as Key

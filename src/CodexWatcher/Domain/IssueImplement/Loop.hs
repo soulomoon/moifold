@@ -20,11 +20,13 @@ import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation (..), DaemonOp
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssueImplement.TurnClassifier
 import CodexWatcher.Domain.IssueImplement.Watcher
-import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (..), RuntimeInterpreter (..), commandText)
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Types
 import Data.Aeson (Result (..), Value (..), fromJSON)

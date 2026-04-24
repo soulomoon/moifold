@@ -16,13 +16,15 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.Daemon (DaemonObservation (..), DaemonOptions (..))
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssuePlanning.Graph.Canonical
 import CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Runtime (CommandReport (..), RuntimeCommand (..), RuntimeInterpreter (..), commandText, runtimeWriteJsonValue)
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Types

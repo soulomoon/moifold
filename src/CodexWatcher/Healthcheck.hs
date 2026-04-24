@@ -20,11 +20,16 @@ module CodexWatcher.Healthcheck
 import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
-import CodexWatcher.EventLog
+import CodexWatcher.EventLog.File (loadEventLogFile)
+import CodexWatcher.EventLog.Replay (replayEventLog)
+import CodexWatcher.EventLog.Types
 import CodexWatcher.Healthcheck.Analysis
 import CodexWatcher.Healthcheck.Types
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Command.Render (commandText)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
+import CodexWatcher.Runtime.File (readJsonValue)
 import CodexWatcher.Runtime.Json (commandJsonValue)
+import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
 import CodexWatcher.Types (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..), someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.WatcherPaths qualified as WatcherPaths

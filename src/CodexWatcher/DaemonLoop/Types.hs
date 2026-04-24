@@ -27,8 +27,8 @@ module CodexWatcher.DaemonLoop.Types
 import CodexWatcher.ActionExecutor (ActionExecutionReport (..), ActionExecutionResult (..), ActionExecutor)
 import CodexWatcher.AppServerClient (AppServerClientFailure, AppServerTurn (..))
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation, DaemonObservedTickResult, DaemonOptions)
-import CodexWatcher.EventLog (EventReplayResult, WatcherEvent)
-import CodexWatcher.Runtime (CommandReport (..))
+import CodexWatcher.EventLog.Types (EventReplayResult, WatcherEvent)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Types
 import Data.Text (Text)
 import GHC.Generics (Generic)

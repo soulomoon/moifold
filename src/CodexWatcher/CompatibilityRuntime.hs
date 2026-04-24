@@ -5,7 +5,7 @@ module CodexWatcher.CompatibilityRuntime
   ) where
 
 import CodexWatcher.CompatibilityState
-import CodexWatcher.Runtime
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 
 writeCompatibility :: RuntimeInterpreter IO -> CompatibilityWrite -> IO ()
 writeCompatibility interpreter write =
