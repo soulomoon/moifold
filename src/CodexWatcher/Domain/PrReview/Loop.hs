@@ -18,7 +18,7 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Domain.PrReview.Watcher
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text qualified as Text
 
 runPrCheckingReviews

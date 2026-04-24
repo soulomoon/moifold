@@ -38,7 +38,7 @@ module CodexWatcher.Cli.Parser.Common
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
   ( Domain (..)
   , IssueNumber (..)
   , MaxParallel

@@ -48,7 +48,7 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText, parseCommandJson)
 import CodexWatcher.JsonPath (decodeAtPath, decodeValue, valueText)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson
   ( FromJSON (..)
   , Object

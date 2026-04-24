@@ -8,7 +8,7 @@ module CodexWatcher.Cli.Parser.Guard
 import CodexWatcher.Cli.Parser.Common (pollSecondsOptionDefault, staleSecondsOptionDefault)
 import CodexWatcher.Cli.Parser.Loop (loopParser)
 import CodexWatcher.Cli.Types (GuardWatcherCli (..))
-import CodexWatcher.Types (Domain (..))
+import CodexWatcher.Core.Types (Domain (..))
 import Options.Applicative
 
 guardIssuePlanningParser :: Parser GuardWatcherCli

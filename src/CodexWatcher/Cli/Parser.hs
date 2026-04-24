@@ -13,7 +13,7 @@ import CodexWatcher.Cli.Parser.Observe (observeOnceParser)
 import CodexWatcher.Cli.Parser.Repair (repairInvalidStateParser)
 import CodexWatcher.Cli.Parser.Service (renderServiceParser, stopDaemonParser)
 import CodexWatcher.Cli.Types (CliCommand (..))
-import CodexWatcher.Types (Domain (..))
+import CodexWatcher.Core.Types (Domain (..))
 import Options.Applicative
 
 execCliCommandParser :: IO CliCommand

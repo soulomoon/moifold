@@ -18,7 +18,7 @@ module CodexWatcher.Cli.Types
   ) where
 
 import CodexWatcher.AppServerClient (AppServerEndpoint)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
   ( CommitSha
   , Domain (..)
   , IssueNumber

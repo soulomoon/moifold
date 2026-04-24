@@ -11,7 +11,7 @@ import CodexWatcher.EffectInterpreter
 import CodexWatcher.IssueText (issueNumbersText)
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.TurnOutput
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text qualified as Text
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig

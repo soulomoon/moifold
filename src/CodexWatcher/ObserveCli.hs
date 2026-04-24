@@ -18,7 +18,7 @@ import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Runtime.Owner.Cli (validateRuntimeOwnerForExecution)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (Value (Null))
 import Data.List (find)
 import Data.Maybe (fromMaybe)

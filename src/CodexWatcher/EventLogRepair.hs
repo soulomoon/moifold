@@ -14,7 +14,7 @@ module CodexWatcher.EventLogRepair
 
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text

@@ -3,7 +3,7 @@ module CodexWatcher.CliPaths
   , cliPidFileName
   ) where
 
-import CodexWatcher.Types (Domain, withDomain)
+import CodexWatcher.Core.Types (Domain, withDomain)
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 
 cliPidFileName :: Domain -> FilePath

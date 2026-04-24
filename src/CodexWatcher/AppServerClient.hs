@@ -38,7 +38,7 @@ module CodexWatcher.AppServerClient
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
 import CodexWatcher.AppServerProtocol (AppServerRequest (..), ThreadStartOptions, initializeRequest, initializedNotification, threadReadRequest, threadStartRequest)
 import CodexWatcher.JsonPath (lookupPath, renderedTextAtPath)
-import CodexWatcher.Types (RequestId (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Core.Types (RequestId (..), ThreadId (..), TurnId (..))
 import Control.Applicative ((<|>))
 import Control.Exception (AsyncException, SomeException, displayException, fromException, throwIO, try)
 import Data.Aeson

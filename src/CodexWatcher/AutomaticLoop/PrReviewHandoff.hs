@@ -17,7 +17,7 @@ import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
 import CodexWatcher.Domain.IssueImplement.Watcher (IssueImplementObservation (..), IssueImplementTick (..), issueImplementObserve)
 import CodexWatcher.Domain.PrReview.LaunchCli (ensurePrReviewWatcherForHandoff)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text qualified as Text
 import System.Exit (die)
 

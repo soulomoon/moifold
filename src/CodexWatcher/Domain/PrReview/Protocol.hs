@@ -27,7 +27,7 @@ module CodexWatcher.Domain.PrReview.Protocol
   ) where
 
 import CodexWatcher.EventLog.Types
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 

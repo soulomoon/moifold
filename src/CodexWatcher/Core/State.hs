@@ -1,29 +1,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 
-module CodexWatcher.Types
-  ( module CodexWatcher.Core.Kinds
-  , module CodexWatcher.Core.Ids
-  , module CodexWatcher.Core.Limits
-  , module CodexWatcher.Runtime.Paths
-  , module CodexWatcher.Domain.IssuePlanning.Types
-  , module CodexWatcher.Domain.IssueImplement.Types
-  , module CodexWatcher.Domain.PrReview.Types
-  , BlockedReason (..)
-  , StopReason (..)
-  , WorkerThread (..)
-  , ReviewerThread (..)
-  , ActiveTurn (..)
-  , CompletionEvidence (..)
+module CodexWatcher.Core.State
+  ( CompletionEvidence (..)
   , WatcherState (..)
   , SomeWatcherState (..)
   , domainOf
@@ -40,40 +25,13 @@ module CodexWatcher.Types
 
 import CodexWatcher.Core.Ids
 import CodexWatcher.Core.Kinds
-import CodexWatcher.Core.Limits
+import CodexWatcher.Core.Reason
+import CodexWatcher.Core.Thread
 import CodexWatcher.Domain.IssueImplement.Types
 import CodexWatcher.Domain.IssuePlanning.Types
 import CodexWatcher.Domain.PrReview.Types
-import CodexWatcher.Runtime.Paths
 import Data.Proxy (Proxy (..))
 import Data.Singletons (SingI (..), SingKind (..))
-import Data.Text (Text)
-
-newtype BlockedReason = BlockedReason { unBlockedReason :: Text }
-  deriving stock (Eq, Show)
-
-newtype StopReason = StopReason { unStopReason :: Text }
-  deriving stock (Eq, Show)
-
-data ActiveTurn = ActiveTurn
-  { activeThreadId :: ThreadId
-  , activeTurnId :: TurnId
-  }
-  deriving stock (Eq, Show)
-
-data WorkerThread (activity :: ThreadActivity) where
-  WorkerIdle :: ThreadId -> WorkerThread 'Idle
-  WorkerActive :: ActiveTurn -> WorkerThread 'Active
-
-deriving stock instance Eq (WorkerThread activity)
-deriving stock instance Show (WorkerThread activity)
-
-data ReviewerThread (activity :: ThreadActivity) where
-  ReviewerIdle :: ThreadId -> ReviewerThread 'Idle
-  ReviewerActive :: ActiveTurn -> ReviewerThread 'Active
-
-deriving stock instance Eq (ReviewerThread activity)
-deriving stock instance Show (ReviewerThread activity)
 
 data CompletionEvidence (domain :: Domain) where
   PlanningComplete :: CompletionEvidence 'IssuePlanning

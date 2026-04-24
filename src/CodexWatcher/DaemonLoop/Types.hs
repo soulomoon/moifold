@@ -29,7 +29,7 @@ import CodexWatcher.AppServerClient (AppServerClientFailure, AppServerTurn (..))
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation, DaemonObservedTickResult, DaemonOptions)
 import CodexWatcher.EventLog.Types (EventReplayResult, WatcherEvent)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text (Text)
 import GHC.Generics (Generic)
 

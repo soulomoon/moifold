@@ -13,7 +13,7 @@ module CodexWatcher.Effects
   , hasMutation
   ) where
 
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Singletons (SingI (..))
 import Data.Singletons.Decide (decideEquality)
 import Data.Text (Text)

@@ -9,7 +9,7 @@ module CodexWatcher.Domain.IssuePlanning.Graph.Canonical
   , planningIssueFactsFromSnapshot
   ) where
 
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), Value, withObject, (.:), (.:?), (.!=))
 import Data.Aeson.Types (Parser, parseEither)

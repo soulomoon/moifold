@@ -14,7 +14,7 @@ import CodexWatcher.ReplayCli (repairInvalidState, replayEvents)
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
 import CodexWatcher.RunnerGuardCli (runWatcherRunnerGuard)
 import CodexWatcher.ServiceCli (renderService)
-import CodexWatcher.Types (RepoName (unRepoName))
+import CodexWatcher.Core.Types (RepoName (unRepoName))
 
 main :: IO ()
 main =

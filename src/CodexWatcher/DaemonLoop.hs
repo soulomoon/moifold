@@ -25,7 +25,7 @@ import CodexWatcher.Domain.IssueImplement.Loop qualified as IssueImplementationL
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
 import CodexWatcher.Domain.PrReview.Loop qualified as PrReviewLoop
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson ((.=))
 import Data.Text (Text)
 import Data.Text qualified as Text

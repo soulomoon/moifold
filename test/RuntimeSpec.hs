@@ -23,7 +23,7 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.Process (runProcessSpec)
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.AppServerProtocol (ThreadStartOptions (..), TurnStartOptions (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text qualified as Text
 
 runtimeCommandExamples :: [RuntimeCommand]

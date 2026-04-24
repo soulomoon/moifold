@@ -38,7 +38,7 @@ import CodexWatcher.PromptTemplates
   , validationProtocolTemplate
   )
 import CodexWatcher.IssueText (issueNumbersText)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key

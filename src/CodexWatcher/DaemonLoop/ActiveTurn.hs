@@ -26,7 +26,7 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON, object, withObject, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text

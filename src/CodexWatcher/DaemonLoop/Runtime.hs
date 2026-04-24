@@ -21,7 +21,7 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson ((.=))
 import Data.Text (Text)
 import Data.Text qualified as Text

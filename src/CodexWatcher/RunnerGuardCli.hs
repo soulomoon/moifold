@@ -28,7 +28,7 @@ import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Process (commandSummary)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Control.Concurrent (threadDelay)
 import Data.Aeson (object, toJSON, (.=))
 import Data.Proxy (Proxy (..))

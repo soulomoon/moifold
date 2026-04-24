@@ -12,7 +12,7 @@ module CodexWatcher.EventLog.Replay
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.StateMachine
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.List (find, intersect)
 import Data.Text (Text)
 import Data.Text qualified as Text

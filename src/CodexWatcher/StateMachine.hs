@@ -14,7 +14,7 @@ module CodexWatcher.StateMachine
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Foldable qualified as Foldable
 import Data.List.NonEmpty (NonEmpty)
 import Data.Kind (Constraint)

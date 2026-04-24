@@ -18,7 +18,7 @@ import CodexWatcher.Cli.Parser.Common
   , workdirOptionDefault
   )
 import CodexWatcher.Cli.Types (ObserveOnceCli (..))
-import CodexWatcher.Types (CommitSha (..), PrNumber (..), TurnId (..))
+import CodexWatcher.Core.Types (CommitSha (..), PrNumber (..), TurnId (..))
 import Options.Applicative
 
 observeOnceParser :: Parser ObserveOnceCli

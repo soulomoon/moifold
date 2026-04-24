@@ -51,7 +51,7 @@ import CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Exception (try)
 import Control.Monad (when)

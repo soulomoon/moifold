@@ -10,7 +10,7 @@ module CliSpec
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.Cli.Parser (parseCliCommand)
 import CodexWatcher.Cli.Types
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 
 prop_cliParsesHealthcheckAndRunLoop :: Bool
 prop_cliParsesHealthcheckAndRunLoop =

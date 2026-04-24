@@ -17,7 +17,7 @@ import CodexWatcher.GhGit
 import CodexWatcher.Observation
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.StateMachine
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 

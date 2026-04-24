@@ -10,7 +10,7 @@ module CodexWatcher.WatcherPaths
   , pidFileNameForKnownDomain
   ) where
 
-import CodexWatcher.Types (Domain (..), KnownDomain, knownDomain, withDomain)
+import CodexWatcher.Core.Types (Domain (..), KnownDomain, knownDomain, withDomain)
 import Data.Proxy (Proxy (..))
 import System.FilePath ((</>))
 

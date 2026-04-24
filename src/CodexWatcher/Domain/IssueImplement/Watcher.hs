@@ -15,7 +15,7 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Observation
 import CodexWatcher.StateMachine
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text (Text)
 
 data IssueImplementObservation

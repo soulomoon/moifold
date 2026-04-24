@@ -5,7 +5,7 @@ module CodexWatcher.IssueText
   , issueNumbersText
   ) where
 
-import CodexWatcher.Types (IssueNumber (..))
+import CodexWatcher.Core.Types (IssueNumber (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 

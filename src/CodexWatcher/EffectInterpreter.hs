@@ -19,7 +19,7 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.Effects
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
 import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson
   ( Value
   , object

@@ -14,7 +14,7 @@ import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.Runtime.File (writeJsonValue)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Control.Monad (when)
 import Data.Aeson (encode, object, (.=))
 import Data.ByteString.Lazy qualified as LazyByteString

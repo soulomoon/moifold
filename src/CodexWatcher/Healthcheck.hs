@@ -30,7 +30,7 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.File (readJsonValue)
 import CodexWatcher.Runtime.Json (commandJsonValue)
 import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
-import CodexWatcher.Types (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..), someDomain, somePhase)
+import CodexWatcher.Core.Types (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..), someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 import Control.Applicative ((<|>))

@@ -23,7 +23,7 @@ import CodexWatcher.ReplayCli (formatReplayFailure)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Text qualified as Text
 import System.Exit (die)
 

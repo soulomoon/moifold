@@ -11,7 +11,7 @@ module GhGitSpec
   ) where
 
 import CodexWatcher.GhGit
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (Value (..), encode, object, toJSON, (.=))
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Maybe (listToMaybe)

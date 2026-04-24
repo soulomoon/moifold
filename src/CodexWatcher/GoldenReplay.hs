@@ -19,7 +19,7 @@ module CodexWatcher.GoldenReplay
 
 import CodexWatcher.EventLog.Types (WatcherEvent (..))
 import CodexWatcher.Snapshot
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Control.Applicative (asum)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)

@@ -38,7 +38,7 @@ import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.List (partition)

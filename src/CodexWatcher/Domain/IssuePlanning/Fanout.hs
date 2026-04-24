@@ -26,7 +26,7 @@ import CodexWatcher.CompatibilityState
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
 import Data.Char (isAlphaNum)

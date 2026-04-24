@@ -10,7 +10,7 @@ module CodexWatcher.CompatibilityState
   , compatibilityStateWrites
   ) where
 
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.List.NonEmpty (NonEmpty (..))

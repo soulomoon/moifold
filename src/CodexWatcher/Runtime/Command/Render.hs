@@ -8,7 +8,7 @@ module CodexWatcher.Runtime.Command.Render
   ) where
 
 import CodexWatcher.Runtime.Command.Types
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
   ( BranchName (..)
   , CleanReviewEvidence (..)
   , CommitSha (..)

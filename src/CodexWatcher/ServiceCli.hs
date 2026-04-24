@@ -11,7 +11,7 @@ import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.ChildDaemon (stableExecutablePath)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Supervisor
-import CodexWatcher.Types (unRepoName)
+import CodexWatcher.Core.Types (unRepoName)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
 

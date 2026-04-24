@@ -11,7 +11,7 @@ module CodexWatcher.EventLog.Types
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.Types (Pair, Parser)

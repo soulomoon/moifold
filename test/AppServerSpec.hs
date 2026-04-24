@@ -30,7 +30,7 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Turn.Classifier.Common (StructuredTurnOutcome (..), parseStructuredTurnOutcome)
 import CodexWatcher.TurnOutput (structuredTurnOutputSchema)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

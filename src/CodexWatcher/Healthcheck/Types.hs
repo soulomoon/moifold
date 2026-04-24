@@ -39,7 +39,7 @@ module CodexWatcher.Healthcheck.Types
 
 import CodexWatcher.AppServerClient (AppServerEndpoint)
 import CodexWatcher.Runtime.Command.Types (CommandReport)
-import CodexWatcher.Types (Domain (..), SDomain (..), SomeWatcherState, someDomain)
+import CodexWatcher.Core.Types (Domain (..), SDomain (..), SomeWatcherState, someDomain)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withObject, (.:?))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

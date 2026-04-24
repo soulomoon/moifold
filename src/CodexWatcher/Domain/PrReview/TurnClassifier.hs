@@ -14,7 +14,7 @@ import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

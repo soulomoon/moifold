@@ -33,7 +33,7 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Cli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless, when)
 import Data.Aeson ((.=))

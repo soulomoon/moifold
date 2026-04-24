@@ -8,7 +8,7 @@ module CodexWatcher.Runtime.Command.Types
   , RuntimeCommandSpec (..)
   ) where
 
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
   ( BranchName
   , CleanReviewEvidence
   , IssueConfig

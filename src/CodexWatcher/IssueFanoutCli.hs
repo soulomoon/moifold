@@ -40,7 +40,7 @@ import CodexWatcher.Runtime.File (readJsonValue, writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Process (runRuntimeCommand)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))

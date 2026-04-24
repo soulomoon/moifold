@@ -27,7 +27,7 @@ import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
-import CodexWatcher.Types
+import CodexWatcher.Core.Types
 import CodexWatcher.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Monad (when)

@@ -13,7 +13,7 @@ import CodexWatcher.AppServerProtocol
   ( ThreadStartOptions (..)
   , TurnStartOptions (..)
   )
-import CodexWatcher.Types (ThreadId)
+import CodexWatcher.Core.Types (ThreadId)
 import Data.Text (Text)
 
 defaultModel :: Text
