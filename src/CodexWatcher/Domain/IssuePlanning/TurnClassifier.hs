@@ -51,11 +51,11 @@ classifyIssuePlanningTurn turn =
           Just observation
       | Just requests <- output >>= parsePlanningIssueRequests ->
           Just (ObservedPlanningIssuesRequested requests)
+      | Just graph <- output >>= parsePlanningGraph ->
+          Just (ObservedPlanningGraphUpdated graph)
       | Just outputText <- output
       , planningIssueRequestPayloadInvalid outputText ->
           Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
-      | Just graph <- output >>= parsePlanningGraph ->
-          Just (ObservedPlanningGraphUpdated graph)
       | Just structured <- output >>= parseStructuredTurnOutcome ->
           classifyStructuredIssuePlanning structured
       | otherwise ->
