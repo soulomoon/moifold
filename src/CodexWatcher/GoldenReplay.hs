@@ -307,7 +307,7 @@ replayIdleIssueStatus snapshot status =
   worker = WorkerIdle (ThreadId snapshot.config.threadId)
   maybePr = PrNumber <$> (snapshot.issueState >>= (.issuePrNumber))
 
-typedPrReview :: WatcherState 'PrReview phase -> [Text] -> TypedSnapshot
+typedPrReview :: KnownPhase phase => WatcherState 'PrReview phase -> [Text] -> TypedSnapshot
 typedPrReview state warnings =
   TypedSnapshot
     { typedKind = PrReviewSnapshotKind
@@ -315,7 +315,7 @@ typedPrReview state warnings =
     , typedWarnings = warnings
     }
 
-typedIssueImplement :: WatcherState 'IssueImplement phase -> [Text] -> TypedSnapshot
+typedIssueImplement :: KnownPhase phase => WatcherState 'IssueImplement phase -> [Text] -> TypedSnapshot
 typedIssueImplement state warnings =
   TypedSnapshot
     { typedKind = IssueImplementSnapshotKind

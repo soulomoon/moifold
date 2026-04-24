@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -20,7 +21,8 @@ module CodexWatcher.Types
   , SPhase (..)
   , ThreadActivity (..)
   , Mutability (..)
-  , KnownDomain (..)
+  , KnownDomain
+  , KnownPhase
   , RepoName (..)
   , IssueNumber (..)
   , PrNumber (..)
@@ -74,7 +76,7 @@ import Data.Singletons (Sing, SingI (..), SingKind (..), SomeSing (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Control.Applicative ((<|>))
-import Data.Kind (Type)
+import Data.Kind (Constraint, Type)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -114,15 +116,8 @@ instance SingKind Domain where
   toSing IssueImplement = SomeSing SIssueImplement
   toSing PrReview = SomeSing SPrReview
 
-class SingI domain => KnownDomain (domain :: Domain) where
-  knownDomain :: Domain
-  knownDomain = fromSing (sing @domain)
-
-instance KnownDomain 'IssuePlanning
-
-instance KnownDomain 'IssueImplement
-
-instance KnownDomain 'PrReview
+type KnownDomain :: Domain -> Constraint
+type KnownDomain domain = SingI domain
 
 data Phase
   = Initialized
@@ -213,6 +208,9 @@ instance SingKind Phase where
   toSing Blocked = SomeSing SBlocked
   toSing Complete = SomeSing SComplete
   toSing Stopped = SomeSing SStopped
+
+type KnownPhase :: Phase -> Constraint
+type KnownPhase phase = SingI phase
 
 data ThreadActivity
   = Idle
@@ -621,7 +619,7 @@ deriving stock instance Eq (WatcherState domain phase)
 deriving stock instance Show (WatcherState domain phase)
 
 data SomeWatcherState where
-  SomeWatcherState :: KnownDomain domain => WatcherState domain phase -> SomeWatcherState
+  SomeWatcherState :: (KnownDomain domain, KnownPhase phase) => WatcherState domain phase -> SomeWatcherState
 
 deriving stock instance Show SomeWatcherState
 
@@ -631,30 +629,11 @@ domainOf = fromSing . domainSing
 domainSing :: forall domain phase. KnownDomain domain => WatcherState domain phase -> SDomain domain
 domainSing _ = sing @domain
 
-phaseOf :: WatcherState domain phase -> Phase
+phaseOf :: KnownPhase phase => WatcherState domain phase -> Phase
 phaseOf = fromSing . phaseSing
 
-phaseSing :: WatcherState domain phase -> SPhase phase
-phaseSing PlanningReady {} = SInitialized
-phaseSing PlanningTurnActive {} = SPlanMode
-phaseSing PlanningWaitingForReadyIssues {} = SInitialized
-phaseSing IssueReadyToPlan {} = SPlanMode
-phaseSing IssueInPlanMode {} = SPlanMode
-phaseSing IssuePlanReady {} = SImplementing
-phaseSing IssueImplementationReady {} = SImplementing
-phaseSing IssueImplementing {} = SImplementing
-phaseSing IssueHandoffReady {} = SImplementing
-phaseSing IssueHandoffInitialized {} = SImplementing
-phaseSing IssueWaitingForPrMerge {} = SImplementing
-phaseSing IssueWaitingForIssueClose {} = SImplementing
-phaseSing PrCheckingReviews {} = SCheckingReviews
-phaseSing PrFixingReviews {} = SFixingReviews
-phaseSing PrReviewingClean {} = SReviewingClean
-phaseSing PrWaitingForMergeability {} = SWaitingMergeability
-phaseSing PrMerging {} = SMerging
-phaseSing BlockedState {} = SBlocked
-phaseSing CompleteState {} = SComplete
-phaseSing StoppedState {} = SStopped
+phaseSing :: forall domain phase. KnownPhase phase => WatcherState domain phase -> SPhase phase
+phaseSing _ = sing @phase
 
 someDomain :: SomeWatcherState -> Domain
 someDomain (SomeWatcherState state) = domainOf state

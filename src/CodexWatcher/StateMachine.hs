@@ -71,7 +71,8 @@ data Event (domain :: Domain) (phase :: Phase) where
 
 data Decision (domain :: Domain) where
   Decision
-    :: WatcherState domain nextPhase
+    :: KnownPhase nextPhase
+    => WatcherState domain nextPhase
     -> EffectPlan
     -> Decision domain
 
