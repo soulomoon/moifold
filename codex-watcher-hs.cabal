@@ -34,11 +34,15 @@ library
     CodexWatcher.AppServerProtocol
     CodexWatcher.AutomaticLoop.Runner
     CodexWatcher.ChildDaemon
+    CodexWatcher.Cli.Command.DaemonControl
+    CodexWatcher.Cli.Command.IssueFanout
+    CodexWatcher.Cli.Command.Observe
+    CodexWatcher.Cli.Command.Replay
+    CodexWatcher.Cli.Command.RunnerGuard
+    CodexWatcher.Cli.Command.Service
     CodexWatcher.Cli.Parser
+    CodexWatcher.Cli.RuntimeConfig
     CodexWatcher.Cli.Types
-    CodexWatcher.CliPaths
-    CodexWatcher.CompatibilityRuntime
-    CodexWatcher.CompatibilityState
     CodexWatcher.Core.Ids
     CodexWatcher.Core.Kinds
     CodexWatcher.Core.Limits
@@ -46,7 +50,6 @@ library
     CodexWatcher.Core.State
     CodexWatcher.Core.Thread
     CodexWatcher.Daemon
-    CodexWatcher.DaemonControlCli
     CodexWatcher.DaemonLoop
     CodexWatcher.DaemonLoop.ActiveTurn
     CodexWatcher.DaemonLoop.Runtime
@@ -69,7 +72,6 @@ library
     CodexWatcher.Domain.PrReview.Types
     CodexWatcher.Domain.PrReview.Watcher
     CodexWatcher.EffectInterpreter
-    CodexWatcher.EffectRuntimeCli
     CodexWatcher.Effects
     CodexWatcher.EventLog.File
     CodexWatcher.EventLog.Replay
@@ -80,17 +82,15 @@ library
     CodexWatcher.Healthcheck
     CodexWatcher.Healthcheck.Analysis
     CodexWatcher.Healthcheck.Types
-    CodexWatcher.IssueFanoutCli
     CodexWatcher.IssueText
     CodexWatcher.Json
     CodexWatcher.JsonPath
     CodexWatcher.Logging
     CodexWatcher.Observation
-    CodexWatcher.ObserveCli
     CodexWatcher.PromptTemplates
-    CodexWatcher.ReplayCli
     CodexWatcher.Runtime.Command.Render
     CodexWatcher.Runtime.Command.Types
+    CodexWatcher.Runtime.Compatibility
     CodexWatcher.Runtime.Json
     CodexWatcher.Runtime.Defaults
     CodexWatcher.Runtime.File
@@ -100,16 +100,14 @@ library
     CodexWatcher.Runtime.Owner.Types
     CodexWatcher.Runtime.Paths
     CodexWatcher.Runtime.Process
+    CodexWatcher.Runtime.WatcherPaths
     CodexWatcher.RunnerGuard
-    CodexWatcher.RunnerGuardCli
     CodexWatcher.Snapshot
-    CodexWatcher.ServiceCli
     CodexWatcher.StateMachine
     CodexWatcher.Supervisor
     CodexWatcher.Turn.Classifier.Common
     CodexWatcher.TurnOutput
     CodexWatcher.WatcherLiveness
-    CodexWatcher.WatcherPaths
     CodexWatcher.WatcherRuntimeStatus
   other-modules:
     CodexWatcher.AutomaticLoop.IssuePlanningFanout

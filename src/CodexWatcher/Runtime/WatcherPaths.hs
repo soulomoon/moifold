@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module CodexWatcher.WatcherPaths
+module CodexWatcher.Runtime.WatcherPaths
   ( defaultEventsPath
   , defaultPidPath
   , defaultPidPathForKnownDomain

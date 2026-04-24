@@ -33,7 +33,7 @@ import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
 import CodexWatcher.Core.Ids (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.State (someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
-import CodexWatcher.WatcherPaths qualified as WatcherPaths
+import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad (filterM)

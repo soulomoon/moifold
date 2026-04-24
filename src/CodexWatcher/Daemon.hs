@@ -24,7 +24,7 @@ module CodexWatcher.Daemon
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.CompatibilityState
+import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.File (loadEventLogFile)
@@ -269,10 +269,6 @@ fromIssueImplementTick tick =
 fromIssuePlanningTick :: IssuePlanningTick -> ObservedPolicyTick
 fromIssuePlanningTick tick =
   ObservedPolicyTick tick.issuePlanningTickEvent tick.issuePlanningTickState tick.issuePlanningTickEffects
-
-writeCompatibility :: RuntimeInterpreter m -> CompatibilityWrite -> m ()
-writeCompatibility interpreter write =
-  interpreter.runtimeWriteJsonValue write.compatibilityWritePath write.compatibilityWriteValue
 
 runObservedDaemonDryRun
   :: Monad m

@@ -14,11 +14,11 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
 import CodexWatcher.Cli.Types
-import CodexWatcher.CompatibilityState
+import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter
-import CodexWatcher.EffectRuntimeCli
+import CodexWatcher.Cli.RuntimeConfig
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
@@ -26,13 +26,13 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
-import CodexWatcher.IssueFanoutCli (readyIssueStatusFromRuntime)
+import CodexWatcher.Cli.Command.IssueFanout (readyIssueStatusFromRuntime)
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Observation
-import CodexWatcher.ObserveCli (parseDaemonObservation)
+import CodexWatcher.Cli.Command.Observe (parseDaemonObservation)
 import CodexWatcher.Domain.IssuePlanning.Graph.Canonical
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Domain.PrReview.Watcher

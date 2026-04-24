@@ -5,9 +5,10 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CodexWatcher.CompatibilityState
+module CodexWatcher.Runtime.Compatibility
   ( CompatibilityWrite (..)
   , compatibilityStateWrites
+  , writeCompatibility
   ) where
 
 import CodexWatcher.Core.Ids
@@ -32,6 +33,7 @@ import CodexWatcher.Domain.PrReview.Types
   , PrConfig (..)
   , ReviewEvidence (..)
   )
+import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.List.NonEmpty (NonEmpty (..))
@@ -44,6 +46,10 @@ data CompatibilityWrite = CompatibilityWrite
   , compatibilityWriteValue :: Value
   }
   deriving stock (Eq, Show)
+
+writeCompatibility :: RuntimeInterpreter m -> CompatibilityWrite -> m ()
+writeCompatibility interpreter write =
+  interpreter.runtimeWriteJsonValue write.compatibilityWritePath write.compatibilityWriteValue
 
 compatibilityStateWrites :: FilePath -> SomeWatcherState -> [CompatibilityWrite]
 compatibilityStateWrites stateDir state =

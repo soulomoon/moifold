@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CodexWatcher.ObserveCli
+module CodexWatcher.Cli.Command.Observe
   ( observeOnce
   , parseDaemonObservation
   ) where
@@ -11,7 +11,7 @@ import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
 import CodexWatcher.Cli.Types
 import CodexWatcher.Daemon
-import CodexWatcher.EffectRuntimeCli
+import CodexWatcher.Cli.RuntimeConfig
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Watcher

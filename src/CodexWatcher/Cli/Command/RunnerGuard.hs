@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module CodexWatcher.RunnerGuardCli
+module CodexWatcher.Cli.Command.RunnerGuard
   ( boolSwitch
   , guardCommandForDomain
   , guardStartCommand
@@ -21,13 +21,13 @@ module CodexWatcher.RunnerGuardCli
 import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.ChildDaemon (runWithOptionalPidFile, stableExecutablePath)
 import CodexWatcher.Cli.Types
-import CodexWatcher.CliPaths (defaultCliPidPath)
 import CodexWatcher.IssueText (issueNumbersCsv)
 import CodexWatcher.RunnerGuard
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Process (commandSummary)
+import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.Core.Ids (RepoName (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds (Domain (..), KnownDomain)
 import CodexWatcher.Core.Limits (PollSeconds, pollSecondsMicros)
@@ -50,7 +50,7 @@ runWatcherRunnerGuardTyped _ cli = do
   defaultRepairCwd <- getCurrentDirectory
   let loopCli = cli.guardCliLoop
       guardPidFile = maybe (loopCli.loopCliStateDir </> "runner-guard.pid") id cli.guardCliPidFile
-      watcherPidFile = maybe (defaultCliPidPath loopCli.loopCliDomain loopCli.loopCliStateDir) id loopCli.loopCliPidFile
+      watcherPidFile = maybe (WatcherPaths.defaultPidPath loopCli.loopCliDomain loopCli.loopCliStateDir) id loopCli.loopCliPidFile
       repairCwd = maybe defaultRepairCwd id cli.guardCliRepairCwd
       guardConfig :: RunnerGuardConfig domain
       guardConfig =
@@ -142,7 +142,7 @@ guardCliCommandArgs guardPidFile cli =
     <> ["--guard-pid-file", Text.pack guardPidFile, "--guard-poll-seconds", Text.pack (show cli.guardCliPollSeconds), "--stale-seconds", Text.pack (show cli.guardCliStaleSeconds)]
     <> maybe [] (\repairCwd -> ["--repair-cwd", Text.pack repairCwd]) cli.guardCliRepairCwd
  where
-  watcherPidFile = maybe (defaultCliPidPath cli.guardCliLoop.loopCliDomain cli.guardCliLoop.loopCliStateDir) id cli.guardCliLoop.loopCliPidFile
+  watcherPidFile = maybe (WatcherPaths.defaultPidPath cli.guardCliLoop.loopCliDomain cli.guardCliLoop.loopCliStateDir) id cli.guardCliLoop.loopCliPidFile
 
 loopCliCommandArgs :: FilePath -> LoopCli -> [Text.Text]
 loopCliCommandArgs watcherPidFile cli =

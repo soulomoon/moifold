@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CodexWatcher.ServiceCli
+module CodexWatcher.Cli.Command.Service
   ( renderService
   , serviceConfigFromCli
   , serviceConfigFromCliWithExecutable

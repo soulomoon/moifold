@@ -18,13 +18,11 @@ import CodexWatcher.AutomaticLoop.PrReviewHandoff (issueImplementReviewHandoffAf
 import CodexWatcher.AutomaticLoop.StartupThreads (refreshStartupThreads)
 import CodexWatcher.ChildDaemon (runWithOptionalPidFile)
 import CodexWatcher.Cli.Types (LoopCli (..), cliDomainName)
-import CodexWatcher.CliPaths (defaultCliPidPath)
-import CodexWatcher.CompatibilityRuntime (writeCompatibility)
-import CodexWatcher.CompatibilityState (compatibilityStateWrites)
+import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
-import CodexWatcher.EffectRuntimeCli (defaultEffectRuntimeConfigWithPlannerScope)
+import CodexWatcher.Cli.RuntimeConfig (defaultEffectRuntimeConfigWithPlannerScope)
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..))
@@ -34,6 +32,7 @@ import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Cli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
+import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.Core.Ids (ThreadId)
 import CodexWatcher.Core.Kinds (Domain)
 import CodexWatcher.Core.Limits (pollSecondsMicros)
@@ -73,7 +72,7 @@ runAutomaticLoop cli = do
         case cli.loopCliPidFile of
           Just pidFile -> Just pidFile
           Nothing
-            | shouldLoop -> Just (defaultCliPidPath cli.loopCliDomain cli.loopCliStateDir)
+            | shouldLoop -> Just (WatcherPaths.defaultPidPath cli.loopCliDomain cli.loopCliStateDir)
             | otherwise -> Nothing
   validateLoopDomain cli.loopCliDomain cli.loopCliPlannerThread
   validateRuntimeOwnerForExecution cli.loopCliStateDir executionMode

@@ -11,15 +11,14 @@ module CodexWatcher.AutomaticLoop.IssuePlanningFanout
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..), ActionExecutor (..))
 import CodexWatcher.AppServerClient (AppServerEndpoint)
 import CodexWatcher.Cli.Types (LoopCli (..))
-import CodexWatcher.CompatibilityRuntime (writeCompatibility)
-import CodexWatcher.CompatibilityState (compatibilityStateWrites)
+import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
 import CodexWatcher.GhGit (remoteIssueIsClosed, runGhIssueView)
-import CodexWatcher.IssueFanoutCli
+import CodexWatcher.Cli.Command.IssueFanout
   ( IssueImplementerChildStartResult (..)
   , issueImplementerChildLaunchMode
   , issueImplementerRuntimeStatus
@@ -31,7 +30,7 @@ import CodexWatcher.IssueFanoutCli
 import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..), IssuePlanningTick (..), issuePlanningObserve)
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.ReplayCli (formatReplayFailure)
+import CodexWatcher.Cli.Command.Replay (formatReplayFailure)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Core.Ids (IssueNumber (..))
 import CodexWatcher.Core.Kinds (Domain (..))

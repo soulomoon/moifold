@@ -11,7 +11,7 @@ module CodexWatcher.DaemonLoop.Runtime
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.CompatibilityState
+import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.ActiveTurn qualified as ActiveTurn
 import CodexWatcher.DaemonLoop.TurnStart qualified as TurnStart

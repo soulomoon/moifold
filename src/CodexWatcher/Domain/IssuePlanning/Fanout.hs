@@ -22,7 +22,7 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   , withLaunchThreadId
   ) where
 
-import CodexWatcher.CompatibilityState
+import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))

@@ -1,15 +1,15 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module CodexWatcher.DaemonControlCli
+module CodexWatcher.Cli.Command.DaemonControl
   ( stopDaemon
   ) where
 
 import CodexWatcher.ChildDaemon (isPidRunning)
 import CodexWatcher.Cli.Types (StopDaemonCli (..))
-import CodexWatcher.CliPaths (defaultCliPidPath)
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (KillTerm))
 import CodexWatcher.Runtime.Process (runRuntimeCommand)
+import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import Control.Monad (when)
 import Data.Text qualified as Text
 import System.Directory (doesFileExist)
@@ -41,4 +41,4 @@ stopDaemonPidPath options =
     Nothing -> do
       stateDir <- maybe (die "stop-daemon requires --pid-file <path> or --state-dir <path> --domain <domain>") pure options.stopDaemonCliStateDir
       domain <- maybe (die "stop-daemon requires --pid-file <path> or --state-dir <path> --domain <domain>") pure options.stopDaemonCliDomain
-      pure (defaultCliPidPath domain stateDir)
+      pure (WatcherPaths.defaultPidPath domain stateDir)

@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CodexWatcher.ReplayCli
+module CodexWatcher.Cli.Command.Replay
   ( replayEvents
   , repairInvalidState
   , formatReplayFailure
   ) where
 
 import CodexWatcher.Cli.Types (RepairInvalidStateCli (..))
-import CodexWatcher.CompatibilityState (CompatibilityWrite (..), compatibilityStateWrites)
+import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types

@@ -7,7 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module CodexWatcher.IssueFanoutCli
+module CodexWatcher.Cli.Command.IssueFanout
   ( IssueImplementerChildLaunch (..)
   , IssueImplementerChildStartResult (..)
   , issueFanout
@@ -26,7 +26,7 @@ import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
-import CodexWatcher.CompatibilityRuntime
+import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
@@ -46,7 +46,7 @@ import CodexWatcher.Core.Limits (PollSeconds, mkPollSeconds)
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), isTerminalState, someDomainIs)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
-import CodexWatcher.WatcherPaths qualified as WatcherPaths
+import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))
 import Control.Monad (unless, when)

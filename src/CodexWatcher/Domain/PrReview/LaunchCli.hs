@@ -19,8 +19,7 @@ import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
-import CodexWatcher.CompatibilityRuntime
-import CodexWatcher.CompatibilityState
+import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
@@ -35,7 +34,7 @@ import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), somePh
 import CodexWatcher.Core.Thread (ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
-import CodexWatcher.WatcherPaths qualified as WatcherPaths
+import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Monad (when)
 import Data.Aeson (Value, object, (.=))

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CodexWatcher.EffectRuntimeCli
+module CodexWatcher.Cli.RuntimeConfig
   ( defaultEffectRuntimeConfig
   , defaultEffectRuntimeConfigWithPlannerScope
   , plannerTurnInputForScope

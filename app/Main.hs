@@ -6,14 +6,14 @@ module Main (main) where
 import CodexWatcher.AutomaticLoop.Runner (runAutomaticLoop)
 import CodexWatcher.Cli.Parser (execCliCommandParser)
 import CodexWatcher.Cli.Types
-import CodexWatcher.DaemonControlCli (stopDaemon)
+import CodexWatcher.Cli.Command.DaemonControl (stopDaemon)
 import CodexWatcher.Healthcheck
-import CodexWatcher.IssueFanoutCli (issueFanout)
-import CodexWatcher.ObserveCli (observeOnce)
-import CodexWatcher.ReplayCli (repairInvalidState, replayEvents)
+import CodexWatcher.Cli.Command.IssueFanout (issueFanout)
+import CodexWatcher.Cli.Command.Observe (observeOnce)
+import CodexWatcher.Cli.Command.Replay (repairInvalidState, replayEvents)
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
-import CodexWatcher.RunnerGuardCli (runWatcherRunnerGuard)
-import CodexWatcher.ServiceCli (renderService)
+import CodexWatcher.Cli.Command.RunnerGuard (runWatcherRunnerGuard)
+import CodexWatcher.Cli.Command.Service (renderService)
 import CodexWatcher.Core.Ids (RepoName (unRepoName))
 
 main :: IO ()
