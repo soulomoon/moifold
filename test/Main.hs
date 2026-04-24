@@ -226,9 +226,6 @@ instance Arbitrary ActiveTurn where
 instance Arbitrary ReviewEvidence where
   arbitrary = ReviewEvidence <$> ((:|) <$> arbitrary <*> listOf arbitrary) <*> arbitrary
 
-instance Arbitrary a => Arbitrary (NonEmpty a) where
-  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
-
 instance Arbitrary CleanReviewEvidence where
   arbitrary = CleanReviewEvidence <$> arbitrary <*> pure "LGTM"
 
