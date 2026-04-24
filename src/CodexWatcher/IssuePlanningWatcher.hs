@@ -18,12 +18,13 @@ import CodexWatcher.Observation
 import CodexWatcher.StateMachine
 import CodexWatcher.Types
 import Data.List (find, intersect)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
 data IssuePlanningObservation
   = ObservedPlanningTurnStarted ThreadId TurnId
-  | ObservedPlanningIssuesRequested [IssueCreationRequest]
+  | ObservedPlanningIssuesRequested (NonEmpty IssueCreationRequest)
   | ObservedPlanningGraphUpdated PlanningGraph
   | ObservedPlanningReadyIssuesFixed
   | ObservedPlanningScopeCompleted
@@ -42,11 +43,8 @@ data IssuePlanningTick = IssuePlanningTick
 issuePlanningObserve :: SomeWatcherState -> IssuePlanningObservation -> Either Text IssuePlanningTick
 issuePlanningObserve (SomeWatcherState state@PlanningReady {}) (ObservedPlanningTurnStarted threadId turnId) =
   Right (tick (IssuePlanningTurnStarted threadId turnId) (step state (StartPlanningTurn (ActiveTurn threadId turnId))))
-issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPlanningIssuesRequested requests)
-  | null requests =
-      Left "issue planning issue creation observation must include at least one issue"
-  | otherwise =
-      Right (tick (IssuePlanningIssuesRequested requests) (step state (PlannerRequestedIssueCreation requests)))
+issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPlanningIssuesRequested requests) =
+  Right (tick (IssuePlanningIssuesRequested requests) (step state (PlannerRequestedIssueCreation requests)))
 issuePlanningObserve (SomeWatcherState state@PlanningTurnActive {}) (ObservedPlanningGraphUpdated graph) =
   case state of
     PlanningTurnActive config _activeTurn ->

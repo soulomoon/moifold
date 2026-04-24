@@ -448,7 +448,7 @@ prop_plannerGraphUpdateWaitsAndRecords config activeTurn graph =
 
 prop_plannerIssueCreationReturnsToPlanning :: PlannerConfig -> ActiveTurn -> IssueCreationRequest -> Bool
 prop_plannerIssueCreationReturnsToPlanning config activeTurn request =
-  case step (PlanningTurnActive config activeTurn) (PlannerRequestedIssueCreation [request]) of
+  case step (PlanningTurnActive config activeTurn) (PlannerRequestedIssueCreation (request :| [])) of
     Decision state effects ->
       phaseOf state == Initialized
         && effects == [SomeEffect (CreateIssue (plannerRepo config) request), SomeEffect SleepUntilNextPoll]
@@ -768,7 +768,7 @@ prop_eventLogIssuePlanningIssueCreationReturnsReady config plannerThread planner
   case replayEventLog
     [ IssuePlanningInitialized config
     , IssuePlanningTurnStarted plannerThread plannerTurn
-    , IssuePlanningIssuesRequested [request]
+    , IssuePlanningIssuesRequested (request :| [])
     ] of
     Right replay ->
       someDomain replay.replayState == IssuePlanning
@@ -872,9 +872,9 @@ prop_issuePlanningWatcherCreatesIssuesBeforeReplanning config threadId turnId re
   let ready = SomeWatcherState (PlanningReady config)
    in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
         Right started ->
-          case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningIssuesRequested [request]) of
+          case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningIssuesRequested (request :| [])) of
             Right requested ->
-              issuePlanningTickEvent requested == IssuePlanningIssuesRequested [request]
+              issuePlanningTickEvent requested == IssuePlanningIssuesRequested (request :| [])
                 && somePhase requested.issuePlanningTickState == Initialized
                 && hasEffect CreateIssueTag requested.issuePlanningTickEffects
                 && issuePlanningTickEffects requested == [SomeEffect (CreateIssue (plannerRepo config) request), SomeEffect SleepUntilNextPoll]
@@ -1018,7 +1018,7 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
         && issuePlanningCompletionEvent (IssuePlanningGraphUpdated graph)
         && not (issuePlanningCompletionEvent (IssuePlanningTurnRetryRequested (BlockedReason "retry")) )
         && not (issuePlanningCompletionEvent IssuePlanningTurnCompleted)
-        && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested [IssueCreationRequest "subissue" "details" Nothing]))
+        && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested (IssueCreationRequest "subissue" "details" Nothing :| [])))
         && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
 
 prop_issuePlanningFanoutUsesOnlyReadyIssues :: Bool
@@ -1069,7 +1069,7 @@ canonicalEventExamples :: [WatcherEvent]
 canonicalEventExamples =
   [ IssuePlanningInitialized plannerConfig
   , IssuePlanningTurnStarted plannerThread plannerTurn
-  , IssuePlanningIssuesRequested [IssueCreationRequest "Subissue title" "Subissue body" Nothing]
+  , IssuePlanningIssuesRequested (IssueCreationRequest "Subissue title" "Subissue body" Nothing :| [])
   , IssuePlanningGraphUpdated planningGraph
   , IssuePlanningReadyIssuesFixed
   , IssuePlanningTurnRetryRequested blockedReason
@@ -1488,8 +1488,8 @@ prop_turnClassifierPrefersStructuredOutputs =
           [BlockedPlanningIssue (IssueNumber 16) [IssueNumber 15] "wait"]
           [IssueDependency (IssueNumber 16) [IssueNumber 15]]
    in parseStructuredTurnOutcome "{\"outcome\":\"blocked\",\"reason\":\"schema blocker\"}" == Just (StructuredBlocked "schema blocker")
-    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "{\"outcome\":\"complete\",\"issues_to_create\":[{\"title\":\"Subissue A\",\"body\":\"Split from parent\"}]}")) == Just (ObservedPlanningIssuesRequested [issueRequest])
-    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"body\":\"Split from existing parent\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningIssuesRequested [subissueRequest])
+    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "{\"outcome\":\"complete\",\"issues_to_create\":[{\"title\":\"Subissue A\",\"body\":\"Split from parent\"}]}")) == Just (ObservedPlanningIssuesRequested (issueRequest :| []))
+    && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"body\":\"Split from existing parent\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningIssuesRequested (subissueRequest :| []))
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-invalid-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-graph") "completed" (Just "{\"outcome\":\"complete\",\"ready_issues\":[15],\"blocked_issues\":[{\"issueNumber\":16,\"blockedBy\":[15],\"reason\":\"wait\"}],\"dependencies\":[{\"issueNumber\":16,\"dependsOn\":[15]}]}")) == Just (ObservedPlanningGraphUpdated planningGraph)
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-graph-rich") "completed" (Just "{\"outcome\":\"complete\",\"ready_issues\":[{\"number\":15,\"title\":\"ready\"}],\"blocked_issues\":[{\"number\":16,\"blocked_by\":[15],\"reason\":\"wait\"}],\"dependencies\":[{\"issue\":16,\"depends_on\":[15]}]}")) == Just (ObservedPlanningGraphUpdated planningGraph)
@@ -2848,7 +2848,7 @@ observedDaemonTickExecuteCommandFailureDoesNotAppendEvent = do
         [ IssuePlanningInitialized plannerConfig
         , IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan")
         ]
-      observation = DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested [issueRequest])
+      observation = DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested (issueRequest :| []))
   result <- runObservedDaemonTickWithEvents executor options events observation
   calls <- getCalls
   results <-
@@ -3287,7 +3287,7 @@ automaticDaemonLoopPlanningIssueCreationRequestsReplanning = do
       results <-
         sequence
           [ assert "planning issue creation reads active planner turn" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
-          , assert "planning issue creation emits request event" (observedEvent == Just (IssuePlanningIssuesRequested [issueRequest]))
+          , assert "planning issue creation emits request event" (observedEvent == Just (IssuePlanningIssuesRequested (issueRequest :| [])))
           , assert "planning issue creation returns to planning ready" (maybe False ((== Initialized) . somePhase . daemonObservedState) tick.loopObservedTick)
           , assert "planning issue creation plans gh issue create" (PlannedCommand (GhIssueCreate repo issueRequest) `elem` actions)
           , assert "planning issue creation does not trigger fanout boundary" (maybe True (not . issuePlanningCompletionEvent) observedEvent)

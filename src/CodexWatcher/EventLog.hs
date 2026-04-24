@@ -34,7 +34,7 @@ import Data.Text qualified as Text
 data WatcherEvent
   = IssuePlanningInitialized PlannerConfig
   | IssuePlanningTurnStarted ThreadId TurnId
-  | IssuePlanningIssuesRequested [IssueCreationRequest]
+  | IssuePlanningIssuesRequested (NonEmpty IssueCreationRequest)
   | IssuePlanningGraphUpdated PlanningGraph
   | IssuePlanningReadyIssuesFixed
   | IssuePlanningScopeCompleted
@@ -548,9 +548,9 @@ reviewThreadIds (first : rest) = do
   rest' <- traverse (nonEmptyText "reviewThreadIds[]") rest
   pure (ReviewThreadId first' :| fmap ReviewThreadId rest')
 
-nonEmptyIssueCreationRequests :: [IssueCreationRequest] -> Parser [IssueCreationRequest]
+nonEmptyIssueCreationRequests :: [IssueCreationRequest] -> Parser (NonEmpty IssueCreationRequest)
 nonEmptyIssueCreationRequests [] = fail "issues must not be empty"
-nonEmptyIssueCreationRequests requests = pure requests
+nonEmptyIssueCreationRequests (request : rest) = pure (request :| rest)
 
 nonEmptyTextField :: Object -> Key.Key -> Parser Text
 nonEmptyTextField objectValue key = objectValue .: key >>= nonEmptyText (Key.toString key)

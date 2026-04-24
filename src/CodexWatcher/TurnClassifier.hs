@@ -27,6 +27,7 @@ import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', withObject, (
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List (find)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -69,7 +70,7 @@ data IssuePlanTurnReport = IssuePlanTurnReport
   }
   deriving stock (Eq, Show)
 
-newtype StructuredPlanningIssueRequests = StructuredPlanningIssueRequests [IssueCreationRequest]
+newtype StructuredPlanningIssueRequests = StructuredPlanningIssueRequests (NonEmpty IssueCreationRequest)
   deriving stock (Eq, Show)
 
 newtype StructuredPlanningGraph = StructuredPlanningGraph PlanningGraph
@@ -79,7 +80,9 @@ instance FromJSON StructuredPlanningIssueRequests where
   parseJSON = withObject "StructuredPlanningIssueRequests" \objectValue -> do
     issues <- objectValue .:? "issues_to_create" .!= []
     subissues <- objectValue .:? "subissues_to_create" .!= []
-    pure (StructuredPlanningIssueRequests (issues <> subissues))
+    case issues <> subissues of
+      firstRequest : restRequests -> pure (StructuredPlanningIssueRequests (firstRequest :| restRequests))
+      [] -> fail "issues_to_create and subissues_to_create must not both be empty"
 
 instance FromJSON StructuredPlanningGraph where
   parseJSON = withObject "StructuredPlanningGraph" \objectValue ->
@@ -153,8 +156,8 @@ classifyIssuePlanningTurn turn =
     TurnCompleted output
       | Just observation <- missingOutputBlocked "planning turn completed without output" ObservedPlanningBlocked output ->
           Just observation
-      | Just (firstRequest : restRequests) <- output >>= parsePlanningIssueRequests ->
-          Just (ObservedPlanningIssuesRequested (firstRequest : restRequests))
+      | Just requests <- output >>= parsePlanningIssueRequests ->
+          Just (ObservedPlanningIssuesRequested requests)
       | Just outputText <- output
       , planningIssueRequestPayloadInvalid outputText ->
           Just (ObservedPlanningBlocked (BlockedReason "planning turn returned invalid issue creation payload"))
@@ -231,7 +234,7 @@ parseStructuredTurnOutcome output =
     Left _ -> Nothing
     Right structured -> Just structured
 
-parsePlanningIssueRequests :: Text -> Maybe [IssueCreationRequest]
+parsePlanningIssueRequests :: Text -> Maybe (NonEmpty IssueCreationRequest)
 parsePlanningIssueRequests output =
   case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
     Left _ -> Nothing

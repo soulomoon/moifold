@@ -18,6 +18,8 @@ module CodexWatcher.StateMachine
 
 import CodexWatcher.Effects
 import CodexWatcher.Types
+import Data.Foldable qualified as Foldable
+import Data.List.NonEmpty (NonEmpty)
 import Data.Kind (Constraint)
 import qualified Data.Text as Text
 import GHC.TypeLits (ErrorMessage (..), TypeError)
@@ -35,7 +37,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   StartPlanningTurn :: ActiveTurn -> Event 'IssuePlanning 'Initialized
   PlannerReadyIssuesFixed :: Event 'IssuePlanning 'Initialized
   PlannerScopeCompleted :: Event 'IssuePlanning 'Initialized
-  PlannerRequestedIssueCreation :: [IssueCreationRequest] -> Event 'IssuePlanning 'PlanMode
+  PlannerRequestedIssueCreation :: NonEmpty IssueCreationRequest -> Event 'IssuePlanning 'PlanMode
   PlannerUpdatedGraph :: PlanningGraph -> Event 'IssuePlanning 'PlanMode
   PlannerTurnRetryRequested :: BlockedReason -> Event 'IssuePlanning 'PlanMode
   PlannerTurnCompleted :: Event 'IssuePlanning 'PlanMode
@@ -108,7 +110,7 @@ step (PlanningTurnActive config _activeTurn) (PlannerUpdatedGraph graph) =
 step (PlanningTurnActive config _activeTurn) (PlannerRequestedIssueCreation requests) =
   Decision
     (PlanningReady config)
-    ([SomeEffect (CreateIssue (plannerRepo config) request) | request <- requests] <> [SomeEffect SleepUntilNextPoll])
+    ([SomeEffect (CreateIssue (plannerRepo config) request) | request <- Foldable.toList requests] <> [SomeEffect SleepUntilNextPoll])
 step (IssueReadyToPlan config prNumber (WorkerIdle threadId)) (StartReadyIssuePlanTurn activeTurn) =
   Decision
     (IssueInPlanMode config prNumber (WorkerActive activeTurn))
