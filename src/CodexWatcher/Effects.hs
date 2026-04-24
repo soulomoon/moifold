@@ -20,8 +20,9 @@ module CodexWatcher.Effects
 
 import CodexWatcher.Types
 import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
+import Data.Singletons.Decide (decideEquality)
 import Data.Text (Text)
-import Data.Type.Equality (TestEquality (..), (:~:) (Refl))
+import Data.Type.Equality ((:~:) (Refl))
 
 data Effect (mutability :: Mutability) where
   ReadOpenIssues :: RepoName -> Effect 'ReadOnly
@@ -55,7 +56,7 @@ deriving stock instance Show SomeEffect
 
 instance Eq SomeEffect where
   SomeEffect left == SomeEffect right =
-    case testEquality (effectMutabilitySing left) (effectMutabilitySing right) of
+    case decideEquality (effectMutabilitySing left) (effectMutabilitySing right) of
       Just Refl -> left == right
       Nothing -> False
 

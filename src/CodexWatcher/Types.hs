@@ -78,7 +78,7 @@ module CodexWatcher.Types
 
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.Singletons (SingI (..), SingKind (..), SomeSing (..))
-import Data.Singletons.TH (genSingletons)
+import Data.Singletons.TH (genSingletons, singDecideInstances)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Control.Applicative ((<|>))
@@ -87,7 +87,6 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Aeson.Types (Parser)
-import Data.Type.Equality (TestEquality (..), (:~:) (Refl))
 
 data Domain
   = IssuePlanning
@@ -129,14 +128,7 @@ data Mutability
   deriving stock (Eq, Show)
 
 $(genSingletons [''Domain, ''Phase, ''Mutability])
-
-instance TestEquality SMutability where
-  testEquality SReadOnly SReadOnly = Just Refl
-  testEquality SCanStartTurn SCanStartTurn = Just Refl
-  testEquality SCanMutateLocal SCanMutateLocal = Just Refl
-  testEquality SCanMutateGitHub SCanMutateGitHub = Just Refl
-  testEquality SCanMerge SCanMerge = Just Refl
-  testEquality _ _ = Nothing
+$(singDecideInstances [''Mutability])
 
 type KnownMutability :: Mutability -> Constraint
 type KnownMutability mutability = SingI mutability
