@@ -110,7 +110,7 @@ validatePlanningGraph config graph
   outOfScopeIssue =
     case plannerScopeIssues config of
       [] -> Nothing
-      scopeIssues -> find (`notElem` scopeIssues) graphIssues
+      scopeIssues -> find (`notElem` scopedGraphClosure scopeIssues graph) graphIssues
   readyBlockedOverlap = graph.planningReadyIssues `intersect` blockedIssues
   readyIssueHasDependency dependency =
     dependency.dependencyIssue `elem` graph.planningReadyIssues && not (null dependency.dependencyDependsOn)
@@ -128,6 +128,27 @@ issueText =
 issueListText :: [IssueNumber] -> Text
 issueListText issues =
   Text.intercalate ", " (fmap (("#" <>) . issueText) issues)
+
+scopedGraphClosure :: [IssueNumber] -> PlanningGraph -> [IssueNumber]
+scopedGraphClosure scopeIssues graph =
+  go [] scopeIssues
+ where
+  go seen [] = seen
+  go seen (issue : rest)
+    | issue `elem` seen = go seen rest
+    | otherwise = go (seen <> [issue]) (graphIssueDependencies issue <> rest)
+
+  graphIssueDependencies issue =
+    concat
+      [ dependency.dependencyDependsOn
+      | dependency <- graph.planningDependencies
+      , dependency.dependencyIssue == issue
+      ]
+      <> concat
+        [ blocked.blockedPlanningDependsOn
+        | blocked <- graph.planningBlockedIssues
+        , blocked.blockedPlanningIssue == issue
+        ]
 
 tick :: WatcherEvent -> Decision 'IssuePlanning -> IssuePlanningTick
 tick event decision =

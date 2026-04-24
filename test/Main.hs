@@ -935,6 +935,27 @@ prop_issuePlanningWatcherBlocksOutOfScopeGraph threadId turnId =
             Left _ -> False
         Left _ -> False
 
+prop_issuePlanningWatcherAllowsScopedDependencyClosure :: ThreadId -> TurnId -> Bool
+prop_issuePlanningWatcherAllowsScopedDependencyClosure threadId turnId =
+  let config = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 8]
+      ready = SomeWatcherState (PlanningReady config)
+      graph =
+        PlanningGraph
+          [IssueNumber 15]
+          [BlockedPlanningIssue (IssueNumber 8) [IssueNumber 15, IssueNumber 16] "split work"]
+          [ IssueDependency (IssueNumber 8) [IssueNumber 15, IssueNumber 16]
+          , IssueDependency (IssueNumber 16) [IssueNumber 15]
+          ]
+   in case issuePlanningObserve ready (ObservedPlanningTurnStarted threadId turnId) of
+        Right started ->
+          case issuePlanningObserve started.issuePlanningTickState (ObservedPlanningGraphUpdated graph) of
+            Right graphed ->
+              issuePlanningTickEvent graphed == IssuePlanningGraphUpdated graph
+                && somePhase graphed.issuePlanningTickState == Initialized
+                && hasEffect RecordPlanningGraphTag graphed.issuePlanningTickEffects
+            Left _ -> False
+        Left _ -> False
+
 prop_canonicalPlanningGraphUsesDependencyHintsAndOpenChildren :: Bool
 prop_canonicalPlanningGraphUsesDependencyHintsAndOpenChildren =
   canonicalPlanningGraph plannerConfig facts plannerOutput == expected
@@ -4504,6 +4525,7 @@ main = do
       , quickCheckResult prop_issuePlanningWatcherCreatesIssuesBeforeReplanning
       , quickCheckResult prop_issuePlanningWatcherRecordsGraphBeforeFanoutAndWaits
       , quickCheckResult prop_issuePlanningWatcherBlocksOutOfScopeGraph
+      , quickCheckResult prop_issuePlanningWatcherAllowsScopedDependencyClosure
       , quickCheckResult prop_canonicalPlanningGraphUsesDependencyHintsAndOpenChildren
       , quickCheckResult prop_issuePlanningSelectionRespectsMaxParallelAndSkipsActive
       , quickCheckResult prop_issuePlanningFanoutBuildsLaunchPlans
