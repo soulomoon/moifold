@@ -32,30 +32,12 @@ library
     CodexWatcher.ActionExecutor
     CodexWatcher.AppServerClient
     CodexWatcher.AppServerProtocol
-    CodexWatcher.AutomaticLoop.IssuePlanningFanout
-    CodexWatcher.AutomaticLoop.Output
-    CodexWatcher.AutomaticLoop.PrReviewHandoff
-    CodexWatcher.AutomaticLoop.Runner
-    CodexWatcher.AutomaticLoop.StartupThreads
     CodexWatcher.AutomaticLoopCli
     CodexWatcher.ChildDaemon
     CodexWatcher.Cli
-    CodexWatcher.Cli.Parser
-    CodexWatcher.Cli.Parser.Common
-    CodexWatcher.Cli.Parser.Fanout
-    CodexWatcher.Cli.Parser.Guard
-    CodexWatcher.Cli.Parser.Healthcheck
-    CodexWatcher.Cli.Parser.Loop
-    CodexWatcher.Cli.Parser.Observe
-    CodexWatcher.Cli.Parser.Repair
-    CodexWatcher.Cli.Parser.Service
-    CodexWatcher.Cli.Types
     CodexWatcher.CliPaths
     CodexWatcher.CompatibilityRuntime
     CodexWatcher.CompatibilityState
-    CodexWatcher.Core.Ids
-    CodexWatcher.Core.Kinds
-    CodexWatcher.Core.Limits
     CodexWatcher.Daemon
     CodexWatcher.DaemonControlCli
     CodexWatcher.DaemonLoop
@@ -63,29 +45,10 @@ library
     CodexWatcher.DaemonLoop.Runtime
     CodexWatcher.DaemonLoop.TurnStart
     CodexWatcher.DaemonLoop.Types
-    CodexWatcher.Domain.IssueImplement.Loop
-    CodexWatcher.Domain.IssueImplement.TurnClassifier
-    CodexWatcher.Domain.IssueImplement.Types
-    CodexWatcher.Domain.IssueImplement.Watcher
-    CodexWatcher.Domain.IssuePlanning.Fanout
-    CodexWatcher.Domain.IssuePlanning.Graph.Canonical
-    CodexWatcher.Domain.IssuePlanning.Loop
-    CodexWatcher.Domain.IssuePlanning.TurnClassifier
-    CodexWatcher.Domain.IssuePlanning.Types
-    CodexWatcher.Domain.IssuePlanning.Watcher
-    CodexWatcher.Domain.PrReview.LaunchCli
-    CodexWatcher.Domain.PrReview.Loop
-    CodexWatcher.Domain.PrReview.Protocol
-    CodexWatcher.Domain.PrReview.TurnClassifier
-    CodexWatcher.Domain.PrReview.Types
-    CodexWatcher.Domain.PrReview.Watcher
     CodexWatcher.EffectInterpreter
     CodexWatcher.EffectRuntimeCli
     CodexWatcher.Effects
     CodexWatcher.EventLog
-    CodexWatcher.EventLog.File
-    CodexWatcher.EventLog.Replay
-    CodexWatcher.EventLog.Types
     CodexWatcher.EventLogRepair
     CodexWatcher.GhGit
     CodexWatcher.GoldenReplay
@@ -112,17 +75,7 @@ library
     CodexWatcher.PrReviewWatcher
     CodexWatcher.ReplayCli
     CodexWatcher.Runtime
-    CodexWatcher.Runtime.Command.Render
-    CodexWatcher.Runtime.Command.Types
-    CodexWatcher.Runtime.Defaults
-    CodexWatcher.Runtime.File
-    CodexWatcher.Runtime.Interpreter
     CodexWatcher.Runtime.Json
-    CodexWatcher.Runtime.Owner.Cli
-    CodexWatcher.Runtime.Owner.Store
-    CodexWatcher.Runtime.Owner.Types
-    CodexWatcher.Runtime.Paths
-    CodexWatcher.Runtime.Process
     CodexWatcher.RuntimeOwner
     CodexWatcher.RuntimeOwnerCli
     CodexWatcher.RuntimeDefaults
@@ -132,13 +85,61 @@ library
     CodexWatcher.ServiceCli
     CodexWatcher.StateMachine
     CodexWatcher.Supervisor
-    CodexWatcher.Turn.Classifier.Common
     CodexWatcher.TurnOutput
     CodexWatcher.Types
     CodexWatcher.TurnClassifier
     CodexWatcher.WatcherLiveness
     CodexWatcher.WatcherPaths
     CodexWatcher.WatcherRuntimeStatus
+  other-modules:
+    CodexWatcher.AutomaticLoop.IssuePlanningFanout
+    CodexWatcher.AutomaticLoop.Output
+    CodexWatcher.AutomaticLoop.PrReviewHandoff
+    CodexWatcher.AutomaticLoop.Runner
+    CodexWatcher.AutomaticLoop.StartupThreads
+    CodexWatcher.Cli.Parser
+    CodexWatcher.Cli.Parser.Common
+    CodexWatcher.Cli.Parser.Fanout
+    CodexWatcher.Cli.Parser.Guard
+    CodexWatcher.Cli.Parser.Healthcheck
+    CodexWatcher.Cli.Parser.Loop
+    CodexWatcher.Cli.Parser.Observe
+    CodexWatcher.Cli.Parser.Repair
+    CodexWatcher.Cli.Parser.Service
+    CodexWatcher.Cli.Types
+    CodexWatcher.Core.Ids
+    CodexWatcher.Core.Kinds
+    CodexWatcher.Core.Limits
+    CodexWatcher.Domain.IssueImplement.Loop
+    CodexWatcher.Domain.IssueImplement.TurnClassifier
+    CodexWatcher.Domain.IssueImplement.Types
+    CodexWatcher.Domain.IssueImplement.Watcher
+    CodexWatcher.Domain.IssuePlanning.Fanout
+    CodexWatcher.Domain.IssuePlanning.Graph.Canonical
+    CodexWatcher.Domain.IssuePlanning.Loop
+    CodexWatcher.Domain.IssuePlanning.TurnClassifier
+    CodexWatcher.Domain.IssuePlanning.Types
+    CodexWatcher.Domain.IssuePlanning.Watcher
+    CodexWatcher.Domain.PrReview.LaunchCli
+    CodexWatcher.Domain.PrReview.Loop
+    CodexWatcher.Domain.PrReview.Protocol
+    CodexWatcher.Domain.PrReview.TurnClassifier
+    CodexWatcher.Domain.PrReview.Types
+    CodexWatcher.Domain.PrReview.Watcher
+    CodexWatcher.EventLog.File
+    CodexWatcher.EventLog.Replay
+    CodexWatcher.EventLog.Types
+    CodexWatcher.Runtime.Command.Render
+    CodexWatcher.Runtime.Command.Types
+    CodexWatcher.Runtime.Defaults
+    CodexWatcher.Runtime.File
+    CodexWatcher.Runtime.Interpreter
+    CodexWatcher.Runtime.Owner.Cli
+    CodexWatcher.Runtime.Owner.Store
+    CodexWatcher.Runtime.Owner.Types
+    CodexWatcher.Runtime.Paths
+    CodexWatcher.Runtime.Process
+    CodexWatcher.Turn.Classifier.Common
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,
