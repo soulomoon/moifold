@@ -367,7 +367,7 @@ initializeFromEvent = \case
 
 applyEvent :: SomeWatcherState -> WatcherEvent -> Either Text (SomeWatcherState, EffectPlan)
 applyEvent state event
-  | isTerminalPhase (somePhase state) =
+  | isTerminalState state =
       terminalEvent state event
 applyEvent _ event@PrReviewInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)

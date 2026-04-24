@@ -136,7 +136,7 @@ issueImplementerStateIsActive stateDir = do
           case replayEventLog events of
             Left _ -> pure True
             Right replay ->
-              pure (someDomain replay.replayState == IssueImplement && not (isTerminalPhase (somePhase replay.replayState)))
+              pure (someDomain replay.replayState == IssueImplement && not (isTerminalState replay.replayState))
 
 data IssueImplementerChildLaunch
   = DoNotLaunchChildren

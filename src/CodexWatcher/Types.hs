@@ -66,6 +66,7 @@ module CodexWatcher.Types
   , somePhase
   , isTerminalPhase
   , isTerminalPhaseSing
+  , isTerminalState
   , mkMaxParallel
   , mkPollSeconds
   , mkStaleSeconds
@@ -566,3 +567,6 @@ isTerminalPhaseSing SBlocked = True
 isTerminalPhaseSing SComplete = True
 isTerminalPhaseSing SStopped = True
 isTerminalPhaseSing _ = False
+
+isTerminalState :: SomeWatcherState -> Bool
+isTerminalState (SomeWatcherState state) = isTerminalPhaseSing (phaseSing state)

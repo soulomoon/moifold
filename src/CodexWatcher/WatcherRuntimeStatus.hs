@@ -17,7 +17,7 @@ module CodexWatcher.WatcherRuntimeStatus
 
 import CodexWatcher.ChildDaemon (readPidFile, isPidRunning)
 import CodexWatcher.EventLog (EventReplayResult (..), loadEventLogFile, replayEventLog)
-import CodexWatcher.Types (BlockedReason (..), Domain, SomeWatcherState (..), StopReason (..), WatcherState (..), isTerminalPhase, someDomain, somePhase)
+import CodexWatcher.Types (BlockedReason (..), Domain, SomeWatcherState (..), StopReason (..), WatcherState (..), isTerminalState, someDomain)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
@@ -67,7 +67,7 @@ watcherRuntimeStatus config = do
                   pure (runningStatus running)
                 Right replay
                   | someDomain replay.replayState == config.watcherRuntimeExpectedDomain
-                  , isTerminalPhase (somePhase replay.replayState) -> do
+                  , isTerminalState replay.replayState -> do
                       terminal <- config.watcherRuntimeReplayTerminalIsTerminal replay
                       pure (if terminal then WatcherTerminal (terminalReason replay.replayState) else runningStatus running)
                   | running ->

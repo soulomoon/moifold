@@ -2297,7 +2297,7 @@ runtimeStatusHelperCoversCommonCases = do
                 pure $
                   terminalIsTerminal
                     && someDomain replay.replayState == IssuePlanning
-                    && isTerminalPhase (somePhase replay.replayState)
+                    && isTerminalState replay.replayState
             }
   exists <- doesDirectoryExist stateDir
   when exists (removePathForcibly stateDir)
