@@ -234,6 +234,14 @@ step (PrCheckingReviews config (WorkerIdle workerThreadId) _reviewer) (NoReviewT
   Decision
     (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
     [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
+step (PrVerifyingReviewFix config _oldEvidence _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
+  Decision
+    (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
+    [SomeEffect (StartWorkerTurn (activeThreadId activeTurn))]
+step (PrVerifyingReviewFix config _oldEvidence (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
+  Decision
+    (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
+    [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
 step (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) _reviewer) (StartReviewFixVerification reviewTargetSha activeTurn) =
   Decision
     (PrReviewingClean config reviewTargetSha (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn))

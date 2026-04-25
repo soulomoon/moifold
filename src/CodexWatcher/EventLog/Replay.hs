@@ -101,6 +101,10 @@ applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle worker
   fromDecision (step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
   fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
+applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
+  fromDecision (step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId)))
+applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
+  fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
 applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence _worker (ReviewerIdle reviewerThread))) (PrReviewFixVerificationStarted _eventEvidence reviewTargetSha turnId) =
   fromDecision (step state (StartReviewFixVerification reviewTargetSha (ActiveTurn reviewerThread turnId)))
 applyEvent (SomeWatcherState state@PrFixingReviews {}) PrReviewFixCompleted =
