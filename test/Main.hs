@@ -141,7 +141,8 @@ import RuntimeSpec
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrRequestChangesBlocksReview
-  , prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
+  , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
@@ -287,6 +288,7 @@ data EffectTag
   | CloseIssueTag
   | ResolveReviewThreadTag
   | RequestChangesReviewTag
+  | DismissRequestChangesReviewTag
   | RecordIssuePlanTag
   | RecordPlanningGraphTag
   | RecordBlockedTag
@@ -313,6 +315,7 @@ effectTag = \case
   SomeEffect CloseIssue {} -> CloseIssueTag
   SomeEffect ResolveReviewThread {} -> ResolveReviewThreadTag
   SomeEffect RequestChangesReview {} -> RequestChangesReviewTag
+  SomeEffect DismissRequestChangesReview {} -> DismissRequestChangesReviewTag
   SomeEffect RecordIssuePlan {} -> RecordIssuePlanTag
   SomeEffect RecordPlanningGraph {} -> RecordPlanningGraphTag
   SomeEffect RecordBlocked {} -> RecordBlockedTag
@@ -1586,6 +1589,29 @@ prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks config workerThrea
             && lacksEffect MergePullRequestTag tick.prReviewTickEffects
         Left _ -> False
 
+prop_prReviewVerificationCleanDismissesSummaryRequestChanges :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
+prop_prReviewVerificationCleanDismissesSummaryRequestChanges config workerThread reviewerThread oldCommit reviewTarget turnId =
+  let evidence = reviewEvidenceFromSummaries ("GitHub reports reviewDecision=CHANGES_REQUESTED" :| []) oldCommit
+      cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
+      state =
+        SomeWatcherState
+          ( PrReviewingClean
+              config
+              reviewTarget
+              (Just evidence)
+              (WorkerIdle workerThread)
+              (ReviewerActive (ActiveTurn reviewerThread turnId))
+          )
+   in case prReviewObserve state (ObservedReviewerOutcome (ReviewerClean cleanEvidence [])) of
+        Right tick ->
+          prReviewTickEvent tick == PrReviewCleanFound cleanEvidence []
+            && somePhase tick.prReviewTickState == WaitingMergeability
+            && hasEffect DismissRequestChangesReviewTag tick.prReviewTickEffects
+            && hasEffect SleepUntilNextPollTag tick.prReviewTickEffects
+            && lacksEffect ReadReviewThreadsTag tick.prReviewTickEffects
+            && lacksEffect MergePullRequestTag tick.prReviewTickEffects
+        Left _ -> False
+
 prop_prReviewVerificationCleanRequiresResolvedThreadIds :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
 prop_prReviewVerificationCleanRequiresResolvedThreadIds config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
   let evidence = reviewEvidenceFromThreads (reviewThreadId :| []) oldCommit
@@ -2043,7 +2069,7 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
     , "outcome=incomplete with a non-empty reason"
     , "outcome=complete with a non-empty summary"
     ]
-    && reviewerPromptVersion == "haskell-pro-style-v5-blocking-review"
+    && reviewerPromptVersion == "haskell-pro-style-v6-no-self-approve"
 
 prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =
@@ -2167,7 +2193,7 @@ prop_effectInterpreterMergeUsesConfiguredRepoAndMethod prNumber cleanEvidence =
   let repo = RepoName "soulomoon/mlf2"
       config = (effectRuntimeConfig repo "/tmp/work" 40) {effectRuntimeMergeMethod = "squash"}
       compiled = compileEffectPlan config [SomeEffect (MergePullRequest prNumber cleanEvidence)]
-   in compiled.compiledActions == [PlannedCommand (GhPrApproveReviewAndMerge repo prNumber cleanEvidence "squash")]
+   in compiled.compiledActions == [PlannedCommand (GhPrCleanReviewAndMerge repo prNumber cleanEvidence "squash")]
 
 prop_actionExecutorDryRunPreservesActionOrder :: Bool
 prop_actionExecutorDryRunPreservesActionOrder =
@@ -3099,7 +3125,7 @@ observedDaemonTickPreMergeGateRechecksWhenHeadChanged = do
       pure False
  where
   isMerge = \case
-    FakeCommand GhPrApproveReviewAndMerge {} -> True
+    FakeCommand GhPrCleanReviewAndMerge {} -> True
     _ -> False
 
 observedDaemonTickPreMergeGateMergesWhenClean :: IO Bool
@@ -3165,7 +3191,7 @@ observedDaemonTickPreMergeGateMergesWhenClean = do
       pure False
  where
   isMerge = \case
-    FakeCommand GhPrApproveReviewAndMerge {} -> True
+    FakeCommand GhPrCleanReviewAndMerge {} -> True
     _ -> False
 
 observedDaemonTickPreMergeGateWaitsWhenUnstable :: IO Bool
@@ -3220,7 +3246,7 @@ observedDaemonTickPreMergeGateWaitsWhenUnstable = do
       pure False
  where
   isMerge = \case
-    FakeCommand GhPrApproveReviewAndMerge {} -> True
+    FakeCommand GhPrCleanReviewAndMerge {} -> True
     _ -> False
   isBlockWrite = \case
     FakeWriteJson path _ -> path == "/tmp/work/.watcher/block-state.json"
@@ -4839,6 +4865,7 @@ main = do
       , quickCheckResult prop_prReviewWatcherWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_prReviewWatcherCleanReviewerWaitsForMergeability
       , quickCheckResult prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks
+      , quickCheckResult prop_prReviewVerificationCleanDismissesSummaryRequestChanges
       , quickCheckResult prop_prReviewVerificationCleanRequiresResolvedThreadIds
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
       , quickCheckResult prop_runtimeGitPushDryRunNeverForces
@@ -4851,7 +4878,8 @@ main = do
       , quickCheckResult prop_runtimeGhPrCreateKeepsStdoutJsonOnly
       , quickCheckResult prop_runtimeGhPrBodyUpdateUsesPlanFile
       , quickCheckResult prop_runtimeGhPrRequestChangesBlocksReview
-      , quickCheckResult prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge
+      , quickCheckResult prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
+      , quickCheckResult prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
       , quickCheckResult prop_ghGitParsesRemoteIssueView

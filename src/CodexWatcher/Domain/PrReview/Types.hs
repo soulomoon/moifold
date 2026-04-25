@@ -7,6 +7,7 @@ module CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceFromSummaries
   , reviewEvidenceFromParts
   , reviewEvidenceFromThreads
+  , reviewEvidenceHasSummaries
   , reviewEvidenceSummaries
   , reviewEvidenceThreadIds
   , CleanReviewEvidence (..)
@@ -57,6 +58,10 @@ reviewEvidenceThreadIds evidence =
 reviewEvidenceSummaries :: ReviewEvidence -> [Text]
 reviewEvidenceSummaries evidence =
   [summary | ReviewSummaryFinding summary <- NonEmpty.toList (reviewFindings evidence)]
+
+reviewEvidenceHasSummaries :: ReviewEvidence -> Bool
+reviewEvidenceHasSummaries =
+  not . null . reviewEvidenceSummaries
 
 data CleanReviewEvidence = CleanReviewEvidence
   { cleanReviewCommit :: CommitSha

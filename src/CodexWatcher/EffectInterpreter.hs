@@ -144,6 +144,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
     RequestChangesReview prConfig evidence ->
       unchanged [PlannedCommand (GhPrRequestChanges prConfig evidence)]
+    DismissRequestChangesReview prConfig evidence ->
+      unchanged [PlannedCommand (GhPrDismissRequestChanges prConfig evidence)]
     RecordIssuePlan issueConfig prNumber planMarkdown ->
       unchanged [PlannedWriteText (runtimeStateDirFile config.effectRuntimeStateDir "issue-plan.md") (issuePlanFileText issueConfig prNumber planMarkdown)]
     RecordPlanningGraph graph ->
@@ -151,7 +153,7 @@ compileEffect config requestId (SomeEffect effect) =
     RecordBlocked reason ->
       unchanged [PlannedWriteJson (runtimeStateDirFile config.effectRuntimeStateDir "block-state.json") (blockedStateJson reason)]
     MergePullRequest prNumber evidence ->
-      unchanged [PlannedCommand (GhPrApproveReviewAndMerge config.effectRuntimeRepo prNumber evidence config.effectRuntimeMergeMethod)]
+      unchanged [PlannedCommand (GhPrCleanReviewAndMerge config.effectRuntimeRepo prNumber evidence config.effectRuntimeMergeMethod)]
     StopDaemon ->
       unchanged [PlannedStopDaemon]
     SleepUntilNextPoll ->

@@ -41,6 +41,7 @@ data Effect (mutability :: Mutability) where
   CloseIssue :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
   RequestChangesReview :: PrConfig -> ReviewEvidence -> Effect 'CanMutateGitHub
+  DismissRequestChangesReview :: PrConfig -> CleanReviewEvidence -> Effect 'CanMutateGitHub
   RecordIssuePlan :: IssueConfig -> PrNumber -> Text -> Effect 'CanMutateLocal
   RecordPlanningGraph :: PlanningGraph -> Effect 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal

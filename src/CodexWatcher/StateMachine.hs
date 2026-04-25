@@ -25,6 +25,7 @@ import CodexWatcher.Domain.PrReview.Types
   , MergeCommit
   , PrConfig (..)
   , ReviewEvidence (..)
+  , reviewEvidenceHasSummaries
   , reviewEvidenceThreadIds
   )
 import Data.Foldable qualified as Foldable
@@ -259,6 +260,11 @@ step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle r
   Decision
     (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
     [SomeEffect (ReadReviewThreads config)]
+step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds)
+  | reviewEvidenceHasSummaries verification =
+      Decision
+        (PrWaitingForMergeability config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+        (resolveReviewThreads (Just verification) resolvedThreadIds <> [SomeEffect (DismissRequestChangesReview config evidence), SomeEffect SleepUntilNextPoll])
 step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean _evidence resolvedThreadIds) =
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))

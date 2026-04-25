@@ -39,7 +39,7 @@ renderTemplate template variables =
 
 reviewerPromptVersion :: Text
 reviewerPromptVersion =
-  "haskell-pro-style-v5-blocking-review"
+  "haskell-pro-style-v6-no-self-approve"
 
 agentPrincipleFrame :: Text -> Text -> [Text] -> [Text] -> Text
 agentPrincipleFrame role mission hardConstraints outputContract =
@@ -263,7 +263,7 @@ prReviewReviewerThreadDeveloperTemplate =
         ]
         [ "If you find actionable line-addressable problems or worthwhile simplifications, add inline GitHub PR review comments that create unresolved review threads."
         , "If a required task/plan/issue gap is not line-addressable in the PR diff, record it in findings_summary instead of returning clean."
-        , "If there are no actionable issues or suggestions and the implementation satisfies the PR plan and linked issue, record a clean LGTM state; the watcher script submits an APPROVE review and merge."
+        , "If there are no actionable issues or suggestions and the implementation satisfies the PR plan and linked issue, record a clean LGTM state; the watcher script may dismiss its own blocking request-changes review, submits a non-approval clean comment, and merges."
         ]
         <> Text.unlines
           [ ""

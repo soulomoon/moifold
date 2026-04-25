@@ -10,7 +10,8 @@ module RuntimeSpec
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhPrRequestChangesBlocksReview
-  , prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
+  , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
@@ -57,7 +58,8 @@ runtimeCommandExamples =
   , GhResolveReviewThread (ReviewThreadId "PRRT_test")
   , GhPrRequestChanges (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (reviewEvidenceFromSummaries ("tests fail" :| []) (CommitSha "abc123"))
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
-  , GhPrApproveReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
+  , GhPrDismissRequestChanges (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (CleanReviewEvidence (CommitSha "abc123") "LGTM")
+  , GhPrCleanReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
   , CheckNonEmptyFile "/tmp/work/.watcher/issue-plan.md"
   , GitBranchCurrent "/tmp/work"
   , GitRevParseHead "/tmp/work"
@@ -255,10 +257,32 @@ prop_runtimeGhPrRequestChangesBlocksReview prNumber =
         && unCommitSha commit `Text.isInfixOf` spec.stdin
         && finding `Text.isInfixOf` spec.stdin
 
-prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
-prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge prNumber evidence =
+prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker :: PrNumber -> CleanReviewEvidence -> Bool
+prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker prNumber evidence =
   let repo = RepoName "soulomoon/mlf2"
-      spec = renderRuntimeCommand (GhPrApproveReviewAndMerge repo prNumber evidence "squash")
+      config = PrConfig repo prNumber (BranchName "codex/example")
+      spec = renderRuntimeCommand (GhPrDismissRequestChanges config evidence)
+      script = Text.pack (spec.args !! 1)
+   in spec.command == "bash"
+        && take 2 spec.args == ["-lc", Text.unpack script]
+        && spec.args
+          == [ "-lc"
+             , Text.unpack script
+             , "codex-watcher-gh-pr-dismiss-request-changes"
+             , show (unPrNumber prNumber)
+             , Text.unpack (unRepoName repo)
+             , Text.unpack (unCommitSha (cleanReviewCommit evidence))
+             ]
+        && "gh api graphql" `Text.isInfixOf` script
+        && "CHANGES_REQUESTED" `Text.isInfixOf` script
+        && "Submitted by Haskell PR review watcher as a blocking request-changes review." `Text.isInfixOf` script
+        && "dismissals" `Text.isInfixOf` script
+        && not ("--approve" `Text.isInfixOf` script)
+
+prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
+prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge prNumber evidence =
+  let repo = RepoName "soulomoon/mlf2"
+      spec = renderRuntimeCommand (GhPrCleanReviewAndMerge repo prNumber evidence "squash")
       script = Text.pack (spec.args !! 1)
       reviewIndex = Text.breakOn "gh pr review" script
       mergeIndex = Text.breakOn "gh pr merge" script
@@ -267,19 +291,20 @@ prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge prNumber evidence =
         && spec.args
           == [ "-lc"
              , Text.unpack script
-             , "codex-watcher-gh-pr-approve-review-and-merge"
+             , "codex-watcher-gh-pr-clean-review-and-merge"
              , show (unPrNumber prNumber)
              , Text.unpack (unRepoName repo)
              , "--squash"
              ]
         && "set -euo pipefail" `Text.isInfixOf` script
         && "gh pr review" `Text.isInfixOf` script
-        && "--approve --body-file -" `Text.isInfixOf` script
+        && "--comment --body-file -" `Text.isInfixOf` script
+        && not ("--approve" `Text.isInfixOf` script)
         && "gh pr merge" `Text.isInfixOf` script
         && Text.length (fst reviewIndex) < Text.length (fst mergeIndex)
         && cleanReviewComment evidence `Text.isInfixOf` spec.stdin
         && unCommitSha (cleanReviewCommit evidence) `Text.isInfixOf` spec.stdin
-        && "Submitted by Haskell PR review watcher as an approving clean review before merge." `Text.isInfixOf` spec.stdin
+        && "Submitted by Haskell PR review watcher as a clean review comment before merge." `Text.isInfixOf` spec.stdin
 
 prop_runtimeKillZeroOnlyChecksPid :: ThreadId -> Bool
 prop_runtimeKillZeroOnlyChecksPid threadId =

@@ -173,12 +173,24 @@ renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
     ]
     Nothing
     ""
-renderRuntimeCommand (GhPrApproveReviewAndMerge repo prNumber evidence mergeMethod) =
+renderRuntimeCommand (GhPrDismissRequestChanges config evidence) =
   RuntimeCommandSpec
     "bash"
     [ "-lc"
-    , Text.unpack approveReviewAndMergeScript
-    , "codex-watcher-gh-pr-approve-review-and-merge"
+    , Text.unpack dismissRequestChangesScript
+    , "codex-watcher-gh-pr-dismiss-request-changes"
+    , show (unPrNumber (prNumber config))
+    , Text.unpack (unRepoName (prRepo config))
+    , Text.unpack (unCommitSha (cleanReviewCommit evidence))
+    ]
+    Nothing
+    ""
+renderRuntimeCommand (GhPrCleanReviewAndMerge repo prNumber evidence mergeMethod) =
+  RuntimeCommandSpec
+    "bash"
+    [ "-lc"
+    , Text.unpack cleanReviewAndMergeScript
+    , "codex-watcher-gh-pr-clean-review-and-merge"
     , show (unPrNumber prNumber)
     , Text.unpack (unRepoName repo)
     , mergeFlag mergeMethod
@@ -347,15 +359,33 @@ reviewThreadsQuery :: String
 reviewThreadsQuery =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,body,path,line,author{login}}}}}}}}"
 
-approveReviewAndMergeScript :: Text
-approveReviewAndMergeScript =
+cleanReviewAndMergeScript :: Text
+cleanReviewAndMergeScript =
   Text.unlines
     [ "set -euo pipefail"
     , "pr_number=\"$1\""
     , "repo=\"$2\""
     , "merge_flag=\"$3\""
-    , "gh pr review \"$pr_number\" --repo \"$repo\" --approve --body-file -"
+    , "gh pr review \"$pr_number\" --repo \"$repo\" --comment --body-file -"
     , "gh pr merge \"$pr_number\" --repo \"$repo\" \"$merge_flag\""
+    ]
+
+dismissRequestChangesScript :: Text
+dismissRequestChangesScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "pr_number=\"$1\""
+    , "repo=\"$2\""
+    , "reviewed_commit=\"$3\""
+    , "owner=\"${repo%%/*}\""
+    , "name=\"${repo#*/}\""
+    , "viewer=\"$(gh api user --jq .login)\""
+    , "query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(last:100){nodes{databaseId state body author{login}}}}}}'"
+    , "review_ids=\"$(gh api graphql -f owner=\"$owner\" -f name=\"$name\" -F number=\"$pr_number\" -f query=\"$query\" --jq \".data.repository.pullRequest.reviews.nodes[] | select(.state == \\\"CHANGES_REQUESTED\\\" and .author.login == \\\"$viewer\\\" and (.body // \\\"\\\" | contains(\\\"Submitted by Haskell PR review watcher as a blocking request-changes review.\\\"))) | .databaseId\")\""
+    , "for review_id in $review_ids; do"
+    , "  [ -n \"$review_id\" ] || continue"
+    , "  gh api --method PUT \"repos/$repo/pulls/$pr_number/reviews/$review_id/dismissals\" -f message=\"Resolved by watcher clean review at $reviewed_commit before merge.\" >/dev/null"
+    , "done"
     ]
 
 requestChangesReviewBody :: ReviewEvidence -> Text
@@ -386,7 +416,7 @@ cleanReviewBody evidence =
     , ""
     , "Reviewed commit: `" <> unCommitSha (cleanReviewCommit evidence) <> "`"
     , ""
-    , "Submitted by Haskell PR review watcher as an approving clean review before merge."
+    , "Submitted by Haskell PR review watcher as a clean review comment before merge."
     ]
 
 commandText :: CommandReport -> Text
