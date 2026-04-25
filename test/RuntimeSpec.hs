@@ -143,7 +143,7 @@ prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
              , "--state"
              , "all"
              , "--json"
-             , "number,title,headRefName,headRefOid,body,closingIssuesReferences,state"
+             , "number,title,headRefName,headRefOid,body,state"
              ]
 
 prop_runtimeGhPrChecksUsesRequiredCurrentCli :: RepoName -> PrNumber -> Bool

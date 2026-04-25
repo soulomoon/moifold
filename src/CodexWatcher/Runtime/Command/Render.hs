@@ -71,7 +71,7 @@ renderRuntimeCommand (GhPrListOpen repo) =
 renderRuntimeCommand (GhPrListByHead repo branch state) =
   RuntimeCommandSpec
     "gh"
-    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--head", Text.unpack (unBranchName branch), "--state", Text.unpack state, "--json", "number,title,headRefName,headRefOid,body,closingIssuesReferences,state"]
+    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--head", Text.unpack (unBranchName branch), "--state", Text.unpack state, "--json", "number,title,headRefName,headRefOid,body,state"]
     Nothing
     ""
 renderRuntimeCommand (GhPrView repo prNumber fields) =
