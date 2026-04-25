@@ -1853,6 +1853,18 @@ prop_defaultEffectRuntimeConfigUsesStructuredOutputSchemas =
              , Just "/tmp/work"
              , Just "/tmp/work"
              ]
+        && maybe
+          False
+          ( \input ->
+              promptContainsAll
+                input
+                [ "Read the PR body and linked issue"
+                , "Treat the PR body implementation plan as part of the review target"
+                , "Verify that the current head actually satisfies the PR plan and the linked issue acceptance criteria"
+                , "Do not report clean solely because the PR diff is empty"
+                ]
+          )
+          (actionTurnInputText (actions !! 4))
         && all (== Nothing) (map actionTurnCollaborationMode actions)
 
 prop_turnOutputSchemasRequireStructuredDetails :: Bool
@@ -1939,6 +1951,8 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           reviewerPrompt
           [ "dedicated English-only PR reviewer"
           , "add inline GitHub PR review comments"
+          , "PR body/implementation plan, linked issue"
+          , "Empty PR diffs are not automatically clean"
           , "Do not edit files, commit, push, resolve review threads, or submit an approval review"
           ]
         && promptContainsAll
@@ -2018,7 +2032,7 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
     , "outcome=incomplete with a non-empty reason"
     , "outcome=complete with a non-empty summary"
     ]
-    && reviewerPromptVersion == "haskell-pro-style-v3-agent-principle"
+    && reviewerPromptVersion == "haskell-pro-style-v4-task-completion"
 
 prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =

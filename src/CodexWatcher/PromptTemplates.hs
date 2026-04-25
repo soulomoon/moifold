@@ -39,7 +39,7 @@ renderTemplate template variables =
 
 reviewerPromptVersion :: Text
 reviewerPromptVersion =
-  "haskell-pro-style-v3-agent-principle"
+  "haskell-pro-style-v4-task-completion"
 
 agentPrincipleFrame :: Text -> Text -> [Text] -> [Text] -> Text
 agentPrincipleFrame role mission hardConstraints outputContract =
@@ -253,7 +253,7 @@ prReviewReviewerThreadDeveloperTemplate =
     "reviewer-thread-developer.md"
     ( agentPrincipleFrame
         "You are the dedicated English-only PR reviewer for {{repoFullName}}#{{prNumber}}."
-        "Review the target PR for concrete correctness, regression, test, and maintainability risks before the watcher merges it."
+        "Review the target PR for concrete correctness, regression, test, maintainability, and task-completion risks before the watcher merges it."
         [ "PR URL: {{prUrl}}."
         , "Your working directory is {{workdir}}."
         , "The PR branch is {{branchOrUnknownUseTools}}."
@@ -261,16 +261,18 @@ prReviewReviewerThreadDeveloperTemplate =
         , "Do not use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."
         ]
-        [ "If you find actionable problems or worthwhile simplifications, add inline GitHub PR review comments that create unresolved review threads."
-        , "If there are no actionable issues or suggestions, record a clean LGTM state; the watcher script submits the COMMENT review and merge."
+        [ "If you find actionable line-addressable problems or worthwhile simplifications, add inline GitHub PR review comments that create unresolved review threads."
+        , "If a required task/plan/issue gap is not line-addressable in the PR diff, report blocked or incomplete with a concrete reason instead of returning clean."
+        , "If there are no actionable issues or suggestions and the implementation satisfies the PR plan and linked issue, record a clean LGTM state; the watcher script submits the COMMENT review and merge."
         ]
         <> Text.unlines
           [ ""
           , "Review guidance:"
           , "- Use {{reviewerModel}}/{{reviewerEffort}} for review turns."
           , "- For Haskell code, use the `haskell-pro` skill as the review guideline. Read `/root/.codex/skills/haskell-pro/SKILL.md` before reviewing Haskell changes when that file is available."
-          , "- Inspect the PR diff and only the surrounding code needed to verify findings or suggestions."
+          , "- Inspect the PR diff, PR body/implementation plan, linked issue, and only the surrounding code needed to verify findings, suggestions, or task-completion claims."
           , "- Inline comments may cover bugs, regressions, missing tests, behavioral risks, style issues, refactoring opportunities, or simplification opportunities."
+          , "- Empty PR diffs are not automatically clean. If work landed in earlier prerequisite PRs, verify the current head still satisfies the PR plan and linked issue acceptance criteria."
           , "- Style/refactor/simplify comments must be concrete, local, and worth addressing; avoid subjective preference-only feedback."
           , "- Prefer precise inline review comments on changed lines and do not duplicate issues already covered by review history."
           ]
@@ -375,7 +377,7 @@ reviewerTemplate =
     "reviewer.md"
     ( agentPrincipleFrame
         "Scheduled PR reviewer tick for {{repoFullName}}#{{prNumber}}."
-        "Review PR https://github.com/{{repoFullName}}/pull/{{prNumber}} at head commit {{reviewTargetSha}} and report whether it has actionable findings."
+        "Review PR https://github.com/{{repoFullName}}/pull/{{prNumber}} at head commit {{reviewTargetSha}} and report whether it has actionable findings or fails to satisfy its PR plan or linked issue."
         [ "PR URL: https://github.com/{{repoFullName}}/pull/{{prNumber}}."
         , "Working directory: {{workdir}}."
         , "The working directory is already checked out to the PR branch at the review target commit; use it to inspect the PR changes and surrounding code."
@@ -385,13 +387,17 @@ reviewerTemplate =
         , "Do not edit files, commit, push, resolve review threads, submit an approval review, or use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."
         ]
-        [ "Use inline GitHub PR review comments for concrete issues on changed lines."
+        [ "Use inline GitHub PR review comments for concrete line-addressable issues on changed lines."
         , "Do not duplicate existing review comments."
+        , "If a task/plan/issue gap is not line-addressable in the PR diff, report blocked or incomplete with a concrete reason rather than returning clean."
         , "Report only through the active output schema."
         ]
         <> Text.unlines
           [ ""
           , "Review PR https://github.com/{{repoFullName}}/pull/{{prNumber}} at head commit {{reviewTargetSha}}."
+          , "Read the PR body and linked issue. Treat the PR body implementation plan as part of the review target."
+          , "Verify that the current head actually satisfies the PR plan and the linked issue acceptance criteria, even when the PR has no changed files against the base branch."
+          , "Do not report clean solely because the PR diff is empty. Empty diff is clean only if the planned behavior is already present and adequately validated at the review target commit."
           , ""
           , "Focus on actionable findings:"
           , "- correctness bugs"
@@ -400,14 +406,16 @@ reviewerTemplate =
           , "- unsafe edge cases"
           , "- simplification opportunities"
           , "- type-safety or architecture issues worth addressing"
+          , "- implementation-plan or linked-issue requirements that are not actually satisfied"
           , ""
           , "{{verificationInstructions}}"
           , ""
-          , "Use inline GitHub PR review comments for concrete issues on changed lines."
+          , "Use inline GitHub PR review comments for concrete line-addressable issues on changed lines."
+          , "For concrete task-completion gaps with no changed line to comment on, report blocked or incomplete with a specific reason; do not create a fake clean review."
           , "Do not duplicate existing review comments."
           , "Do not edit files, commit, push, approve, or resolve threads."
           , ""
-          , "If there are no actionable findings, report a clean review."
+          , "If there are no actionable findings and the implementation satisfies the PR plan and linked issue, report a clean review."
           , "If you cannot complete the review, report blocked/incomplete with a concrete reason."
           , ""
           , "Return only a value matching the provided output schema."
