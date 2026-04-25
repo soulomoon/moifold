@@ -79,6 +79,8 @@ applyEvent (SomeWatcherState (PrCheckingReviews config (WorkerIdle _oldWorker) (
   Right (SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
 applyEvent (SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
   Right (SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
+applyEvent (SomeWatcherState (PrVerifyingReviewFix config evidence (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
+  Right (SomeWatcherState (PrVerifyingReviewFix config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
 applyEvent (SomeWatcherState state@PlanningReady {}) (IssuePlanningTurnStarted plannerThread turnId) =
   fromDecision (step state (StartPlanningTurn (ActiveTurn plannerThread turnId)))
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningIssuesRequested requests) =

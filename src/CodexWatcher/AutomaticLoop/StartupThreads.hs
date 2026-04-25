@@ -118,5 +118,6 @@ idleIssueConfig = \case
 idlePrReviewConfig :: SomeWatcherState -> Maybe PrConfig
 idlePrReviewConfig = \case
   SomeWatcherState (PrCheckingReviews config (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
+  SomeWatcherState (PrVerifyingReviewFix config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
   SomeWatcherState (PrWaitingForMergeability config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
   _ -> Nothing

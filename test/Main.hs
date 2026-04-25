@@ -576,6 +576,23 @@ prop_eventLogRefreshesIdlePrReviewThreads config oldWorker oldReviewer newWorker
         _ ->
           False
 
+prop_eventLogRefreshesPrReviewVerificationThreads :: PrConfig -> ThreadId -> ThreadId -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> TurnId -> Bool
+prop_eventLogRefreshesPrReviewVerificationThreads config oldWorker oldReviewer newWorker newReviewer reviewThreadId reviewedCommit reviewTarget workerTurn reviewerTurn =
+  let evidence = ReviewEvidence (reviewThreadId :| []) reviewedCommit
+   in replaySatisfies
+        [ PrReviewInitialized config oldWorker oldReviewer
+        , PrReviewUnresolvedFound (reviewThreadId :| []) reviewedCommit workerTurn
+        , PrReviewFixCompleted
+        , PrReviewThreadsRefreshed newWorker newReviewer
+        , PrReviewFixVerificationStarted evidence reviewTarget reviewerTurn
+        ]
+        \replay ->
+          case replay.replayState of
+            SomeWatcherState (PrReviewingClean _ _ (Just _) (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
+              workerThread == newWorker && activeTurn.activeThreadId == newReviewer
+            _ ->
+              False
+
 prop_eventLogCreatePrBeforeIssuePlanStartsPlanReady :: IssueConfig -> ThreadId -> PrNumber -> Bool
 prop_eventLogCreatePrBeforeIssuePlanStartsPlanReady config workerThread prNumber =
   replaySatisfies
@@ -4589,6 +4606,7 @@ main = do
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
       , quickCheckResult prop_eventLogRefreshesIdleIssueWorkerThread
       , quickCheckResult prop_eventLogRefreshesIdlePrReviewThreads
+      , quickCheckResult prop_eventLogRefreshesPrReviewVerificationThreads
       , quickCheckResult prop_eventLogCreatePrBeforeIssuePlanStartsPlanReady
       , quickCheckResult prop_eventLogCannotUpdatePrBodyBeforePlan
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforeImplementationTurn
