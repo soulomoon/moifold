@@ -116,14 +116,12 @@ validateCompleteReviewerTurnReport expectedCommit report
               ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
           | report.reviewerReportAddedCommentCount /= Just 0 ->
               ReviewerIncomplete "clean review must record added_review_comment_count as 0"
-          | report.reviewerReportLgtmComment /= Just "LGTM" ->
-              ReviewerIncomplete "clean review must record lgtm_comment as LGTM"
           | not (null (requiredReviewThreadIds report.reviewerReportRemainingThreadIds)) ->
               ReviewerIncomplete "clean review must not record remaining_review_thread_ids"
           | hasOverlappingResolution report ->
               ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
           | otherwise ->
-              ReviewerClean (CleanReviewEvidence expectedCommit "LGTM") (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+              ReviewerClean (CleanReviewEvidence expectedCommit (reviewerCleanComment report)) (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
         "comments_added"
           | report.reviewerReportCommit /= Just expectedCommit ->
               ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
@@ -176,6 +174,12 @@ requiredText =
 requiredReviewThreadIds :: Maybe [ReviewThreadId] -> [ReviewThreadId]
 requiredReviewThreadIds =
   maybe [] id
+
+reviewerCleanComment :: ReviewerTurnReport -> Text
+reviewerCleanComment report =
+  case Text.strip <$> report.reviewerReportLgtmComment of
+    Just comment | not (Text.null comment) -> comment
+    _ -> "LGTM"
 
 hasOverlappingResolution :: ReviewerTurnReport -> Bool
 hasOverlappingResolution report =
