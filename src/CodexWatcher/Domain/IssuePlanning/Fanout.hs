@@ -11,6 +11,7 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   , ReadyIssueStatus (..)
   , defaultIssuePlanningFanoutConfig
   , issueImplementerConfigJson
+  , issueImplementerGitRemoteUrl
   , issueImplementerLaunchPlan
   , issueImplementerStateDir
   , issueImplementerWorkdirSetupCommands
@@ -186,10 +187,15 @@ issueImplementerWorkdirSetupCommands launch =
     Nothing -> []
     Just workdir ->
       [ RawCommand "gh" ["repo", "clone", Text.unpack (unRepoName launch.launchIssueConfig.issueRepo), workdir] Nothing
+      , RawCommand "git" ["remote", "set-url", "origin", Text.unpack (issueImplementerGitRemoteUrl launch.launchIssueConfig.issueRepo)] (Just workdir)
       , RawCommand "git" ["checkout", "-B", Text.unpack (unBranchName launch.launchIssueConfig.issueBranch)] (Just workdir)
       , RawCommand "git" ["config", "user.email", "codex-watcher@users.noreply.github.com"] (Just workdir)
       , RawCommand "git" ["config", "user.name", "codex-watcher"] (Just workdir)
       ]
+
+issueImplementerGitRemoteUrl :: RepoName -> Text
+issueImplementerGitRemoteUrl repo =
+  "https://github.com/" <> unRepoName repo <> ".git"
 
 parseIssueImplementerConfigIssue :: Value -> Either Text (RepoName, IssueNumber)
 parseIssueImplementerConfigIssue value =

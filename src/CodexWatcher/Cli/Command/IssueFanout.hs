@@ -236,6 +236,7 @@ prepareIssueImplementerWorkdir launch =
       if exists
         then do
           ensureLaunchCommand launch (RawCommand "git" ["rev-parse", "--is-inside-work-tree"] (Just workdir))
+          ensureLaunchCommand launch (RawCommand "git" ["remote", "set-url", "origin", Text.unpack (issueImplementerGitRemoteUrl launch.launchIssueConfig.issueRepo)] (Just workdir))
           ensureLaunchCommand launch (RawCommand "git" ["checkout", "-B", Text.unpack (unBranchName launch.launchIssueConfig.issueBranch)] (Just workdir))
           ensureLaunchCommand launch (RawCommand "git" ["config", "user.email", "codex-watcher@users.noreply.github.com"] (Just workdir))
           ensureLaunchCommand launch (RawCommand "git" ["config", "user.name", "codex-watcher"] (Just workdir))

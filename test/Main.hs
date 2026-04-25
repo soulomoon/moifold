@@ -1063,6 +1063,7 @@ prop_issuePlanningFanoutBuildsLaunchPlans =
             && launchWorkdir firstLaunch == Just "/tmp/worktrees/owner_name__issue1"
             && issueImplementerWorkdirSetupCommands firstLaunch
               == [ RawCommand "gh" ["repo", "clone", "owner/name", "/tmp/worktrees/owner_name__issue1"] Nothing
+                 , RawCommand "git" ["remote", "set-url", "origin", "https://github.com/owner/name.git"] (Just "/tmp/worktrees/owner_name__issue1")
                  , RawCommand "git" ["checkout", "-B", "codex/issue-1"] (Just "/tmp/worktrees/owner_name__issue1")
                  , RawCommand "git" ["config", "user.email", "codex-watcher@users.noreply.github.com"] (Just "/tmp/worktrees/owner_name__issue1")
                  , RawCommand "git" ["config", "user.name", "codex-watcher"] (Just "/tmp/worktrees/owner_name__issue1")
