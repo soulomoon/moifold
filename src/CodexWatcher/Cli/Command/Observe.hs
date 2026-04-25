@@ -114,7 +114,7 @@ observationSpecs =
         ObservedReviewHandoffStarted <$> requiredValue "--pr-number" cli.observeCliPrNumber
     )
   , issue "implementation-completed" ( \cli ->
-        ObservedImplementationCompleted <$> requiredValue "--pr-number" cli.observeCliPrNumber
+        (`ObservedImplementationCompleted` Nothing) <$> requiredValue "--pr-number" cli.observeCliPrNumber
     )
   , issue "pr-merged" ( \cli ->
         ObservedPullRequestMerged <$> requiredValue "--pr-number" cli.observeCliPrNumber

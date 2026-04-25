@@ -40,7 +40,13 @@ import CodexWatcher.Runtime.Paths
   , runtimeWorkdirPath
   )
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
-import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput, reviewerVerificationTurnInput)
+import CodexWatcher.TurnOutput
+  ( issueFinalReviewTurnInput
+  , issueFinalReviewTurnOutputSchema
+  , issuePlanModeDeveloperInstructions
+  , reviewerTurnInput
+  , reviewerVerificationTurnInput
+  )
 import Data.Aeson
   ( Value
   , object
@@ -130,6 +136,8 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest (reviewerTurnRuntimeConfig config prConfig reviewTargetSha) threadId
     StartReviewerVerificationTurn prConfig evidence reviewTargetSha threadId ->
       oneAppServerRequest (reviewerVerificationTurnRuntimeConfig config prConfig evidence reviewTargetSha) threadId
+    StartIssueFinalReviewTurn issueConfig prNumber reviewTargetSha threadId ->
+      oneAppServerRequest (issueFinalReviewTurnRuntimeConfig config issueConfig prNumber reviewTargetSha) threadId
     PushBranch branch ->
       unchanged [PlannedCommand (GitPush (runtimeWorkdirPath config.effectRuntimeWorkdir) branch)]
     CreateIssue repo request ->
@@ -138,6 +146,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhCreatePullRequest (runtimeWorkdirPath config.effectRuntimeWorkdir) issueConfig)]
     UpdatePullRequestBody issueConfig prNumber ->
       unchanged [PlannedCommand (GhUpdatePullRequestBody (runtimeWorkdirPath config.effectRuntimeWorkdir) issueConfig prNumber (runtimeStateDirFile config.effectRuntimeStateDir "issue-plan.md"))]
+    UpdateIssueFollowUp issueConfig evidence ->
+      unchanged [PlannedCommand (GhIssueFollowUp issueConfig evidence)]
     CloseIssue issueConfig prNumber ->
       unchanged [PlannedCommand (GhIssueClose issueConfig prNumber)]
     ResolveReviewThread reviewThreadId ->
@@ -212,6 +222,19 @@ reviewerVerificationTurnRuntimeConfig config prConfig evidence reviewTargetSha =
           prConfig
           evidence
           reviewTargetSha
+    }
+
+issueFinalReviewTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> PrNumber -> CommitSha -> TurnRuntimeConfig
+issueFinalReviewTurnRuntimeConfig config issueConfig prNumber reviewTargetSha =
+  config.effectRuntimeReviewerTurn
+    { turnRuntimeInput =
+        issueFinalReviewTurnInput
+          (runtimeWorkdirPath config.effectRuntimeWorkdir)
+          (runtimeStateDirFile config.effectRuntimeStateDir "final-review-state.json")
+          issueConfig
+          prNumber
+          reviewTargetSha
+    , turnRuntimeOutputSchema = Just issueFinalReviewTurnOutputSchema
     }
 
 issuePlanTurnRuntimeConfig :: EffectRuntimeConfig -> IssueConfig -> PrNumber -> TurnRuntimeConfig

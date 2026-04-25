@@ -68,6 +68,12 @@ renderRuntimeCommand (GhPrListOpen repo) =
     ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid,body"]
     Nothing
     ""
+renderRuntimeCommand (GhPrListByHead repo branch state) =
+  RuntimeCommandSpec
+    "gh"
+    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--head", Text.unpack (unBranchName branch), "--state", Text.unpack state, "--json", "number,title,headRefName,headRefOid,body,closingIssuesReferences,state"]
+    Nothing
+    ""
 renderRuntimeCommand (GhPrView repo prNumber fields) =
   RuntimeCommandSpec
     "gh"
@@ -135,6 +141,17 @@ renderRuntimeCommand (GhUpdatePullRequestBody workdir config prNumber planPath) 
     ]
     (Just workdir)
     ""
+renderRuntimeCommand (GhIssueFollowUp config evidence) =
+  RuntimeCommandSpec
+    "bash"
+    [ "-lc"
+    , Text.unpack issueFollowUpScript
+    , "codex-watcher-gh-issue-follow-up"
+    , Text.unpack (unRepoName (issueRepo config))
+    , show (unIssueNumber (issueNumber config))
+    ]
+    Nothing
+    (issueFollowUpBody config evidence)
 renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
   RuntimeCommandSpec
     "gh"
@@ -341,6 +358,34 @@ closeIssueScript =
     , "  gh issue close \"$issue\" --repo \"$repo\" --reason completed >/dev/null"
     , "fi"
     , "printf '{\"status\":\"closed\",\"issueNumber\":%s,\"prNumber\":%s}\\n' \"$issue\" \"$pr\""
+    ]
+
+issueFollowUpScript :: Text
+issueFollowUpScript =
+  Text.unlines
+    [ "set -euo pipefail"
+    , "repo=\"$1\""
+    , "issue=\"$2\""
+    , "state=$(gh issue view \"$issue\" --repo \"$repo\" --json state --jq '.state')"
+    , "if [ \"$state\" = \"CLOSED\" ]; then"
+    , "  gh issue reopen \"$issue\" --repo \"$repo\" >/dev/null"
+    , "fi"
+    , "gh issue comment \"$issue\" --repo \"$repo\" --body-file - >/dev/null"
+    , "printf '{\"status\":\"follow_up_recorded\",\"issueNumber\":%s}\\n' \"$issue\""
+    ]
+
+issueFollowUpBody :: IssueConfig -> ReviewEvidence -> Text
+issueFollowUpBody config evidence =
+  Text.unlines
+    [ "Post-merge verification found rework is required for #" <> Text.pack (show (unIssueNumber config.issueNumber)) <> "."
+    , ""
+    , "Reviewed commit: `" <> unCommitSha evidence.reviewedCommit <> "`"
+    , "Next branch: `" <> unBranchName config.issueBranch <> "`"
+    , ""
+    , "Findings:"
+    , reviewFindingBullets evidence
+    , ""
+    , "The watcher will re-enter implementation on this branch instead of marking the issue complete."
     ]
 
 repoOwnerName :: RepoName -> (Text, Text)

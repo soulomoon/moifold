@@ -89,16 +89,37 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
   IssueHandoffReady
     :: IssueConfig
     -> PrNumber
+    -> WorkerThread 'Idle
+    -> Maybe (ReviewerThread 'Idle)
     -> WatcherState 'IssueImplement 'Implementing
 
   IssueHandoffInitialized
     :: IssueConfig
     -> PrNumber
+    -> WorkerThread 'Idle
+    -> Maybe (ReviewerThread 'Idle)
     -> WatcherState 'IssueImplement 'Implementing
 
   IssueWaitingForPrMerge
     :: IssueConfig
     -> PrNumber
+    -> WorkerThread 'Idle
+    -> Maybe (ReviewerThread 'Idle)
+    -> WatcherState 'IssueImplement 'Implementing
+
+  IssuePostMergeReviewReady
+    :: IssueConfig
+    -> PrNumber
+    -> WorkerThread 'Idle
+    -> Maybe (ReviewerThread 'Idle)
+    -> WatcherState 'IssueImplement 'Implementing
+
+  IssuePostMergeReviewing
+    :: IssueConfig
+    -> PrNumber
+    -> WorkerThread 'Idle
+    -> CommitSha
+    -> ReviewerThread 'Active
     -> WatcherState 'IssueImplement 'Implementing
 
   IssueWaitingForIssueClose

@@ -5,6 +5,8 @@ module CodexWatcher.TurnOutput
   ( issueImplementerThreadDeveloperInstructions
   , issueImplementationTurnOutputSchema
   , issueImplementationTurnInput
+  , issueFinalReviewTurnInput
+  , issueFinalReviewTurnOutputSchema
   , issuePlanTurnOutputSchema
   , issuePlanModeDeveloperInstructions
   , issuePlanTurnInput
@@ -137,6 +139,37 @@ reviewerTurnOutputSchema =
     , ("blocked_reason", nullableStringField)
     , ("resolved_review_thread_ids", stringArrayField)
     , ("remaining_review_thread_ids", stringArrayField)
+    ]
+
+issueFinalReviewTurnOutputSchema :: Value
+issueFinalReviewTurnOutputSchema =
+  strictObjectSchema
+    [ "completion_status"
+    , "reviewed_commit_sha"
+    , "reviewer_prompt_version"
+    , "issue_solved"
+    , "plan_implemented"
+    , "tests_sufficient"
+    , "rework_required"
+    , "findings_summary"
+    , "blocked_reason"
+    , "lgtm_comment"
+    ]
+    [ ( "completion_status"
+      , object
+          [ "type" .= ("string" :: Text)
+          , "enum" .= (["clean", "rework_required", "incomplete", "blocked"] :: [Text])
+          ]
+      )
+    , ("reviewed_commit_sha", stringField)
+    , ("reviewer_prompt_version", stringField)
+    , ("issue_solved", booleanField)
+    , ("plan_implemented", booleanField)
+    , ("tests_sufficient", booleanField)
+    , ("rework_required", booleanField)
+    , ("findings_summary", stringArrayField)
+    , ("blocked_reason", nullableStringField)
+    , ("lgtm_comment", nullableStringField)
     ]
 
 structuredTurnOutcomeInstructions :: Text
@@ -272,6 +305,33 @@ reviewerTurnInput :: FilePath -> FilePath -> PrConfig -> CommitSha -> Text
 reviewerTurnInput workdir reviewerStatePath config reviewTargetSha =
   reviewerTurnInputWithVerification workdir reviewerStatePath config reviewTargetSha noVerificationInstructions
 
+issueFinalReviewTurnInput :: FilePath -> FilePath -> IssueConfig -> PrNumber -> CommitSha -> Text
+issueFinalReviewTurnInput workdir reviewerStatePath config prNumber reviewTargetSha =
+  Text.unlines
+    [ "Final-review the merged implementation for issue #" <> Text.pack (show (unIssueNumber config.issueNumber)) <> " and PR #" <> Text.pack (show (unPrNumber prNumber)) <> "."
+    , ""
+    , "Repository: " <> unRepoName config.issueRepo
+    , "Issue: " <> issueUrl config.issueRepo config.issueNumber
+    , "PR: " <> prUrl config.issueRepo prNumber
+    , "Workdir: " <> Text.pack workdir
+    , "Branch used for the implementation: " <> unBranchName config.issueBranch
+    , "Review target commit: " <> unCommitSha reviewTargetSha
+    , "Reviewer prompt version: " <> reviewerPromptVersion
+    , "Reviewer state path: " <> Text.pack reviewerStatePath
+    , ""
+    , "Task:"
+    , "- Inspect the issue body/comments, PR body, PR plan, merged implementation, tests, and relevant local code."
+    , "- Decide whether the implementation truly solved the issue and whether the PR plan was actually implemented."
+    , "- Do not treat an empty PR diff against the base branch as clean by itself; post-merge review must validate behavior against the issue and PR plan."
+    , "- If the issue is not solved, the plan is not implemented, tests are insufficient, or follow-up work is needed, use completion_status=rework_required."
+    , "- If everything is solved and no follow-up is needed, use completion_status=clean."
+    , "- If you cannot complete the check, use completion_status=incomplete or blocked with a concrete blocked_reason."
+    , ""
+    , "Restrictions:"
+    , "- Do not edit files, commit, push, approve, close the issue, create PRs, or resolve GitHub review threads."
+    , "- Return only a value matching the provided output schema."
+    ]
+
 reviewerVerificationTurnInput :: FilePath -> FilePath -> PrConfig -> ReviewEvidence -> CommitSha -> Text
 reviewerVerificationTurnInput workdir reviewerStatePath config evidence reviewTargetSha =
   reviewerTurnInputWithVerification
@@ -377,6 +437,10 @@ issuePlanningScopeInstructions scopeIssues =
 stringField :: Value
 stringField =
   object ["type" .= ("string" :: Text)]
+
+booleanField :: Value
+booleanField =
+  object ["type" .= ("boolean" :: Text)]
 
 nullableStringField :: Value
 nullableStringField =

@@ -34,10 +34,12 @@ data Effect (mutability :: Mutability) where
   StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartReviewerTurn :: PrConfig -> CommitSha -> ThreadId -> Effect 'CanStartTurn
   StartReviewerVerificationTurn :: PrConfig -> ReviewEvidence -> CommitSha -> ThreadId -> Effect 'CanStartTurn
+  StartIssueFinalReviewTurn :: IssueConfig -> PrNumber -> CommitSha -> ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub
   UpdatePullRequestBody :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
+  UpdateIssueFollowUp :: IssueConfig -> ReviewEvidence -> Effect 'CanMutateGitHub
   CloseIssue :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
   RequestChangesReview :: PrConfig -> ReviewEvidence -> Effect 'CanMutateGitHub

@@ -8,4 +8,7 @@
 {"type":"issue_review_handoff_initialized","prNumber":7}
 {"type":"issue_review_handoff_started","prNumber":7}
 {"type":"issue_pr_merged","prNumber":7}
+{"type":"issue_reviewer_thread_ready","reviewerThreadId":"issue-reviewer-42"}
+{"type":"issue_post_merge_review_started","commitSha":"0123456789abcdef","reviewerTurnId":"turn-post-merge-review"}
+{"type":"issue_post_merge_review_clean","commitSha":"0123456789abcdef","comment":"LGTM"}
 {"type":"issue_closed","prNumber":7}

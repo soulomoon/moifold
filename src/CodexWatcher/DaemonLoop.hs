@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -25,6 +26,8 @@ import CodexWatcher.Domain.IssueImplement.Loop qualified as IssueImplementationL
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
 import CodexWatcher.Domain.PrReview.Loop qualified as PrReviewLoop
+import CodexWatcher.Core.Ids (ThreadId)
+import CodexWatcher.Core.Kinds (ThreadActivity (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ReviewerThread (..), WorkerThread (..))
 import Data.Aeson ((.=))
@@ -112,12 +115,16 @@ runFromState executor config events replay = do
       IssueImplementationLoop.runIssueImplementationReady domainLoopOps executor config events replay issueConfig maybePrNumber workerThread
     SomeWatcherState (IssueImplementing _issueConfig maybePr (WorkerActive activeTurn)) ->
       IssueImplementationLoop.runIssueImplementing domainLoopOps executor config events replay maybePr activeTurn
-    SomeWatcherState (IssueHandoffReady _issueConfig prNumber) ->
+    SomeWatcherState (IssueHandoffReady _issueConfig prNumber _worker _reviewer) ->
       IssueImplementationLoop.runIssueHandoffReady domainLoopOps executor config events prNumber
-    SomeWatcherState (IssueHandoffInitialized _issueConfig prNumber) ->
+    SomeWatcherState (IssueHandoffInitialized _issueConfig prNumber _worker _reviewer) ->
       IssueImplementationLoop.runIssueHandoffInitialized domainLoopOps executor config events prNumber
-    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber) ->
+    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber _worker _reviewer) ->
       IssueImplementationLoop.runIssueWaitingForPrMerge domainLoopOps executor config events replay issueConfig prNumber
+    SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber _worker maybeReviewer) ->
+      IssueImplementationLoop.runIssuePostMergeReviewReady domainLoopOps executor config events replay issueConfig prNumber (reviewerThreadId <$> maybeReviewer)
+    SomeWatcherState (IssuePostMergeReviewing _issueConfig _prNumber _worker commit (ReviewerActive activeTurn)) ->
+      IssueImplementationLoop.runIssuePostMergeReviewing domainLoopOps executor config events replay commit activeTurn
     SomeWatcherState (IssueWaitingForIssueClose issueConfig prNumber) ->
       IssueImplementationLoop.runIssueWaitingForIssueClose domainLoopOps executor config events replay issueConfig prNumber
     SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
@@ -145,6 +152,9 @@ formatDaemonLoopFailure = \case
   DaemonLoopExternalFailure reason -> "external observation failed: " <> reason
   DaemonLoopAppServerFailure failure -> formatAppServerClientFailure failure
   DaemonLoopUnexpectedStartPlan reason -> "unexpected start-turn plan: " <> reason
+
+reviewerThreadId :: ReviewerThread 'Idle -> ThreadId
+reviewerThreadId (ReviewerIdle threadId) = threadId
 
 logLoopResult :: ActionExecutor m -> Either DaemonLoopFailure DaemonLoopTickResult -> m ()
 logLoopResult executor = \case

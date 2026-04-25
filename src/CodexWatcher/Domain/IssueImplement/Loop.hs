@@ -10,12 +10,15 @@ module CodexWatcher.Domain.IssueImplement.Loop
   , runIssueImplementing
   , runIssuePlanActive
   , runIssuePlanReady
+  , runIssuePostMergeReviewReady
+  , runIssuePostMergeReviewing
   , runIssueReadyToPlan
   , runIssueWaitingForIssueClose
   , runIssueWaitingForPrMerge
   ) where
 
 import CodexWatcher.ActionExecutor
+import CodexWatcher.AppServerClient (startThreadWithInterpreter)
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation (..), DaemonOptions (..))
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
@@ -26,12 +29,17 @@ import CodexWatcher.Domain.IssueImplement.TurnClassifier
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
+import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText)
-import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..), ThreadId)
+import CodexWatcher.Runtime.Paths (runtimeStateDirPath, runtimeWorkdirPath)
+import CodexWatcher.StateMachine (nextIssueAttemptBranch)
+import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
+import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), ThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
 import Data.Aeson (Result (..), Value (..), fromJSON)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -121,7 +129,7 @@ runIssueImplementing
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runIssueImplementing ops executor config events replay maybePr activeTurn =
   observeClassifiedActiveTurn ops executor config events replay activeTurn \turn ->
-    fmap DaemonIssueImplementObservation (classifyIssueImplementationTurn maybePr turn)
+    fmap DaemonIssueImplementObservation (classifyIssueImplementationTurn maybePr (latestIssueReviewerThread events) turn)
 
 runIssueHandoffReady
   :: DomainLoopOps m
@@ -161,7 +169,53 @@ runIssueWaitingForPrMerge ops executor config events replay issueConfig prNumber
       | remotePullRequestIsMerged remote ->
           ops.loopObserveWithExecutor executor config events (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
       | otherwise ->
-          ops.loopIdle executor config replay ("waiting for PR merge before closing issue: #" <> Text.pack (show (unPrNumber prNumber)))
+          ops.loopIdle executor config replay ("waiting for PR merge before post-merge review: #" <> Text.pack (show (unPrNumber prNumber)))
+
+runIssuePostMergeReviewReady
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> IssueConfig
+  -> PrNumber
+  -> Maybe ThreadId
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+runIssuePostMergeReviewReady ops executor config events replay issueConfig prNumber maybeReviewerThread =
+  case maybeReviewerThread of
+    Nothing ->
+      ensureIssueReviewerThread ops executor config events replay issueConfig prNumber
+    Just reviewerThread -> do
+      pullRequest <- runGhPrView executor.actionRuntime issueConfig.issueRepo prNumber
+      case pullRequest of
+        Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+        Right remote ->
+          case remote.remotePullRequestHeadRefOid of
+            Nothing ->
+              pure (Left (DaemonLoopExternalFailure ("merged PR #" <> Text.pack (show (unPrNumber prNumber)) <> " did not expose headRefOid for post-merge review")))
+            Just reviewTargetSha ->
+              ops.loopPrestartAndObserve
+                executor
+                config
+                events
+                (StartIssueFinalReviewTurnKind issueConfig prNumber reviewTargetSha)
+                reviewerThread
+                (DaemonIssueImplementObservation . ObservedPostMergeReviewStarted reviewTargetSha)
+
+runIssuePostMergeReviewing
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> CommitSha
+  -> ActiveTurn
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+runIssuePostMergeReviewing ops executor config events replay reviewTargetSha activeTurn =
+  observeClassifiedActiveTurn ops executor config events replay activeTurn \turn ->
+    fmap (DaemonIssueImplementObservation . ObservedPostMergeReviewerOutcome) (classifyIssueFinalReviewTurn reviewTargetSha turn)
 
 runIssueWaitingForIssueClose
   :: Monad m
@@ -198,7 +252,7 @@ observeExistingPullRequest ops executor config events replay issueConfig = do
     Left reason -> pure (Left (DaemonLoopExternalFailure reason))
     Right openPullRequests ->
       case find ((== issueConfig.issueBranch) . ghPullRequestHeadRefName) openPullRequests of
-        Nothing -> retryCreatePullRequest ops executor config events replay issueConfig
+        Nothing -> advanceMergedAttemptBranchOrCreatePullRequest ops executor config events replay issueConfig
         Just pullRequest -> do
           linked <- validateExistingPullRequestLink executor issueConfig pullRequest
           case linked of
@@ -228,6 +282,58 @@ observeExistingPullRequest ops executor config events replay issueConfig = do
                         )
                     )
                 )
+
+advanceMergedAttemptBranchOrCreatePullRequest
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> IssueConfig
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+advanceMergedAttemptBranchOrCreatePullRequest ops executor config events replay issueConfig = do
+  pullRequests <- runGhPrListByHead executor.actionRuntime issueConfig.issueRepo issueConfig.issueBranch "all"
+  case pullRequests of
+    Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+    Right branchPullRequests ->
+      case find mergedPullRequestForBranch branchPullRequests of
+        Nothing ->
+          retryCreatePullRequest ops executor config events replay issueConfig
+        Just pullRequest -> do
+          linked <- validateExistingPullRequestLink executor issueConfig pullRequest
+          case linked of
+            Left reason ->
+              pure (Left (DaemonLoopExternalFailure reason))
+            Right True ->
+              let nextBranch = nextIssueAttemptBranch issueConfig.issueNumber issueConfig.issueBranch
+               in ops.loopObserveWithExecutor
+                    executor
+                    config
+                    events
+                    (DaemonIssueImplementObservation (ObservedIssueAttemptBranchAdvanced nextBranch))
+            Right False ->
+              ops.loopObserveWithExecutor
+                executor
+                config
+                events
+                ( DaemonIssueImplementObservation
+                    ( ObservedIssueImplementBlocked
+                        ( BlockedReason
+                            ( "merged PR #"
+                                <> Text.pack (show (unPrNumber pullRequest.ghPullRequestNumber))
+                                <> " already uses branch "
+                                <> unBranchName issueConfig.issueBranch
+                                <> " but is not linked to issue #"
+                                <> Text.pack (show (unIssueNumber issueConfig.issueNumber))
+                            )
+                        )
+                    )
+                )
+ where
+  mergedPullRequestForBranch pullRequest =
+    pullRequest.ghPullRequestHeadRefName == issueConfig.issueBranch
+      && pullRequest.ghPullRequestState == Just RemotePullRequestMerged
 
 validateExistingPullRequestLink :: Monad m => ActionExecutor m -> IssueConfig -> GhPullRequest -> m (Either Text Bool)
 validateExistingPullRequestLink executor issueConfig pullRequest
@@ -369,6 +475,13 @@ latestIssuePlanMarkdown =
   step _latestPlan (IssuePlanCompletedEvent planMarkdown _maybeImplementationTurn) = Just planMarkdown
   step latestPlan _event = latestPlan
 
+latestIssueReviewerThread :: [WatcherEvent] -> Maybe ThreadId
+latestIssueReviewerThread =
+  foldl' step Nothing
+ where
+  step _latestReviewer (IssueReviewerThreadReadyEvent reviewerThreadId) = Just reviewerThreadId
+  step latestReviewer _event = latestReviewer
+
 retryCloseIssue
   :: Monad m
   => ActionExecutor m
@@ -391,6 +504,52 @@ retryCloseIssue executor config replay issueConfig prNumber =
         Just failure -> Left (DaemonLoopDaemonFailure failure)
         Nothing ->
           Right (idleTickResult replay ("closed issue after merged PR #" <> Text.pack (show (unPrNumber prNumber)) <> "; waiting to observe closed issue") reports)
+
+ensureIssueReviewerThread
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> EventReplayResult
+  -> IssueConfig
+  -> PrNumber
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+ensureIssueReviewerThread ops executor config events _replay issueConfig prNumber =
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      ops.loopObserveWithExecutor
+        executor
+        config
+        events
+        (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady (ThreadId "dry-run-issue-reviewer-thread")))
+    ExecuteActions -> do
+      let requestId = config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId
+          prConfig = issuePrConfig issueConfig prNumber
+          instructions =
+            prReviewThreadDeveloperInstructions
+              (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
+              (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir)
+              prConfig
+              "reviewer"
+      started <-
+        startThreadWithInterpreter
+          executor.actionAppServer
+          requestId
+          (defaultThreadStartOptions (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir) instructions)
+      case started of
+        Left failure ->
+          pure (Left (DaemonLoopAppServerFailure failure))
+        Right reviewerThread ->
+          ops.loopObserveWithExecutor
+            executor
+            config
+            events
+            (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady reviewerThread))
+
+issuePrConfig :: IssueConfig -> PrNumber -> PrConfig
+issuePrConfig issueConfig pr =
+  PrConfig issueConfig.issueRepo pr issueConfig.issueBranch
 
 runIssueEffectPlan
   :: Monad m

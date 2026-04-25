@@ -10,15 +10,17 @@ module CodexWatcher.StateMachine
   ( CanBlock
   , Event (..)
   , Decision (..)
+  , nextIssueAttemptBranch
   , step
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ReviewThreadId)
+import CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..), PrNumber (..), ReviewThreadId, ThreadId)
 import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
 import CodexWatcher.Core.State (CompletionEvidence (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
 import CodexWatcher.Domain.PrReview.Types
   ( CleanReviewEvidence
@@ -28,7 +30,9 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceHasSummaries
   , reviewEvidenceThreadIds
   )
+import Control.Monad (guard)
 import Data.Foldable qualified as Foldable
+import Data.Char (isDigit)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Kind (Constraint)
 import qualified Data.Text as Text
@@ -54,14 +58,20 @@ data Event (domain :: Domain) (phase :: Phase) where
 
   StartReadyIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePlanCompleted :: Text.Text -> Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
+  IssueAttemptBranchAdvanced :: BranchName -> Event 'IssueImplement 'Implementing
   IssuePullRequestReady :: PrNumber -> Event 'IssueImplement 'Implementing
   IssuePullRequestBodyUpdated :: PrNumber -> Event 'IssueImplement 'Implementing
   StartIssueImplementationTurn :: ActiveTurn -> Event 'IssueImplement 'Implementing
   IssueImplementationIncomplete :: Event 'IssueImplement 'Implementing
   IssueReviewHandoffInitialized :: PrNumber -> Event 'IssueImplement 'Implementing
   IssueReviewHandoffStarted :: PrNumber -> Event 'IssueImplement 'Implementing
-  IssueImplementationCompleted :: PrNumber -> Event 'IssueImplement 'Implementing
+  IssueImplementationCompleted :: PrNumber -> Maybe ThreadId -> Event 'IssueImplement 'Implementing
+  IssueReviewerThreadReady :: ThreadId -> Event 'IssueImplement 'Implementing
   IssuePullRequestMerged :: PrNumber -> Event 'IssueImplement 'Implementing
+  StartIssuePostMergeReview :: CommitSha -> ActiveTurn -> Event 'IssueImplement 'Implementing
+  IssuePostMergeReviewSatisfied :: CleanReviewEvidence -> Event 'IssueImplement 'Implementing
+  IssuePostMergeReviewFollowUp :: ReviewEvidence -> Event 'IssueImplement 'Implementing
+  IssuePostMergeReviewIncomplete :: Text.Text -> Event 'IssueImplement 'Implementing
   IssueClosed :: PrNumber -> Event 'IssueImplement 'Implementing
 
   ReviewThreadsFound :: ReviewEvidence -> ActiveTurn -> Event 'PrReview 'CheckingReviews
@@ -129,6 +139,20 @@ step (IssueInPlanMode config prNumber (WorkerActive activeTurn)) (IssuePlanCompl
    in Decision
         (IssuePlanReady config prNumber (WorkerIdle (activeThreadId nextTurn)))
         [SomeEffect (RecordIssuePlan config prNumber planMarkdown), SomeEffect SleepUntilNextPoll]
+step (IssueImplementationReady config Nothing worker) (IssueAttemptBranchAdvanced branch) =
+  Decision
+    (IssueImplementationReady (config {issueBranch = branch}) Nothing worker)
+    [SomeEffect SleepUntilNextPoll]
+step (IssueImplementationReady _config (Just prNumber) _worker) (IssueAttemptBranchAdvanced branch) =
+  let reason =
+        BlockedReason
+          ( "cannot advance issue branch to "
+              <> unBranchName branch
+              <> " after PR #"
+              <> Text.pack (show (unPrNumber prNumber))
+              <> " is already known"
+          )
+   in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
 step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady prNumber) =
   Decision
     (IssueReadyToPlan config prNumber worker)
@@ -162,50 +186,50 @@ step (IssueImplementing config maybePr (WorkerActive activeTurn)) IssueImplement
   Decision
     (IssueImplementationReady config maybePr (WorkerIdle (activeThreadId activeTurn)))
     [SomeEffect (StartIssueImplementationWorkerTurn (activeThreadId activeTurn))]
-step (IssueImplementing config maybePr _thread) (IssueImplementationCompleted prNumber)
+step (IssueImplementing config maybePr (WorkerActive activeTurn)) (IssueImplementationCompleted prNumber maybeReviewerThreadId)
   | prMatchesKnownStrict maybePr prNumber =
-      Decision (IssueHandoffReady config prNumber) [SomeEffect SleepUntilNextPoll]
+      Decision (IssueHandoffReady config prNumber (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle <$> maybeReviewerThreadId)) [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked maybePr prNumber
-step (IssueHandoffReady config expectedPrNumber) (IssueReviewHandoffInitialized prNumber)
+step (IssueHandoffReady config expectedPrNumber worker reviewer) (IssueReviewHandoffInitialized prNumber)
   | expectedPrNumber == prNumber =
-      Decision (IssueHandoffInitialized config prNumber) [SomeEffect SleepUntilNextPoll]
+      Decision (IssueHandoffInitialized config prNumber worker reviewer) [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step state@(IssueHandoffInitialized _config expectedPrNumber) (IssueReviewHandoffInitialized prNumber)
+step state@(IssueHandoffInitialized _config expectedPrNumber _worker _reviewer) (IssueReviewHandoffInitialized prNumber)
   | expectedPrNumber == prNumber =
       Decision state [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step (IssueHandoffInitialized config expectedPrNumber) (IssueReviewHandoffStarted prNumber)
+step (IssueHandoffInitialized config expectedPrNumber worker reviewer) (IssueReviewHandoffStarted prNumber)
   | expectedPrNumber == prNumber =
-      Decision (IssueWaitingForPrMerge config prNumber) [SomeEffect SleepUntilNextPoll]
+      Decision (IssueWaitingForPrMerge config prNumber worker reviewer) [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
 step state@IssueWaitingForPrMerge {} (IssueReviewHandoffInitialized _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step state@IssueWaitingForPrMerge {} (IssueReviewHandoffStarted _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
-step state@(IssueHandoffReady _config expectedPrNumber) (IssueImplementationCompleted prNumber)
+step state@(IssueHandoffReady _config expectedPrNumber _worker _reviewer) (IssueImplementationCompleted prNumber _maybeReviewerThreadId)
   | expectedPrNumber == prNumber =
       Decision state [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step state@(IssueHandoffInitialized _config expectedPrNumber) (IssueImplementationCompleted prNumber)
+step state@(IssueHandoffInitialized _config expectedPrNumber _worker _reviewer) (IssueImplementationCompleted prNumber _maybeReviewerThreadId)
   | expectedPrNumber == prNumber =
       Decision state [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step state@(IssueWaitingForPrMerge _config expectedPrNumber) (IssueImplementationCompleted prNumber)
+step state@(IssueWaitingForPrMerge _config expectedPrNumber _worker _reviewer) (IssueImplementationCompleted prNumber _maybeReviewerThreadId)
   | expectedPrNumber == prNumber =
       Decision state [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step (IssueWaitingForPrMerge config expectedPrNumber) (IssuePullRequestMerged prNumber)
+step (IssueWaitingForPrMerge config expectedPrNumber worker reviewer) (IssuePullRequestMerged prNumber)
   | expectedPrNumber == prNumber =
       Decision
-        (IssueWaitingForIssueClose config prNumber)
-        [SomeEffect (CloseIssue config prNumber), SomeEffect SleepUntilNextPoll]
+        (IssuePostMergeReviewReady config prNumber worker reviewer)
+        [SomeEffect SleepUntilNextPoll]
   | otherwise =
       let reason =
             BlockedReason
@@ -213,6 +237,39 @@ step (IssueWaitingForPrMerge config expectedPrNumber) (IssuePullRequestMerged pr
                   <> Text.pack (" while waiting for PR #" <> show (unPrNumber expectedPrNumber))
               )
        in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
+step (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle reviewerThreadId))) (StartIssuePostMergeReview reviewTargetSha activeTurn) =
+  Decision
+    (IssuePostMergeReviewing config prNumber worker reviewTargetSha (ReviewerActive activeTurn))
+    [SomeEffect (StartIssueFinalReviewTurn config prNumber reviewTargetSha reviewerThreadId)]
+step (IssuePostMergeReviewReady config prNumber worker _oldReviewer) (IssueReviewerThreadReady reviewerThreadId) =
+  Decision
+    (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle reviewerThreadId)))
+    [SomeEffect SleepUntilNextPoll]
+step (IssueHandoffReady config prNumber worker _oldReviewer) (IssueReviewerThreadReady reviewerThreadId) =
+  Decision
+    (IssueHandoffReady config prNumber worker (Just (ReviewerIdle reviewerThreadId)))
+    [SomeEffect SleepUntilNextPoll]
+step (IssueHandoffInitialized config prNumber worker _oldReviewer) (IssueReviewerThreadReady reviewerThreadId) =
+  Decision
+    (IssueHandoffInitialized config prNumber worker (Just (ReviewerIdle reviewerThreadId)))
+    [SomeEffect SleepUntilNextPoll]
+step (IssueWaitingForPrMerge config prNumber worker _oldReviewer) (IssueReviewerThreadReady reviewerThreadId) =
+  Decision
+    (IssueWaitingForPrMerge config prNumber worker (Just (ReviewerIdle reviewerThreadId)))
+    [SomeEffect SleepUntilNextPoll]
+step (IssuePostMergeReviewing config prNumber _worker _reviewTargetSha (ReviewerActive _activeTurn)) (IssuePostMergeReviewSatisfied _evidence) =
+  Decision
+    (IssueWaitingForIssueClose config prNumber)
+    [SomeEffect (CloseIssue config prNumber), SomeEffect SleepUntilNextPoll]
+step (IssuePostMergeReviewing config _prNumber (WorkerIdle workerThreadId) _reviewTargetSha (ReviewerActive _activeTurn)) (IssuePostMergeReviewFollowUp evidence) =
+  let followUpConfig = postMergeReworkIssueConfig config
+   in Decision
+        (IssueImplementationReady followUpConfig Nothing (WorkerIdle workerThreadId))
+        [SomeEffect (UpdateIssueFollowUp followUpConfig evidence), SomeEffect SleepUntilNextPoll]
+step (IssuePostMergeReviewing config prNumber worker _reviewTargetSha (ReviewerActive activeTurn)) (IssuePostMergeReviewIncomplete _reason) =
+  Decision
+    (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle (activeThreadId activeTurn))))
+    [SomeEffect SleepUntilNextPoll]
 step (IssueWaitingForIssueClose _config expectedPrNumber) (IssueClosed prNumber)
   | expectedPrNumber == prNumber =
       Decision
@@ -229,6 +286,10 @@ step state@(IssueImplementationReady {}) (IssuePullRequestMerged _prNumber) =
 step state@(IssueHandoffReady {}) (IssuePullRequestMerged _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step state@(IssueHandoffInitialized {}) (IssuePullRequestMerged _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@(IssuePostMergeReviewReady {}) (IssuePullRequestMerged _prNumber) =
+  Decision state [SomeEffect SleepUntilNextPoll]
+step state@(IssuePostMergeReviewing {}) (IssuePullRequestMerged _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step state@IssueWaitingForIssueClose {} (IssuePullRequestMerged _prNumber) =
   Decision state [SomeEffect SleepUntilNextPoll]
@@ -328,3 +389,39 @@ resolveReviewThreads (Just evidence) resolvedThreadIds =
   | threadId <- reviewEvidenceThreadIds evidence
   , threadId `elem` resolvedThreadIds
   ]
+
+postMergeReworkIssueConfig :: IssueConfig -> IssueConfig
+postMergeReworkIssueConfig config =
+  config {issueBranch = nextIssueAttemptBranch (issueNumber config) (issueBranch config)}
+
+nextIssueAttemptBranch :: IssueNumber -> BranchName -> BranchName
+nextIssueAttemptBranch issueNumber' (BranchName currentBranch) =
+  BranchName (baseBranch <> "-" <> Text.pack (show (attempt + 1)))
+ where
+  (baseBranch, attempt) =
+    case splitIssueAttemptBranch issueNumber' currentBranch of
+      Just parsed -> parsed
+      Nothing -> (currentBranch, 1)
+
+splitIssueAttemptBranch :: IssueNumber -> Text.Text -> Maybe (Text.Text, Int)
+splitIssueAttemptBranch (IssueNumber issueNumber') branch = do
+  let digits = Text.takeWhileEnd isDigit branch
+      baseWithDash = Text.dropWhileEnd isDigit branch
+      issueSuffix = Text.pack (show issueNumber')
+  guard (not (Text.null digits))
+  (base, separator) <- Text.unsnoc baseWithDash
+  guard (separator == '-')
+  guard (issueSuffix `Text.isSuffixOf` base)
+  attempt <- parsePositiveInt digits
+  pure (base, attempt)
+
+parsePositiveInt :: Text.Text -> Maybe Int
+parsePositiveInt digits =
+  case Text.foldl' decimalStep (Just 0) digits of
+    Just value | value > 0 -> Just value
+    _ -> Nothing
+ where
+  decimalStep Nothing _char = Nothing
+  decimalStep (Just value) char
+    | isDigit char = Just (value * 10 + fromEnum char - fromEnum '0')
+    | otherwise = Nothing

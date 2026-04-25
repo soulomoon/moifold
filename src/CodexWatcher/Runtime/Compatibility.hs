@@ -88,17 +88,25 @@ compatibilityStateWrites stateDir state =
       [ write "issue-state.json" (issueStateJson config "in_progress" maybePr Nothing)
       , write "daemon-state.json" (activeDaemonJson "implement" activeTurn)
       ]
-    SomeWatcherState (IssueHandoffReady config prNumber) ->
+    SomeWatcherState (IssueHandoffReady config prNumber _worker _reviewer) ->
       [ write "issue-state.json" (issueStateJson config "in_progress" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
       ]
-    SomeWatcherState (IssueHandoffInitialized config prNumber) ->
+    SomeWatcherState (IssueHandoffInitialized config prNumber _worker _reviewer) ->
       [ write "issue-state.json" (issueStateJson config "in_progress" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
       ]
-    SomeWatcherState (IssueWaitingForPrMerge config prNumber) ->
+    SomeWatcherState (IssueWaitingForPrMerge config prNumber _worker _reviewer) ->
       [ write "issue-state.json" (issueStateJson config "waiting_pr_merge" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
+      ]
+    SomeWatcherState (IssuePostMergeReviewReady config prNumber _worker _reviewer) ->
+      [ write "issue-state.json" (issueStateJson config "post_merge_review" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
+    SomeWatcherState (IssuePostMergeReviewing config prNumber _worker _commit (ReviewerActive activeTurn)) ->
+      [ write "issue-state.json" (issueStateJson config "post_merge_review" (Just prNumber) Nothing)
+      , write "daemon-state.json" (activeDaemonJson "post-merge-review" activeTurn)
       ]
     SomeWatcherState (IssueWaitingForIssueClose config prNumber) ->
       [ write "issue-state.json" (issueStateJson config "waiting_issue_close" (Just prNumber) Nothing)

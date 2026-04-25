@@ -50,6 +50,7 @@ runtimeCommandExamples =
   , GhIssueCreate (RepoName "soulomoon/mlf2") (IssueCreationRequest "Subissue title" "Subissue body" Nothing)
   , GhIssueClose (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example")) (PrNumber 7)
   , GhPrListOpen (RepoName "soulomoon/mlf2")
+  , GhPrListByHead (RepoName "soulomoon/mlf2") (BranchName "codex/example") "all"
   , GhPrChecks (RepoName "soulomoon/mlf2") (PrNumber 6)
   , GhPrView (RepoName "soulomoon/mlf2") (PrNumber 6) ["state", "url"]
   , GhReviewThreads (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example"))
@@ -111,6 +112,7 @@ prop_runtimeGhPrViewUsesStructuredFields :: RepoName -> PrNumber -> Bool
 prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
   let spec = renderRuntimeCommand (GhPrView repo prNumber ["state", "url", "headRefOid"])
       listSpec = renderRuntimeCommand (GhPrListOpen repo)
+      headListSpec = renderRuntimeCommand (GhPrListByHead repo (BranchName "codex/issue-42") "all")
    in spec.command == "gh"
         && spec.args
           == [ "pr"
@@ -130,6 +132,18 @@ prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
              , "open"
              , "--json"
              , "number,title,headRefName,headRefOid,body"
+             ]
+        && headListSpec.args
+          == [ "pr"
+             , "list"
+             , "--repo"
+             , Text.unpack (unRepoName repo)
+             , "--head"
+             , "codex/issue-42"
+             , "--state"
+             , "all"
+             , "--json"
+             , "number,title,headRefName,headRefOid,body,closingIssuesReferences,state"
              ]
 
 prop_runtimeGhPrChecksUsesRequiredCurrentCli :: RepoName -> PrNumber -> Bool

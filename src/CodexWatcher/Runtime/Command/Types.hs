@@ -31,11 +31,13 @@ data RuntimeCommand
   | GhIssueCreate RepoName IssueCreationRequest
   | GhIssueClose IssueConfig PrNumber
   | GhPrListOpen RepoName
+  | GhPrListByHead RepoName BranchName Text
   | GhPrView RepoName PrNumber [Text]
   | GhPrChecks RepoName PrNumber
   | GhReviewThreads PrConfig
   | GhCreatePullRequest FilePath IssueConfig
   | GhUpdatePullRequestBody FilePath IssueConfig PrNumber FilePath
+  | GhIssueFollowUp IssueConfig ReviewEvidence
   | GhResolveReviewThread ReviewThreadId
   | GhPrRequestChanges PrConfig ReviewEvidence
   | GhPrMerge RepoName PrNumber Text

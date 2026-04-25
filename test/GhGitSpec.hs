@@ -37,11 +37,12 @@ prop_ghGitParsesIssueAndPrLists =
                   , "headRefOid" .= ("abc123" :: Text)
                   , "closingIssuesReferences" .= [object ["number" .= (42 :: Int)]]
                   , "body" .= ("Closes #42" :: Text)
+                  , "state" .= ("MERGED" :: Text)
                   ]
               ]
           )
    in parseGhIssueList issuesJson == Right [GhIssue (IssueNumber 42) "Fix bug"]
-        && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123")) [IssueNumber 42] (Just "Closes #42")]
+        && parseGhPrList prsJson == Right [GhPullRequest (PrNumber 7) "Implement fix" (BranchName "codex/issue-42") (Just (CommitSha "abc123")) [IssueNumber 42] (Just "Closes #42") (Just RemotePullRequestMerged)]
 
 prop_ghGitParsesRemoteIssueView :: Bool
 prop_ghGitParsesRemoteIssueView =

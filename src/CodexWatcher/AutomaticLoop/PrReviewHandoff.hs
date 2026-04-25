@@ -73,7 +73,7 @@ blockIssueImplementerHandoff cli state reason =
           putStrLn ("blocked issue implementer: " <> Text.unpack reason.unBlockedReason)
 
 issueWaitingForPrMerge :: SomeWatcherState -> Maybe (IssueConfig, PrNumber)
-issueWaitingForPrMerge (SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber)) =
+issueWaitingForPrMerge (SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber _worker _reviewer)) =
   Just (issueConfig, prNumber)
 issueWaitingForPrMerge _ =
   Nothing

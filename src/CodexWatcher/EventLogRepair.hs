@@ -50,7 +50,7 @@ repairFromFailure events failure =
       repairMissingPlanBeforePullRequest events failure (IssuePullRequestCreatedEvent prNumber) prNumber
     IssuePullRequestReusedEvent prNumber ->
       repairMissingPlanBeforePullRequest events failure (IssuePullRequestReusedEvent prNumber) prNumber
-    IssueImplementationCompletedEvent prNumber ->
+    IssueImplementationCompletedEvent prNumber _maybeReviewerThreadId ->
       repairCompletionWithoutImplementationTurn events failure prNumber
     _ ->
       Left ("no deterministic repair rule for event " <> eventName failure.event)

@@ -65,6 +65,7 @@ data StartTurnKind
   | StartIssueImplementationWorkerTurnKind
   | StartReviewerTurnKind PrConfig CommitSha
   | StartReviewerVerificationTurnKind PrConfig ReviewEvidence CommitSha
+  | StartIssueFinalReviewTurnKind IssueConfig PrNumber CommitSha
   deriving stock (Eq, Show)
 
 data ActiveTurnReadResult = ActiveTurnReadResult

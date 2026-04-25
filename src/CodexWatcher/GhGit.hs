@@ -37,6 +37,7 @@ module CodexWatcher.GhGit
   , runGitWorktreeStatus
   , runGhIssueListOpen
   , runGhIssueView
+  , runGhPrListByHead
   , runGhPrListOpen
   , runGhPrChecks
   , runGhPrView
@@ -120,6 +121,7 @@ data GhPullRequest = GhPullRequest
   , ghPullRequestHeadRefOid :: Maybe CommitSha
   , ghPullRequestLinkedIssueNumbers :: [IssueNumber]
   , ghPullRequestBody :: Maybe Text
+  , ghPullRequestState :: Maybe RemotePullRequestState
   }
   deriving stock (Eq, Show, Generic)
 
@@ -132,6 +134,7 @@ instance FromJSON GhPullRequest where
       <*> (fmap CommitSha <$> objectValue .:? "headRefOid")
       <*> parseClosingIssueReferences objectValue
       <*> objectValue .:? "body"
+      <*> (fmap parseRemotePullRequestState <$> objectValue .:? "state")
 
 newtype ClosingIssueReference = ClosingIssueReference IssueNumber
 
@@ -366,6 +369,10 @@ runGhIssueView interpreter repo issueNumber =
 runGhPrListOpen :: Monad m => RuntimeInterpreter m -> RepoName -> m (Either Text [GhPullRequest])
 runGhPrListOpen interpreter repo =
   parseCommandJson parseGhPrList <$> interpreter.runtimeRunCommand (GhPrListOpen repo)
+
+runGhPrListByHead :: Monad m => RuntimeInterpreter m -> RepoName -> BranchName -> Text -> m (Either Text [GhPullRequest])
+runGhPrListByHead interpreter repo branch state =
+  parseCommandJson parseGhPrList <$> interpreter.runtimeRunCommand (GhPrListByHead repo branch state)
 
 runGhPrChecks :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text [GhPullRequestCheck])
 runGhPrChecks interpreter repo prNumber = do

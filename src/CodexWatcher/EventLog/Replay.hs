@@ -146,6 +146,16 @@ applyEvent (SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle _oldThr
   Right (SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle threadId)), [])
 applyEvent (SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
   Right (SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle threadId)), [])
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueAttemptBranchAdvancedEvent branch) =
+  fromDecision (step state (IssueAttemptBranchAdvanced branch))
+applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueReviewerThreadReadyEvent threadId) =
+  fromDecision (step state (IssueReviewerThreadReady threadId))
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueReviewerThreadReadyEvent threadId) =
+  fromDecision (step state (IssueReviewerThreadReady threadId))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueReviewerThreadReadyEvent threadId) =
+  fromDecision (step state (IssueReviewerThreadReady threadId))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewReady {}) (IssueReviewerThreadReadyEvent threadId) =
+  fromDecision (step state (IssueReviewerThreadReady threadId))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestCreatedEvent prNumber) =
   fromDecision (step state (IssuePullRequestReady prNumber))
 applyEvent (SomeWatcherState state@(IssueImplementationReady _config _maybePr _worker)) (IssuePullRequestReusedEvent prNumber) =
@@ -193,16 +203,28 @@ applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueImplementat
   fromDecision (step state (MarkBlocked reason))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationBlockedEvent reason) =
   fromDecision (step state (MarkBlocked reason))
-applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber) =
-  fromDecision (step state (IssueImplementationCompleted prNumber))
-applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueImplementationCompletedEvent prNumber) =
-  fromDecision (step state (IssueImplementationCompleted prNumber))
-applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueImplementationCompletedEvent prNumber) =
-  fromDecision (step state (IssueImplementationCompleted prNumber))
-applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationCompletedEvent prNumber) =
-  fromDecision (step state (IssueImplementationCompleted prNumber))
+applyEvent (SomeWatcherState state@(IssueImplementing _config _maybePr _worker)) (IssueImplementationCompletedEvent prNumber maybeReviewerThreadId) =
+  fromDecision (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId))
+applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueImplementationCompletedEvent prNumber maybeReviewerThreadId) =
+  fromDecision (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId))
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueImplementationCompletedEvent prNumber maybeReviewerThreadId) =
+  fromDecision (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId))
+applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationCompletedEvent prNumber maybeReviewerThreadId) =
+  fromDecision (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssuePullRequestMergedEvent prNumber) =
   fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewReady {}) (IssuePostMergeReviewStartedEvent commit turnId) =
+  case state of
+    IssuePostMergeReviewReady _config _prNumber _worker (Just (ReviewerIdle reviewerThread)) ->
+      fromDecision (step state (StartIssuePostMergeReview commit (ActiveTurn reviewerThread turnId)))
+    IssuePostMergeReviewReady {} ->
+      Left "post-merge review started before reviewer thread was available"
+applyEvent (SomeWatcherState state@IssuePostMergeReviewing {}) (IssuePostMergeReviewCleanEvent evidence) =
+  fromDecision (step state (IssuePostMergeReviewSatisfied evidence))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewing {}) (IssuePostMergeReviewFollowUpEvent evidence) =
+  fromDecision (step state (IssuePostMergeReviewFollowUp evidence))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewing {}) (IssuePostMergeReviewIncompleteEvent reason) =
+  fromDecision (step state (IssuePostMergeReviewIncomplete reason))
 applyEvent (SomeWatcherState state@IssueWaitingForIssueClose {}) (IssueClosedEvent prNumber) =
   fromDecision (step state (IssueClosed prNumber))
 applyEvent (SomeWatcherState state) (WatcherRecoveredInvalidState _reason) =

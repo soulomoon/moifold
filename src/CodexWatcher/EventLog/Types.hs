@@ -69,6 +69,7 @@ data WatcherEvent
   | PrReviewMergeCompleted MergeCommit
   | IssueImplementInitialized IssueConfig ThreadId
   | IssueWorkerThreadRefreshed ThreadId
+  | IssueAttemptBranchAdvancedEvent BranchName
   | IssuePlanTurnStartedEvent TurnId
   | IssuePlanCompletedEvent Text (Maybe TurnId)
   | IssuePullRequestCreatedEvent PrNumber
@@ -77,10 +78,15 @@ data WatcherEvent
   | IssueImplementationTurnStartedEvent TurnId
   | IssueImplementationIncompleteEvent Text
   | IssueImplementationBlockedEvent BlockedReason
+  | IssueReviewerThreadReadyEvent ThreadId
   | IssueReviewHandoffInitializedEvent PrNumber
   | IssueReviewHandoffStartedEvent PrNumber
-  | IssueImplementationCompletedEvent PrNumber
+  | IssueImplementationCompletedEvent PrNumber (Maybe ThreadId)
   | IssuePullRequestMergedEvent PrNumber
+  | IssuePostMergeReviewStartedEvent CommitSha TurnId
+  | IssuePostMergeReviewCleanEvent CleanReviewEvidence
+  | IssuePostMergeReviewFollowUpEvent ReviewEvidence
+  | IssuePostMergeReviewIncompleteEvent Text
   | IssueClosedEvent PrNumber
   | WatcherRecoveredInvalidState Text
   | WatcherBlocked BlockedReason
@@ -187,6 +193,8 @@ instance ToJSON WatcherEvent where
           <> ["workerThreadId" .= unThreadId workerThreadId]
       IssueWorkerThreadRefreshed workerThreadId ->
         eventType event <> ["workerThreadId" .= unThreadId workerThreadId]
+      IssueAttemptBranchAdvancedEvent branch ->
+        eventType event <> ["branch" .= unBranchName branch]
       IssuePlanTurnStartedEvent planTurnId ->
         eventType event <> ["planTurnId" .= unTurnId planTurnId]
       IssuePlanCompletedEvent planMarkdown maybeImplementationTurnId ->
@@ -205,14 +213,34 @@ instance ToJSON WatcherEvent where
         eventType event <> ["reason" .= reason]
       IssueImplementationBlockedEvent reason ->
         eventType event <> ["reason" .= unBlockedReason reason]
+      IssueReviewerThreadReadyEvent reviewerThreadId ->
+        eventType event <> ["reviewerThreadId" .= unThreadId reviewerThreadId]
       IssueReviewHandoffInitializedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       IssueReviewHandoffStartedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
-      IssueImplementationCompletedEvent prNumber' ->
-        eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssueImplementationCompletedEvent prNumber' maybeReviewerThreadId ->
+        eventType event
+          <> ["prNumber" .= unPrNumber prNumber']
+          <> maybe [] (\threadId -> ["reviewerThreadId" .= unThreadId threadId]) maybeReviewerThreadId
       IssuePullRequestMergedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
+      IssuePostMergeReviewStartedEvent commitSha reviewerTurnId ->
+        eventType event
+          <> [ "commitSha" .= unCommitSha commitSha
+             , "reviewerTurnId" .= unTurnId reviewerTurnId
+             ]
+      IssuePostMergeReviewCleanEvent evidence ->
+        eventType event
+          <> [ "commitSha" .= unCommitSha (cleanReviewCommit evidence)
+             , "comment" .= cleanReviewComment evidence
+             ]
+      IssuePostMergeReviewFollowUpEvent evidence ->
+        eventType event
+          <> reviewEvidenceFields evidence
+          <> ["commitSha" .= unCommitSha (reviewedCommit evidence)]
+      IssuePostMergeReviewIncompleteEvent reason ->
+        eventType event <> ["reason" .= reason]
       IssueClosedEvent prNumber' ->
         eventType event <> ["prNumber" .= unPrNumber prNumber']
       WatcherRecoveredInvalidState reason ->
@@ -310,6 +338,9 @@ instance FromJSON WatcherEvent where
       "issue_worker_thread_refreshed" ->
         IssueWorkerThreadRefreshed
           <$> (ThreadId <$> nonEmptyTextField objectValue "workerThreadId")
+      "issue_attempt_branch_advanced" ->
+        IssueAttemptBranchAdvancedEvent
+          <$> (BranchName <$> nonEmptyTextField objectValue "branch")
       "issue_plan_turn_started" ->
         IssuePlanTurnStartedEvent
           <$> (TurnId <$> nonEmptyTextField objectValue "planTurnId")
@@ -335,6 +366,9 @@ instance FromJSON WatcherEvent where
       "issue_implementation_blocked" ->
         IssueImplementationBlockedEvent
           <$> (BlockedReason <$> nonEmptyTextField objectValue "reason")
+      "issue_reviewer_thread_ready" ->
+        IssueReviewerThreadReadyEvent
+          <$> (ThreadId <$> nonEmptyTextField objectValue "reviewerThreadId")
       "issue_review_handoff_initialized" ->
         IssueReviewHandoffInitializedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
@@ -344,9 +378,23 @@ instance FromJSON WatcherEvent where
       "issue_implementation_completed" ->
         IssueImplementationCompletedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
+          <*> (traverse (fmap ThreadId . nonEmptyText "reviewerThreadId") =<< objectValue .:? "reviewerThreadId")
       "issue_pr_merged" ->
         IssuePullRequestMergedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
+      "issue_post_merge_review_started" ->
+        IssuePostMergeReviewStartedEvent
+          <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
+          <*> (TurnId <$> nonEmptyTextField objectValue "reviewerTurnId")
+      "issue_post_merge_review_clean" ->
+        IssuePostMergeReviewCleanEvent
+          <$> (CleanReviewEvidence <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha") <*> (objectValue .:? "comment" .!= "LGTM"))
+      "issue_post_merge_review_follow_up" ->
+        IssuePostMergeReviewFollowUpEvent
+          <$> parseReviewEvidence objectValue "commitSha" (Just "post-merge reviewer reported follow-up without structured findings")
+      "issue_post_merge_review_incomplete" ->
+        IssuePostMergeReviewIncompleteEvent
+          <$> (objectValue .:? "reason" .!= "incomplete")
       "issue_closed" ->
         IssueClosedEvent
           <$> (PrNumber <$> positiveIntField objectValue "prNumber")
@@ -532,6 +580,7 @@ eventName = \case
   PrReviewMergeCompleted {} -> "pr_review_merge_completed"
   IssueImplementInitialized {} -> "issue_implement_initialized"
   IssueWorkerThreadRefreshed {} -> "issue_worker_thread_refreshed"
+  IssueAttemptBranchAdvancedEvent {} -> "issue_attempt_branch_advanced"
   IssuePlanTurnStartedEvent {} -> "issue_plan_turn_started"
   IssuePlanCompletedEvent {} -> "issue_plan_completed"
   IssuePullRequestCreatedEvent {} -> "issue_pr_created"
@@ -540,10 +589,15 @@ eventName = \case
   IssueImplementationTurnStartedEvent {} -> "issue_implementation_turn_started"
   IssueImplementationIncompleteEvent {} -> "issue_implementation_incomplete"
   IssueImplementationBlockedEvent {} -> "issue_implementation_blocked"
+  IssueReviewerThreadReadyEvent {} -> "issue_reviewer_thread_ready"
   IssueReviewHandoffInitializedEvent {} -> "issue_review_handoff_initialized"
   IssueReviewHandoffStartedEvent {} -> "issue_review_handoff_started"
   IssueImplementationCompletedEvent {} -> "issue_implementation_completed"
   IssuePullRequestMergedEvent {} -> "issue_pr_merged"
+  IssuePostMergeReviewStartedEvent {} -> "issue_post_merge_review_started"
+  IssuePostMergeReviewCleanEvent {} -> "issue_post_merge_review_clean"
+  IssuePostMergeReviewFollowUpEvent {} -> "issue_post_merge_review_follow_up"
+  IssuePostMergeReviewIncompleteEvent {} -> "issue_post_merge_review_incomplete"
   IssueClosedEvent {} -> "issue_closed"
   WatcherRecoveredInvalidState {} -> "watcher_recovered_invalid_state"
   WatcherBlocked {} -> "watcher_blocked"
