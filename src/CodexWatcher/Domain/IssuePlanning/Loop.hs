@@ -141,10 +141,11 @@ ensurePlannerThread
   -> DaemonLoopConfig
   -> m (Either DaemonLoopFailure (ThreadId, DaemonLoopConfig, [ActionExecutionReport]))
 ensurePlannerThread executor config =
-  case config.loopPlannerThreadId of
-    Just threadId ->
-      pure (Right (threadId, config, []))
-    Nothing ->
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions
+      | Just threadId <- config.loopPlannerThreadId ->
+          pure (Right (threadId, config, []))
+    _ ->
       startPlannerThread executor config
 
 startPlannerThread

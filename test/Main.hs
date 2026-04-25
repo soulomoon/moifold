@@ -3320,6 +3320,62 @@ automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart = do
     FakeWriteJson path _ -> path == snapshotPath
     _ -> False
 
+automaticDaemonLoopPlanningExecuteStartsFreshPlannerThread :: IO Bool
+automaticDaemonLoopPlanningExecuteStartsFreshPlannerThread = do
+  let repo = RepoName "soulomoon/mlf2"
+      issueNumber = IssueNumber 12
+      issueJson =
+        object
+          [ "number" .= (12 :: Int)
+          , "title" .= ("Root issue" :: Text)
+          , "state" .= ("OPEN" :: Text)
+          , "closed" .= False
+          , "body" .= ("Root body" :: Text)
+          , "url" .= ("https://github.com/soulomoon/mlf2/issues/12" :: Text)
+          , "labels" .= ([] :: [Value])
+          , "assignees" .= ([] :: [Value])
+          ]
+      subIssuesJson = toJSON ([] :: [Value])
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          RawCommand "gh" ["issue", "view", "12", "--repo", "soulomoon/mlf2", "--json", _] Nothing ->
+            jsonCommandReport issueJson
+          RawCommand "gh" ["api", "repos/soulomoon/mlf2/issues/12/sub_issues", "--paginate", "--jq", _] Nothing ->
+            jsonCommandReport subIssuesJson
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 121
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      stalePlannerThread = ThreadId "stale-planner-thread"
+      loopConfig = DaemonLoopConfig options (Just stalePlannerThread)
+      events = [IssuePlanningInitialized (PlannerConfig repo (maxParallelForTest 8) [issueNumber])]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          threadStarts = [request | FakeAppServer request <- calls, request.requestMethod == "thread/start"]
+          turnStarts = [request | FakeAppServer request <- calls, request.requestMethod == "turn/start"]
+          turnStartThreadIds = [lookupValue "threadId" request.requestParams | request <- turnStarts]
+      results <-
+        sequence
+          [ assert "automatic planning execute refreshes stale planner thread" (length threadStarts == 1)
+          , assert "automatic planning execute starts one turn on fresh planner thread" (turnStartThreadIds == [Just (String "thread-started")])
+          , assert "automatic planning execute does not reuse stale planner thread" (Just (String (unThreadId stalePlannerThread)) `notElem` turnStartThreadIds)
+          , assert "automatic planning execute emits refreshed planner thread event" (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "thread-started") (TurnId "turn-started")))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic planning fresh planner thread: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+
 automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn :: IO Bool
 automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn = do
   let repo = RepoName "soulomoon/mlf2"
@@ -4758,6 +4814,7 @@ main = do
   preMergeUnstableOk <- observedDaemonTickPreMergeGateWaitsWhenUnstable
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningSnapshotOk <- automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart
+  automaticPlanningFreshThreadOk <- automaticDaemonLoopPlanningExecuteStartsFreshPlannerThread
   automaticPlanningClosedScopeOk <- automaticDaemonLoopPlanningClosedScopeCompletesWithoutPlannerTurn
   automaticPlanningIssueCreationOk <- automaticDaemonLoopPlanningIssueCreationRequestsReplanning
   automaticPlanningGraphOk <- automaticDaemonLoopPlanningGraphWaitsAndRecords
@@ -4810,6 +4867,7 @@ main = do
       && preMergeUnstableOk
       && automaticPlanningDryRunOk
       && automaticPlanningSnapshotOk
+      && automaticPlanningFreshThreadOk
       && automaticPlanningClosedScopeOk
       && automaticPlanningIssueCreationOk
       && automaticPlanningGraphOk
