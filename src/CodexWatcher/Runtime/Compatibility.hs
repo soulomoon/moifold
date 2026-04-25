@@ -32,11 +32,12 @@ import CodexWatcher.Domain.PrReview.Types
   , MergeCommit (..)
   , PrConfig (..)
   , ReviewEvidence (..)
+  , reviewEvidenceSummaries
+  , reviewEvidenceThreadIds
   )
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
-import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
@@ -109,11 +110,11 @@ compatibilityStateWrites stateDir state =
       ]
     SomeWatcherState (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThread)) ->
       [ write "watcher-state.json" (prWatcherStateJson config (activeThreadId activeTurn) reviewerThread "worker_active" (Just (reviewedCommit evidence)) Nothing)
-      , write "checker-state.json" (checkerStateJson config (unresolvedThreads evidence))
+      , write "checker-state.json" (checkerStateJson config evidence)
       ]
     SomeWatcherState (PrVerifyingReviewFix config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "verifying_fix" (Just (reviewedCommit evidence)) Nothing)
-      , write "checker-state.json" (checkerStateJson config (unresolvedThreads evidence))
+      , write "checker-state.json" (checkerStateJson config evidence)
       ]
     SomeWatcherState (PrReviewingClean config commit _verification (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread (activeThreadId activeTurn) "reviewer_active" (Just commit) (Just commit))
@@ -184,15 +185,19 @@ prWatcherStateJson config workerThread reviewerThread turnStatus maybeReviewTarg
     , "lastReviewerTargetSha" .= fmap unCommitSha maybeReviewerTarget
     ]
 
-checkerStateJson :: PrConfig -> NonEmpty ReviewThreadId -> Value
-checkerStateJson config threads =
+checkerStateJson :: PrConfig -> ReviewEvidence -> Value
+checkerStateJson config evidence =
   object
     [ "repo" .= unRepoName (prRepo config)
     , "pr_number" .= unPrNumber (prNumber config)
-    , "has_unresolved" .= True
-    , "unresolved_count" .= length (nonEmptyToList threads)
-    , "unresolved_thread_ids" .= fmap unReviewThreadId (nonEmptyToList threads)
+    , "has_unresolved" .= not (null threadIds)
+    , "unresolved_count" .= length threadIds
+    , "unresolved_thread_ids" .= fmap unReviewThreadId threadIds
+    , "has_feedback" .= True
+    , "review_findings" .= reviewEvidenceSummaries evidence
     ]
+ where
+  threadIds = reviewEvidenceThreadIds evidence
 
 checkerStateClearJson :: PrConfig -> Value
 checkerStateClearJson config =
@@ -202,6 +207,8 @@ checkerStateClearJson config =
     , "has_unresolved" .= False
     , "unresolved_count" .= (0 :: Int)
     , "unresolved_thread_ids" .= ([] :: [Text])
+    , "has_feedback" .= False
+    , "review_findings" .= ([] :: [Text])
     ]
 
 reviewerStateJson :: CleanReviewEvidence -> Value
@@ -248,6 +255,3 @@ stoppedDaemonJson reason =
     , "activeTurnPurpose" .= Null
     , "stopReason" .= unStopReason reason
     ]
-
-nonEmptyToList :: NonEmpty a -> [a]
-nonEmptyToList (first :| rest) = first : rest

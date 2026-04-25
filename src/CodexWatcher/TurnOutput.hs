@@ -48,7 +48,7 @@ import CodexWatcher.Core.Ids
   , ReviewThreadId (..)
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
-import CodexWatcher.Domain.PrReview.Types (PrConfig (..), ReviewEvidence (..))
+import CodexWatcher.Domain.PrReview.Types (PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadIds)
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key
@@ -306,21 +306,26 @@ noVerificationInstructions =
 verificationInstructions :: ReviewEvidence -> Text
 verificationInstructions evidence =
   Text.unlines
-    [ "Review-thread verification:"
-    , "- The previous worker turn claimed to fix these unresolved GitHub review threads from commit " <> unCommitSha evidence.reviewedCommit <> ":"
-    , reviewThreadBullets evidence.unresolvedThreads
-    , "- Re-read those GitHub review threads and inspect the current local PR code."
+    [ "Review-feedback verification:"
+    , "- The previous worker turn claimed to fix this review feedback from commit " <> unCommitSha evidence.reviewedCommit <> ":"
+    , reviewFeedbackBullets evidence
+    , "- Re-read those GitHub review threads and request-changes reviews as applicable, then inspect the current local PR code."
     , "- Put fixed prior thread IDs in resolved_review_thread_ids."
     , "- Put prior thread IDs that still apply in remaining_review_thread_ids."
-    , "- If any prior thread still applies and you do not add a new non-duplicate inline comment, use review_status=remaining_findings."
+    , "- If any prior thread or request-changes finding still applies and you do not add a new non-duplicate inline comment, use review_status=remaining_findings and describe it in findings_summary."
     , "- If prior threads are fixed but you add new review comments, use review_status=comments_added."
-    , "- If all prior threads are fixed and there are no new actionable findings, use review_status=clean."
+    , "- If all prior feedback is fixed and there are no new actionable findings, use review_status=clean."
     , "- Do not resolve GitHub review threads yourself; the watcher resolves only the IDs you list as resolved."
     ]
 
-reviewThreadBullets :: Foldable f => f ReviewThreadId -> Text
-reviewThreadBullets =
-  Text.unlines . fmap (("- " <>) . unReviewThreadId) . foldMap (: [])
+reviewFeedbackBullets :: ReviewEvidence -> Text
+reviewFeedbackBullets evidence =
+  Text.unlines (threadBullets <> summaryBullets)
+ where
+  threadBullets =
+    ["- review thread " <> unReviewThreadId threadId | threadId <- reviewEvidenceThreadIds evidence]
+  summaryBullets =
+    ["- " <> summary | summary <- reviewEvidenceSummaries evidence]
 
 validationProtocol :: FilePath -> Text
 validationProtocol agentStatePath =

@@ -26,7 +26,16 @@ import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (SomeWatcherState)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence (..))
+import CodexWatcher.Domain.PrReview.Types
+  ( CleanReviewEvidence (..)
+  , MergeCommit (..)
+  , PrConfig (..)
+  , ReviewEvidence (..)
+  , reviewEvidenceFromParts
+  , reviewEvidenceFromSummaries
+  , reviewEvidenceSummaries
+  , reviewEvidenceThreadIds
+  )
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.Types (Pair, Parser)
@@ -46,12 +55,13 @@ data WatcherEvent
   | PrReviewInitialized PrConfig ThreadId ThreadId
   | PrReviewThreadsRefreshed ThreadId ThreadId
   | PrReviewUnresolvedFound (NonEmpty ReviewThreadId) CommitSha TurnId
+  | PrReviewFeedbackFound ReviewEvidence TurnId
   | PrReviewNoUnresolvedFound CommitSha TurnId
   | PrReviewFixVerificationStarted ReviewEvidence CommitSha TurnId
   | PrReviewFixCompleted
   | PrReviewFixIncomplete Text
   | PrReviewCleanFound CleanReviewEvidence [ReviewThreadId]
-  | PrReviewProblemsAdded CommitSha [ReviewThreadId]
+  | PrReviewProblemsAdded ReviewEvidence [ReviewThreadId]
   | PrReviewReviewIncomplete Text
   | PrReviewMergeabilityClean CommitSha
   | PrReviewMergeabilityWaiting Text
@@ -129,6 +139,10 @@ instance ToJSON WatcherEvent where
              , "commitSha" .= unCommitSha commitSha
              , "workerTurnId" .= unTurnId workerTurnId
              ]
+      PrReviewFeedbackFound evidence workerTurnId ->
+        eventType event
+          <> reviewEvidenceFields evidence
+          <> ["workerTurnId" .= unTurnId workerTurnId]
       PrReviewNoUnresolvedFound commitSha reviewerTurnId ->
         eventType event
           <> [ "commitSha" .= unCommitSha commitSha
@@ -136,8 +150,8 @@ instance ToJSON WatcherEvent where
              ]
       PrReviewFixVerificationStarted evidence reviewTargetSha reviewerTurnId ->
         eventType event
-          <> [ "reviewThreadIds" .= fmap unReviewThreadId (nonEmptyToList (unresolvedThreads evidence))
-             , "reviewedCommitSha" .= unCommitSha (reviewedCommit evidence)
+          <> reviewEvidenceFields evidence
+          <> [ "reviewedCommitSha" .= unCommitSha (reviewedCommit evidence)
              , "commitSha" .= unCommitSha reviewTargetSha
              , "reviewerTurnId" .= unTurnId reviewerTurnId
              ]
@@ -151,9 +165,10 @@ instance ToJSON WatcherEvent where
              , "comment" .= cleanReviewComment evidence
              , "resolvedReviewThreadIds" .= fmap unReviewThreadId resolvedThreadIds
              ]
-      PrReviewProblemsAdded commitSha resolvedThreadIds ->
+      PrReviewProblemsAdded evidence resolvedThreadIds ->
         eventType event
-          <> [ "commitSha" .= unCommitSha commitSha
+          <> reviewEvidenceFields evidence
+          <> [ "commitSha" .= unCommitSha (reviewedCommit evidence)
              , "resolvedReviewThreadIds" .= fmap unReviewThreadId resolvedThreadIds
              ]
       PrReviewReviewIncomplete reason ->
@@ -250,6 +265,10 @@ instance FromJSON WatcherEvent where
           <$> (reviewThreadIds =<< objectValue .: "reviewThreadIds")
           <*> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
           <*> (TurnId <$> nonEmptyTextField objectValue "workerTurnId")
+      "pr_review_feedback_found" ->
+        PrReviewFeedbackFound
+          <$> parseReviewEvidence objectValue "commitSha" Nothing
+          <*> (TurnId <$> nonEmptyTextField objectValue "workerTurnId")
       "pr_review_no_unresolved_found" ->
         PrReviewNoUnresolvedFound
           <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
@@ -267,7 +286,7 @@ instance FromJSON WatcherEvent where
           <*> reviewThreadIdListField objectValue "resolvedReviewThreadIds"
       "pr_review_problems_added" ->
         PrReviewProblemsAdded
-          <$> (CommitSha <$> nonEmptyTextField objectValue "commitSha")
+          <$> parseReviewEvidence objectValue "commitSha" (Just "reviewer reported problems without structured findings")
           <*> reviewThreadIdListField objectValue "resolvedReviewThreadIds"
       "pr_review_review_incomplete" ->
         PrReviewReviewIncomplete
@@ -361,9 +380,25 @@ parsePrReviewFixVerificationStarted :: Object -> Parser WatcherEvent
 parsePrReviewFixVerificationStarted objectValue = do
   reviewTargetSha <- CommitSha <$> nonEmptyTextField objectValue "commitSha"
   oldReviewedCommitSha <- CommitSha <$> (objectValue .:? "reviewedCommitSha" .!= unCommitSha reviewTargetSha)
-  evidence <- ReviewEvidence <$> (reviewThreadIds =<< objectValue .: "reviewThreadIds") <*> pure oldReviewedCommitSha
+  evidence <- parseReviewEvidenceWithCommit objectValue oldReviewedCommitSha Nothing
   reviewerTurnId <- TurnId <$> nonEmptyTextField objectValue "reviewerTurnId"
   pure (PrReviewFixVerificationStarted evidence reviewTargetSha reviewerTurnId)
+
+parseReviewEvidence :: Object -> Key.Key -> Maybe Text -> Parser ReviewEvidence
+parseReviewEvidence objectValue commitKey fallback = do
+  commit <- CommitSha <$> nonEmptyTextField objectValue commitKey
+  parseReviewEvidenceWithCommit objectValue commit fallback
+
+parseReviewEvidenceWithCommit :: Object -> CommitSha -> Maybe Text -> Parser ReviewEvidence
+parseReviewEvidenceWithCommit objectValue commit fallback = do
+  threadIds <- reviewThreadIdListField objectValue "reviewThreadIds"
+  summaries <- reviewFindingListField objectValue "reviewFindings"
+  case reviewEvidenceFromParts threadIds summaries commit of
+    Just evidence -> pure evidence
+    Nothing ->
+      case fallback of
+        Just summary -> pure (reviewEvidenceFromSummaries (summary :| []) commit)
+        Nothing -> fail "review evidence must include reviewThreadIds or reviewFindings"
 
 parseIssueConfig :: Object -> Parser IssueConfig
 parseIssueConfig objectValue =
@@ -383,6 +418,11 @@ reviewThreadIdListField :: Object -> Key.Key -> Parser [ReviewThreadId]
 reviewThreadIdListField objectValue key = do
   values <- objectValue .:? key .!= ([] :: [Text])
   traverse (fmap ReviewThreadId . nonEmptyText (Key.toString key <> "[]")) values
+
+reviewFindingListField :: Object -> Key.Key -> Parser [Text]
+reviewFindingListField objectValue key = do
+  values <- objectValue .:? key .!= ([] :: [Text])
+  traverse (nonEmptyText (Key.toString key <> "[]")) values
 
 nonEmptyIssueCreationRequests :: [IssueCreationRequest] -> Parser (NonEmpty IssueCreationRequest)
 nonEmptyIssueCreationRequests [] = fail "issues must not be empty"
@@ -456,6 +496,12 @@ prConfigFields config =
   , "branch" .= unBranchName (prBranch config)
   ]
 
+reviewEvidenceFields :: ReviewEvidence -> [Pair]
+reviewEvidenceFields evidence =
+  [ "reviewThreadIds" .= fmap unReviewThreadId (reviewEvidenceThreadIds evidence)
+  , "reviewFindings" .= reviewEvidenceSummaries evidence
+  ]
+
 nonEmptyToList :: NonEmpty a -> [a]
 nonEmptyToList (first :| rest) = first : rest
 
@@ -472,6 +518,7 @@ eventName = \case
   PrReviewInitialized {} -> "pr_review_initialized"
   PrReviewThreadsRefreshed {} -> "pr_review_threads_refreshed"
   PrReviewUnresolvedFound {} -> "pr_review_unresolved_found"
+  PrReviewFeedbackFound {} -> "pr_review_feedback_found"
   PrReviewNoUnresolvedFound {} -> "pr_review_no_unresolved_found"
   PrReviewFixVerificationStarted {} -> "pr_review_fix_verification_started"
   PrReviewFixCompleted -> "pr_review_fix_completed"

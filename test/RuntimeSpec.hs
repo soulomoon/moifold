@@ -9,7 +9,8 @@ module RuntimeSpec
   , prop_runtimeGhIssueCloseCommentsAndCloses
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
-  , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrRequestChangesBlocksReview
+  , prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
@@ -34,7 +35,8 @@ import CodexWatcher.Core.Ids
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), reviewEvidenceFromSummaries)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text qualified as Text
 
 runtimeCommandExamples :: [RuntimeCommand]
@@ -53,8 +55,9 @@ runtimeCommandExamples =
   , GhCreatePullRequest "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
   , GhUpdatePullRequestBody "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example")) (PrNumber 7) "/tmp/work/.watcher/issue-plan.md"
   , GhResolveReviewThread (ReviewThreadId "PRRT_test")
+  , GhPrRequestChanges (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (reviewEvidenceFromSummaries ("tests fail" :| []) (CommitSha "abc123"))
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
-  , GhPrCommentReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
+  , GhPrApproveReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
   , CheckNonEmptyFile "/tmp/work/.watcher/issue-plan.md"
   , GitBranchCurrent "/tmp/work"
   , GitRevParseHead "/tmp/work"
@@ -229,10 +232,33 @@ prop_runtimeGhPrBodyUpdateUsesPlanFile config prNumber =
              , planPath
              ]
 
-prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
-prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge prNumber evidence =
+prop_runtimeGhPrRequestChangesBlocksReview :: PrNumber -> Bool
+prop_runtimeGhPrRequestChangesBlocksReview prNumber =
   let repo = RepoName "soulomoon/mlf2"
-      spec = renderRuntimeCommand (GhPrCommentReviewAndMerge repo prNumber evidence "squash")
+      config = PrConfig repo prNumber (BranchName "codex/example")
+      commit = CommitSha "abc123"
+      finding = "implementation does not satisfy the PR plan"
+      spec = renderRuntimeCommand (GhPrRequestChanges config (reviewEvidenceFromSummaries (finding :| []) commit))
+   in spec.command == "gh"
+        && spec.args
+          == [ "pr"
+             , "review"
+             , show (unPrNumber prNumber)
+             , "--repo"
+             , Text.unpack (unRepoName repo)
+             , "--request-changes"
+             , "--body-file"
+             , "-"
+             ]
+        && "Review did not pass" `Text.isInfixOf` spec.stdin
+        && "blocking request-changes review" `Text.isInfixOf` spec.stdin
+        && unCommitSha commit `Text.isInfixOf` spec.stdin
+        && finding `Text.isInfixOf` spec.stdin
+
+prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
+prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge prNumber evidence =
+  let repo = RepoName "soulomoon/mlf2"
+      spec = renderRuntimeCommand (GhPrApproveReviewAndMerge repo prNumber evidence "squash")
       script = Text.pack (spec.args !! 1)
       reviewIndex = Text.breakOn "gh pr review" script
       mergeIndex = Text.breakOn "gh pr merge" script
@@ -241,19 +267,19 @@ prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge prNumber evidence =
         && spec.args
           == [ "-lc"
              , Text.unpack script
-             , "codex-watcher-gh-pr-comment-review-and-merge"
+             , "codex-watcher-gh-pr-approve-review-and-merge"
              , show (unPrNumber prNumber)
              , Text.unpack (unRepoName repo)
              , "--squash"
              ]
         && "set -euo pipefail" `Text.isInfixOf` script
         && "gh pr review" `Text.isInfixOf` script
-        && "--comment --body-file -" `Text.isInfixOf` script
+        && "--approve --body-file -" `Text.isInfixOf` script
         && "gh pr merge" `Text.isInfixOf` script
         && Text.length (fst reviewIndex) < Text.length (fst mergeIndex)
         && cleanReviewComment evidence `Text.isInfixOf` spec.stdin
         && unCommitSha (cleanReviewCommit evidence) `Text.isInfixOf` spec.stdin
-        && "Submitted by Haskell PR review watcher before merge." `Text.isInfixOf` spec.stdin
+        && "Submitted by Haskell PR review watcher as an approving clean review before merge." `Text.isInfixOf` spec.stdin
 
 prop_runtimeKillZeroOnlyChecksPid :: ThreadId -> Bool
 prop_runtimeKillZeroOnlyChecksPid threadId =

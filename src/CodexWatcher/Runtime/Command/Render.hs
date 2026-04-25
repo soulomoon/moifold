@@ -18,7 +18,7 @@ import CodexWatcher.Core.Ids
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadIds)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
@@ -147,6 +147,20 @@ renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
     ]
     Nothing
     ""
+renderRuntimeCommand (GhPrRequestChanges config evidence) =
+  RuntimeCommandSpec
+    "gh"
+    [ "pr"
+    , "review"
+    , show (unPrNumber (prNumber config))
+    , "--repo"
+    , Text.unpack (unRepoName (prRepo config))
+    , "--request-changes"
+    , "--body-file"
+    , "-"
+    ]
+    Nothing
+    (requestChangesReviewBody evidence)
 renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
   RuntimeCommandSpec
     "gh"
@@ -159,12 +173,12 @@ renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
     ]
     Nothing
     ""
-renderRuntimeCommand (GhPrCommentReviewAndMerge repo prNumber evidence mergeMethod) =
+renderRuntimeCommand (GhPrApproveReviewAndMerge repo prNumber evidence mergeMethod) =
   RuntimeCommandSpec
     "bash"
     [ "-lc"
-    , Text.unpack commentReviewAndMergeScript
-    , "codex-watcher-gh-pr-comment-review-and-merge"
+    , Text.unpack approveReviewAndMergeScript
+    , "codex-watcher-gh-pr-approve-review-and-merge"
     , show (unPrNumber prNumber)
     , Text.unpack (unRepoName repo)
     , mergeFlag mergeMethod
@@ -333,16 +347,37 @@ reviewThreadsQuery :: String
 reviewThreadsQuery =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,body,path,line,author{login}}}}}}}}"
 
-commentReviewAndMergeScript :: Text
-commentReviewAndMergeScript =
+approveReviewAndMergeScript :: Text
+approveReviewAndMergeScript =
   Text.unlines
     [ "set -euo pipefail"
     , "pr_number=\"$1\""
     , "repo=\"$2\""
     , "merge_flag=\"$3\""
-    , "gh pr review \"$pr_number\" --repo \"$repo\" --comment --body-file -"
+    , "gh pr review \"$pr_number\" --repo \"$repo\" --approve --body-file -"
     , "gh pr merge \"$pr_number\" --repo \"$repo\" \"$merge_flag\""
     ]
+
+requestChangesReviewBody :: ReviewEvidence -> Text
+requestChangesReviewBody evidence =
+  Text.unlines
+    [ "Review did not pass at commit `" <> unCommitSha evidence.reviewedCommit <> "`."
+    , ""
+    , "Findings to address:"
+    , reviewFindingBullets evidence
+    , ""
+    , "Submitted by Haskell PR review watcher as a blocking request-changes review."
+    ]
+
+reviewFindingBullets :: ReviewEvidence -> Text
+reviewFindingBullets evidence =
+  Text.unlines
+    ( summaryBullets <> threadBullets )
+ where
+  summaryBullets =
+    ["- " <> summary | summary <- reviewEvidenceSummaries evidence]
+  threadBullets =
+    ["- Unresolved review thread: `" <> unReviewThreadId threadId <> "`" | threadId <- reviewEvidenceThreadIds evidence]
 
 cleanReviewBody :: CleanReviewEvidence -> Text
 cleanReviewBody evidence =
@@ -351,7 +386,7 @@ cleanReviewBody evidence =
     , ""
     , "Reviewed commit: `" <> unCommitSha (cleanReviewCommit evidence) <> "`"
     , ""
-    , "Submitted by Haskell PR review watcher before merge."
+    , "Submitted by Haskell PR review watcher as an approving clean review before merge."
     ]
 
 commandText :: CommandReport -> Text

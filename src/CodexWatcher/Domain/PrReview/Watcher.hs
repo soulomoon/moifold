@@ -22,14 +22,20 @@ import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit, ReviewEvidence (..))
+import CodexWatcher.Domain.PrReview.Types
+  ( CleanReviewEvidence (..)
+  , MergeCommit
+  , ReviewEvidence (..)
+  , reviewEvidenceFromThreads
+  , reviewEvidenceThreadIds
+  )
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)
 import Data.Text qualified as Text
 
 data PrReviewObservation
   = ObservedReviewThreads ReviewThreadsReport CommitSha TurnId
+  | ObservedReviewFeedback ReviewEvidence TurnId
   | ObservedReviewFixVerificationStarted CommitSha TurnId
   | ObservedWorkerOutcome WorkerOutcome
   | ObservedReviewerOutcome ReviewerOutcome
@@ -54,7 +60,7 @@ prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedReviewThr
       case state of
         PrCheckingReviews _config (WorkerIdle workerThread) _reviewer ->
           let event = PrReviewUnresolvedFound threadIds commit turnId
-              decision = step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId))
+              decision = step state (ReviewThreadsFound (reviewEvidenceFromThreads threadIds commit) (ActiveTurn workerThread turnId))
            in Right (tick event decision)
     Nothing ->
       case state of
@@ -62,6 +68,18 @@ prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedReviewThr
           let event = PrReviewNoUnresolvedFound commit turnId
               decision = step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId))
            in Right (tick event decision)
+prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedReviewFeedback evidence turnId) =
+  case state of
+    PrCheckingReviews _config (WorkerIdle workerThread) _reviewer ->
+      let event = PrReviewFeedbackFound evidence turnId
+          decision = step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId))
+       in Right (tick event decision)
+prReviewObserve (SomeWatcherState state@PrVerifyingReviewFix {}) (ObservedReviewFeedback evidence turnId) =
+  case state of
+    PrVerifyingReviewFix _config _oldEvidence (WorkerIdle workerThread) _reviewer ->
+      let event = PrReviewFeedbackFound evidence turnId
+          decision = step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId))
+       in Right (tick event decision)
 prReviewObserve (SomeWatcherState state@PrFixingReviews {}) (ObservedWorkerOutcome outcome) =
   case outcome of
     WorkerCompleted ->
@@ -80,8 +98,8 @@ prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedReviewerOu
   case verifyReviewerOutcome state outcome of
     ReviewerClean evidence resolvedThreadIds ->
       Right (tick (PrReviewCleanFound evidence resolvedThreadIds) (step state (ReviewerFoundClean evidence resolvedThreadIds)))
-    ReviewerProblemsAdded commit resolvedThreadIds ->
-      Right (tick (PrReviewProblemsAdded commit resolvedThreadIds) (step state (ReviewerFoundProblems commit resolvedThreadIds)))
+    ReviewerProblemsAdded evidence resolvedThreadIds ->
+      Right (tick (PrReviewProblemsAdded evidence resolvedThreadIds) (step state (ReviewerFoundProblems evidence resolvedThreadIds)))
     ReviewerIncomplete reason ->
       Right (tick (PrReviewReviewIncomplete reason) (step state ReviewerTurnIncomplete))
     ReviewerBlocked reason ->
@@ -140,6 +158,6 @@ verifyReviewerOutcome (PrReviewingClean _config _commit (Just evidence) _worker 
       ReviewerIncomplete ("clean verification did not mark fixed prior review threads as resolved: " <> Text.intercalate ", " (fmap unReviewThreadId missingThreadIds))
  where
   missingThreadIds =
-    filter (`notElem` resolvedThreadIds) (NonEmpty.toList evidence.unresolvedThreads)
+    filter (`notElem` resolvedThreadIds) (reviewEvidenceThreadIds evidence)
 verifyReviewerOutcome _ outcome =
   outcome

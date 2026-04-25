@@ -24,7 +24,7 @@ import CodexWatcher.Domain.IssuePlanning.Types
   , PlannerConfig (..)
   , PlanningGraph (..)
   )
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), ReviewEvidence (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromThreads)
 import Data.List (find, intersect)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -100,11 +100,15 @@ applyEvent (SomeWatcherState state@PlanningTurnActive {}) (IssuePlanningTurnRetr
 applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompleted =
   fromDecision (step state PlannerTurnCompleted)
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
-  fromDecision (step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId)))
+  fromDecision (step state (ReviewThreadsFound (reviewEvidenceFromThreads threadIds commit) (ActiveTurn workerThread turnId)))
+applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewFeedbackFound evidence turnId) =
+  fromDecision (step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
   fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
 applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
-  fromDecision (step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId)))
+  fromDecision (step state (ReviewThreadsFound (reviewEvidenceFromThreads threadIds commit) (ActiveTurn workerThread turnId)))
+applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence (WorkerIdle workerThread) _reviewer)) (PrReviewFeedbackFound evidence turnId) =
+  fromDecision (step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
   fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
 applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence _worker (ReviewerIdle reviewerThread))) (PrReviewFixVerificationStarted _eventEvidence reviewTargetSha turnId) =
@@ -115,8 +119,8 @@ applyEvent (SomeWatcherState state@PrFixingReviews {}) (PrReviewFixIncomplete _r
   fromDecision (step state ReviewFixIncomplete)
 applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewCleanFound evidence resolvedThreadIds) =
   fromDecision (step state (ReviewerFoundClean evidence resolvedThreadIds))
-applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewProblemsAdded commit resolvedThreadIds) =
-  fromDecision (step state (ReviewerFoundProblems commit resolvedThreadIds))
+applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewProblemsAdded evidence resolvedThreadIds) =
+  fromDecision (step state (ReviewerFoundProblems evidence resolvedThreadIds))
 applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewReviewIncomplete _reason) =
   fromDecision (step state ReviewerTurnIncomplete)
 applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) event@(PrReviewMergeabilityClean commitSha) =

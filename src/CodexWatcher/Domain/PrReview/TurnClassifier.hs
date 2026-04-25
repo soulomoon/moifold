@@ -16,10 +16,11 @@ import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import CodexWatcher.Core.Ids (CommitSha (..), ReviewThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromParts, reviewEvidenceFromSummaries)
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -131,8 +132,10 @@ validateCompleteReviewerTurnReport expectedCommit report
               ReviewerIncomplete "comments_added review must record at least one added review comment"
           | hasOverlappingResolution report ->
               ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
+          | null (requiredFindings report.reviewerReportFindingsSummary) ->
+              ReviewerIncomplete "comments_added review must include at least one findings_summary item"
           | otherwise ->
-              ReviewerProblemsAdded expectedCommit (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+              ReviewerProblemsAdded (reviewEvidenceFromSummaries (firstFinding (requiredFindings report.reviewerReportFindingsSummary)) expectedCommit) (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
         "remaining_findings"
           | report.reviewerReportCommit /= Just expectedCommit ->
               ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
@@ -143,7 +146,9 @@ validateCompleteReviewerTurnReport expectedCommit report
           | hasOverlappingResolution report ->
               ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
           | otherwise ->
-              ReviewerProblemsAdded expectedCommit (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+              case reviewEvidenceFromParts (requiredReviewThreadIds report.reviewerReportRemainingThreadIds) (requiredFindings report.reviewerReportFindingsSummary) expectedCommit of
+                Just evidence -> ReviewerProblemsAdded evidence (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+                Nothing -> ReviewerIncomplete "remaining_findings review must include review thread IDs or findings_summary"
         other ->
           ReviewerIncomplete ("unsupported review_status: " <> other)
 
@@ -174,6 +179,14 @@ requiredText =
 requiredReviewThreadIds :: Maybe [ReviewThreadId] -> [ReviewThreadId]
 requiredReviewThreadIds =
   maybe [] id
+
+requiredFindings :: Maybe [Text] -> [Text]
+requiredFindings =
+  maybe [] (filter (not . Text.null . Text.strip))
+
+firstFinding :: [Text] -> NonEmpty Text
+firstFinding [] = "reviewer reported problems" :| []
+firstFinding (first : rest) = first :| rest
 
 reviewerCleanComment :: ReviewerTurnReport -> Text
 reviewerCleanComment report =

@@ -23,7 +23,9 @@ import CodexWatcher.Runtime.Paths (runtimeWorkdirPath)
 import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ThreadId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence, reviewEvidenceFromSummaries)
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.Text (Text)
 import Data.Text qualified as Text
 
 runPrCheckingReviews
@@ -48,11 +50,22 @@ runPrCheckingReviews ops executor config events prConfig workerThread reviewerTh
       report <- runGhReviewThreads executor.actionRuntime prConfig
       case report of
         Left reason -> pure (Left (DaemonLoopExternalFailure reason))
-        Right reviewReport ->
-          let hasUnresolved = not (null reviewReport.unresolvedReviewThreads)
-              targetThread = if hasUnresolved then workerThread else reviewerThread
-           in ops.loopPrestartAndObserve executor config events (if hasUnresolved then StartWorkerTurnKind else StartReviewerTurnKind prConfig commit) targetThread \turnId ->
+        Right reviewReport
+          | not (null reviewReport.unresolvedReviewThreads) ->
+              ops.loopPrestartAndObserve executor config events StartWorkerTurnKind workerThread \turnId ->
                 DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
+          | otherwise -> do
+              remoteResult <- runGhPrView executor.actionRuntime prConfig.prRepo prConfig.prNumber
+              case remoteResult of
+                Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+                Right remote
+                  | isChangesRequested remote.remotePullRequestReviewDecision ->
+                      let evidence = reviewEvidenceFromSummaries (changesRequestedFinding prConfig :| []) commit
+                       in ops.loopPrestartAndObserve executor config events StartWorkerTurnKind workerThread \turnId ->
+                            DaemonPrReviewObservation (ObservedReviewFeedback evidence turnId)
+                  | otherwise ->
+                      ops.loopPrestartAndObserve executor config events (StartReviewerTurnKind prConfig commit) reviewerThread \turnId ->
+                        DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
 
 runPrFixingReviews
   :: Monad m
@@ -145,3 +158,13 @@ runPrMerging ops executor config events replay prConfig = do
           ops.loopObserveWithExecutor executor config events (DaemonPrReviewObservation (ObservedMergeCompleted (MergeCommit mergeCommit)))
       | otherwise ->
           ops.loopIdle executor config replay ("waiting for PR merge completion for #" <> Text.pack (show (unPrNumber prConfig.prNumber)))
+
+isChangesRequested :: Maybe Text -> Bool
+isChangesRequested =
+  maybe False ((== "CHANGES_REQUESTED") . Text.toUpper . Text.strip)
+
+changesRequestedFinding :: PrConfig -> Text
+changesRequestedFinding prConfig =
+  "GitHub reports reviewDecision=CHANGES_REQUESTED for PR #"
+    <> Text.pack (show (unPrNumber prConfig.prNumber))
+    <> "; inspect the latest request-changes review and address its findings."

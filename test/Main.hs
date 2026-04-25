@@ -140,7 +140,8 @@ import RuntimeSpec
   , prop_runtimeGhIssueCloseCommentsAndCloses
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
-  , prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
+  , prop_runtimeGhPrRequestChangesBlocksReview
+  , prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
@@ -240,6 +241,13 @@ instance Arbitrary PrConfig where
 instance Arbitrary ActiveTurn where
   arbitrary = ActiveTurn <$> arbitrary <*> arbitrary
 
+instance Arbitrary ReviewFinding where
+  arbitrary =
+    oneof
+      [ ReviewThreadFinding <$> arbitrary
+      , ReviewSummaryFinding . Text.pack <$> listOf1 (elements ['a' .. 'z'])
+      ]
+
 instance Arbitrary ReviewEvidence where
   arbitrary = ReviewEvidence <$> ((:|) <$> arbitrary <*> listOf arbitrary) <*> arbitrary
 
@@ -278,6 +286,7 @@ data EffectTag
   | UpdatePullRequestBodyTag
   | CloseIssueTag
   | ResolveReviewThreadTag
+  | RequestChangesReviewTag
   | RecordIssuePlanTag
   | RecordPlanningGraphTag
   | RecordBlockedTag
@@ -303,6 +312,7 @@ effectTag = \case
   SomeEffect UpdatePullRequestBody {} -> UpdatePullRequestBodyTag
   SomeEffect CloseIssue {} -> CloseIssueTag
   SomeEffect ResolveReviewThread {} -> ResolveReviewThreadTag
+  SomeEffect RequestChangesReview {} -> RequestChangesReviewTag
   SomeEffect RecordIssuePlan {} -> RecordIssuePlanTag
   SomeEffect RecordPlanningGraph {} -> RecordPlanningGraphTag
   SomeEffect RecordBlocked {} -> RecordBlockedTag
@@ -491,7 +501,7 @@ prop_eventLogFullPrReviewPathCompletes config workerThread reviewerThread review
         [ PrReviewInitialized config workerThread reviewerThread
         , PrReviewUnresolvedFound reviewThreadIds reviewedCommit workerTurn
         , PrReviewFixCompleted
-        , PrReviewFixVerificationStarted (ReviewEvidence reviewThreadIds reviewedCommit) reviewedCommit verificationTurn
+        , PrReviewFixVerificationStarted (reviewEvidenceFromThreads reviewThreadIds reviewedCommit) reviewedCommit verificationTurn
         , PrReviewCleanFound verifiedCleanEvidence (Foldable.toList reviewThreadIds)
         , PrReviewNoUnresolvedFound reviewedCommit finalReviewTurn
         , PrReviewCleanFound verifiedCleanEvidence []
@@ -581,7 +591,7 @@ prop_eventLogRefreshesIdlePrReviewThreads config oldWorker oldReviewer newWorker
 
 prop_eventLogRefreshesPrReviewVerificationThreads :: PrConfig -> ThreadId -> ThreadId -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> TurnId -> Bool
 prop_eventLogRefreshesPrReviewVerificationThreads config oldWorker oldReviewer newWorker newReviewer reviewThreadId reviewedCommit reviewTarget workerTurn reviewerTurn =
-  let evidence = ReviewEvidence (reviewThreadId :| []) reviewedCommit
+  let evidence = reviewEvidenceFromThreads (reviewThreadId :| []) reviewedCommit
    in replaySatisfies
         [ PrReviewInitialized config oldWorker oldReviewer
         , PrReviewUnresolvedFound (reviewThreadId :| []) reviewedCommit workerTurn
@@ -1187,7 +1197,7 @@ canonicalEventExamples =
   , PrReviewMergeabilityWaiting "mergeability still unstable"
   , PrReviewMergeabilityRecheck "reviewed head changed"
   , PrReviewMergeabilityClean commit
-  , PrReviewProblemsAdded commit []
+  , PrReviewProblemsAdded (reviewEvidenceFromSummaries ("reviewer reported problems" :| []) commit) []
   , PrReviewReviewIncomplete "reviewer state missing required fields"
   , PrReviewMergeCompleted mergeCommit
   , IssueImplementInitialized issueConfig workerThread
@@ -1434,7 +1444,8 @@ prop_protocolPrReviewReviewerBlockedStopsInBlocked config workerThread reviewerT
 prop_protocolPrReviewReviewerProblemsReturnToChecking :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewReviewerProblemsReturnToChecking config workerThread reviewerThread reviewTarget reviewerTurn =
   let session = newPrReviewReviewerSession config reviewerThread reviewTarget
-      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerProblemsAdded reviewTarget []) session
+      evidence = reviewEvidenceFromSummaries ("reviewer reported problems" :| []) reviewTarget
+      (_finished, events) = runPrReviewReviewerProtocol reviewerTurn (ReviewerProblemsAdded evidence []) session
    in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
         Right replay ->
           someDomain replay.replayState == PrReview
@@ -1469,7 +1480,7 @@ prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread re
       (_workerFinished, workerEvents) = runPrReviewWorkerProtocol workerTurn WorkerCompleted workerSession
       cleanEvidence = CleanReviewEvidence commit "LGTM"
       reviewerEvents =
-        [ PrReviewFixVerificationStarted (ReviewEvidence reviewThreadIds commit) commit verificationTurn
+        [ PrReviewFixVerificationStarted (reviewEvidenceFromThreads reviewThreadIds commit) commit verificationTurn
         , PrReviewCleanFound cleanEvidence (Foldable.toList reviewThreadIds)
         , PrReviewNoUnresolvedFound commit finalReviewTurn
         , PrReviewCleanFound cleanEvidence []
@@ -1523,7 +1534,7 @@ prop_prReviewWatcherWorkerIncompleteReturnsToChecking config workerThread review
         SomeWatcherState
           ( PrFixingReviews
               config
-              (ReviewEvidence (reviewThreadId :| []) commit)
+              (reviewEvidenceFromThreads (reviewThreadId :| []) commit)
               (WorkerActive (ActiveTurn workerThread turnId))
               (ReviewerIdle reviewerThread)
           )
@@ -1555,7 +1566,7 @@ prop_prReviewWatcherCleanReviewerWaitsForMergeability config workerThread review
 
 prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
 prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
-  let evidence = ReviewEvidence (reviewThreadId :| []) oldCommit
+  let evidence = reviewEvidenceFromThreads (reviewThreadId :| []) oldCommit
       cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
       state =
         SomeWatcherState
@@ -1577,7 +1588,7 @@ prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks config workerThrea
 
 prop_prReviewVerificationCleanRequiresResolvedThreadIds :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
 prop_prReviewVerificationCleanRequiresResolvedThreadIds config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
-  let evidence = ReviewEvidence (reviewThreadId :| []) oldCommit
+  let evidence = reviewEvidenceFromThreads (reviewThreadId :| []) oldCommit
       cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
       state =
         SomeWatcherState
@@ -1659,7 +1670,7 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-clean-null-comment") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: review_status, reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, lgtm_comment, findings_summary, blocked_reason, resolved_review_thread_ids, remaining_review_thread_ids"))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-comments") "completed" (Just (reviewerStateOutput "comments_added" (CommitSha "abc123") reviewerPromptVersion 1 Nothing ["left inline comment"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (CommitSha "abc123") []))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-comments") "completed" (Just (reviewerStateOutput "comments_added" (CommitSha "abc123") reviewerPromptVersion 1 Nothing ["left inline comment"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (reviewEvidenceFromSummaries ("left inline comment" :| []) (CommitSha "abc123")) []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-sha-mismatch") "completed" (Just (reviewerStateOutput "clean" (CommitSha "def456") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer inspected def456, expected abc123"))
 
 prop_turnClassifierBlocksMissingOutputs :: Bool
@@ -2032,7 +2043,7 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
     , "outcome=incomplete with a non-empty reason"
     , "outcome=complete with a non-empty summary"
     ]
-    && reviewerPromptVersion == "haskell-pro-style-v4-task-completion"
+    && reviewerPromptVersion == "haskell-pro-style-v5-blocking-review"
 
 prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =
@@ -2156,7 +2167,7 @@ prop_effectInterpreterMergeUsesConfiguredRepoAndMethod prNumber cleanEvidence =
   let repo = RepoName "soulomoon/mlf2"
       config = (effectRuntimeConfig repo "/tmp/work" 40) {effectRuntimeMergeMethod = "squash"}
       compiled = compileEffectPlan config [SomeEffect (MergePullRequest prNumber cleanEvidence)]
-   in compiled.compiledActions == [PlannedCommand (GhPrCommentReviewAndMerge repo prNumber cleanEvidence "squash")]
+   in compiled.compiledActions == [PlannedCommand (GhPrApproveReviewAndMerge repo prNumber cleanEvidence "squash")]
 
 prop_actionExecutorDryRunPreservesActionOrder :: Bool
 prop_actionExecutorDryRunPreservesActionOrder =
@@ -3088,7 +3099,7 @@ observedDaemonTickPreMergeGateRechecksWhenHeadChanged = do
       pure False
  where
   isMerge = \case
-    FakeCommand GhPrCommentReviewAndMerge {} -> True
+    FakeCommand GhPrApproveReviewAndMerge {} -> True
     _ -> False
 
 observedDaemonTickPreMergeGateMergesWhenClean :: IO Bool
@@ -3154,7 +3165,7 @@ observedDaemonTickPreMergeGateMergesWhenClean = do
       pure False
  where
   isMerge = \case
-    FakeCommand GhPrCommentReviewAndMerge {} -> True
+    FakeCommand GhPrApproveReviewAndMerge {} -> True
     _ -> False
 
 observedDaemonTickPreMergeGateWaitsWhenUnstable :: IO Bool
@@ -3209,10 +3220,81 @@ observedDaemonTickPreMergeGateWaitsWhenUnstable = do
       pure False
  where
   isMerge = \case
-    FakeCommand GhPrCommentReviewAndMerge {} -> True
+    FakeCommand GhPrApproveReviewAndMerge {} -> True
     _ -> False
   isBlockWrite = \case
     FakeWriteJson path _ -> path == "/tmp/work/.watcher/block-state.json"
+    _ -> False
+
+observedDaemonTickChangesRequestedStartsWorker :: IO Bool
+observedDaemonTickChangesRequestedStartsWorker = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumber = PrNumber 6
+      branch = BranchName "codex/example"
+      prConfig = PrConfig repo prNumber branch
+      commit = CommitSha "abc123"
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \command ->
+          case command of
+            GitBranchCurrent {} -> (defaultFakeCommand command) {stdout = unBranchName branch}
+            GitRevParseHead {} -> (defaultFakeCommand command) {stdout = unCommitSha commit}
+            GitStatusPorcelain {} -> (defaultFakeCommand command) {stdout = ""}
+            GitLsRemoteBranch {} -> (defaultFakeCommand command) {stdout = unCommitSha commit <> "\trefs/heads/" <> unBranchName branch}
+            GhReviewThreads {} -> jsonCommandReport emptyReviewThreadsJson
+            GhPrView {} ->
+              jsonCommandReport
+                ( object
+                    [ "state" .= ("OPEN" :: Text)
+                    , "headRefOid" .= unCommitSha commit
+                    , "mergeStateStatus" .= ("CLEAN" :: Text)
+                    , "reviewDecision" .= ("CHANGES_REQUESTED" :: Text)
+                    ]
+                )
+            _ -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 119
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events =
+        [PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          observedPhase = somePhase . daemonObservedState <$> tick.loopObservedTick
+          turnStartThreadIds =
+            [ lookupValue "threadId" request.requestParams
+            | FakeAppServer request <- calls
+            , request.requestMethod == "turn/start"
+            ]
+          evidenceMatches = \case
+            Just (PrReviewFeedbackFound evidence (TurnId "turn-started")) ->
+              reviewedCommit evidence == commit
+                && reviewEvidenceThreadIds evidence == []
+                && any ("CHANGES_REQUESTED" `Text.isInfixOf`) (reviewEvidenceSummaries evidence)
+            _ -> False
+      results <-
+        sequence
+          [ assert "changes-requested reviewDecision emits review feedback" (evidenceMatches observedEvent)
+          , assert "changes-requested reviewDecision starts worker" (turnStartThreadIds == [Just (String "worker-thread")])
+          , assert "changes-requested reviewDecision moves to fixing reviews" (observedPhase == Just FixingReviews)
+          , assert "changes-requested reviewDecision reads PR reviewDecision" (any isGhPrView calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL changes-requested reviewDecision worker start: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isGhPrView = \case
+    FakeCommand GhPrView {} -> True
     _ -> False
 
 emptyReviewThreadsJson :: Value
@@ -4768,7 +4850,8 @@ main = do
       , quickCheckResult prop_runtimeGhIssueCloseCommentsAndCloses
       , quickCheckResult prop_runtimeGhPrCreateKeepsStdoutJsonOnly
       , quickCheckResult prop_runtimeGhPrBodyUpdateUsesPlanFile
-      , quickCheckResult prop_runtimeGhPrCommentReviewAndMergeCommentsBeforeMerge
+      , quickCheckResult prop_runtimeGhPrRequestChangesBlocksReview
+      , quickCheckResult prop_runtimeGhPrApproveReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
       , quickCheckResult prop_ghGitParsesRemoteIssueView
@@ -4845,6 +4928,7 @@ main = do
   preMergeHeadChangedOk <- observedDaemonTickPreMergeGateRechecksWhenHeadChanged
   preMergeCleanOk <- observedDaemonTickPreMergeGateMergesWhenClean
   preMergeUnstableOk <- observedDaemonTickPreMergeGateWaitsWhenUnstable
+  changesRequestedWorkerOk <- observedDaemonTickChangesRequestedStartsWorker
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningSnapshotOk <- automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart
   automaticPlanningFreshThreadOk <- automaticDaemonLoopPlanningExecuteStartsFreshPlannerThread
@@ -4899,6 +4983,7 @@ main = do
       && preMergeHeadChangedOk
       && preMergeCleanOk
       && preMergeUnstableOk
+      && changesRequestedWorkerOk
       && automaticPlanningDryRunOk
       && automaticPlanningSnapshotOk
       && automaticPlanningFreshThreadOk

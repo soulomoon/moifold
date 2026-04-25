@@ -174,6 +174,7 @@ data RemotePullRequest = RemotePullRequest
   , remotePullRequestMergeCommit :: Maybe CommitSha
   , remotePullRequestMergedAt :: Maybe Text
   , remotePullRequestMergeStateStatus :: Maybe Text
+  , remotePullRequestReviewDecision :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
@@ -193,6 +194,7 @@ instance FromJSON RemotePullRequest where
       <*> parseMergeCommit objectValue
       <*> objectValue .:? "mergedAt"
       <*> objectValue .:? "mergeStateStatus"
+      <*> objectValue .:? "reviewDecision"
 
 remotePullRequestIsOpen :: RemotePullRequest -> Bool
 remotePullRequestIsOpen pullRequest =
@@ -377,7 +379,7 @@ runGhPrChecks interpreter repo prNumber = do
 runGhPrView :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text RemotePullRequest)
 runGhPrView interpreter repo prNumber =
   parseCommandJson parseGhPrView
-    <$> interpreter.runtimeRunCommand (GhPrView repo prNumber ["state", "mergedAt", "mergeCommit", "url", "headRefOid", "mergeStateStatus"])
+    <$> interpreter.runtimeRunCommand (GhPrView repo prNumber ["state", "mergedAt", "mergeCommit", "url", "headRefOid", "mergeStateStatus", "reviewDecision"])
 
 runGhReviewThreads :: Monad m => RuntimeInterpreter m -> PrConfig -> m (Either Text ReviewThreadsReport)
 runGhReviewThreads interpreter prConfig =

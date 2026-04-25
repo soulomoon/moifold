@@ -74,6 +74,7 @@ prop_ghGitParsesRemotePrView =
               , "mergeCommit" .= object ["oid" .= ("merge-sha" :: Text)]
               , "mergedAt" .= ("2026-04-21T00:00:00Z" :: Text)
               , "mergeStateStatus" .= ("CLEAN" :: Text)
+              , "reviewDecision" .= ("APPROVED" :: Text)
               ]
           )
    in parseGhPrView prJson
@@ -85,6 +86,7 @@ prop_ghGitParsesRemotePrView =
             , remotePullRequestMergeCommit = Just (CommitSha "merge-sha")
             , remotePullRequestMergedAt = Just "2026-04-21T00:00:00Z"
             , remotePullRequestMergeStateStatus = Just "CLEAN"
+            , remotePullRequestReviewDecision = Just "APPROVED"
             }
 
 prop_ghGitParsesPrCreateAndChecks :: Bool

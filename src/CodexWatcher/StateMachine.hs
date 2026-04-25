@@ -20,10 +20,15 @@ import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
 import CodexWatcher.Core.State (CompletionEvidence (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, MergeCommit, ReviewEvidence (..), PrConfig (..))
+import CodexWatcher.Domain.PrReview.Types
+  ( CleanReviewEvidence
+  , MergeCommit
+  , PrConfig (..)
+  , ReviewEvidence (..)
+  , reviewEvidenceThreadIds
+  )
 import Data.Foldable qualified as Foldable
 import Data.List.NonEmpty (NonEmpty)
-import Data.List.NonEmpty qualified as NonEmpty
 import Data.Kind (Constraint)
 import qualified Data.Text as Text
 import GHC.TypeLits (ErrorMessage (..), TypeError)
@@ -64,7 +69,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   ReviewFixCompleted :: Event 'PrReview 'FixingReviews
   ReviewFixIncomplete :: Event 'PrReview 'FixingReviews
   ReviewerFoundClean :: CleanReviewEvidence -> [ReviewThreadId] -> Event 'PrReview 'ReviewingClean
-  ReviewerFoundProblems :: CommitSha -> [ReviewThreadId] -> Event 'PrReview 'ReviewingClean
+  ReviewerFoundProblems :: ReviewEvidence -> [ReviewThreadId] -> Event 'PrReview 'ReviewingClean
   ReviewerTurnIncomplete :: Event 'PrReview 'ReviewingClean
   MergeabilityClean :: Event 'PrReview 'WaitingMergeability
   MergeabilityRetryLater :: Text.Text -> Event 'PrReview 'WaitingMergeability
@@ -262,10 +267,10 @@ step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (Revie
   Decision
     (PrWaitingForMergeability config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
     (resolveReviewThreads Nothing resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
-step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems _reviewedCommit resolvedThreadIds) =
+step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems evidence resolvedThreadIds) =
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads verification resolvedThreadIds <> [SomeEffect (ReadReviewThreads config)])
+    (resolveReviewThreads verification resolvedThreadIds <> [SomeEffect (RequestChangesReview config evidence), SomeEffect (ReadReviewThreads config)])
 step (PrReviewingClean config _commit (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
   Decision
     (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
@@ -314,6 +319,6 @@ resolveReviewThreads Nothing _resolvedThreadIds =
   []
 resolveReviewThreads (Just evidence) resolvedThreadIds =
   [ SomeEffect (ResolveReviewThread threadId)
-  | threadId <- NonEmpty.toList (unresolvedThreads evidence)
+  | threadId <- reviewEvidenceThreadIds evidence
   , threadId `elem` resolvedThreadIds
   ]

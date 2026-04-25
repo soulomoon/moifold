@@ -21,9 +21,10 @@ import CodexWatcher.Runtime.Owner.Cli (validateRuntimeOwnerForExecution)
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (somePhase)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), reviewEvidenceFromSummaries)
 import Data.Aeson (Value (Null))
 import Data.List (find)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as Text
 import System.Exit (die)
@@ -135,7 +136,7 @@ observationSpecs =
         (\evidence -> ObservedReviewerOutcome (ReviewerClean evidence [])) <$> requiredCleanReviewEvidence cli
     )
   , prReview "reviewer-problems" ( \cli ->
-        (\commit -> ObservedReviewerOutcome (ReviewerProblemsAdded commit [])) <$> requiredValue "--commit-sha" cli.observeCliCommitSha
+        (\commit -> ObservedReviewerOutcome (ReviewerProblemsAdded (reviewEvidenceFromSummaries (fromMaybe "reviewer reported problems" cli.observeCliReason :| []) commit) [])) <$> requiredValue "--commit-sha" cli.observeCliCommitSha
     )
   , prReviewPureFromCli "reviewer-incomplete" ( \cli ->
         ObservedReviewerOutcome (ReviewerIncomplete (fromMaybe "incomplete" cli.observeCliReason))

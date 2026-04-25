@@ -17,7 +17,7 @@ import CodexWatcher.Core.Ids
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig, ReviewEvidence)
 import Data.Aeson (ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -37,8 +37,9 @@ data RuntimeCommand
   | GhCreatePullRequest FilePath IssueConfig
   | GhUpdatePullRequestBody FilePath IssueConfig PrNumber FilePath
   | GhResolveReviewThread ReviewThreadId
+  | GhPrRequestChanges PrConfig ReviewEvidence
   | GhPrMerge RepoName PrNumber Text
-  | GhPrCommentReviewAndMerge RepoName PrNumber CleanReviewEvidence Text
+  | GhPrApproveReviewAndMerge RepoName PrNumber CleanReviewEvidence Text
   | CheckNonEmptyFile FilePath
   | GitBranchCurrent FilePath
   | GitRevParseHead FilePath

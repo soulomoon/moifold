@@ -30,7 +30,7 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, ThreadId, TurnId)
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.Thread (ActiveTurn (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig, ReviewEvidence)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 
@@ -108,7 +108,7 @@ data WorkerOutcome
 
 data ReviewerOutcome
   = ReviewerClean CleanReviewEvidence [ReviewThreadId]
-  | ReviewerProblemsAdded CommitSha [ReviewThreadId]
+  | ReviewerProblemsAdded ReviewEvidence [ReviewThreadId]
   | ReviewerIncomplete Text
   | ReviewerBlocked BlockedReason
   deriving stock (Eq, Show)
@@ -174,6 +174,6 @@ workerEventForOutcome (WorkerBlocked reason) = WatcherBlocked reason
 
 reviewerEventForOutcome :: ReviewerOutcome -> WatcherEvent
 reviewerEventForOutcome (ReviewerClean evidence resolvedThreadIds) = PrReviewCleanFound evidence resolvedThreadIds
-reviewerEventForOutcome (ReviewerProblemsAdded commit resolvedThreadIds) = PrReviewProblemsAdded commit resolvedThreadIds
+reviewerEventForOutcome (ReviewerProblemsAdded evidence resolvedThreadIds) = PrReviewProblemsAdded evidence resolvedThreadIds
 reviewerEventForOutcome (ReviewerIncomplete reason) = PrReviewReviewIncomplete reason
 reviewerEventForOutcome (ReviewerBlocked reason) = WatcherBlocked reason

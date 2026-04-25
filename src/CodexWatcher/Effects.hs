@@ -40,6 +40,7 @@ data Effect (mutability :: Mutability) where
   UpdatePullRequestBody :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   CloseIssue :: IssueConfig -> PrNumber -> Effect 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'CanMutateGitHub
+  RequestChangesReview :: PrConfig -> ReviewEvidence -> Effect 'CanMutateGitHub
   RecordIssuePlan :: IssueConfig -> PrNumber -> Text -> Effect 'CanMutateLocal
   RecordPlanningGraph :: PlanningGraph -> Effect 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'CanMutateLocal
