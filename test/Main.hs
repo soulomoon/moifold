@@ -27,6 +27,7 @@ import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Cli.Command.IssueFanout (readyIssueStatusFromRuntime)
+import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Domain.IssuePlanning.Watcher
@@ -4589,6 +4590,17 @@ automaticDaemonLoopEmitsBoundaryLogs = do
       putStrLn ("FAIL automatic loop logging: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+automaticLoopRetryPolicyKeepsTransientFailuresAlive :: IO Bool
+automaticLoopRetryPolicyKeepsTransientFailuresAlive = do
+  results <-
+    sequence
+      [ assert "automatic loop retries external observation failures" (retryableAutomaticLoopFailure (DaemonLoopExternalFailure "GitHub GraphQL EOF"))
+      , assert "automatic loop retries app-server transport failures" (retryableAutomaticLoopFailure (DaemonLoopAppServerFailure (AppServerTransportFailure "connection reset")))
+      , assert "automatic loop keeps replay failures fatal" (not (retryableAutomaticLoopFailure (DaemonLoopDaemonFailure (DaemonEventLogDecodeFailed "bad event log"))))
+      , assert "automatic loop keeps unexpected start plans fatal" (not (retryableAutomaticLoopFailure (DaemonLoopUnexpectedStartPlan "invalid start plan")))
+      ]
+  pure (and results)
+
 observeOnceParsingCoversDomainsAndDefaults :: IO Bool
 observeOnceParsingCoversDomainsAndDefaults = do
   planning <-
@@ -4845,6 +4857,7 @@ main = do
   automaticMissingPlanBodyOk <- automaticDaemonLoopMissingPlanFailsPrBodyUpdate
   automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
   automaticLoopLoggingOk <- automaticDaemonLoopEmitsBoundaryLogs
+  automaticLoopRetryPolicyOk <- automaticLoopRetryPolicyKeepsTransientFailuresAlive
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
@@ -4898,6 +4911,7 @@ main = do
       && automaticMissingPlanBodyOk
       && automaticTerminalStopOk
       && automaticLoopLoggingOk
+      && automaticLoopRetryPolicyOk
       && runnerGuardOk
       && runnerGuardRestartOk
       && runnerGuardWaitingRestartOk

@@ -152,7 +152,7 @@ logLoopResult executor = \case
     Log.logWatcher
       executor.actionLogger
       ( Log.watcherLog
-          Log.Error
+          (failureLogLevel failure)
           "loop_tick_failed"
           "automatic loop tick failed"
           ["failure" .= formatDaemonLoopFailure failure]
@@ -171,3 +171,10 @@ logLoopResult executor = \case
           , "actions" .= length tick.loopActionReports
           ]
       )
+
+failureLogLevel :: DaemonLoopFailure -> Log.WatcherLogLevel
+failureLogLevel = \case
+  DaemonLoopExternalFailure {} -> Log.Warn
+  DaemonLoopAppServerFailure {} -> Log.Warn
+  DaemonLoopDaemonFailure {} -> Log.Error
+  DaemonLoopUnexpectedStartPlan {} -> Log.Error

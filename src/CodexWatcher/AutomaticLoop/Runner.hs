@@ -8,6 +8,7 @@
 
 module CodexWatcher.AutomaticLoop.Runner
   ( runAutomaticLoop
+  , retryableAutomaticLoopFailure
   ) where
 
 import CodexWatcher.ActionExecutor
@@ -21,7 +22,7 @@ import CodexWatcher.Cli.Types (LoopCli (..), cliDomainName)
 import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
-import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
+import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..), PlannedAction (..))
 import CodexWatcher.Cli.RuntimeConfig (defaultEffectRuntimeConfigWithPlannerScope)
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
@@ -123,6 +124,24 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
   reconcileLoopCompatibility executor loopConfig
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
+    Left failure
+      | shouldLoop && iteration < maxIterations && retryableAutomaticLoopFailure failure -> do
+          Log.logWatcher
+            executor.actionLogger
+            ( Log.watcherLog
+                Log.Warn
+                "loop_tick_retry_scheduled"
+                "automatic loop tick failed with retryable failure; retrying after poll interval"
+                [ "failure" .= formatDaemonLoopFailure failure
+                , "iteration" .= iteration
+                ]
+            )
+          _ <-
+            executePlannedAction
+              executor
+              loopConfig.loopDaemonOptions.daemonExecutionMode
+              PlannedSleepUntilNextPoll
+          pure ()
     Left failure -> do
       recordInvalidReplayBlockState loopConfig failure
       die (Text.unpack (formatDaemonLoopFailure failure))
@@ -134,6 +153,13 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
   shouldStop <- readIORef stopRequested
   when (shouldLoop && not shouldStop && iteration < maxIterations) $
     runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoop maxIterations (iteration + 1)
+
+retryableAutomaticLoopFailure :: DaemonLoopFailure -> Bool
+retryableAutomaticLoopFailure = \case
+  DaemonLoopExternalFailure {} -> True
+  DaemonLoopAppServerFailure {} -> True
+  DaemonLoopDaemonFailure {} -> False
+  DaemonLoopUnexpectedStartPlan {} -> False
 
 recordInvalidReplayBlockState :: DaemonLoopConfig -> DaemonLoopFailure -> IO ()
 recordInvalidReplayBlockState loopConfig = \case
