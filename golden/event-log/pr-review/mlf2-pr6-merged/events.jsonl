@@ -3,5 +3,7 @@
 {"type":"pr_review_fix_completed"}
 {"type":"pr_review_fix_verification_started","reviewThreadIds":["PRRT_kwDOQhPzu858nL9h","PRRT_kwDOQhPzu858nOCc"],"reviewedCommitSha":"6ecb24088067b9d655366a9e17997cc785b13cdd","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204","reviewerTurnId":"turn-clean-review"}
 {"type":"pr_review_clean_found","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204","comment":"LGTM","resolvedReviewThreadIds":["PRRT_kwDOQhPzu858nL9h","PRRT_kwDOQhPzu858nOCc"]}
+{"type":"pr_review_no_unresolved_found","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204","reviewerTurnId":"turn-final-review"}
+{"type":"pr_review_clean_found","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204","comment":"LGTM","resolvedReviewThreadIds":[]}
 {"type":"pr_review_mergeability_clean","commitSha":"ba1faf7645ca86c48104cd640a708cca0311b204"}
 {"type":"pr_review_merge_completed","mergeCommitSha":"ba1faf7645ca86c48104cd640a708cca0311b204"}

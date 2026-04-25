@@ -483,15 +483,17 @@ prop_stateSingletonReflection config activeTurn =
         && not (isTerminalState (SomeWatcherState activeState))
         && isTerminalState (SomeWatcherState completeState)
 
-prop_eventLogFullPrReviewPathCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> CleanReviewEvidence -> MergeCommit -> Bool
-prop_eventLogFullPrReviewPathCompletes config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reviewerTurn cleanEvidence mergeCommit =
+prop_eventLogFullPrReviewPathCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> TurnId -> CleanReviewEvidence -> MergeCommit -> Bool
+prop_eventLogFullPrReviewPathCompletes config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn verificationTurn finalReviewTurn cleanEvidence mergeCommit =
   let verifiedCleanEvidence = CleanReviewEvidence reviewedCommit (cleanReviewComment cleanEvidence)
    in replaySatisfies
         [ PrReviewInitialized config workerThread reviewerThread
         , PrReviewUnresolvedFound reviewThreadIds reviewedCommit workerTurn
         , PrReviewFixCompleted
-        , PrReviewFixVerificationStarted (ReviewEvidence reviewThreadIds reviewedCommit) reviewedCommit reviewerTurn
+        , PrReviewFixVerificationStarted (ReviewEvidence reviewThreadIds reviewedCommit) reviewedCommit verificationTurn
         , PrReviewCleanFound verifiedCleanEvidence (Foldable.toList reviewThreadIds)
+        , PrReviewNoUnresolvedFound reviewedCommit finalReviewTurn
+        , PrReviewCleanFound verifiedCleanEvidence []
         , PrReviewMergeabilityClean reviewedCommit
         , PrReviewMergeCompleted mergeCommit
         ]
@@ -1460,14 +1462,16 @@ prop_protocolPrReviewReviewerEmitsStartThenCleanEvent config reviewerThread revi
             && null resolvedThreadIds
         _ -> False
 
-prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> MergeCommit -> Bool
-prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread reviewerThread reviewThreadIds commit workerTurn reviewerTurn mergeCommit =
+prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> TurnId -> MergeCommit -> Bool
+prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread reviewerThread reviewThreadIds commit workerTurn verificationTurn finalReviewTurn mergeCommit =
   let workerSession = newPrReviewWorkerSession config workerThread reviewThreadIds commit
       (_workerFinished, workerEvents) = runPrReviewWorkerProtocol workerTurn WorkerCompleted workerSession
       cleanEvidence = CleanReviewEvidence commit "LGTM"
       reviewerEvents =
-        [ PrReviewFixVerificationStarted (ReviewEvidence reviewThreadIds commit) commit reviewerTurn
+        [ PrReviewFixVerificationStarted (ReviewEvidence reviewThreadIds commit) commit verificationTurn
         , PrReviewCleanFound cleanEvidence (Foldable.toList reviewThreadIds)
+        , PrReviewNoUnresolvedFound commit finalReviewTurn
+        , PrReviewCleanFound cleanEvidence []
         ]
       events = PrReviewInitialized config workerThread reviewerThread : workerEvents <> reviewerEvents <> [PrReviewMergeabilityClean commit, PrReviewMergeCompleted mergeCommit]
    in case replayEventLog events of
@@ -1548,8 +1552,8 @@ prop_prReviewWatcherCleanReviewerWaitsForMergeability config workerThread review
             && lacksEffect MergePullRequestTag tick.prReviewTickEffects
         Left _ -> False
 
-prop_prReviewVerificationCleanResolvesFixedThreads :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
-prop_prReviewVerificationCleanResolvesFixedThreads config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
+prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
+prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
   let evidence = ReviewEvidence (reviewThreadId :| []) oldCommit
       cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
       state =
@@ -1564,8 +1568,10 @@ prop_prReviewVerificationCleanResolvesFixedThreads config workerThread reviewerT
    in case prReviewObserve state (ObservedReviewerOutcome (ReviewerClean cleanEvidence [reviewThreadId])) of
         Right tick ->
           prReviewTickEvent tick == PrReviewCleanFound cleanEvidence [reviewThreadId]
-            && somePhase tick.prReviewTickState == WaitingMergeability
+            && somePhase tick.prReviewTickState == CheckingReviews
             && hasEffect ResolveReviewThreadTag tick.prReviewTickEffects
+            && hasEffect ReadReviewThreadsTag tick.prReviewTickEffects
+            && lacksEffect MergePullRequestTag tick.prReviewTickEffects
         Left _ -> False
 
 prop_prReviewVerificationCleanRequiresResolvedThreadIds :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
@@ -4724,7 +4730,7 @@ main = do
       , quickCheckResult prop_prReviewWatcherCleanStartsReviewer
       , quickCheckResult prop_prReviewWatcherWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_prReviewWatcherCleanReviewerWaitsForMergeability
-      , quickCheckResult prop_prReviewVerificationCleanResolvesFixedThreads
+      , quickCheckResult prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks
       , quickCheckResult prop_prReviewVerificationCleanRequiresResolvedThreadIds
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
       , quickCheckResult prop_runtimeGitPushDryRunNeverForces

@@ -254,10 +254,14 @@ step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle r
   Decision
     (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
     [SomeEffect (ReadReviewThreads config)]
-step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds) =
+step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean _evidence resolvedThreadIds) =
+  Decision
+    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+    (resolveReviewThreads (Just verification) resolvedThreadIds <> [SomeEffect (ReadReviewThreads config)])
+step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds) =
   Decision
     (PrWaitingForMergeability config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads verification resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
+    (resolveReviewThreads Nothing resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
 step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems _reviewedCommit resolvedThreadIds) =
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
