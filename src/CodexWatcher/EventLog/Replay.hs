@@ -101,14 +101,16 @@ applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle worker
   fromDecision (step state (ReviewThreadsFound (ReviewEvidence threadIds commit) (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
   fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
+applyEvent (SomeWatcherState state@(PrVerifyingReviewFix _config _storedEvidence _worker (ReviewerIdle reviewerThread))) (PrReviewFixVerificationStarted _eventEvidence reviewTargetSha turnId) =
+  fromDecision (step state (StartReviewFixVerification reviewTargetSha (ActiveTurn reviewerThread turnId)))
 applyEvent (SomeWatcherState state@PrFixingReviews {}) PrReviewFixCompleted =
   fromDecision (step state ReviewFixCompleted)
 applyEvent (SomeWatcherState state@PrFixingReviews {}) (PrReviewFixIncomplete _reason) =
   fromDecision (step state ReviewFixIncomplete)
-applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewCleanFound evidence) =
-  fromDecision (step state (ReviewerFoundClean evidence))
-applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewProblemsAdded _commit) =
-  fromDecision (step state ReviewerFoundProblems)
+applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewCleanFound evidence resolvedThreadIds) =
+  fromDecision (step state (ReviewerFoundClean evidence resolvedThreadIds))
+applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewProblemsAdded commit resolvedThreadIds) =
+  fromDecision (step state (ReviewerFoundProblems commit resolvedThreadIds))
 applyEvent (SomeWatcherState state@PrReviewingClean {}) (PrReviewReviewIncomplete _reason) =
   fromDecision (step state ReviewerTurnIncomplete)
 applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) event@(PrReviewMergeabilityClean commitSha) =

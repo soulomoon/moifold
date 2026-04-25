@@ -14,15 +14,16 @@ module CodexWatcher.StateMachine
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Core.Ids (CommitSha, PrNumber (..))
+import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ReviewThreadId)
 import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
 import CodexWatcher.Core.State (CompletionEvidence (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, MergeCommit, ReviewEvidence, PrConfig (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, MergeCommit, ReviewEvidence (..), PrConfig (..))
 import Data.Foldable qualified as Foldable
 import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Kind (Constraint)
 import qualified Data.Text as Text
 import GHC.TypeLits (ErrorMessage (..), TypeError)
@@ -59,10 +60,11 @@ data Event (domain :: Domain) (phase :: Phase) where
 
   ReviewThreadsFound :: ReviewEvidence -> ActiveTurn -> Event 'PrReview 'CheckingReviews
   NoReviewThreadsFound :: CommitSha -> ActiveTurn -> Event 'PrReview 'CheckingReviews
+  StartReviewFixVerification :: CommitSha -> ActiveTurn -> Event 'PrReview 'CheckingReviews
   ReviewFixCompleted :: Event 'PrReview 'FixingReviews
   ReviewFixIncomplete :: Event 'PrReview 'FixingReviews
-  ReviewerFoundClean :: CleanReviewEvidence -> Event 'PrReview 'ReviewingClean
-  ReviewerFoundProblems :: Event 'PrReview 'ReviewingClean
+  ReviewerFoundClean :: CleanReviewEvidence -> [ReviewThreadId] -> Event 'PrReview 'ReviewingClean
+  ReviewerFoundProblems :: CommitSha -> [ReviewThreadId] -> Event 'PrReview 'ReviewingClean
   ReviewerTurnIncomplete :: Event 'PrReview 'ReviewingClean
   MergeabilityClean :: Event 'PrReview 'WaitingMergeability
   MergeabilityRetryLater :: Text.Text -> Event 'PrReview 'WaitingMergeability
@@ -230,25 +232,33 @@ step (PrCheckingReviews config _worker (ReviewerIdle reviewerThreadId)) (ReviewT
     [SomeEffect (StartWorkerTurn (activeThreadId activeTurn))]
 step (PrCheckingReviews config (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
   Decision
-    (PrReviewingClean config commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
+    (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
     [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
-step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixCompleted =
+step (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) _reviewer) (StartReviewFixVerification reviewTargetSha activeTurn) =
   Decision
-    (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (ReadReviewThreads config)]
+    (PrReviewingClean config reviewTargetSha (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
+    [SomeEffect (StartReviewerVerificationTurn config evidence reviewTargetSha (activeThreadId activeTurn))]
+step (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixCompleted =
+  Decision
+    (PrVerifyingReviewFix config evidence (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
+    [SomeEffect SleepUntilNextPoll]
 step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixIncomplete =
   Decision
     (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
     [SomeEffect (ReadReviewThreads config)]
-step (PrReviewingClean config _commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence) =
+step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds) =
   Decision
     (PrWaitingForMergeability config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    [SomeEffect SleepUntilNextPoll]
-step (PrReviewingClean config _commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerFoundProblems =
+    (resolveReviewThreads verification resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
+step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems _reviewedCommit resolvedThreadIds) =
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    [SomeEffect (ReadReviewThreads config)]
-step (PrReviewingClean config _commit (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
+    (resolveReviewThreads verification resolvedThreadIds <> [SomeEffect (ReadReviewThreads config)])
+step (PrReviewingClean config _commit (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
+  Decision
+    (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+    [SomeEffect SleepUntilNextPoll]
+step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
     [SomeEffect (ReadReviewThreads config)]
@@ -286,3 +296,12 @@ prMismatchBlocked expected actual =
               <> Text.pack (show (unPrNumber actual))
           )
    in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
+
+resolveReviewThreads :: Maybe ReviewEvidence -> [ReviewThreadId] -> EffectPlan
+resolveReviewThreads Nothing _resolvedThreadIds =
+  []
+resolveReviewThreads (Just evidence) resolvedThreadIds =
+  [ SomeEffect (ResolveReviewThread threadId)
+  | threadId <- NonEmpty.toList (unresolvedThreads evidence)
+  , threadId `elem` resolvedThreadIds
+  ]

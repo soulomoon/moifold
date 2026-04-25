@@ -107,7 +107,7 @@ bootstrapUnblockedPrReviewSnapshotEvents snapshot initialEvents
   reviewerCleanEvents =
     initialEvents
       <> [ PrReviewNoUnresolvedFound commit bootstrapReviewerTurn
-         , PrReviewCleanFound (CleanReviewEvidence commit "LGTM")
+         , PrReviewCleanFound (CleanReviewEvidence commit "LGTM") []
          ]
 
 bootstrapNodeIssueImplementSnapshotEvents :: NodeIssueImplementSnapshot -> [WatcherEvent]

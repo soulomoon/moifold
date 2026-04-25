@@ -132,10 +132,10 @@ observationSpecs =
         ObservedWorkerOutcome . WorkerBlocked <$> requiredBlockedReason cli
     )
   , prReview "reviewer-clean" ( \cli ->
-        ObservedReviewerOutcome . ReviewerClean <$> requiredCleanReviewEvidence cli
+        (\evidence -> ObservedReviewerOutcome (ReviewerClean evidence [])) <$> requiredCleanReviewEvidence cli
     )
   , prReview "reviewer-problems" ( \cli ->
-        ObservedReviewerOutcome . ReviewerProblemsAdded <$> requiredValue "--commit-sha" cli.observeCliCommitSha
+        (\commit -> ObservedReviewerOutcome (ReviewerProblemsAdded commit [])) <$> requiredValue "--commit-sha" cli.observeCliCommitSha
     )
   , prReviewPureFromCli "reviewer-incomplete" ( \cli ->
         ObservedReviewerOutcome (ReviewerIncomplete (fromMaybe "incomplete" cli.observeCliReason))

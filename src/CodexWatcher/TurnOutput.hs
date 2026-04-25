@@ -17,6 +17,7 @@ module CodexWatcher.TurnOutput
   , reviewerPromptVersion
   , reviewerTurnInput
   , reviewerTurnOutputSchema
+  , reviewerVerificationTurnInput
   , structuredTurnOutcomeInstructions
   , structuredTurnOutputSchema
   ) where
@@ -44,9 +45,10 @@ import CodexWatcher.Core.Ids
   , IssueNumber (..)
   , PrNumber (..)
   , RepoName (..)
+  , ReviewThreadId (..)
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
-import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
+import CodexWatcher.Domain.PrReview.Types (PrConfig (..), ReviewEvidence (..))
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key
@@ -118,11 +120,13 @@ reviewerTurnOutputSchema =
     , "lgtm_comment"
     , "findings_summary"
     , "blocked_reason"
+    , "resolved_review_thread_ids"
+    , "remaining_review_thread_ids"
     ]
     [ ( "review_status"
       , object
           [ "type" .= ("string" :: Text)
-          , "enum" .= (["clean", "comments_added", "incomplete", "blocked"] :: [Text])
+          , "enum" .= (["clean", "comments_added", "remaining_findings", "incomplete", "blocked"] :: [Text])
           ]
       )
     , ("reviewed_commit_sha", stringField)
@@ -131,6 +135,8 @@ reviewerTurnOutputSchema =
     , ("lgtm_comment", nullableStringField)
     , ("findings_summary", object ["type" .= ("array" :: Text), "items" .= stringField])
     , ("blocked_reason", nullableStringField)
+    , ("resolved_review_thread_ids", stringArrayField)
+    , ("remaining_review_thread_ids", stringArrayField)
     ]
 
 structuredTurnOutcomeInstructions :: Text
@@ -264,6 +270,19 @@ issuePlanModeDeveloperInstructions workdir stateDir config prNumber =
 
 reviewerTurnInput :: FilePath -> FilePath -> PrConfig -> CommitSha -> Text
 reviewerTurnInput workdir reviewerStatePath config reviewTargetSha =
+  reviewerTurnInputWithVerification workdir reviewerStatePath config reviewTargetSha noVerificationInstructions
+
+reviewerVerificationTurnInput :: FilePath -> FilePath -> PrConfig -> ReviewEvidence -> CommitSha -> Text
+reviewerVerificationTurnInput workdir reviewerStatePath config evidence reviewTargetSha =
+  reviewerTurnInputWithVerification
+    workdir
+    reviewerStatePath
+    config
+    reviewTargetSha
+    (verificationInstructions evidence)
+
+reviewerTurnInputWithVerification :: FilePath -> FilePath -> PrConfig -> CommitSha -> Text -> Text
+reviewerTurnInputWithVerification workdir reviewerStatePath config reviewTargetSha verificationInstructionsText =
   renderTemplate
     reviewerTemplate
     [ ("repoFullName", unRepoName config.prRepo)
@@ -273,7 +292,35 @@ reviewerTurnInput workdir reviewerStatePath config reviewTargetSha =
     , ("reviewTargetSha", unCommitSha reviewTargetSha)
     , ("reviewerPromptVersion", reviewerPromptVersion)
     , ("reviewerStatePath", Text.pack reviewerStatePath)
+    , ("verificationInstructions", verificationInstructionsText)
     ]
+
+noVerificationInstructions :: Text
+noVerificationInstructions =
+  Text.unlines
+    [ "Review-thread resolution fields:"
+    , "- This is a normal review pass with no watcher-owned prior thread verification."
+    , "- Return empty arrays for resolved_review_thread_ids and remaining_review_thread_ids."
+    ]
+
+verificationInstructions :: ReviewEvidence -> Text
+verificationInstructions evidence =
+  Text.unlines
+    [ "Review-thread verification:"
+    , "- The previous worker turn claimed to fix these unresolved GitHub review threads from commit " <> unCommitSha evidence.reviewedCommit <> ":"
+    , reviewThreadBullets evidence.unresolvedThreads
+    , "- Re-read those GitHub review threads and inspect the current local PR code."
+    , "- Put fixed prior thread IDs in resolved_review_thread_ids."
+    , "- Put prior thread IDs that still apply in remaining_review_thread_ids."
+    , "- If any prior thread still applies and you do not add a new non-duplicate inline comment, use review_status=remaining_findings."
+    , "- If prior threads are fixed but you add new review comments, use review_status=comments_added."
+    , "- If all prior threads are fixed and there are no new actionable findings, use review_status=clean."
+    , "- Do not resolve GitHub review threads yourself; the watcher resolves only the IDs you list as resolved."
+    ]
+
+reviewThreadBullets :: Foldable f => f ReviewThreadId -> Text
+reviewThreadBullets =
+  Text.unlines . fmap (("- " <>) . unReviewThreadId) . foldMap (: [])
 
 validationProtocol :: FilePath -> Text
 validationProtocol agentStatePath =
@@ -329,6 +376,13 @@ stringField =
 nullableStringField :: Value
 nullableStringField =
   object ["type" .= (["string", "null"] :: [Text])]
+
+stringArrayField :: Value
+stringArrayField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items" .= stringField
+    ]
 
 strictObjectSchema :: [Text] -> [(Text, Value)] -> Value
 strictObjectSchema requiredFields properties =

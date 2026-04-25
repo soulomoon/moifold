@@ -17,17 +17,20 @@ import CodexWatcher.GhGit
 import CodexWatcher.Observation
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, TurnId)
-import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId (..), TurnId)
+import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit, ReviewEvidence (..))
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)
+import Data.Text qualified as Text
 
 data PrReviewObservation
   = ObservedReviewThreads ReviewThreadsReport CommitSha TurnId
+  | ObservedReviewFixVerificationStarted CommitSha TurnId
   | ObservedWorkerOutcome WorkerOutcome
   | ObservedReviewerOutcome ReviewerOutcome
   | ObservedMergeabilityClean CommitSha
@@ -67,12 +70,18 @@ prReviewObserve (SomeWatcherState state@PrFixingReviews {}) (ObservedWorkerOutco
       Right (tick (PrReviewFixIncomplete reason) (step state ReviewFixIncomplete))
     WorkerBlocked reason ->
       Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+prReviewObserve (SomeWatcherState state@PrVerifyingReviewFix {}) (ObservedReviewFixVerificationStarted reviewTargetSha turnId) =
+  case state of
+    PrVerifyingReviewFix _config evidence _worker (ReviewerIdle reviewerThread) ->
+      let event = PrReviewFixVerificationStarted evidence reviewTargetSha turnId
+          decision = step state (StartReviewFixVerification reviewTargetSha (ActiveTurn reviewerThread turnId))
+       in Right (tick event decision)
 prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedReviewerOutcome outcome) =
-  case outcome of
-    ReviewerClean evidence ->
-      Right (tick (PrReviewCleanFound evidence) (step state (ReviewerFoundClean evidence)))
-    ReviewerProblemsAdded commit ->
-      Right (tick (PrReviewProblemsAdded commit) (step state ReviewerFoundProblems))
+  case verifyReviewerOutcome state outcome of
+    ReviewerClean evidence resolvedThreadIds ->
+      Right (tick (PrReviewCleanFound evidence resolvedThreadIds) (step state (ReviewerFoundClean evidence resolvedThreadIds)))
+    ReviewerProblemsAdded commit resolvedThreadIds ->
+      Right (tick (PrReviewProblemsAdded commit resolvedThreadIds) (step state (ReviewerFoundProblems commit resolvedThreadIds)))
     ReviewerIncomplete reason ->
       Right (tick (PrReviewReviewIncomplete reason) (step state ReviewerTurnIncomplete))
     ReviewerBlocked reason ->
@@ -93,6 +102,8 @@ prReviewObserve (SomeWatcherState state@PrMerging {}) (ObservedMergeCompleted me
 prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 prReviewObserve (SomeWatcherState state@PrFixingReviews {}) (ObservedPrReviewBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+prReviewObserve (SomeWatcherState state@PrVerifyingReviewFix {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedPrReviewBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
@@ -120,3 +131,15 @@ unresolvedThreadIds report =
   case fmap reviewThreadId report.unresolvedReviewThreads of
     [] -> Nothing
     first : rest -> Just (first :| rest)
+
+verifyReviewerOutcome :: WatcherState 'PrReview 'ReviewingClean -> ReviewerOutcome -> ReviewerOutcome
+verifyReviewerOutcome (PrReviewingClean _config _commit (Just evidence) _worker _reviewer) (ReviewerClean cleanEvidence resolvedThreadIds)
+  | null missingThreadIds =
+      ReviewerClean cleanEvidence resolvedThreadIds
+  | otherwise =
+      ReviewerIncomplete ("clean verification did not mark fixed prior review threads as resolved: " <> Text.intercalate ", " (fmap unReviewThreadId missingThreadIds))
+ where
+  missingThreadIds =
+    filter (`notElem` resolvedThreadIds) (NonEmpty.toList evidence.unresolvedThreads)
+verifyReviewerOutcome _ outcome =
+  outcome

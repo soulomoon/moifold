@@ -107,8 +107,8 @@ data WorkerOutcome
   deriving stock (Eq, Show)
 
 data ReviewerOutcome
-  = ReviewerClean CleanReviewEvidence
-  | ReviewerProblemsAdded CommitSha
+  = ReviewerClean CleanReviewEvidence [ReviewThreadId]
+  | ReviewerProblemsAdded CommitSha [ReviewThreadId]
   | ReviewerIncomplete Text
   | ReviewerBlocked BlockedReason
   deriving stock (Eq, Show)
@@ -173,7 +173,7 @@ workerEventForOutcome (WorkerIncomplete reason) = PrReviewFixIncomplete reason
 workerEventForOutcome (WorkerBlocked reason) = WatcherBlocked reason
 
 reviewerEventForOutcome :: ReviewerOutcome -> WatcherEvent
-reviewerEventForOutcome (ReviewerClean evidence) = PrReviewCleanFound evidence
-reviewerEventForOutcome (ReviewerProblemsAdded commit) = PrReviewProblemsAdded commit
+reviewerEventForOutcome (ReviewerClean evidence resolvedThreadIds) = PrReviewCleanFound evidence resolvedThreadIds
+reviewerEventForOutcome (ReviewerProblemsAdded commit resolvedThreadIds) = PrReviewProblemsAdded commit resolvedThreadIds
 reviewerEventForOutcome (ReviewerIncomplete reason) = PrReviewReviewIncomplete reason
 reviewerEventForOutcome (ReviewerBlocked reason) = WatcherBlocked reason

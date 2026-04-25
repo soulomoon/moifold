@@ -18,7 +18,7 @@ import CodexWatcher.Core.Kinds (KnownMutability, Mutability (..), SMutability (.
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig, ReviewEvidence)
 import Data.Singletons (SingI (..))
 import Data.Singletons.Decide (decideEquality)
 import Data.Text (Text)
@@ -33,6 +33,7 @@ data Effect (mutability :: Mutability) where
   StartIssuePlanWorkerTurn :: IssueConfig -> PrNumber -> ThreadId -> Effect 'CanStartTurn
   StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'CanStartTurn
   StartReviewerTurn :: PrConfig -> CommitSha -> ThreadId -> Effect 'CanStartTurn
+  StartReviewerVerificationTurn :: PrConfig -> ReviewEvidence -> CommitSha -> ThreadId -> Effect 'CanStartTurn
   PushBranch :: BranchName -> Effect 'CanMutateLocal
   CreateIssue :: RepoName -> IssueCreationRequest -> Effect 'CanMutateGitHub
   CreatePullRequest :: IssueConfig -> Effect 'CanMutateGitHub

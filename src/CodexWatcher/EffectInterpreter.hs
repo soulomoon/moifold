@@ -28,7 +28,7 @@ import CodexWatcher.Core.Ids
   )
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
-import CodexWatcher.Domain.PrReview.Types (PrConfig)
+import CodexWatcher.Domain.PrReview.Types (PrConfig, ReviewEvidence)
 import CodexWatcher.Effects
 import CodexWatcher.Runtime.Paths
   ( RuntimeCwd
@@ -40,7 +40,7 @@ import CodexWatcher.Runtime.Paths
   , runtimeWorkdirPath
   )
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
-import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput)
+import CodexWatcher.TurnOutput (issuePlanModeDeveloperInstructions, reviewerTurnInput, reviewerVerificationTurnInput)
 import Data.Aeson
   ( Value
   , object
@@ -128,6 +128,8 @@ compileEffect config requestId (SomeEffect effect) =
       oneAppServerRequest config.effectRuntimeIssueImplementationTurn threadId
     StartReviewerTurn prConfig reviewTargetSha threadId ->
       oneAppServerRequest (reviewerTurnRuntimeConfig config prConfig reviewTargetSha) threadId
+    StartReviewerVerificationTurn prConfig evidence reviewTargetSha threadId ->
+      oneAppServerRequest (reviewerVerificationTurnRuntimeConfig config prConfig evidence reviewTargetSha) threadId
     PushBranch branch ->
       unchanged [PlannedCommand (GitPush (runtimeWorkdirPath config.effectRuntimeWorkdir) branch)]
     CreateIssue repo request ->
@@ -193,6 +195,18 @@ reviewerTurnRuntimeConfig config prConfig reviewTargetSha =
           (runtimeWorkdirPath config.effectRuntimeWorkdir)
           (runtimeStateDirFile config.effectRuntimeStateDir "reviewer-state.json")
           prConfig
+          reviewTargetSha
+    }
+
+reviewerVerificationTurnRuntimeConfig :: EffectRuntimeConfig -> PrConfig -> ReviewEvidence -> CommitSha -> TurnRuntimeConfig
+reviewerVerificationTurnRuntimeConfig config prConfig evidence reviewTargetSha =
+  config.effectRuntimeReviewerTurn
+    { turnRuntimeInput =
+        reviewerVerificationTurnInput
+          (runtimeWorkdirPath config.effectRuntimeWorkdir)
+          (runtimeStateDirFile config.effectRuntimeStateDir "reviewer-state.json")
+          prConfig
+          evidence
           reviewTargetSha
     }
 

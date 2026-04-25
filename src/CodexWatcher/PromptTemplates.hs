@@ -401,6 +401,8 @@ reviewerTemplate =
           , "- simplification opportunities"
           , "- type-safety or architecture issues worth addressing"
           , ""
+          , "{{verificationInstructions}}"
+          , ""
           , "Use inline GitHub PR review comments for concrete issues on changed lines."
           , "Do not duplicate existing review comments."
           , "Do not edit files, commit, push, approve, or resolve threads."

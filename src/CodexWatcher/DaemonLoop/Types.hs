@@ -32,7 +32,7 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Core.Ids (CommitSha, PrNumber, ThreadId, TurnId (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
-import CodexWatcher.Domain.PrReview.Types (PrConfig)
+import CodexWatcher.Domain.PrReview.Types (PrConfig, ReviewEvidence)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -64,6 +64,7 @@ data StartTurnKind
   | StartIssuePlanWorkerTurnKind IssueConfig PrNumber
   | StartIssueImplementationWorkerTurnKind
   | StartReviewerTurnKind PrConfig CommitSha
+  | StartReviewerVerificationTurnKind PrConfig ReviewEvidence CommitSha
   deriving stock (Eq, Show)
 
 data ActiveTurnReadResult = ActiveTurnReadResult

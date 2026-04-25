@@ -119,9 +119,17 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> ReviewerThread 'Idle
     -> WatcherState 'PrReview 'FixingReviews
 
+  PrVerifyingReviewFix
+    :: PrConfig
+    -> ReviewEvidence
+    -> WorkerThread 'Idle
+    -> ReviewerThread 'Idle
+    -> WatcherState 'PrReview 'CheckingReviews
+
   PrReviewingClean
     :: PrConfig
     -> CommitSha
+    -> Maybe ReviewEvidence
     -> WorkerThread 'Idle
     -> ReviewerThread 'Active
     -> WatcherState 'PrReview 'ReviewingClean

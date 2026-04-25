@@ -78,6 +78,7 @@ startTurnEffect kind threadId =
     StartIssuePlanWorkerTurnKind issueConfig prNumber -> SomeEffect (StartIssuePlanWorkerTurn issueConfig prNumber threadId)
     StartIssueImplementationWorkerTurnKind -> SomeEffect (StartIssueImplementationWorkerTurn threadId)
     StartReviewerTurnKind prConfig reviewTargetSha -> SomeEffect (StartReviewerTurn prConfig reviewTargetSha threadId)
+    StartReviewerVerificationTurnKind prConfig evidence reviewTargetSha -> SomeEffect (StartReviewerVerificationTurn prConfig evidence reviewTargetSha threadId)
 
 syntheticTurnId :: StartTurnKind -> RequestId -> TurnId
 syntheticTurnId kind requestId =
@@ -90,3 +91,4 @@ kindText = \case
   StartIssuePlanWorkerTurnKind {} -> "issue-plan-turn"
   StartIssueImplementationWorkerTurnKind -> "issue-implementation-turn"
   StartReviewerTurnKind {} -> "reviewer-turn"
+  StartReviewerVerificationTurnKind {} -> "reviewer-verification-turn"

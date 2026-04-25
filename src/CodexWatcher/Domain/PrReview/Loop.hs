@@ -7,6 +7,7 @@ module CodexWatcher.Domain.PrReview.Loop
   , runPrFixingReviews
   , runPrMerging
   , runPrReviewingClean
+  , runPrVerifyingReviewFix
   , runPrWaitingForMergeability
   ) where
 
@@ -22,7 +23,7 @@ import CodexWatcher.Runtime.Paths (runtimeWorkdirPath)
 import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ThreadId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence)
 import Data.Text qualified as Text
 
 runPrCheckingReviews
@@ -65,6 +66,28 @@ runPrFixingReviews
 runPrFixingReviews ops executor config events replay activeTurn =
   observeClassifiedActiveTurn ops executor config events replay activeTurn \turn ->
     fmap DaemonPrReviewObservation (classifyPrReviewWorkerTurn turn)
+
+runPrVerifyingReviewFix
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> PrConfig
+  -> ReviewEvidence
+  -> ThreadId
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+runPrVerifyingReviewFix ops executor config events prConfig evidence reviewerThread = do
+  status <-
+    runGitWorktreeStatus
+      executor.actionRuntime
+      (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
+      prConfig.prBranch
+  case status.gitHeadSha of
+    Nothing -> pure (Left (DaemonLoopExternalFailure "could not determine git HEAD for review-fix verification"))
+    Just reviewTargetSha ->
+      ops.loopPrestartAndObserve executor config events (StartReviewerVerificationTurnKind prConfig evidence reviewTargetSha) reviewerThread \turnId ->
+        DaemonPrReviewObservation (ObservedReviewFixVerificationStarted reviewTargetSha turnId)
 
 runPrReviewingClean
   :: Monad m

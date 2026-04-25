@@ -14,7 +14,7 @@ import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
-import CodexWatcher.Core.Ids (CommitSha (..))
+import CodexWatcher.Core.Ids (CommitSha (..), ReviewThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..))
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
@@ -34,6 +34,8 @@ data ReviewerTurnReport = ReviewerTurnReport
   , reviewerReportFindingsSummary :: Maybe [Text]
   , reviewerReportBlockedReasonPresent :: Bool
   , reviewerReportBlockedReason :: Maybe Text
+  , reviewerReportResolvedThreadIds :: Maybe [ReviewThreadId]
+  , reviewerReportRemainingThreadIds :: Maybe [ReviewThreadId]
   }
   deriving stock (Eq, Show)
 
@@ -50,6 +52,8 @@ instance FromJSON ReviewerTurnReport where
       <*> objectValue .:? "findings_summary"
       <*> pure (has "blocked_reason")
       <*> objectValue .:? "blocked_reason"
+      <*> (fmap (fmap ReviewThreadId) <$> objectValue .:? "resolved_review_thread_ids")
+      <*> (fmap (fmap ReviewThreadId) <$> objectValue .:? "remaining_review_thread_ids")
 
 classifyPrReviewWorkerTurn :: AppServerTurn -> Maybe PrReviewObservation
 classifyPrReviewWorkerTurn turn =
@@ -114,8 +118,12 @@ validateCompleteReviewerTurnReport expectedCommit report
               ReviewerIncomplete "clean review must record added_review_comment_count as 0"
           | report.reviewerReportLgtmComment /= Just "LGTM" ->
               ReviewerIncomplete "clean review must record lgtm_comment as LGTM"
+          | not (null (requiredReviewThreadIds report.reviewerReportRemainingThreadIds)) ->
+              ReviewerIncomplete "clean review must not record remaining_review_thread_ids"
+          | hasOverlappingResolution report ->
+              ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
           | otherwise ->
-              ReviewerClean (CleanReviewEvidence expectedCommit "LGTM")
+              ReviewerClean (CleanReviewEvidence expectedCommit "LGTM") (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
         "comments_added"
           | report.reviewerReportCommit /= Just expectedCommit ->
               ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
@@ -123,8 +131,21 @@ validateCompleteReviewerTurnReport expectedCommit report
               ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
           | maybe True (< 1) report.reviewerReportAddedCommentCount ->
               ReviewerIncomplete "comments_added review must record at least one added review comment"
+          | hasOverlappingResolution report ->
+              ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
           | otherwise ->
-              ReviewerProblemsAdded expectedCommit
+              ReviewerProblemsAdded expectedCommit (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+        "remaining_findings"
+          | report.reviewerReportCommit /= Just expectedCommit ->
+              ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
+          | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
+              ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
+          | null (requiredReviewThreadIds report.reviewerReportRemainingThreadIds) ->
+              ReviewerIncomplete "remaining_findings review must record remaining_review_thread_ids"
+          | hasOverlappingResolution report ->
+              ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
+          | otherwise ->
+              ReviewerProblemsAdded expectedCommit (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
         other ->
           ReviewerIncomplete ("unsupported review_status: " <> other)
 
@@ -138,6 +159,8 @@ missingReviewerFields report =
     , missingPresence "lgtm_comment" report.reviewerReportLgtmCommentPresent
     , missing "findings_summary" report.reviewerReportFindingsSummary
     , missingPresence "blocked_reason" report.reviewerReportBlockedReasonPresent
+    , missing "resolved_review_thread_ids" report.reviewerReportResolvedThreadIds
+    , missing "remaining_review_thread_ids" report.reviewerReportRemainingThreadIds
     ]
  where
   missing _fieldName (Just _) = []
@@ -149,6 +172,14 @@ missingReviewerFields report =
 requiredText :: Maybe Text -> Text
 requiredText =
   maybe "" id
+
+requiredReviewThreadIds :: Maybe [ReviewThreadId] -> [ReviewThreadId]
+requiredReviewThreadIds =
+  maybe [] id
+
+hasOverlappingResolution :: ReviewerTurnReport -> Bool
+hasOverlappingResolution report =
+  any (`elem` requiredReviewThreadIds report.reviewerReportRemainingThreadIds) (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
 
 classifyStructuredPrReviewWorker :: StructuredTurnOutcome -> Maybe WorkerOutcome
 classifyStructuredPrReviewWorker = \case

@@ -296,7 +296,9 @@ checkReplayState config events = \case
     staleProblem config "PR review watcher has not checked review threads" ["last event: " <> lastEventName events]
   SomeWatcherState (PrFixingReviews _ _ (WorkerActive activeTurn) _) ->
     checkActiveTurn config "PR review worker" activeTurn
-  SomeWatcherState (PrReviewingClean _ _ _ (ReviewerActive activeTurn)) ->
+  SomeWatcherState (PrVerifyingReviewFix {}) ->
+    staleProblem config "PR review watcher has not started fix verification" ["last event: " <> lastEventName events]
+  SomeWatcherState (PrReviewingClean _ _ _ _ (ReviewerActive activeTurn)) ->
     checkActiveTurn config "PR reviewer" activeTurn
   SomeWatcherState (PrWaitingForMergeability {}) ->
     pure Nothing
