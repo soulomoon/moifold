@@ -190,14 +190,15 @@ validateReadyIssueFanout plannerConfig maybeGraph readyStatuses launchPlans =
             pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already terminal complete")))
           _ -> do
             remote <- runGhIssueView ioRuntimeInterpreter plannerConfig.plannerRepo issue
-            pure case remote of
-              Left reason ->
-                Just (BlockedReason ("ready issue #" <> issueText issue <> " could not be read from GitHub: " <> reason))
+            case remote of
+              Left reason -> do
+                putStrLn ("planner fanout warning: ready issue #" <> show (unIssueNumber issue) <> " could not be read from GitHub; will retry next tick: " <> Text.unpack reason)
+                pure Nothing
               Right remoteIssue
                 | remoteIssueIsClosed remoteIssue ->
-                    Just (BlockedReason ("ready issue #" <> issueText issue <> " is already closed on GitHub"))
+                    pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already closed on GitHub")))
                 | otherwise ->
-                    Nothing
+                    pure Nothing
 
 planningGraphFromState :: SomeWatcherState -> Maybe PlanningGraph
 planningGraphFromState (SomeWatcherState (PlanningWaitingForReadyIssues _config graph)) = Just graph

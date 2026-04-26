@@ -95,7 +95,8 @@ executePlannedAction executor ExecuteActions action =
   case action of
     PlannedCommand command -> do
       logPlannedAction executor action
-      report <- executor.actionRuntime.runtimeRunCommand command
+      rawReport <- executor.actionRuntime.runtimeRunCommand command
+      let report = normalizeCommandReport command rawReport
       let result = executed action (CommandActionResult report)
       logActionReport executor (actionReportLevel result) "action_finished" "planned command action finished" result
       pure result
@@ -279,3 +280,20 @@ runtimeCommandName = \case
   KillZero {} -> "kill_zero"
   KillTerm {} -> "kill_term"
   RawCommand command _args _cwd -> "raw_command:" <> Text.pack command
+
+normalizeCommandReport :: RuntimeCommand -> CommandReport -> CommandReport
+normalizeCommandReport command report =
+  case command of
+    GhPrRequestChanges {}
+      | requestChangesOwnPrFailure report ->
+          report
+            { ok = True
+            , errorMessage = Just "GitHub refused request-changes on the author's own PR; treating review findings as recorded so the watcher can continue to rework."
+            }
+    _ ->
+      report
+
+requestChangesOwnPrFailure :: CommandReport -> Bool
+requestChangesOwnPrFailure report =
+  not report.ok
+    && "Can not request changes on your own pull request" `Text.isInfixOf` report.stderr

@@ -25,6 +25,8 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
+import CodexWatcher.Runtime.Owner.Store (readRuntimeOwnerMarker)
+import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..))
 import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
 import CodexWatcher.Core.Ids (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..))
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
@@ -268,14 +270,31 @@ startPrReviewWatcherChildIfEnabled True endpoint pollSeconds launch =
   startPrReviewWatcherChild endpoint pollSeconds launch
 
 startPrReviewWatcherChild :: AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
-startPrReviewWatcherChild endpoint pollSeconds launch =
-  startChildDaemon
-    ( "PR review watcher "
-        <> show (unPrNumber launch.reviewLaunchPrConfig.prNumber)
-    )
-    launch.reviewLaunchStateDir
-    "watcher.pid"
-    (prReviewWatcherChildArgs endpoint pollSeconds launch)
+startPrReviewWatcherChild endpoint pollSeconds launch = do
+  liveOwner <- livePrReviewRuntimeOwnerPid launch.reviewLaunchStateDir
+  case liveOwner of
+    Just pidText -> do
+      restoreOwnedPidFile (launch.reviewLaunchStateDir </> "watcher.pid") pidText
+      putStrLn ("PR review watcher " <> show (unPrNumber launch.reviewLaunchPrConfig.prNumber) <> " already running under runtime owner pid " <> Text.unpack pidText)
+    Nothing ->
+      startChildDaemon
+        ( "PR review watcher "
+            <> show (unPrNumber launch.reviewLaunchPrConfig.prNumber)
+        )
+        launch.reviewLaunchStateDir
+        "watcher.pid"
+        (prReviewWatcherChildArgs endpoint pollSeconds launch)
+
+livePrReviewRuntimeOwnerPid :: FilePath -> IO (Maybe Text.Text)
+livePrReviewRuntimeOwnerPid stateDir = do
+  marker <- readRuntimeOwnerMarker stateDir
+  case marker of
+    Right (Just (RuntimeOwnerLeased lease))
+      | lease.runtimeLeaseOwner == HaskellRuntime -> do
+          running <- isPidRunning lease.runtimeLeasePid
+          pure if running then Just lease.runtimeLeasePid else Nothing
+    _ ->
+      pure Nothing
 
 prReviewWatcherChildArgs :: AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> [String]
 prReviewWatcherChildArgs endpoint pollSeconds launch =

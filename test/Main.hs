@@ -13,6 +13,7 @@ module Main (main) where
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
+import CodexWatcher.ChildDaemon (readPidFile, restoreOwnedPidFile)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon
@@ -26,7 +27,7 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
-import CodexWatcher.Cli.Command.IssueFanout (readyIssueStatusFromRuntime)
+import CodexWatcher.Cli.Command.IssueFanout (readyIssueStatusFromRuntime, resolveFanoutActiveIssues)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Fanout
@@ -1203,6 +1204,49 @@ prop_issuePlanningFanoutUsesOnlyReadyIssues =
    in launchIssues == [IssueNumber 10]
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
+
+issuePlanningFanoutDiscoversOnlyRunningImplementers :: IO Bool
+issuePlanningFanoutDiscoversOnlyRunningImplementers = do
+  let root = "/tmp/codex-watcher-hs-active-implementers"
+      repo = RepoName "owner/name"
+      runningIssue = IssueNumber 19
+      stoppedIssue = IssueNumber 20
+      staleIssue = IssueNumber 21
+      runningConfig = IssueConfig repo runningIssue (BranchName "codex/issue-19")
+      stoppedConfig = IssueConfig repo stoppedIssue (BranchName "codex/issue-20")
+      staleConfig = IssueConfig repo staleIssue (BranchName "codex/issue-21")
+      writeConfig targetStateDir issueConfig threadId =
+        LazyByteString.writeFile
+          (targetStateDir </> "config.json")
+          (encode (issueImplementerConfigJson issueConfig threadId targetStateDir Nothing))
+      writeEvents targetStateDir events =
+        LazyByteString.writeFile (targetStateDir </> "events.jsonl") (mconcat (fmap (\event -> encode event <> "\n") events))
+      stateDir issue =
+        issueImplementerStateDir root repo issue
+  exists <- doesDirectoryExist root
+  when exists (removePathForcibly root)
+  createDirectoryIfMissing True (stateDir runningIssue)
+  createDirectoryIfMissing True (stateDir stoppedIssue)
+  createDirectoryIfMissing True (stateDir staleIssue)
+  writeConfig (stateDir runningIssue) runningConfig (ThreadId "thread-19")
+  writeConfig (stateDir stoppedIssue) stoppedConfig (ThreadId "thread-20")
+  writeConfig (stateDir staleIssue) staleConfig (ThreadId "thread-21")
+  pid <- getProcessID
+  writeFile (stateDir runningIssue </> "issue-watcher.pid") (show pid <> "\n")
+  writeEvents
+    (stateDir stoppedIssue)
+    [ IssueImplementInitialized stoppedConfig (ThreadId "thread-20")
+    , WatcherStopped (StopReason "done")
+    ]
+  active <- resolveFanoutActiveIssues Nothing repo root
+  explicit <- resolveFanoutActiveIssues (Just [staleIssue]) repo root
+  removePathForcibly root
+  results <-
+    sequence
+      [ assert "active discovery includes only running issue implementers" (active == [runningIssue])
+      , assert "explicit active issues still override runtime discovery" (explicit == [staleIssue])
+      ]
+  pure (and results)
 
 prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers :: Bool
 prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers =
@@ -2440,6 +2484,27 @@ runtimeOwnerClearRejectsRunningLease = do
       ]
   pure (and results)
 
+restoreOwnedPidFileRepairsMissingAndStalePid :: IO Bool
+restoreOwnedPidFileRepairsMissingAndStalePid = do
+  let stateDir = "/tmp/codex-watcher-hs-pid-restore"
+      pidPath = stateDir </> "watcher.pid"
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  currentPid <- Text.pack . show <$> getProcessID
+  restoreOwnedPidFile pidPath currentPid
+  restoredMissing <- readPidFile pidPath
+  writeFile pidPath "999999999\n"
+  restoreOwnedPidFile pidPath currentPid
+  restoredStale <- readPidFile pidPath
+  removePathForcibly stateDir
+  results <-
+    sequence
+      [ assert "restoreOwnedPidFile writes missing pid file" (restoredMissing == Just currentPid)
+      , assert "restoreOwnedPidFile replaces stale non-running pid file" (restoredStale == Just currentPid)
+      ]
+  pure (and results)
+
 prop_supervisorRendersRestartAndLogrotate :: Bool
 prop_supervisorRendersRestartAndLogrotate =
   let config =
@@ -3052,6 +3117,35 @@ actionExecutorLogsCommandFailure = do
       , assert "command failure logs action start" ("action_started" `elem` fmap Log.watcherLogEvent logs)
       , assert "command failure logs error result" (any (\entry -> Log.watcherLogEvent entry == "action_finished" && Log.watcherLogLevel entry == Log.Error) logs)
       , assert "command failure log redacts command output" (not ("ghp_secret" `Text.isInfixOf` renderedLogs) && "<redacted-token>" `Text.isInfixOf` renderedLogs)
+      ]
+  pure (and results)
+
+actionExecutorTreatsOwnPrRequestChangesAsNonFatal :: IO Bool
+actionExecutorTreatsOwnPrRequestChangesAsNonFatal = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhPrRequestChanges {} ->
+            failedCommandReport "failed to create review: Message: Review Can not request changes on your own pull request, Locations: [{Line:1 Column:66}]"
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let prConfig = PrConfig (RepoName "soulomoon/mlf2") (PrNumber 45) (BranchName "codex/issue-19")
+      evidence = reviewEvidenceFromSummaries ("inline finding added" :| []) (CommitSha "abc123")
+  report <- executePlannedAction executor ExecuteActions (PlannedCommand (GhPrRequestChanges prConfig evidence))
+  calls <- getCalls
+  let treatedAsSuccess =
+        case report.actionExecutionResult of
+          CommandActionResult commandReport ->
+            commandReport.ok
+              && commandReport.status == Just 1
+              && commandReport.errorMessage == Just "GitHub refused request-changes on the author's own PR; treating review findings as recorded so the watcher can continue to rework."
+          _ ->
+            False
+  results <-
+    sequence
+      [ assert "own PR request-changes failure is nonfatal" treatedAsSuccess
+      , assert "request-changes command was still attempted" (calls == [FakeCommand (GhPrRequestChanges prConfig evidence)])
       ]
   pure (and results)
 
@@ -5254,6 +5348,7 @@ main = do
   watcherLogRenderingOk <- watcherLogRenderingIncludesTimestampSeverityAndRedacts
   actionExecutorLogDryRunOk <- actionExecutorLogsDryRunWhenLoggerInjected
   actionExecutorLogFailureOk <- actionExecutorLogsCommandFailure
+  actionExecutorOwnPrReviewOk <- actionExecutorTreatsOwnPrRequestChangesAsNonFatal
   daemonTickOk <- daemonTickDryRunReplaysEventsAndDoesNotExecute
   daemonTickCommandFailureOk <- daemonTickExecuteStopsOnCommandFailure
   observedDaemonDryRunOk <- observedDaemonTickDryRunDoesNotMutate
@@ -5292,6 +5387,7 @@ main = do
   automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
   automaticLoopLoggingOk <- automaticDaemonLoopEmitsBoundaryLogs
   automaticLoopRetryPolicyOk <- automaticLoopRetryPolicyKeepsTransientFailuresAlive
+  issuePlanningFanoutActiveOk <- issuePlanningFanoutDiscoversOnlyRunningImplementers
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
@@ -5299,6 +5395,7 @@ main = do
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
   runtimeOwnerLeaseOk <- runtimeOwnerLeaseParsingRejectsOwnerOnlyJson
   runtimeOwnerClaimOk <- runtimeOwnerClearRejectsRunningLease
+  pidRestoreOk <- restoreOwnedPidFileRepairsMissingAndStalePid
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
   if
     all isSuccess results
@@ -5311,6 +5408,7 @@ main = do
       && watcherLogRenderingOk
       && actionExecutorLogDryRunOk
       && actionExecutorLogFailureOk
+      && actionExecutorOwnPrReviewOk
       && daemonTickOk
       && daemonTickCommandFailureOk
       && observedDaemonDryRunOk
@@ -5349,6 +5447,7 @@ main = do
       && automaticTerminalStopOk
       && automaticLoopLoggingOk
       && automaticLoopRetryPolicyOk
+      && issuePlanningFanoutActiveOk
       && runnerGuardOk
       && runnerGuardRestartOk
       && runnerGuardWaitingRestartOk
@@ -5356,6 +5455,7 @@ main = do
       && runtimeStatusOk
       && runtimeOwnerLeaseOk
       && runtimeOwnerClaimOk
+      && pidRestoreOk
       && observeParsingOk
     then pure ()
     else exitFailure

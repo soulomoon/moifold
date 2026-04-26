@@ -17,7 +17,7 @@ import CodexWatcher.AutomaticLoop.IssuePlanningFanout (issuePlanningFanoutAfterT
 import CodexWatcher.AutomaticLoop.Output (printLoopTick)
 import CodexWatcher.AutomaticLoop.PrReviewHandoff (issueImplementReviewHandoffAfterTick)
 import CodexWatcher.AutomaticLoop.StartupThreads (refreshStartupThreads)
-import CodexWatcher.ChildDaemon (runWithOptionalPidFile)
+import CodexWatcher.ChildDaemon (restoreOwnedPidFile, runWithOptionalPidFile)
 import CodexWatcher.Cli.Types (LoopCli (..), cliDomainName)
 import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon
@@ -47,6 +47,7 @@ import Data.Text qualified as Text
 import System.Directory (createDirectoryIfMissing)
 import System.Exit (die)
 import System.FilePath ((</>))
+import System.Posix.Process (getProcessID)
 
 runAutomaticLoop :: LoopCli -> IO ()
 runAutomaticLoop cli = do
@@ -113,6 +114,7 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
   renewRuntimeOwnerForExecution
     (runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir)
     loopConfig.loopDaemonOptions.daemonExecutionMode
+  repairCurrentPidFile cliDomain (runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) loopConfig.loopDaemonOptions.daemonExecutionMode
   Log.logWatcher
     executor.actionLogger
     ( Log.watcherLog
@@ -152,7 +154,14 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
       when shouldStopAfterTick (writeIORef stopRequested True)
   shouldStop <- readIORef stopRequested
   when (shouldLoop && not shouldStop && iteration < maxIterations) $
-    runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoop maxIterations (iteration + 1)
+      runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoop maxIterations (iteration + 1)
+
+repairCurrentPidFile :: Domain -> FilePath -> ActionExecutionMode -> IO ()
+repairCurrentPidFile _domain _stateDir DryRunActions =
+  pure ()
+repairCurrentPidFile domain stateDir ExecuteActions = do
+  pidText <- Text.pack . show <$> getProcessID
+  restoreOwnedPidFile (WatcherPaths.defaultPidPath domain stateDir) pidText
 
 retryableAutomaticLoopFailure :: DaemonLoopFailure -> Bool
 retryableAutomaticLoopFailure = \case

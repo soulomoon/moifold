@@ -11,6 +11,7 @@ module CodexWatcher.ChildDaemon
   , isPidRunning
   , readPidFile
   , removeOwnedPidFile
+  , restoreOwnedPidFile
   , runWithOptionalPidFile
   , stableExecutablePath
   , startChildDaemon
@@ -26,6 +27,7 @@ import Control.Exception (IOException, finally, try)
 import Control.Monad (unless, void, when)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.IO qualified as Text.IO
 import System.Directory (createDirectory, createDirectoryIfMissing, doesFileExist, removeFile, removePathForcibly)
 import System.Environment (getExecutablePath)
 import System.Exit (die)
@@ -136,7 +138,7 @@ readPidFile pidPath = do
   if not exists
     then pure Nothing
     else do
-      pidText <- Text.strip . Text.pack <$> readFile pidPath
+      pidText <- Text.strip <$> Text.IO.readFile pidPath
       pure if Text.null pidText then Nothing else Just pidText
 
 isPidRunning :: Text -> IO Bool
@@ -150,6 +152,23 @@ runWithOptionalPidFile (Just pidPath) action = do
   pidText <- Text.pack . show <$> getProcessID
   acquirePidFileLock pidPath
   (writeFile pidPath (Text.unpack pidText <> "\n") >> action) `finally` removeOwnedPidFile pidPath pidText
+
+restoreOwnedPidFile :: FilePath -> Text -> IO ()
+restoreOwnedPidFile pidPath expectedPid = do
+  maybePid <- readPidFile pidPath
+  case maybePid of
+    Just currentPid | currentPid == expectedPid -> pure ()
+    Just currentPid -> do
+      running <- isPidRunning currentPid
+      when running $
+        die ("refusing to repair pid file because it belongs to running pid " <> Text.unpack currentPid <> ": " <> pidPath)
+      writeOwnedPid
+    Nothing ->
+      writeOwnedPid
+ where
+  writeOwnedPid = do
+    createDirectoryIfMissing True (takeDirectory pidPath)
+    writeFile pidPath (Text.unpack expectedPid <> "\n")
 
 ensurePidFileAvailable :: FilePath -> IO ()
 ensurePidFileAvailable pidPath = do

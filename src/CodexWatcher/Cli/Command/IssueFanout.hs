@@ -28,8 +28,6 @@ import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon (appendWatcherEvent)
-import CodexWatcher.EventLog.File (loadEventLogFile)
-import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssuePlanning.Fanout
@@ -43,7 +41,7 @@ import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions)
 import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), RepoName (..), RequestId (..), ThreadId (..))
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Limits (PollSeconds, mkPollSeconds)
-import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), isTerminalState, someDomainIs)
+import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
@@ -119,8 +117,8 @@ loadActiveIssueImplementerIssue repo stateDir = do
   case maybeIssue of
     Nothing -> pure Nothing
     Just issue -> do
-      active <- issueImplementerStateIsActive stateDir
-      pure (if active then Just issue else Nothing)
+      status <- issueImplementerRuntimeStatusFromStateDir repo issue stateDir
+      pure (if statusIsActiveRunning status then Just issue else Nothing)
 
 loadIssueImplementerConfigIssue :: RepoName -> FilePath -> IO (Maybe IssueNumber)
 loadIssueImplementerConfigIssue repo stateDir = do
@@ -136,21 +134,18 @@ loadIssueImplementerConfigIssue repo stateDir = do
           | configRepo == repo -> pure (Just issue)
           | otherwise -> pure Nothing
 
-issueImplementerStateIsActive :: FilePath -> IO Bool
-issueImplementerStateIsActive stateDir = do
-  let eventsPath = stateDir </> "events.jsonl"
-  exists <- doesFileExist eventsPath
-  if not exists
-    then pure True
-    else do
-      loaded <- loadEventLogFile eventsPath
-      case loaded of
-        Left _ -> pure True
-        Right events ->
-          case replayEventLog events of
-            Left _ -> pure True
-            Right replay ->
-              pure (someDomainIs @'IssueImplement replay.replayState && not (isTerminalState replay.replayState))
+issueImplementerRuntimeStatusFromStateDir :: RepoName -> IssueNumber -> FilePath -> IO WatcherRuntimeStatus
+issueImplementerRuntimeStatusFromStateDir repo issueNumber' stateDir = do
+  let statusConfig :: WatcherRuntimeStatusConfig 'IssueImplement
+      statusConfig =
+        WatcherRuntimeStatusConfig
+          { watcherRuntimeConfigPath = stateDir </> "config.json"
+          , watcherRuntimeEventsPath = stateDir </> "events.jsonl"
+          , watcherRuntimePidPath = WatcherPaths.defaultPidPathForKnownDomain (Proxy @'IssueImplement) stateDir
+          , watcherRuntimeMissingIsTerminal = pure False
+          , watcherRuntimeReplayTerminalIsTerminal = issueImplementReplayTerminalSucceeded repo issueNumber'
+          }
+  watcherRuntimeStatus statusConfig
 
 data IssueImplementerChildLaunch
   = DoNotLaunchChildren
