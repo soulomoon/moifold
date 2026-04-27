@@ -17,10 +17,13 @@ module CodexWatcher.Core.Kinds
   , Phase (..)
   , SPhase (..)
   , ThreadActivity (..)
+  , ActionKind (..)
+  , SActionKind (..)
   , Mutability (..)
   , SMutability (..)
   , KnownDomain
   , KnownPhase
+  , KnownAction
   , KnownMutability
   , domainSing
   , phaseSing
@@ -70,6 +73,34 @@ data ThreadActivity
   | Active
   deriving stock (Eq, Show)
 
+data ActionKind
+  = ReadOpenIssuesAction
+  | ReadOpenPullRequestsAction
+  | ReadReviewThreadsAction
+  | StartPlannerTurnAction
+  | StartWorkerTurnAction
+  | StartIssuePlanWorkerTurnAction
+  | StartIssueImplementationWorkerTurnAction
+  | StartReviewerTurnAction
+  | StartReviewerVerificationTurnAction
+  | StartIssueFinalReviewTurnAction
+  | PushBranchAction
+  | CreateIssueAction
+  | CreatePullRequestAction
+  | UpdatePullRequestBodyAction
+  | UpdateIssueFollowUpAction
+  | CloseIssueAction
+  | ResolveReviewThreadAction
+  | RequestChangesReviewAction
+  | DismissRequestChangesReviewAction
+  | RecordIssuePlanAction
+  | RecordPlanningGraphAction
+  | RecordBlockedAction
+  | MergePullRequestAction
+  | StopDaemonAction
+  | SleepUntilNextPollAction
+  deriving stock (Eq, Show)
+
 data Mutability
   = ReadOnly
   | CanStartTurn
@@ -78,8 +109,11 @@ data Mutability
   | CanMerge
   deriving stock (Eq, Show)
 
-$(genSingletons [''Domain, ''Phase, ''Mutability])
-$(singDecideInstances [''Mutability])
+$(genSingletons [''Domain, ''Phase, ''ActionKind, ''Mutability])
+$(singDecideInstances [''ActionKind, ''Mutability])
+
+type KnownAction :: ActionKind -> Constraint
+type KnownAction action = SingI action
 
 type KnownMutability :: Mutability -> Constraint
 type KnownMutability mutability = SingI mutability
