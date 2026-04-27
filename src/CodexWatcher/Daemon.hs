@@ -30,6 +30,7 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
+import CodexWatcher.Failure
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Watcher
@@ -42,6 +43,7 @@ import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.Ids (CommitSha (..))
 import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
+import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.List (partition)
@@ -277,21 +279,24 @@ runObservedDaemonDryRun
   -> EventReplayResult
   -> ObservedPolicyTick
   -> m (Either DaemonFailure DaemonObservedTickResult)
-runObservedDaemonDryRun executor options replay observed = do
-  let compatibilityWrites = compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir) observed.observedState
-      compiledEffects = compileEffectPlan options.daemonRuntimeConfig observed.observedEffects
-  actionReports <- executeCompiledEffectPlan executor DryRunActions compiledEffects
-  pure
-    ( Right
-        DaemonObservedTickResult
-          { daemonObservedReplayResult = replay
-          , daemonObservedEvent = observed.observedEvent
-          , daemonObservedState = observed.observedState
-          , daemonObservedCompatibilityWrites = compatibilityWrites
-          , daemonObservedCompiledEffects = compiledEffects
-          , daemonObservedActionReports = actionReports
-          }
-    )
+runObservedDaemonDryRun executor options replay observed =
+  case validatePhaseActionPlan replay.replayState observed.observedEffects of
+    Left errorValue -> pure (Left (DaemonObservationRejected (formatPhaseActionValidationError errorValue)))
+    Right () -> do
+      let compatibilityWrites = compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir) observed.observedState
+          compiledEffects = compileEffectPlan options.daemonRuntimeConfig observed.observedEffects
+      actionReports <- executeCompiledEffectPlan executor DryRunActions compiledEffects
+      pure
+        ( Right
+            DaemonObservedTickResult
+              { daemonObservedReplayResult = replay
+              , daemonObservedEvent = observed.observedEvent
+              , daemonObservedState = observed.observedState
+              , daemonObservedCompatibilityWrites = compatibilityWrites
+              , daemonObservedCompiledEffects = compiledEffects
+              , daemonObservedActionReports = actionReports
+              }
+        )
 
 runObservedDaemonExecute
   :: Monad m
@@ -303,56 +308,59 @@ runObservedDaemonExecute
   -> m (Either DaemonFailure DaemonObservedTickResult)
 runObservedDaemonExecute executor options events replay observed0 = do
   let observed = observed0
-      compiledEffects = compileEffectPlan options.daemonRuntimeConfig observed.observedEffects
-      (preCommitActions, postCommitActions) = partition actionRunsBeforeEventCommit compiledEffects.compiledActions
-  preReportsResult <- executeCheckedActions executor preCommitActions
-  case preReportsResult of
-    Left failure -> pure (Left failure)
-    Right preReports -> do
-      case prepareObservedCommit options events observed compiledEffects postCommitActions preReports of
+  case validatePhaseActionPlan replay.replayState observed.observedEffects of
+    Left errorValue -> pure (Left (DaemonObservationRejected (formatPhaseActionValidationError errorValue)))
+    Right () -> do
+      let compiledEffects = compileEffectPlan options.daemonRuntimeConfig observed.observedEffects
+          (preCommitActions, postCommitActions) = partition actionRunsBeforeEventCommit compiledEffects.compiledActions
+      preReportsResult <- executeCheckedActions executor preCommitActions
+      case preReportsResult of
         Left failure -> pure (Left failure)
-        Right prepared -> do
-          mapM_
-            ( \event -> do
-                appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
-                Log.logWatcher
-                  executor.actionLogger
-                  ( Log.watcherLog
-                      Log.Info
-                      "event_committed"
-                      "watcher event committed"
-                      [ "event" .= Text.pack (show event)
-                      , "eventsPath" .= options.daemonEventLogPath
-                      ]
-                  )
-            )
-            prepared.preparedEvents
-          mapM_
-            ( \write -> do
-                writeCompatibility executor.actionRuntime write
-                Log.logWatcher
-                  executor.actionLogger
-                  ( Log.watcherLog
-                      Log.Debug
-                      "compatibility_written"
-                      "compatibility state written"
-                      ["path" .= compatibilityWritePath write]
-                  )
-            )
-            prepared.preparedCompatibilityWrites
-          postReportsResult <- executeCheckedActions executor prepared.preparedPostActions
-          pure case postReportsResult of
-            Left failure -> Left failure
-            Right postReports ->
-              Right
-                DaemonObservedTickResult
-                  { daemonObservedReplayResult = replay
-                  , daemonObservedEvent = observed.observedEvent
-                  , daemonObservedState = prepared.preparedFinalReplay.replayState
-                  , daemonObservedCompatibilityWrites = prepared.preparedCompatibilityWrites
-                  , daemonObservedCompiledEffects = prepared.preparedCompiledEffects
-                  , daemonObservedActionReports = preReports <> postReports
-                  }
+        Right preReports -> do
+          case prepareObservedCommit options events observed compiledEffects postCommitActions preReports of
+            Left failure -> pure (Left failure)
+            Right prepared -> do
+              mapM_
+                ( \event -> do
+                    appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
+                    Log.logWatcher
+                      executor.actionLogger
+                      ( Log.watcherLog
+                          Log.Info
+                          "event_committed"
+                          "watcher event committed"
+                          [ "event" .= Text.pack (show event)
+                          , "eventsPath" .= options.daemonEventLogPath
+                          ]
+                      )
+                )
+                prepared.preparedEvents
+              mapM_
+                ( \write -> do
+                    writeCompatibility executor.actionRuntime write
+                    Log.logWatcher
+                      executor.actionLogger
+                      ( Log.watcherLog
+                          Log.Debug
+                          "compatibility_written"
+                          "compatibility state written"
+                          ["path" .= compatibilityWritePath write]
+                      )
+                )
+                prepared.preparedCompatibilityWrites
+              postReportsResult <- executeCheckedActions executor prepared.preparedPostActions
+              pure case postReportsResult of
+                Left failure -> Left failure
+                Right postReports ->
+                  Right
+                    DaemonObservedTickResult
+                      { daemonObservedReplayResult = replay
+                      , daemonObservedEvent = observed.observedEvent
+                      , daemonObservedState = prepared.preparedFinalReplay.replayState
+                      , daemonObservedCompatibilityWrites = prepared.preparedCompatibilityWrites
+                      , daemonObservedCompiledEffects = prepared.preparedCompiledEffects
+                      , daemonObservedActionReports = preReports <> postReports
+                      }
 
 prepareObservedCommit
   :: DaemonOptions
@@ -400,7 +408,8 @@ actionFailure :: ActionExecutionReport -> Maybe DaemonFailure
 actionFailure report =
   case report.actionExecutionResult of
     CommandActionResult commandReport
-      | not commandReport.ok -> Just (DaemonActionFailed report.actionExecutionAction commandReport)
+      | ActionHardFailed {} <- report.actionExecutionOutcome ->
+          Just (DaemonActionFailed report.actionExecutionAction commandReport)
     _ -> Nothing
 
 data PreMergeGateResult
@@ -413,7 +422,7 @@ runPreMergeGate :: Monad m => ActionExecutor m -> PrConfig -> CleanReviewEvidenc
 runPreMergeGate executor prConfig evidence = do
   remoteResult <- runGhPrView executor.actionRuntime prConfig.prRepo prConfig.prNumber
   case remoteResult of
-    Left reason -> pure (PreMergeGateBlocked ("pre-merge PR read failed: " <> reason))
+    Left reason -> pure (preMergeExternalFailure "pre-merge PR read failed" reason)
     Right remote
       | not (remotePullRequestIsOpen remote) ->
           pure (PreMergeGateBlocked ("pre-merge PR state is " <> renderRemotePullRequestState remote.remotePullRequestState <> ", expected OPEN"))
@@ -431,18 +440,26 @@ runPreMergeGate executor prConfig evidence = do
       | otherwise -> do
           threadsResult <- runGhReviewThreads executor.actionRuntime prConfig
           case threadsResult of
-            Left reason -> pure (PreMergeGateBlocked ("pre-merge review-thread read failed: " <> reason))
+            Left reason -> pure (preMergeExternalFailure "pre-merge review-thread read failed" reason)
             Right threads
               | not (null threads.unresolvedReviewThreads) ->
                   pure (PreMergeGateRecheck "pre-merge found unresolved review threads")
               | otherwise -> do
                   checksResult <- runGhPrChecks executor.actionRuntime prConfig.prRepo prConfig.prNumber
                   pure case checksResult of
-                    Left reason -> PreMergeGateBlocked ("pre-merge required checks could not be read: " <> reason)
+                    Left reason -> preMergeExternalFailure "pre-merge required checks could not be read" reason
                     Right checks
                       | all checkPassed checks -> PreMergeGatePassed
                       | any checkPending checks -> PreMergeGateRetry ("pre-merge required checks are still pending: " <> failedCheckNames checks)
                       | otherwise -> PreMergeGateBlocked ("pre-merge required checks are not successful: " <> failedCheckNames checks)
+
+preMergeExternalFailure :: Text -> Text -> PreMergeGateResult
+preMergeExternalFailure prefix reason =
+  let classification = classifyExternalFailureText reason
+      message = prefix <> ": " <> reason
+   in if failureIsRetryable classification
+        then PreMergeGateRetry message
+        else PreMergeGateBlocked message
 
 mergeStateGateResult :: Maybe Text -> Maybe PreMergeGateResult
 mergeStateGateResult Nothing =

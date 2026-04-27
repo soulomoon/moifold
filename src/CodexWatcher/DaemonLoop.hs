@@ -9,6 +9,7 @@ module CodexWatcher.DaemonLoop
   ( DaemonLoopConfig (..)
   , DaemonLoopFailure (..)
   , DaemonLoopTickResult (..)
+  , classifyDaemonLoopFailure
   , formatDaemonLoopFailure
   , runAutomaticDaemonLoopOnceFromFile
   , runAutomaticDaemonLoopOnceWithEvents
@@ -22,10 +23,12 @@ import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
+import CodexWatcher.Failure
 import CodexWatcher.Domain.IssueImplement.Loop qualified as IssueImplementationLoop
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
 import CodexWatcher.Domain.PrReview.Loop qualified as PrReviewLoop
+import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Core.Ids (ThreadId)
 import CodexWatcher.Core.Kinds (ThreadActivity (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
@@ -153,6 +156,20 @@ formatDaemonLoopFailure = \case
   DaemonLoopAppServerFailure failure -> formatAppServerClientFailure failure
   DaemonLoopUnexpectedStartPlan reason -> "unexpected start-turn plan: " <> reason
 
+classifyDaemonLoopFailure :: DaemonLoopFailure -> FailureClassification
+classifyDaemonLoopFailure = \case
+  DaemonLoopExternalFailure reason ->
+    classifyExternalFailureText reason
+  DaemonLoopAppServerFailure failure ->
+    classifyAppServerFailure failure
+  DaemonLoopDaemonFailure (DaemonActionFailed _action report)
+    | transientFailureText (commandText report) ->
+        FailureClassification TransientFailure (commandText report)
+  DaemonLoopDaemonFailure failure ->
+    FailureClassification FatalFailure (formatDaemonFailure failure)
+  DaemonLoopUnexpectedStartPlan reason ->
+    FailureClassification FatalFailure ("unexpected start-turn plan: " <> reason)
+
 reviewerThreadId :: ReviewerThread 'Idle -> ThreadId
 reviewerThreadId (ReviewerIdle threadId) = threadId
 
@@ -183,8 +200,9 @@ logLoopResult executor = \case
       )
 
 failureLogLevel :: DaemonLoopFailure -> Log.WatcherLogLevel
-failureLogLevel = \case
-  DaemonLoopExternalFailure {} -> Log.Warn
-  DaemonLoopAppServerFailure {} -> Log.Warn
-  DaemonLoopDaemonFailure {} -> Log.Error
-  DaemonLoopUnexpectedStartPlan {} -> Log.Error
+failureLogLevel failure =
+  case (classifyDaemonLoopFailure failure).failureClass of
+    TransientFailure -> Log.Warn
+    FatalFailure -> Log.Error
+    PolicyViolation -> Log.Error
+    ExternalStateMismatch -> Log.Error

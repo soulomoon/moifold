@@ -25,6 +25,7 @@ import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
+import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
 import CodexWatcher.Cli.Command.IssueFanout (readyIssueStatusFromRuntime, resolveFanoutActiveIssues)
@@ -3137,9 +3138,9 @@ actionExecutorTreatsOwnPrRequestChangesAsNonFatal = do
   let treatedAsSuccess =
         case report.actionExecutionResult of
           CommandActionResult commandReport ->
-            commandReport.ok
+            not commandReport.ok
               && commandReport.status == Just 1
-              && commandReport.errorMessage == Just "GitHub refused request-changes on the author's own PR; treating review findings as recorded so the watcher can continue to rework."
+              && report.actionExecutionOutcome == ActionSoftFailed (OwnPrRequestChangesRejected "GitHub refused request-changes on the author's own PR; review findings were recorded, so the watcher can continue to rework.")
           _ ->
             False
   results <-
@@ -3477,6 +3478,54 @@ observedDaemonTickPreMergeGateWaitsWhenUnstable = do
   isMerge = \case
     FakeCommand GhPrCleanReviewAndMerge {} -> True
     _ -> False
+  isBlockWrite = \case
+    FakeWriteJson path _ -> path == "/tmp/work/.watcher/block-state.json"
+    _ -> False
+
+observedDaemonTickPreMergeGateRetriesTransientGithubReads :: IO Bool
+observedDaemonTickPreMergeGateRetriesTransientGithubReads = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumber = PrNumber 6
+      prConfig = PrConfig repo prNumber (BranchName "codex/example")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhPrView {} ->
+            CommandReport {ok = False, status = Just 1, stdout = "", stderr = "GitHub GraphQL EOF", errorMessage = Nothing}
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 120
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")
+        , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence []
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          observedPhase = somePhase . daemonObservedState <$> tick.loopObservedTick
+      results <-
+        sequence
+          [ assert "transient GitHub read emits mergeability retry" (observedEvent == Just (PrReviewMergeabilityWaiting "pre-merge PR read failed: GitHub GraphQL EOF"))
+          , assert "transient GitHub read stays waiting" (observedPhase == Just WaitingMergeability)
+          , assert "transient GitHub read does not block" (not (any isBlockWrite calls))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL pre-merge transient gate: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
   isBlockWrite = \case
     FakeWriteJson path _ -> path == "/tmp/work/.watcher/block-state.json"
     _ -> False
@@ -5112,14 +5161,126 @@ automaticDaemonLoopEmitsBoundaryLogs = do
 
 automaticLoopRetryPolicyKeepsTransientFailuresAlive :: IO Bool
 automaticLoopRetryPolicyKeepsTransientFailuresAlive = do
+  let graphqlFailure = classifyDaemonLoopFailure (DaemonLoopExternalFailure "GitHub GraphQL EOF")
+      transientCommandFailure =
+        classifyDaemonLoopFailure
+          ( DaemonLoopDaemonFailure
+              ( DaemonActionFailed
+                  (PlannedCommand GhAuthStatus)
+                  CommandReport {ok = False, status = Just 1, stdout = "", stderr = "GitHub GraphQL EOF", errorMessage = Nothing}
+              )
+          )
   results <-
     sequence
       [ assert "automatic loop retries external observation failures" (retryableAutomaticLoopFailure (DaemonLoopExternalFailure "GitHub GraphQL EOF"))
       , assert "automatic loop retries app-server transport failures" (retryableAutomaticLoopFailure (DaemonLoopAppServerFailure (AppServerTransportFailure "connection reset")))
       , assert "automatic loop keeps replay failures fatal" (not (retryableAutomaticLoopFailure (DaemonLoopDaemonFailure (DaemonEventLogDecodeFailed "bad event log"))))
       , assert "automatic loop keeps unexpected start plans fatal" (not (retryableAutomaticLoopFailure (DaemonLoopUnexpectedStartPlan "invalid start plan")))
+      , assert "automatic loop classifies GraphQL EOF as transient" (graphqlFailure.failureClass == TransientFailure)
+      , assert "automatic loop classifies transient command output as retryable" (failureIsRetryable transientCommandFailure)
       ]
   pure (and results)
+
+phaseActionValidationRejectsInvalidCombinations :: IO Bool
+phaseActionValidationRejectsInvalidCombinations = do
+  let plannerConfig = PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 2) [IssueNumber 12]
+      planningGraph = PlanningGraph [IssueNumber 12] [] []
+      planningWaiting = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
+      issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+      issuePr = PrNumber 7
+      issuePostMergeWithoutReviewer = SomeWatcherState (IssuePostMergeReviewReady issueConfig issuePr (WorkerIdle (ThreadId "worker")) Nothing)
+      issuePostMergeWithReviewer = SomeWatcherState (IssuePostMergeReviewReady issueConfig issuePr (WorkerIdle (ThreadId "worker")) (Just (ReviewerIdle (ThreadId "reviewer"))))
+      prConfig = PrConfig (RepoName "soulomoon/mlf2") (PrNumber 8) (BranchName "codex/pr-8")
+      prFixing = SomeWatcherState (PrFixingReviews prConfig (reviewEvidenceFromSummaries ("fix" :| []) (CommitSha "abc123")) (WorkerActive (ActiveTurn (ThreadId "worker") (TurnId "turn"))) (ReviewerIdle (ThreadId "reviewer")))
+      startPlanner = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
+      retryPlanning = [SomeEffect SleepUntilNextPoll]
+      startReviewer = [SomeEffect (StartReviewerTurn prConfig (CommitSha "abc123") (ThreadId "reviewer"))]
+      readReviews = [SomeEffect (ReadReviewThreads prConfig)]
+      startFinalReviewer = [SomeEffect (StartIssueFinalReviewTurn issueConfig issuePr (CommitSha "def456") (ThreadId "reviewer"))]
+  results <-
+    sequence
+      [ assert "planning waiting rejects planner turn starts" (validationRejected planningWaiting startPlanner)
+      , assert "planning waiting allows retry sleep" (validatePhaseActionPlan planningWaiting retryPlanning == Right ())
+      , assert "PR fixing rejects clean reviewer starts" (validationRejected prFixing startReviewer)
+      , assert "PR fixing allows review-thread reads" (validatePhaseActionPlan prFixing readReviews == Right ())
+      , assert "post-merge review rejects final reviewer without reviewer thread" (validationRejected issuePostMergeWithoutReviewer startFinalReviewer)
+      , assert "post-merge review allows final reviewer with reviewer thread" (validatePhaseActionPlan issuePostMergeWithReviewer startFinalReviewer == Right ())
+      ]
+  pure (and results)
+ where
+  validationRejected state effects =
+    case validatePhaseActionPlan state effects of
+      Left _ -> True
+      Right () -> False
+
+phaseActionValidationAcceptsStateMachineDecisions :: IO Bool
+phaseActionValidationAcceptsStateMachineDecisions = do
+  let repo = RepoName "soulomoon/mlf2"
+      plannerConfig = PlannerConfig repo (maxParallelForTest 2) [IssueNumber 42]
+      planningGraph = PlanningGraph [IssueNumber 42] [] []
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      followUpConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42-2")
+      prNumber = PrNumber 7
+      prConfig = PrConfig repo prNumber (BranchName "codex/issue-42")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      plannerTurn = ActiveTurn (ThreadId "planner") (TurnId "planner-turn")
+      planTurn = ActiveTurn workerThread (TurnId "plan-turn")
+      implementationTurn = ActiveTurn workerThread (TurnId "implementation-turn")
+      reviewerTurn = ActiveTurn reviewerThread (TurnId "reviewer-turn")
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      reviewEvidence = reviewEvidenceFromSummaries ("fix bug" :| []) commit
+      workerIdle = WorkerIdle workerThread
+      reviewerIdle = ReviewerIdle reviewerThread
+      workerActive = WorkerActive implementationTurn
+      reviewerActive = ReviewerActive reviewerTurn
+      planningRequests =
+        IssueCreationRequest "child issue" "body" Nothing :| []
+      cases =
+        [ decisionAllowed "planning starts planner" (PlanningReady plannerConfig) (StartPlanningTurn plannerTurn)
+        , decisionAllowed "planning records graph" (PlanningTurnActive plannerConfig plannerTurn) (PlannerUpdatedGraph planningGraph)
+        , decisionAllowed "planning creates issues" (PlanningTurnActive plannerConfig plannerTurn) (PlannerRequestedIssueCreation planningRequests)
+        , decisionAllowed "planning waits after retry" (PlanningTurnActive plannerConfig plannerTurn) (PlannerTurnRetryRequested (BlockedReason "retry"))
+        , decisionAllowed "planning completes" (PlanningTurnActive plannerConfig plannerTurn) PlannerTurnCompleted
+        , decisionAllowed "planning waiting reactivates" (PlanningWaitingForReadyIssues plannerConfig planningGraph) PlannerReadyIssuesFixed
+        , decisionAllowed "issue starts plan turn" (IssueReadyToPlan issueConfig prNumber workerIdle) (StartReadyIssuePlanTurn planTurn)
+        , decisionAllowed "issue records plan" (IssueInPlanMode issueConfig prNumber (WorkerActive planTurn)) (IssuePlanCompleted sampleIssuePlanMarkdown (Just implementationTurn))
+        , decisionAllowed "issue accepts PR body update" (IssuePlanReady issueConfig prNumber workerIdle) (IssuePullRequestBodyUpdated prNumber)
+        , decisionAllowed "issue starts implementation" (IssueImplementationReady issueConfig (Just prNumber) workerIdle) (StartIssueImplementationTurn implementationTurn)
+        , decisionAllowed "issue advances merged attempt branch" (IssueImplementationReady issueConfig Nothing workerIdle) (IssueAttemptBranchAdvanced followUpConfig.issueBranch)
+        , decisionAllowed "issue restarts incomplete implementation" (IssueImplementing issueConfig (Just prNumber) workerActive) IssueImplementationIncomplete
+        , decisionAllowed "issue completes implementation" (IssueImplementing issueConfig (Just prNumber) workerActive) (IssueImplementationCompleted prNumber (Just reviewerThread))
+        , decisionAllowed "issue enters post-merge review" (IssueWaitingForPrMerge issueConfig prNumber workerIdle (Just reviewerIdle)) (IssuePullRequestMerged prNumber)
+        , decisionAllowed "issue records reviewer thread" (IssuePostMergeReviewReady issueConfig prNumber workerIdle Nothing) (IssueReviewerThreadReady reviewerThread)
+        , decisionAllowed "issue starts final review" (IssuePostMergeReviewReady issueConfig prNumber workerIdle (Just reviewerIdle)) (StartIssuePostMergeReview commit reviewerTurn)
+        , decisionAllowed "issue closes after final clean" (IssuePostMergeReviewing issueConfig prNumber workerIdle commit reviewerActive) (IssuePostMergeReviewSatisfied cleanEvidence)
+        , decisionAllowed "issue requests follow-up" (IssuePostMergeReviewing issueConfig prNumber workerIdle commit reviewerActive) (IssuePostMergeReviewFollowUp reviewEvidence)
+        , decisionAllowed "issue retries incomplete final review" (IssuePostMergeReviewing issueConfig prNumber workerIdle commit reviewerActive) (IssuePostMergeReviewIncomplete "retry")
+        , decisionAllowed "issue completes after close" (IssueWaitingForIssueClose issueConfig prNumber) (IssueClosed prNumber)
+        , decisionAllowed "PR starts worker on findings" (PrCheckingReviews prConfig workerIdle reviewerIdle) (ReviewThreadsFound reviewEvidence implementationTurn)
+        , decisionAllowed "PR starts clean reviewer" (PrCheckingReviews prConfig workerIdle reviewerIdle) (NoReviewThreadsFound commit reviewerTurn)
+        , decisionAllowed "PR fix completion waits" (PrFixingReviews prConfig reviewEvidence workerActive reviewerIdle) ReviewFixCompleted
+        , decisionAllowed "PR incomplete fix rereads threads" (PrFixingReviews prConfig reviewEvidence workerActive reviewerIdle) ReviewFixIncomplete
+        , decisionAllowed "PR verifying starts worker on new findings" (PrVerifyingReviewFix prConfig reviewEvidence workerIdle reviewerIdle) (ReviewThreadsFound reviewEvidence implementationTurn)
+        , decisionAllowed "PR verifying starts normal reviewer" (PrVerifyingReviewFix prConfig reviewEvidence workerIdle reviewerIdle) (NoReviewThreadsFound commit reviewerTurn)
+        , decisionAllowed "PR verifying starts verification reviewer" (PrVerifyingReviewFix prConfig reviewEvidence workerIdle reviewerIdle) (StartReviewFixVerification commit reviewerTurn)
+        , decisionAllowed "PR clean reviewer approves clean" (PrReviewingClean prConfig commit Nothing workerIdle reviewerActive) (ReviewerFoundClean cleanEvidence [])
+        , decisionAllowed "PR verification resolves old findings" (PrReviewingClean prConfig commit (Just reviewEvidence) workerIdle reviewerActive) (ReviewerFoundClean cleanEvidence [ReviewThreadId "thread-1"])
+        , decisionAllowed "PR clean reviewer finds problems" (PrReviewingClean prConfig commit Nothing workerIdle reviewerActive) (ReviewerFoundProblems reviewEvidence [ReviewThreadId "thread-1"])
+        , decisionAllowed "PR clean reviewer incomplete rereads" (PrReviewingClean prConfig commit Nothing workerIdle reviewerActive) ReviewerTurnIncomplete
+        , decisionAllowed "PR waits then merges" (PrWaitingForMergeability prConfig cleanEvidence workerIdle reviewerIdle) MergeabilityClean
+        , decisionAllowed "PR mergeability retries" (PrWaitingForMergeability prConfig cleanEvidence workerIdle reviewerIdle) (MergeabilityRetryLater "pending")
+        , decisionAllowed "PR mergeability rechecks reviews" (PrWaitingForMergeability prConfig cleanEvidence workerIdle reviewerIdle) (MergeabilityRecheckReviews "review changed")
+        , decisionAllowed "PR merge completes" (PrMerging prConfig cleanEvidence) (MergeCompleted (MergeCommit (CommitSha "def456")))
+        , decisionAllowed "blocked state can stop" (BlockedState (BlockedReason "blocked") :: WatcherState 'IssueImplement 'Blocked) (StopWatcher (StopReason "stop"))
+        ]
+  sequence cases >>= pure . and
+ where
+  decisionAllowed testName state event =
+    case step state event of
+      Decision _ effects ->
+        assert testName (validatePhaseActionPlan (SomeWatcherState state) effects == Right ())
 
 observeOnceParsingCoversDomainsAndDefaults :: IO Bool
 observeOnceParsingCoversDomainsAndDefaults = do
@@ -5357,6 +5518,7 @@ main = do
   preMergeHeadChangedOk <- observedDaemonTickPreMergeGateRechecksWhenHeadChanged
   preMergeCleanOk <- observedDaemonTickPreMergeGateMergesWhenClean
   preMergeUnstableOk <- observedDaemonTickPreMergeGateWaitsWhenUnstable
+  preMergeTransientOk <- observedDaemonTickPreMergeGateRetriesTransientGithubReads
   changesRequestedWorkerOk <- observedDaemonTickChangesRequestedStartsWorker
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningSnapshotOk <- automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart
@@ -5387,6 +5549,8 @@ main = do
   automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
   automaticLoopLoggingOk <- automaticDaemonLoopEmitsBoundaryLogs
   automaticLoopRetryPolicyOk <- automaticLoopRetryPolicyKeepsTransientFailuresAlive
+  phaseActionValidationOk <- phaseActionValidationRejectsInvalidCombinations
+  phaseActionDecisionValidationOk <- phaseActionValidationAcceptsStateMachineDecisions
   issuePlanningFanoutActiveOk <- issuePlanningFanoutDiscoversOnlyRunningImplementers
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
@@ -5417,6 +5581,7 @@ main = do
       && preMergeHeadChangedOk
       && preMergeCleanOk
       && preMergeUnstableOk
+      && preMergeTransientOk
       && changesRequestedWorkerOk
       && automaticPlanningDryRunOk
       && automaticPlanningSnapshotOk
@@ -5447,6 +5612,8 @@ main = do
       && automaticTerminalStopOk
       && automaticLoopLoggingOk
       && automaticLoopRetryPolicyOk
+      && phaseActionValidationOk
+      && phaseActionDecisionValidationOk
       && issuePlanningFanoutActiveOk
       && runnerGuardOk
       && runnerGuardRestartOk

@@ -78,6 +78,7 @@ library
     CodexWatcher.EventLog.Replay
     CodexWatcher.EventLog.Types
     CodexWatcher.EventLogRepair
+    CodexWatcher.Failure
     CodexWatcher.GhGit
     CodexWatcher.GoldenReplay
     CodexWatcher.Healthcheck

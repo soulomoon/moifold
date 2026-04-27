@@ -8,8 +8,11 @@ module CodexWatcher.ActionExecutor
   ( ActionExecutionMode (..)
   , ActionExecutionReport (..)
   , ActionExecutionResult (..)
+  , ActionOutcome (..)
   , ActionExecutor (..)
   , AppServerInterpreter (..)
+  , HardFailure (..)
+  , SoftFailure (..)
   , dryRunCompiledEffectPlan
   , executeCompiledEffectPlan
   , executePlannedAction
@@ -20,6 +23,7 @@ module CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Logging qualified as Log
+import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..), ioRuntimeInterpreter)
 import Data.Aeson (Value (..), (.=))
@@ -57,10 +61,25 @@ data ActionExecutionResult
   | DryRunActionResult
   deriving stock (Eq, Show, Generic)
 
+data SoftFailure
+  = OwnPrRequestChangesRejected Text
+  deriving stock (Eq, Show, Generic)
+
+data HardFailure
+  = CommandHardFailed Text
+  deriving stock (Eq, Show, Generic)
+
+data ActionOutcome
+  = ActionSucceeded
+  | ActionSoftFailed SoftFailure
+  | ActionHardFailed HardFailure
+  deriving stock (Eq, Show, Generic)
+
 data ActionExecutionReport = ActionExecutionReport
   { actionExecutionMode :: ActionExecutionMode
   , actionExecutionAction :: PlannedAction
   , actionExecutionResult :: ActionExecutionResult
+  , actionExecutionOutcome :: ActionOutcome
   }
   deriving stock (Eq, Show, Generic)
 
@@ -96,38 +115,37 @@ executePlannedAction executor ExecuteActions action =
     PlannedCommand command -> do
       logPlannedAction executor action
       rawReport <- executor.actionRuntime.runtimeRunCommand command
-      let report = normalizeCommandReport command rawReport
-      let result = executed action (CommandActionResult report)
+      let result = executed action (CommandActionResult rawReport) (commandActionOutcome command rawReport)
       logActionReport executor (actionReportLevel result) "action_finished" "planned command action finished" result
       pure result
     PlannedAppServerRequest request -> do
       logPlannedAction executor action
       response <- executor.actionAppServer.appServerSendRequest request
-      let result = executed action (AppServerActionResult response)
+      let result = executed action (AppServerActionResult response) ActionSucceeded
       logActionReport executor Log.Info "action_finished" "planned app-server action finished" result
       pure result
     PlannedWriteJson path value -> do
       logPlannedAction executor action
       executor.actionRuntime.runtimeWriteJsonValue path value
-      let result = executed action (WriteJsonActionResult path)
+      let result = executed action (WriteJsonActionResult path) ActionSucceeded
       logActionReport executor Log.Info "action_finished" "planned write-json action finished" result
       pure result
     PlannedWriteText path content -> do
       logPlannedAction executor action
       executor.actionRuntime.runtimeWriteTextFile path content
-      let result = executed action (WriteTextActionResult path)
+      let result = executed action (WriteTextActionResult path) ActionSucceeded
       logActionReport executor Log.Info "action_finished" "planned write-text action finished" result
       pure result
     PlannedSleepUntilNextPoll -> do
       logPlannedAction executor action
       executor.actionSleepUntilNextPoll
-      let result = executed action SleepActionResult
+      let result = executed action SleepActionResult ActionSucceeded
       logActionReport executor Log.Debug "action_finished" "planned sleep action finished" result
       pure result
     PlannedStopDaemon -> do
       logPlannedAction executor action
       executor.actionStopDaemon
-      let result = executed action StopDaemonActionResult
+      let result = executed action StopDaemonActionResult ActionSucceeded
       logActionReport executor Log.Info "action_finished" "planned stop action finished" result
       pure result
 
@@ -137,14 +155,16 @@ dryRunAction action =
     { actionExecutionMode = DryRunActions
     , actionExecutionAction = action
     , actionExecutionResult = DryRunActionResult
+    , actionExecutionOutcome = ActionSucceeded
     }
 
-executed :: PlannedAction -> ActionExecutionResult -> ActionExecutionReport
-executed action result =
+executed :: PlannedAction -> ActionExecutionResult -> ActionOutcome -> ActionExecutionReport
+executed action result outcome =
   ActionExecutionReport
     { actionExecutionMode = ExecuteActions
     , actionExecutionAction = action
     , actionExecutionResult = result
+    , actionExecutionOutcome = outcome
     }
 
 logPlannedAction :: ActionExecutor m -> PlannedAction -> m ()
@@ -167,6 +187,7 @@ logActionReport executor level event message report =
         event
         message
         ( plannedActionContext report.actionExecutionAction
+            <> actionOutcomeContext report.actionExecutionOutcome
             <> actionResultContext report.actionExecutionResult
             <> ["mode" .= Text.pack (show report.actionExecutionMode)]
         )
@@ -174,11 +195,23 @@ logActionReport executor level event message report =
 
 actionReportLevel :: ActionExecutionReport -> Log.WatcherLogLevel
 actionReportLevel report =
-  case report.actionExecutionResult of
-    CommandActionResult commandReport
-      | commandReport.ok -> Log.Info
-      | otherwise -> Log.Error
-    _ -> Log.Info
+  case report.actionExecutionOutcome of
+    ActionSucceeded -> Log.Info
+    ActionSoftFailed {} -> Log.Warn
+    ActionHardFailed {} -> Log.Error
+
+actionOutcomeContext :: ActionOutcome -> [Pair]
+actionOutcomeContext = \case
+  ActionSucceeded ->
+    ["outcome" .= ("succeeded" :: Text)]
+  ActionSoftFailed softFailure ->
+    [ "outcome" .= ("soft_failed" :: Text)
+    , "softFailure" .= softFailureText softFailure
+    ]
+  ActionHardFailed hardFailure ->
+    [ "outcome" .= ("hard_failed" :: Text)
+    , "hardFailure" .= hardFailureText hardFailure
+    ]
 
 plannedActionContext :: PlannedAction -> [Pair]
 plannedActionContext = \case
@@ -281,19 +314,29 @@ runtimeCommandName = \case
   KillTerm {} -> "kill_term"
   RawCommand command _args _cwd -> "raw_command:" <> Text.pack command
 
-normalizeCommandReport :: RuntimeCommand -> CommandReport -> CommandReport
-normalizeCommandReport command report =
-  case command of
-    GhPrRequestChanges {}
-      | requestChangesOwnPrFailure report ->
-          report
-            { ok = True
-            , errorMessage = Just "GitHub refused request-changes on the author's own PR; treating review findings as recorded so the watcher can continue to rework."
-            }
-    _ ->
-      report
+commandActionOutcome :: RuntimeCommand -> CommandReport -> ActionOutcome
+commandActionOutcome command report
+  | report.ok =
+      ActionSucceeded
+  | GhPrRequestChanges {} <- command
+  , requestChangesOwnPrFailure report =
+      ActionSoftFailed (OwnPrRequestChangesRejected ownPrRequestChangesSoftFailureText)
+  | otherwise =
+      ActionHardFailed (CommandHardFailed (commandText report))
 
 requestChangesOwnPrFailure :: CommandReport -> Bool
 requestChangesOwnPrFailure report =
   not report.ok
     && "Can not request changes on your own pull request" `Text.isInfixOf` report.stderr
+
+ownPrRequestChangesSoftFailureText :: Text
+ownPrRequestChangesSoftFailureText =
+  "GitHub refused request-changes on the author's own PR; review findings were recorded, so the watcher can continue to rework."
+
+softFailureText :: SoftFailure -> Text
+softFailureText = \case
+  OwnPrRequestChangesRejected reason -> reason
+
+hardFailureText :: HardFailure -> Text
+hardFailureText = \case
+  CommandHardFailed reason -> reason

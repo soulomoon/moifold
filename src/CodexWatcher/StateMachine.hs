@@ -1,7 +1,9 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -10,15 +12,18 @@ module CodexWatcher.StateMachine
   ( CanBlock
   , Event (..)
   , Decision (..)
+  , PhaseActionValidationError (..)
+  , formatPhaseActionValidationError
   , nextIssueAttemptBranch
   , step
+  , validatePhaseActionPlan
   ) where
 
 import CodexWatcher.Effects
 import CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..), PrNumber (..), ReviewThreadId, ThreadId)
 import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
-import CodexWatcher.Core.State (CompletionEvidence (..), WatcherState (..))
+import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlannerConfig (..), PlanningGraph)
@@ -96,6 +101,187 @@ data Decision (domain :: Domain) where
     => WatcherState domain nextPhase
     -> EffectPlan
     -> Decision domain
+
+data PhaseActionValidationError = PhaseActionValidationError
+  { phaseActionState :: Text.Text
+  , phaseActionEffect :: Text.Text
+  , phaseActionReason :: Text.Text
+  }
+  deriving stock (Eq, Show)
+
+formatPhaseActionValidationError :: PhaseActionValidationError -> Text.Text
+formatPhaseActionValidationError errorValue =
+  errorValue.phaseActionReason
+    <> " (state="
+    <> errorValue.phaseActionState
+    <> ", effect="
+    <> errorValue.phaseActionEffect
+    <> ")"
+
+validatePhaseActionPlan :: SomeWatcherState -> EffectPlan -> Either PhaseActionValidationError ()
+validatePhaseActionPlan state effects =
+  case filter (not . effectAllowedForState state) effects of
+    [] -> Right ()
+    effect : _ ->
+      Left
+        PhaseActionValidationError
+          { phaseActionState = watcherStateLabel state
+          , phaseActionEffect = someEffectName effect
+          , phaseActionReason = "effect is not allowed from watcher phase"
+          }
+
+watcherStateLabel :: SomeWatcherState -> Text.Text
+watcherStateLabel state =
+  Text.pack (show (someDomain state)) <> "/" <> Text.pack (show (somePhase state))
+
+effectAllowedForState :: SomeWatcherState -> SomeEffect -> Bool
+effectAllowedForState (SomeWatcherState state) effect
+  | commonEffectAllowed effect = True
+  | otherwise =
+      case state of
+        PlanningReady {} ->
+          effectIsStartPlannerTurn effect
+        PlanningTurnActive {} ->
+          effectIsOneOf
+            [ effectIsCreateIssue
+            , effectIsRecordPlanningGraph
+            , effectIsSleep
+            ]
+            effect
+        PlanningWaitingForReadyIssues {} ->
+          effectIsSleep effect
+        IssueReadyToPlan {} ->
+          effectIsStartIssuePlanWorkerTurn effect
+        IssueInPlanMode {} ->
+          effectIsOneOf [effectIsRecordIssuePlan, effectIsSleep] effect
+        IssuePlanReady {} ->
+          effectIsOneOf [effectIsRecordIssuePlan, effectIsUpdatePullRequestBody, effectIsSleep] effect
+        IssueImplementationReady {} ->
+          effectIsOneOf [effectIsCreatePullRequest, effectIsStartIssueImplementationWorkerTurn, effectIsSleep] effect
+        IssueImplementing {} ->
+          effectIsOneOf [effectIsStartIssueImplementationWorkerTurn, effectIsSleep] effect
+        IssueHandoffReady {} ->
+          effectIsSleep effect
+        IssueHandoffInitialized {} ->
+          effectIsSleep effect
+        IssueWaitingForPrMerge {} ->
+          effectIsSleep effect
+        IssuePostMergeReviewReady _config _prNumber _worker maybeReviewer ->
+          case maybeReviewer of
+            Just {} -> effectIsOneOf [effectIsStartIssueFinalReviewTurn, effectIsSleep] effect
+            Nothing -> effectIsSleep effect
+        IssuePostMergeReviewing {} ->
+          effectIsOneOf [effectIsCloseIssue, effectIsUpdateIssueFollowUp, effectIsSleep] effect
+        IssueWaitingForIssueClose {} ->
+          effectIsOneOf [effectIsCloseIssue, effectIsSleep] effect
+        PrCheckingReviews {} ->
+          effectIsOneOf [effectIsStartWorkerTurn, effectIsStartReviewerTurn] effect
+        PrFixingReviews {} ->
+          effectIsOneOf [effectIsReadReviewThreads, effectIsSleep] effect
+        PrVerifyingReviewFix {} ->
+          effectIsOneOf [effectIsStartWorkerTurn, effectIsStartReviewerTurn, effectIsStartReviewerVerificationTurn] effect
+        PrReviewingClean {} ->
+          effectIsOneOf
+            [ effectIsResolveReviewThread
+            , effectIsDismissRequestChangesReview
+            , effectIsRequestChangesReview
+            , effectIsReadReviewThreads
+            , effectIsSleep
+            ]
+            effect
+        PrWaitingForMergeability {} ->
+          effectIsOneOf [effectIsMergePullRequest, effectIsReadReviewThreads, effectIsSleep] effect
+        PrMerging {} ->
+          effectIsSleep effect
+        BlockedState {} ->
+          effectIsStopDaemon effect
+        CompleteState {} ->
+          effectIsStopDaemon effect
+        StoppedState {} ->
+          effectIsStopDaemon effect
+
+commonEffectAllowed :: SomeEffect -> Bool
+commonEffectAllowed effect =
+  effectIsOneOf [effectIsRecordBlocked, effectIsStopDaemon] effect
+
+effectIsOneOf :: [SomeEffect -> Bool] -> SomeEffect -> Bool
+effectIsOneOf predicates effect =
+  any ($ effect) predicates
+
+someEffectName :: SomeEffect -> Text.Text
+someEffectName (SomeEffect effect) =
+  case effect of
+    ReadOpenIssues {} -> "ReadOpenIssues"
+    ReadOpenPullRequests {} -> "ReadOpenPullRequests"
+    ReadReviewThreads {} -> "ReadReviewThreads"
+    StartPlannerTurn {} -> "StartPlannerTurn"
+    StartWorkerTurn {} -> "StartWorkerTurn"
+    StartIssuePlanWorkerTurn {} -> "StartIssuePlanWorkerTurn"
+    StartIssueImplementationWorkerTurn {} -> "StartIssueImplementationWorkerTurn"
+    StartReviewerTurn {} -> "StartReviewerTurn"
+    StartReviewerVerificationTurn {} -> "StartReviewerVerificationTurn"
+    StartIssueFinalReviewTurn {} -> "StartIssueFinalReviewTurn"
+    PushBranch {} -> "PushBranch"
+    CreateIssue {} -> "CreateIssue"
+    CreatePullRequest {} -> "CreatePullRequest"
+    UpdatePullRequestBody {} -> "UpdatePullRequestBody"
+    UpdateIssueFollowUp {} -> "UpdateIssueFollowUp"
+    CloseIssue {} -> "CloseIssue"
+    ResolveReviewThread {} -> "ResolveReviewThread"
+    RequestChangesReview {} -> "RequestChangesReview"
+    DismissRequestChangesReview {} -> "DismissRequestChangesReview"
+    RecordIssuePlan {} -> "RecordIssuePlan"
+    RecordPlanningGraph {} -> "RecordPlanningGraph"
+    RecordBlocked {} -> "RecordBlocked"
+    MergePullRequest {} -> "MergePullRequest"
+    StopDaemon -> "StopDaemon"
+    SleepUntilNextPoll -> "SleepUntilNextPoll"
+
+effectIsReadReviewThreads, effectIsStartPlannerTurn, effectIsStartWorkerTurn, effectIsStartIssuePlanWorkerTurn, effectIsStartIssueImplementationWorkerTurn, effectIsStartReviewerTurn, effectIsStartReviewerVerificationTurn, effectIsStartIssueFinalReviewTurn, effectIsCreateIssue, effectIsCreatePullRequest, effectIsUpdatePullRequestBody, effectIsUpdateIssueFollowUp, effectIsCloseIssue, effectIsResolveReviewThread, effectIsRequestChangesReview, effectIsDismissRequestChangesReview, effectIsRecordIssuePlan, effectIsRecordPlanningGraph, effectIsRecordBlocked, effectIsMergePullRequest, effectIsSleep, effectIsStopDaemon :: SomeEffect -> Bool
+effectIsReadReviewThreads (SomeEffect (ReadReviewThreads {})) = True
+effectIsReadReviewThreads _ = False
+effectIsStartPlannerTurn (SomeEffect (StartPlannerTurn {})) = True
+effectIsStartPlannerTurn _ = False
+effectIsStartWorkerTurn (SomeEffect (StartWorkerTurn {})) = True
+effectIsStartWorkerTurn _ = False
+effectIsStartIssuePlanWorkerTurn (SomeEffect (StartIssuePlanWorkerTurn {})) = True
+effectIsStartIssuePlanWorkerTurn _ = False
+effectIsStartIssueImplementationWorkerTurn (SomeEffect (StartIssueImplementationWorkerTurn {})) = True
+effectIsStartIssueImplementationWorkerTurn _ = False
+effectIsStartReviewerTurn (SomeEffect (StartReviewerTurn {})) = True
+effectIsStartReviewerTurn _ = False
+effectIsStartReviewerVerificationTurn (SomeEffect (StartReviewerVerificationTurn {})) = True
+effectIsStartReviewerVerificationTurn _ = False
+effectIsStartIssueFinalReviewTurn (SomeEffect (StartIssueFinalReviewTurn {})) = True
+effectIsStartIssueFinalReviewTurn _ = False
+effectIsCreateIssue (SomeEffect (CreateIssue {})) = True
+effectIsCreateIssue _ = False
+effectIsCreatePullRequest (SomeEffect (CreatePullRequest {})) = True
+effectIsCreatePullRequest _ = False
+effectIsUpdatePullRequestBody (SomeEffect (UpdatePullRequestBody {})) = True
+effectIsUpdatePullRequestBody _ = False
+effectIsUpdateIssueFollowUp (SomeEffect (UpdateIssueFollowUp {})) = True
+effectIsUpdateIssueFollowUp _ = False
+effectIsCloseIssue (SomeEffect (CloseIssue {})) = True
+effectIsCloseIssue _ = False
+effectIsResolveReviewThread (SomeEffect (ResolveReviewThread {})) = True
+effectIsResolveReviewThread _ = False
+effectIsRequestChangesReview (SomeEffect (RequestChangesReview {})) = True
+effectIsRequestChangesReview _ = False
+effectIsDismissRequestChangesReview (SomeEffect (DismissRequestChangesReview {})) = True
+effectIsDismissRequestChangesReview _ = False
+effectIsRecordIssuePlan (SomeEffect (RecordIssuePlan {})) = True
+effectIsRecordIssuePlan _ = False
+effectIsRecordPlanningGraph (SomeEffect (RecordPlanningGraph {})) = True
+effectIsRecordPlanningGraph _ = False
+effectIsRecordBlocked (SomeEffect (RecordBlocked {})) = True
+effectIsRecordBlocked _ = False
+effectIsMergePullRequest (SomeEffect (MergePullRequest {})) = True
+effectIsMergePullRequest _ = False
+effectIsSleep (SomeEffect SleepUntilNextPoll) = True
+effectIsSleep _ = False
+effectIsStopDaemon (SomeEffect StopDaemon) = True
+effectIsStopDaemon _ = False
 
 step :: WatcherState domain phase -> Event domain phase -> Decision domain
 step _ (MarkBlocked reason) =

@@ -28,6 +28,7 @@ import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..))
 import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
+import CodexWatcher.Failure (FailureClassification (..), failureClassText, failureIsRetryable)
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
@@ -127,7 +128,8 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
     Left failure
-      | shouldLoop && iteration < maxIterations && retryableAutomaticLoopFailure failure -> do
+      | let classification = classifyDaemonLoopFailure failure
+      , shouldLoop && iteration < maxIterations && failureIsRetryable classification -> do
           Log.logWatcher
             executor.actionLogger
             ( Log.watcherLog
@@ -135,6 +137,8 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
                 "loop_tick_retry_scheduled"
                 "automatic loop tick failed with retryable failure; retrying after poll interval"
                 [ "failure" .= formatDaemonLoopFailure failure
+                , "failureClass" .= failureClassText classification.failureClass
+                , "failureReason" .= classification.failureReason
                 , "iteration" .= iteration
                 ]
             )
@@ -164,11 +168,8 @@ repairCurrentPidFile domain stateDir ExecuteActions = do
   restoreOwnedPidFile (WatcherPaths.defaultPidPath domain stateDir) pidText
 
 retryableAutomaticLoopFailure :: DaemonLoopFailure -> Bool
-retryableAutomaticLoopFailure = \case
-  DaemonLoopExternalFailure {} -> True
-  DaemonLoopAppServerFailure {} -> True
-  DaemonLoopDaemonFailure {} -> False
-  DaemonLoopUnexpectedStartPlan {} -> False
+retryableAutomaticLoopFailure =
+  failureIsRetryable . classifyDaemonLoopFailure
 
 recordInvalidReplayBlockState :: DaemonLoopConfig -> DaemonLoopFailure -> IO ()
 recordInvalidReplayBlockState loopConfig = \case

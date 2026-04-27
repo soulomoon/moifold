@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -17,6 +18,7 @@ import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
+import CodexWatcher.Failure (FailureClass (..), FailureClassification (..), classifyExternalFailureText, failureClassText)
 import CodexWatcher.GhGit (remoteIssueIsClosed, runGhIssueView)
 import CodexWatcher.Cli.Command.IssueFanout
   ( IssueImplementerChildStartResult (..)
@@ -45,6 +47,12 @@ import Data.Aeson (Value, object, (.=))
 import Data.Maybe (mapMaybe)
 import Data.Text qualified as Text
 import System.Exit (die)
+
+data FanoutValidationResult
+  = FanoutValidationPassed
+  | FanoutValidationRetry FailureClassification
+  | FanoutValidationBlocked BlockedReason FailureClassification
+  deriving stock (Eq, Show)
 
 issuePlanningFanoutAfterTick :: ActionExecutor IO -> LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
 issuePlanningFanoutAfterTick executor cli endpoint executionMode tick =
@@ -94,18 +102,34 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
       allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
   validation <- validateReadyIssueFanout plannerConfig (planningGraphFromState planningState) (zip readyIssues statuses) (launches <> stoppedActiveLaunches)
   case validation of
-    Just reason -> do
+    FanoutValidationBlocked reason classification -> do
       Log.logWatcher
         executor.actionLogger
         ( Log.watcherLog
             Log.Warn
             "fanout_validation_failed"
             "ready issue fanout validation failed"
-            ["reason" .= reason.unBlockedReason]
+            [ "reason" .= reason.unBlockedReason
+            , "failureClass" .= failureClassText classification.failureClass
+            , "failureReason" .= classification.failureReason
+            ]
         )
       blockPlanningFanout executionMode cli planningState reason
       pure False
-    Nothing -> do
+    FanoutValidationRetry classification -> do
+      Log.logWatcher
+        executor.actionLogger
+        ( Log.watcherLog
+            Log.Warn
+            "fanout_validation_retry"
+            "ready issue fanout validation hit a retryable external failure"
+            [ "failureClass" .= failureClassText classification.failureClass
+            , "failureReason" .= classification.failureReason
+            ]
+        )
+      putStrLn ("planner fanout will retry: " <> Text.unpack classification.failureReason)
+      pure False
+    FanoutValidationPassed -> do
       Log.logWatcher
         executor.actionLogger
         ( Log.watcherLog
@@ -174,31 +198,35 @@ childStartProblemJson (issue, detail, status) =
     , "status" .= show status
     ]
 
-validateReadyIssueFanout :: PlannerConfig -> Maybe PlanningGraph -> [(IssueNumber, WatcherRuntimeStatus)] -> [IssueImplementerLaunchPlan] -> IO (Maybe BlockedReason)
+validateReadyIssueFanout :: PlannerConfig -> Maybe PlanningGraph -> [(IssueNumber, WatcherRuntimeStatus)] -> [IssueImplementerLaunchPlan] -> IO FanoutValidationResult
 validateReadyIssueFanout plannerConfig maybeGraph readyStatuses launchPlans =
   firstInvalid <$> traverse validateIssue (fmap (\launch -> launch.launchIssueConfig.issueNumber) launchPlans)
  where
-  firstInvalid = foldr (<|>) Nothing
+  firstInvalid [] = FanoutValidationPassed
+  firstInvalid (FanoutValidationPassed : rest) = firstInvalid rest
+  firstInvalid (result : _rest) = result
   validateIssue issue
     | not (readyIssueAllowedByPlannerScope plannerConfig maybeGraph issue) =
-        pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is outside planner scope")))
+        pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is outside planner scope"))
     | otherwise =
         case lookup issue readyStatuses of
           Just WatcherActiveRunning ->
-            pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already active")))
+            pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is already active"))
           Just (WatcherTerminal TerminalComplete) ->
-            pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already terminal complete")))
+            pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is already terminal complete"))
           _ -> do
             remote <- runGhIssueView ioRuntimeInterpreter plannerConfig.plannerRepo issue
             case remote of
               Left reason -> do
                 putStrLn ("planner fanout warning: ready issue #" <> show (unIssueNumber issue) <> " could not be read from GitHub; will retry next tick: " <> Text.unpack reason)
-                pure Nothing
+                pure (FanoutValidationRetry (classifyExternalFailureText reason))
               Right remoteIssue
                 | remoteIssueIsClosed remoteIssue ->
-                    pure (Just (BlockedReason ("ready issue #" <> issueText issue <> " is already closed on GitHub")))
+                    pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is already closed on GitHub"))
                 | otherwise ->
-                    pure Nothing
+                    pure FanoutValidationPassed
+  blocked failureClass reason =
+    FanoutValidationBlocked (BlockedReason reason) (FailureClassification failureClass reason)
 
 planningGraphFromState :: SomeWatcherState -> Maybe PlanningGraph
 planningGraphFromState (SomeWatcherState (PlanningWaitingForReadyIssues _config graph)) = Just graph

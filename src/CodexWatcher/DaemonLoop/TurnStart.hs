@@ -15,8 +15,10 @@ import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
+import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Core.Ids (RequestId (..), ThreadId, TurnId (..))
+import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
 import Data.Aeson (Value)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -32,16 +34,29 @@ prestartAndObserve
   -> (TurnId -> DaemonObservation)
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 prestartAndObserve observe executor config events kind threadId toObservation =
-  case config.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions -> do
-      let turnId = syntheticTurnId kind config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId
-      observe executor config events (toObservation turnId)
-    ExecuteActions -> do
-      started <- prestartTurn executor config.loopDaemonOptions.daemonRuntimeConfig kind threadId
-      case started of
-        Left failure -> pure (Left failure)
-        Right (turnId, cachedExecutor) ->
-          observe cachedExecutor config events (toObservation turnId)
+  case validateStartTurnPlan events kind threadId of
+    Left failure -> pure (Left failure)
+    Right () ->
+      case config.loopDaemonOptions.daemonExecutionMode of
+        DryRunActions -> do
+          let turnId = syntheticTurnId kind config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId
+          observe executor config events (toObservation turnId)
+        ExecuteActions -> do
+          started <- prestartTurn executor config.loopDaemonOptions.daemonRuntimeConfig kind threadId
+          case started of
+            Left failure -> pure (Left failure)
+            Right (turnId, cachedExecutor) ->
+              observe cachedExecutor config events (toObservation turnId)
+
+validateStartTurnPlan :: [WatcherEvent] -> StartTurnKind -> ThreadId -> Either DaemonLoopFailure ()
+validateStartTurnPlan events kind threadId = do
+  replay <-
+    case replayEventLog events of
+      Left failure -> Left (DaemonLoopDaemonFailure (DaemonReplayFailed failure))
+      Right value -> Right value
+  case validatePhaseActionPlan replay.replayState [startTurnEffect kind threadId] of
+    Left errorValue -> Left (DaemonLoopUnexpectedStartPlan (formatPhaseActionValidationError errorValue))
+    Right () -> Right ()
 
 prestartTurn
   :: Monad m

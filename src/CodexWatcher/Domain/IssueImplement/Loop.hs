@@ -33,7 +33,7 @@ import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath, runtimeWorkdirPath)
-import CodexWatcher.StateMachine (nextIssueAttemptBranch)
+import CodexWatcher.StateMachine (formatPhaseActionValidationError, nextIssueAttemptBranch, validatePhaseActionPlan)
 import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
 import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), ThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
@@ -561,13 +561,17 @@ runIssueEffectPlan
   -> ([ActionExecutionReport] -> m (Either DaemonLoopFailure DaemonLoopTickResult))
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runIssueEffectPlan executor config replay effects dryRunReason onExecute = do
-  let plan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig effects
-  reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode plan
-  case config.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions ->
-      pure (Right (idleTickResult replay dryRunReason reports))
-    ExecuteActions ->
-      onExecute reports
+  case validatePhaseActionPlan replay.replayState effects of
+    Left errorValue ->
+      pure (Left (DaemonLoopDaemonFailure (DaemonObservationRejected (formatPhaseActionValidationError errorValue))))
+    Right () -> do
+      let plan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig effects
+      reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode plan
+      case config.loopDaemonOptions.daemonExecutionMode of
+        DryRunActions ->
+          pure (Right (idleTickResult replay dryRunReason reports))
+        ExecuteActions ->
+          onExecute reports
 
 onlyCommandReport :: Text -> [ActionExecutionReport] -> Either DaemonLoopFailure CommandActionReport
 onlyCommandReport label reports =

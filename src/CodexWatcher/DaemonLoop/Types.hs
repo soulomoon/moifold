@@ -24,7 +24,7 @@ module CodexWatcher.DaemonLoop.Types
   , withPrependedActionReports
   ) where
 
-import CodexWatcher.ActionExecutor (ActionExecutionReport (..), ActionExecutionResult (..), ActionExecutor)
+import CodexWatcher.ActionExecutor (ActionExecutionReport (..), ActionExecutionResult (..), ActionExecutor, ActionOutcome (..))
 import CodexWatcher.AppServerClient (AppServerClientFailure, AppServerTurn (..))
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation, DaemonObservedTickResult, DaemonOptions)
 import CodexWatcher.EventLog.Types (EventReplayResult, WatcherEvent)
@@ -119,7 +119,9 @@ finalCommandReport reports =
 
 successfulCommandActionReport :: CommandActionReport -> Either DaemonLoopFailure SuccessfulCommandActionReport
 successfulCommandActionReport report
-  | report.commandActionCommandReport.ok =
+  | report.commandActionExecutionReport.actionExecutionOutcome == ActionSucceeded =
+      Right (SuccessfulCommandActionReport report.commandActionExecutionReport report.commandActionCommandReport)
+  | ActionSoftFailed {} <- report.commandActionExecutionReport.actionExecutionOutcome =
       Right (SuccessfulCommandActionReport report.commandActionExecutionReport report.commandActionCommandReport)
   | otherwise =
       Left
@@ -133,7 +135,7 @@ firstCommandFailure [] =
 firstCommandFailure (report : rest) =
   case report.actionExecutionResult of
     CommandActionResult commandReport
-      | not commandReport.ok ->
+      | ActionHardFailed {} <- report.actionExecutionOutcome ->
           Just (DaemonActionFailed report.actionExecutionAction commandReport)
     _ ->
       firstCommandFailure rest
