@@ -32,7 +32,7 @@ import CodexWatcher.Failure (FailureClassification (..), failureClassText, failu
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime.File (writeJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
-import CodexWatcher.Runtime.Owner.Cli (renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
+import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLeaseIfOwnedByCurrentProcess, renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.Core.Ids (ThreadId)
@@ -40,6 +40,7 @@ import CodexWatcher.Core.Kinds (Domain)
 import CodexWatcher.Core.Limits (pollSecondsMicros)
 import CodexWatcher.Core.State (someDomain, someDomainIs, withDomain)
 import Control.Concurrent (threadDelay)
+import Control.Exception (finally)
 import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -96,8 +97,11 @@ runAutomaticLoop cli = do
         ["stateDir" .= cli.loopCliStateDir]
     )
   runWithOptionalPidFile maybePidFile do
-    loopConfig <- refreshStartupThreads executor cli executionMode baseLoopConfig
-    runLoopIterations stopRequested executor loopConfig cli.loopCliDomain postTick shouldLoop maxIterations 1
+    ( do
+        loopConfig <- refreshStartupThreads executor cli executionMode baseLoopConfig
+        runLoopIterations stopRequested executor loopConfig cli.loopCliDomain postTick shouldLoop maxIterations 1
+      )
+      `finally` clearRuntimeLeaseIfOwnedByCurrentProcess cli.loopCliStateDir executionMode
 
 automaticLoopLogger :: ActionExecutionMode -> FilePath -> IO (Log.WatcherLogger IO)
 automaticLoopLogger DryRunActions _stateDir =

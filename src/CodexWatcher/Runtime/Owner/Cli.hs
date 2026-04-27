@@ -4,6 +4,7 @@
 
 module CodexWatcher.Runtime.Owner.Cli
   ( clearRuntimeLease
+  , clearRuntimeLeaseIfOwnedByCurrentProcess
   , renewRuntimeOwnerForExecution
   , validateRuntimeOwnerForExecution
   ) where
@@ -28,6 +29,21 @@ clearRuntimeLease stateDir = do
   ensureClearable marker
   removeRuntimeOwnerFile stateDir
   putStrLn ("cleared inactive runtime lease in " <> stateDir)
+
+clearRuntimeLeaseIfOwnedByCurrentProcess :: FilePath -> ActionExecutionMode -> IO ()
+clearRuntimeLeaseIfOwnedByCurrentProcess stateDir executionMode =
+  case executionMode of
+    DryRunActions -> pure ()
+    ExecuteActions -> do
+      marker <- readMarkerOrDie stateDir
+      currentPid <- Text.pack . show <$> getProcessID
+      case marker of
+        Just (RuntimeOwnerLeased lease)
+          | lease.runtimeLeaseOwner == HaskellRuntime
+          , lease.runtimeLeasePid == currentPid ->
+              removeRuntimeOwnerFile stateDir
+        _ ->
+          pure ()
 
 validateRuntimeOwnerForExecution :: FilePath -> ActionExecutionMode -> IO ()
 validateRuntimeOwnerForExecution stateDir executionMode =

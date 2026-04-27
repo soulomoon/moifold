@@ -42,7 +42,7 @@ import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
-import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
+import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease, clearRuntimeLeaseIfOwnedByCurrentProcess)
 import CodexWatcher.Runtime.Owner.Store
 import CodexWatcher.Runtime.Owner.Types
 import CodexWatcher.RunnerGuard
@@ -86,7 +86,7 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime, secondsToDiffTime)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removePathForcibly)
 import System.FilePath ((</>))
 import System.Exit (ExitCode (..), exitFailure)
 import System.Posix.Process (getProcessID)
@@ -2482,6 +2482,42 @@ runtimeOwnerClearRejectsRunningLease = do
   results <-
     sequence
       [ assert "runtime owner clear rejects running lease" (case clearResult of Left (ExitFailure _) -> True; _ -> False)
+      ]
+  pure (and results)
+
+runtimeOwnerCleanupClearsOnlyCurrentProcessLease :: IO Bool
+runtimeOwnerCleanupClearsOnlyCurrentProcessLease = do
+  let stateDir = "/tmp/codex-watcher-hs-runtime-owner-cleanup"
+      ownerPath = stateDir </> "runtime-owner.json"
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  now <- getCurrentTime
+  currentPid <- Text.pack . show <$> getProcessID
+  let currentLease =
+        RuntimeLease
+          { runtimeLeaseOwner = HaskellRuntime
+          , runtimeLeasePid = currentPid
+          , runtimeLeaseHost = "test-host"
+          , runtimeLeaseClaimedAt = now
+          , runtimeLeaseExpiresAt = addUTCTime 60 now
+          , runtimeLeaseEventLogHeadHash = "head"
+          }
+      otherLease = currentLease {runtimeLeasePid = "999999999"}
+  LazyByteString.writeFile ownerPath (encode (runtimeLeaseJson currentLease))
+  clearRuntimeLeaseIfOwnedByCurrentProcess stateDir ExecuteActions
+  currentCleared <- not <$> doesFileExist ownerPath
+  LazyByteString.writeFile ownerPath (encode (runtimeLeaseJson otherLease))
+  clearRuntimeLeaseIfOwnedByCurrentProcess stateDir ExecuteActions
+  otherPreserved <- doesFileExist ownerPath
+  clearRuntimeLeaseIfOwnedByCurrentProcess stateDir DryRunActions
+  dryRunPreserved <- doesFileExist ownerPath
+  removePathForcibly stateDir
+  results <-
+    sequence
+      [ assert "runtime owner cleanup clears current process lease" currentCleared
+      , assert "runtime owner cleanup preserves other process lease" otherPreserved
+      , assert "runtime owner cleanup is a no-op in dry-run" dryRunPreserved
       ]
   pure (and results)
 
@@ -5559,6 +5595,7 @@ main = do
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
   runtimeOwnerLeaseOk <- runtimeOwnerLeaseParsingRejectsOwnerOnlyJson
   runtimeOwnerClaimOk <- runtimeOwnerClearRejectsRunningLease
+  runtimeOwnerCleanupOk <- runtimeOwnerCleanupClearsOnlyCurrentProcessLease
   pidRestoreOk <- restoreOwnedPidFileRepairsMissingAndStalePid
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
   if
@@ -5622,6 +5659,7 @@ main = do
       && runtimeStatusOk
       && runtimeOwnerLeaseOk
       && runtimeOwnerClaimOk
+      && runtimeOwnerCleanupOk
       && pidRestoreOk
       && observeParsingOk
     then pure ()
