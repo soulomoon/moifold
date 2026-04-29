@@ -18,7 +18,7 @@ import CodexWatcher.Core.Ids
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadIds)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadCommentRefs, reviewEvidenceThreadRefs)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
@@ -164,20 +164,33 @@ renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
     ]
     Nothing
     ""
-renderRuntimeCommand (GhPrRequestChanges config evidence) =
+renderRuntimeCommand (GhReplyReviewThread reviewThreadId comment) =
+  RuntimeCommandSpec
+    "gh"
+    [ "api"
+    , "graphql"
+    , "-f"
+    , "query=mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}"
+    , "-f"
+    , "threadId=" <> Text.unpack (unReviewThreadId reviewThreadId)
+    , "-f"
+    , "body=" <> Text.unpack comment
+    ]
+    Nothing
+    ""
+renderRuntimeCommand (GhPrCommentReviewFindings config evidence) =
   RuntimeCommandSpec
     "gh"
     [ "pr"
-    , "review"
+    , "comment"
     , show (unPrNumber (prNumber config))
     , "--repo"
     , Text.unpack (unRepoName (prRepo config))
-    , "--request-changes"
     , "--body-file"
     , "-"
     ]
     Nothing
-    (requestChangesReviewBody evidence)
+    (reviewFindingsCommentBody evidence)
 renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
   RuntimeCommandSpec
     "gh"
@@ -296,6 +309,11 @@ createPullRequestScript =
     , "repo=\"$1\""
     , "branch=\"$2\""
     , "issue=\"$3\""
+    , "default_branch=$(gh repo view \"$repo\" --json defaultBranchRef --jq '.defaultBranchRef.name // empty' 2>/dev/null || true)"
+    , "if [ -z \"$default_branch\" ]; then"
+    , "  default_branch=$(git remote show origin 2>/dev/null | sed -n 's/.*HEAD branch: //p' | head -n1 || true)"
+    , "fi"
+    , "if [ -z \"$default_branch\" ]; then default_branch=\"master\"; fi"
     , "existing=$(gh pr list --repo \"$repo\" --head \"$branch\" --state open --json number --jq '.[0].number // empty')"
     , "if [ -n \"$existing\" ]; then"
     , "  linked=$(gh pr view \"$existing\" --repo \"$repo\" --json body,closingIssuesReferences --jq \"(([.closingIssuesReferences[]?.number] | index($issue)) != null) or ((.body // \\\"\\\") | test(\\\"(?i)(close[sd]?|fix(e[sd])?|resolve[sd]?) +#$issue(\\\\\\\\b|[^0-9])\\\"))\")"
@@ -306,21 +324,38 @@ createPullRequestScript =
     , "  printf '{\"status\":\"reused\",\"prNumber\":%s}\\n' \"$existing\""
     , "  exit 0"
     , "fi"
+    , "dirty_before_checkout=$(git status --porcelain)"
+    , "current_branch=$(git branch --show-current || true)"
+    , "if [ -n \"$dirty_before_checkout\" ] && [ \"$current_branch\" != \"$branch\" ]; then"
+    , "  printf 'worktree has uncommitted changes on branch %s; expected %s\\n' \"$current_branch\" \"$branch\" >&2"
+    , "  exit 1"
+    , "fi"
     , "git fetch origin --prune >/dev/null"
-    , "git checkout -B \"$branch\" >/dev/null"
+    , "base=\"origin/$default_branch\""
+    , "if ! git rev-parse --verify \"$base\" >/dev/null 2>&1; then"
+    , "  git fetch origin \"$default_branch\" >/dev/null"
+    , "fi"
+    , "if git show-ref --verify --quiet \"refs/heads/$branch\"; then"
+    , "  git checkout \"$branch\" >/dev/null"
+    , "elif git show-ref --verify --quiet \"refs/remotes/origin/$branch\"; then"
+    , "  git checkout -B \"$branch\" \"origin/$branch\" >/dev/null"
+    , "else"
+    , "  git checkout -B \"$branch\" \"$base\" >/dev/null"
+    , "fi"
     , "git config user.email >/dev/null || git config user.email codex-watcher@users.noreply.github.com"
     , "git config user.name >/dev/null || git config user.name codex-watcher"
-    , "base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || true)"
-    , "if [ -z \"$base\" ]; then base=\"origin/main\"; fi"
-    , "if ! git rev-parse --verify \"$base\" >/dev/null 2>&1; then"
-    , "  base=$(git rev-list --max-parents=0 HEAD | tail -n1)"
+    , "if [ -n \"$(git status --porcelain)\" ]; then"
+    , "  git add -A"
+    , "  if ! git diff --cached --quiet; then"
+    , "    git commit -m \"Implement issue #$issue\" >/dev/null"
+    , "  fi"
     , "fi"
     , "if [ -z \"$(git log --oneline \"$base\"..HEAD)\" ]; then"
     , "  git commit --allow-empty -m \"Start issue #$issue implementation\" >/dev/null"
     , "fi"
     , "git push -u origin \"$branch\" >/dev/null"
     , "body=$(printf 'Closes #%s.\\n\\nImplementation plan pending. The issue implementer will sync issue-plan.md into this PR before implementation starts.' \"$issue\")"
-    , "url=$(gh pr create --repo \"$repo\" --head \"$branch\" --title \"Implement #$issue\" --body \"$body\")"
+    , "url=$(gh pr create --repo \"$repo\" --head \"$branch\" --base \"$default_branch\" --title \"Implement #$issue\" --body \"$body\")"
     , "number=\"${url##*/}\""
     , "printf '{\"status\":\"created\",\"prNumber\":%s}\\n' \"$number\""
     ]
@@ -402,7 +437,7 @@ mergeFlag _ = "--merge"
 
 reviewThreadsQuery :: String
 reviewThreadsQuery =
-  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,body,path,line,author{login}}}}}}}}"
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,url,body,path,line,author{login}}}}}}}}"
 
 cleanReviewAndMergeScript :: Text
 cleanReviewAndMergeScript =
@@ -433,26 +468,39 @@ dismissRequestChangesScript =
     , "done"
     ]
 
-requestChangesReviewBody :: ReviewEvidence -> Text
-requestChangesReviewBody evidence =
+reviewFindingsCommentBody :: ReviewEvidence -> Text
+reviewFindingsCommentBody evidence =
   Text.unlines
-    [ "Review did not pass at commit `" <> unCommitSha evidence.reviewedCommit <> "`."
+    [ "Review findings require rework at commit `" <> unCommitSha evidence.reviewedCommit <> "`."
     , ""
     , "Findings to address:"
     , reviewFindingBullets evidence
-    , ""
-    , "Submitted by Haskell PR review watcher as a blocking request-changes review."
     ]
 
 reviewFindingBullets :: ReviewEvidence -> Text
 reviewFindingBullets evidence =
   Text.unlines
-    ( summaryBullets <> threadBullets )
+    ( summaryBullets <> threadCommentBullets <> threadBullets )
  where
+  threadCommentRefs =
+    reviewEvidenceThreadCommentRefs evidence
+  threadCommentIds =
+    [threadId | (threadId, _threadUrl, _comment) <- threadCommentRefs]
   summaryBullets =
     ["- " <> summary | summary <- reviewEvidenceSummaries evidence]
+  threadCommentBullets =
+    ["- " <> reviewThreadLink threadUrl <> ": " <> Text.strip comment | (_threadId, threadUrl, comment) <- threadCommentRefs]
   threadBullets =
-    ["- Unresolved review thread: `" <> unReviewThreadId threadId <> "`" | threadId <- reviewEvidenceThreadIds evidence]
+    [ "- " <> reviewThreadLink threadUrl <> " requires follow-up."
+    | (threadId, threadUrl) <- reviewEvidenceThreadRefs evidence
+    , threadId `notElem` threadCommentIds
+    ]
+
+reviewThreadLink :: Maybe Text -> Text
+reviewThreadLink (Just url)
+  | not (Text.null (Text.strip url)) = "[Unresolved review thread](" <> Text.strip url <> ")"
+reviewThreadLink _ =
+  "Unresolved review thread"
 
 cleanReviewBody :: CleanReviewEvidence -> Text
 cleanReviewBody evidence =

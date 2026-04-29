@@ -60,7 +60,7 @@ data DaemonLoopTickResult = DaemonLoopTickResult
 
 data StartTurnKind
   = StartPlannerTurnKind
-  | StartWorkerTurnKind
+  | StartWorkerTurnKind ReviewEvidence
   | StartIssuePlanWorkerTurnKind IssueConfig PrNumber
   | StartIssueImplementationWorkerTurnKind
   | StartReviewerTurnKind PrConfig CommitSha

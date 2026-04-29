@@ -140,6 +140,13 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> ReviewerThread 'Idle
     -> WatcherState 'PrReview 'FixingReviews
 
+  PrReviewFixQueued
+    :: PrConfig
+    -> ReviewEvidence
+    -> WorkerThread 'Idle
+    -> ReviewerThread 'Idle
+    -> WatcherState 'PrReview 'CheckingReviews
+
   PrVerifyingReviewFix
     :: PrConfig
     -> ReviewEvidence

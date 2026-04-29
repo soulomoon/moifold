@@ -12,7 +12,7 @@ module CodexWatcher.EventLog.Replay
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Ids (IssueNumber (..))
+import CodexWatcher.Core.Ids (IssueNumber (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds (Domain (..), KnownDomain, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason, StopReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), isTerminalState, someDomain, somePhase)
@@ -77,6 +77,13 @@ applyEvent _ event@IssuePlanningInitialized {} =
   Left ("duplicate initialization event: " <> eventName event)
 applyEvent (SomeWatcherState (PrCheckingReviews config (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
   Right (SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
+applyEvent (SomeWatcherState (PrReviewFixQueued config evidence (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
+  Right (SomeWatcherState (PrReviewFixQueued config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
+applyEvent (SomeWatcherState (PrFixingReviews config evidence worker@(WorkerActive activeTurn) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread)
+  | workerThread == activeThreadId activeTurn =
+      Right (SomeWatcherState (PrFixingReviews config evidence worker (ReviewerIdle reviewerThread)), [])
+  | otherwise =
+      Left "PR review thread refresh worker thread does not match active worker turn"
 applyEvent (SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
   Right (SomeWatcherState (PrWaitingForMergeability config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)), [])
 applyEvent (SomeWatcherState (PrVerifyingReviewFix config evidence (WorkerIdle _oldWorker) (ReviewerIdle _oldReviewer))) (PrReviewThreadsRefreshed workerThread reviewerThread) =
@@ -102,6 +109,8 @@ applyEvent (SomeWatcherState state@PlanningTurnActive {}) IssuePlanningTurnCompl
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewUnresolvedFound threadIds commit turnId) =
   fromDecision (step state (ReviewThreadsFound (reviewEvidenceFromThreads threadIds commit) (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config (WorkerIdle workerThread) _reviewer)) (PrReviewFeedbackFound evidence turnId) =
+  fromDecision (step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId)))
+applyEvent (SomeWatcherState state@(PrReviewFixQueued _config _storedEvidence (WorkerIdle workerThread) _reviewer)) (PrReviewFeedbackFound evidence turnId) =
   fromDecision (step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId)))
 applyEvent (SomeWatcherState state@(PrCheckingReviews _config _worker (ReviewerIdle reviewerThread))) (PrReviewNoUnresolvedFound commit turnId) =
   fromDecision (step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId)))
@@ -134,18 +143,20 @@ applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) (PrReviewMergeab
   fromDecision (step state (MergeabilityRetryLater reason))
 applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) (PrReviewMergeabilityRecheck reason) =
   fromDecision (step state (MergeabilityRecheckReviews reason))
+applyEvent (SomeWatcherState state@PrWaitingForMergeability {}) (PrReviewMergeabilityFixRequired evidence) =
+  fromDecision (step state (MergeabilityFixRequired evidence))
 applyEvent (SomeWatcherState state@PrMerging {}) (PrReviewMergeCompleted mergeCommit) =
   fromDecision (step state (MergeCompleted mergeCommit))
 applyEvent (SomeWatcherState state@(IssueReadyToPlan _config _prNumber (WorkerIdle threadId))) (IssuePlanTurnStartedEvent turnId) =
   fromDecision (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId)))
-applyEvent (SomeWatcherState (IssueReadyToPlan config prNumber (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
-  Right (SomeWatcherState (IssueReadyToPlan config prNumber (WorkerIdle threadId)), [])
+applyEvent (SomeWatcherState state@IssueReadyToPlan {}) (IssueWorkerThreadRefreshed threadId) =
+  fromDecision (step state (IssueWorkerThreadReady threadId))
 applyEvent (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (IssuePlanCompletedEvent planMarkdown turnId) =
   fromDecision (step state (IssuePlanCompleted planMarkdown (ActiveTurn (activeThreadId activeTurn) <$> turnId)))
-applyEvent (SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
-  Right (SomeWatcherState (IssuePlanReady config prNumber (WorkerIdle threadId)), [])
-applyEvent (SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle _oldThread))) (IssueWorkerThreadRefreshed threadId) =
-  Right (SomeWatcherState (IssueImplementationReady config maybePr (WorkerIdle threadId)), [])
+applyEvent (SomeWatcherState state@IssuePlanReady {}) (IssueWorkerThreadRefreshed threadId) =
+  fromDecision (step state (IssueWorkerThreadReady threadId))
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueWorkerThreadRefreshed threadId) =
+  fromDecision (step state (IssueWorkerThreadReady threadId))
 applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssueAttemptBranchAdvancedEvent branch) =
   fromDecision (step state (IssueAttemptBranchAdvanced branch))
 applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssueReviewerThreadReadyEvent threadId) =
@@ -217,8 +228,13 @@ applyEvent (SomeWatcherState state@IssuePostMergeReviewReady {}) (IssuePostMerge
   case state of
     IssuePostMergeReviewReady _config _prNumber _worker (Just (ReviewerIdle reviewerThread)) ->
       fromDecision (step state (StartIssuePostMergeReview commit (ActiveTurn reviewerThread turnId)))
-    IssuePostMergeReviewReady {} ->
-      Left "post-merge review started before reviewer thread was available"
+    IssuePostMergeReviewReady config prNumber worker Nothing ->
+      let reviewerThread = legacyPostMergeReviewerThread turnId
+       in fromDecision
+            ( step
+                (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle reviewerThread)))
+                (StartIssuePostMergeReview commit (ActiveTurn reviewerThread turnId))
+            )
 applyEvent (SomeWatcherState state@IssuePostMergeReviewing {}) (IssuePostMergeReviewCleanEvent evidence) =
   fromDecision (step state (IssuePostMergeReviewSatisfied evidence))
 applyEvent (SomeWatcherState state@IssuePostMergeReviewing {}) (IssuePostMergeReviewFollowUpEvent evidence) =
@@ -281,3 +297,7 @@ validatePlanningGraphForReplay config graph
 hasDuplicate :: Eq a => [a] -> Bool
 hasDuplicate [] = False
 hasDuplicate (item : rest) = item `elem` rest || hasDuplicate rest
+
+legacyPostMergeReviewerThread :: TurnId -> ThreadId
+legacyPostMergeReviewerThread turnId =
+  ThreadId ("legacy-post-merge-reviewer-" <> unTurnId turnId)

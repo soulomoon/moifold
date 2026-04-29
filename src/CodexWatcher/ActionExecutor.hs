@@ -62,7 +62,7 @@ data ActionExecutionResult
   deriving stock (Eq, Show, Generic)
 
 data SoftFailure
-  = OwnPrRequestChangesRejected Text
+  = ReviewFindingsCommentSoftFailed Text
   deriving stock (Eq, Show, Generic)
 
 data HardFailure
@@ -299,7 +299,8 @@ runtimeCommandName = \case
   GhCreatePullRequest {} -> "gh_create_pull_request"
   GhUpdatePullRequestBody {} -> "gh_update_pull_request_body"
   GhResolveReviewThread {} -> "gh_resolve_review_thread"
-  GhPrRequestChanges {} -> "gh_pr_request_changes"
+  GhReplyReviewThread {} -> "gh_reply_review_thread"
+  GhPrCommentReviewFindings {} -> "gh_pr_comment_review_findings"
   GhPrMerge {} -> "gh_pr_merge"
   GhPrDismissRequestChanges {} -> "gh_pr_dismiss_request_changes"
   GhPrCleanReviewAndMerge {} -> "gh_pr_clean_review_and_merge"
@@ -315,27 +316,15 @@ runtimeCommandName = \case
   RawCommand command _args _cwd -> "raw_command:" <> Text.pack command
 
 commandActionOutcome :: RuntimeCommand -> CommandReport -> ActionOutcome
-commandActionOutcome command report
+commandActionOutcome _command report
   | report.ok =
       ActionSucceeded
-  | GhPrRequestChanges {} <- command
-  , requestChangesOwnPrFailure report =
-      ActionSoftFailed (OwnPrRequestChangesRejected ownPrRequestChangesSoftFailureText)
   | otherwise =
       ActionHardFailed (CommandHardFailed (commandText report))
 
-requestChangesOwnPrFailure :: CommandReport -> Bool
-requestChangesOwnPrFailure report =
-  not report.ok
-    && "Can not request changes on your own pull request" `Text.isInfixOf` report.stderr
-
-ownPrRequestChangesSoftFailureText :: Text
-ownPrRequestChangesSoftFailureText =
-  "GitHub refused request-changes on the author's own PR; review findings were recorded, so the watcher can continue to rework."
-
 softFailureText :: SoftFailure -> Text
 softFailureText = \case
-  OwnPrRequestChangesRejected reason -> reason
+  ReviewFindingsCommentSoftFailed reason -> reason
 
 hardFailureText :: HardFailure -> Text
 hardFailureText = \case

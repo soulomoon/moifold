@@ -35,7 +35,7 @@ data Effect (action :: ActionKind) (mutability :: Mutability) where
   ReadOpenPullRequests :: RepoName -> Effect 'ReadOpenPullRequestsAction 'ReadOnly
   ReadReviewThreads :: PrConfig -> Effect 'ReadReviewThreadsAction 'ReadOnly
   StartPlannerTurn :: ThreadId -> Effect 'StartPlannerTurnAction 'CanStartTurn
-  StartWorkerTurn :: ThreadId -> Effect 'StartWorkerTurnAction 'CanStartTurn
+  StartWorkerTurn :: ReviewEvidence -> ThreadId -> Effect 'StartWorkerTurnAction 'CanStartTurn
   StartIssuePlanWorkerTurn :: IssueConfig -> PrNumber -> ThreadId -> Effect 'StartIssuePlanWorkerTurnAction 'CanStartTurn
   StartIssueImplementationWorkerTurn :: ThreadId -> Effect 'StartIssueImplementationWorkerTurnAction 'CanStartTurn
   StartReviewerTurn :: PrConfig -> CommitSha -> ThreadId -> Effect 'StartReviewerTurnAction 'CanStartTurn
@@ -48,7 +48,8 @@ data Effect (action :: ActionKind) (mutability :: Mutability) where
   UpdateIssueFollowUp :: IssueConfig -> ReviewEvidence -> Effect 'UpdateIssueFollowUpAction 'CanMutateGitHub
   CloseIssue :: IssueConfig -> PrNumber -> Effect 'CloseIssueAction 'CanMutateGitHub
   ResolveReviewThread :: ReviewThreadId -> Effect 'ResolveReviewThreadAction 'CanMutateGitHub
-  RequestChangesReview :: PrConfig -> ReviewEvidence -> Effect 'RequestChangesReviewAction 'CanMutateGitHub
+  ReplyReviewThread :: ReviewThreadId -> Text -> Effect 'ReplyReviewThreadAction 'CanMutateGitHub
+  PublishReviewFindings :: PrConfig -> ReviewEvidence -> Effect 'PublishReviewFindingsAction 'CanMutateGitHub
   DismissRequestChangesReview :: PrConfig -> CleanReviewEvidence -> Effect 'DismissRequestChangesReviewAction 'CanMutateGitHub
   RecordIssuePlan :: IssueConfig -> PrNumber -> Text -> Effect 'RecordIssuePlanAction 'CanMutateLocal
   RecordPlanningGraph :: PlanningGraph -> Effect 'RecordPlanningGraphAction 'CanMutateLocal
@@ -107,7 +108,8 @@ actionKindText SUpdatePullRequestBodyAction = "UpdatePullRequestBody"
 actionKindText SUpdateIssueFollowUpAction = "UpdateIssueFollowUp"
 actionKindText SCloseIssueAction = "CloseIssue"
 actionKindText SResolveReviewThreadAction = "ResolveReviewThread"
-actionKindText SRequestChangesReviewAction = "RequestChangesReview"
+actionKindText SReplyReviewThreadAction = "ReplyReviewThread"
+actionKindText SPublishReviewFindingsAction = "PublishReviewFindings"
 actionKindText SDismissRequestChangesReviewAction = "DismissRequestChangesReview"
 actionKindText SRecordIssuePlanAction = "RecordIssuePlan"
 actionKindText SRecordPlanningGraphAction = "RecordPlanningGraph"

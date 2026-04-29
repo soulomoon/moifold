@@ -39,7 +39,7 @@ renderTemplate template variables =
 
 reviewerPromptVersion :: Text
 reviewerPromptVersion =
-  "haskell-pro-style-v6-no-self-approve"
+  "haskell-pro-style-v9-queued-review-findings"
 
 agentPrincipleFrame :: Text -> Text -> [Text] -> [Text] -> Text
 agentPrincipleFrame role mission hardConstraints outputContract =
@@ -147,7 +147,7 @@ prReviewWorkerTemplate =
     ( agentPrincipleFrame
         "PR review-fix worker turn."
         "Address review feedback, validate the fix, and publish the PR branch."
-        [ "Focus on unresolved review comments, request-changes review feedback, and the directly related code."
+        [ "Focus on unresolved review comments, watcher review-findings feedback, and the directly related code."
         , "Run relevant validation, commit, and push fixes when ready."
         , "Never mutate watcher events.jsonl, daemon/checker state, pid/lock/runtime-owner files, or unspecified watcher state."
         , "Only write state files explicitly named by the completion contract."
@@ -225,7 +225,7 @@ prReviewWorkerThreadDeveloperTemplate =
         [ "PR URL: {{prUrl}}."
         , "Your working directory is {{workdir}}."
         , "The PR branch is {{branchOrUnknownUseTools}}."
-        , "Scheduled unresolved-review and request-changes checks are done by the watcher script with GitHub, not by agent turns."
+        , "Scheduled unresolved-review and review-findings checks are done by the watcher script with GitHub, not by agent turns."
         , "New review is done in a separate reviewer thread, not in this worker thread."
         , "Do not use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."
@@ -236,7 +236,7 @@ prReviewWorkerThreadDeveloperTemplate =
         <> Text.unlines
           [ ""
           , "Work guidance:"
-          , "- Read review context, including latest request-changes reviews and unresolved inline threads, inspect code, edit, validate, publish, and resolve only when supported by {{workerModel}}/{{workerEffort}} turns."
+          , "- Read review context, including watcher review-findings comments and unresolved inline threads, inspect code, edit, validate, publish, and resolve only when supported by {{workerModel}}/{{workerEffort}} turns."
           , "- Use GitHub MCP/app tools when useful, and use normal shell/file operations for local repository work."
           , ""
           , "{{validationProtocol}}"
@@ -262,8 +262,8 @@ prReviewReviewerThreadDeveloperTemplate =
         , "Use English for every message in this thread."
         ]
         [ "If you find actionable line-addressable problems or worthwhile simplifications, add inline GitHub PR review comments that create unresolved review threads."
-        , "If a required task/plan/issue gap is not line-addressable in the PR diff, record it in findings_summary instead of returning clean."
-        , "If there are no actionable issues or suggestions and the implementation satisfies the PR plan and linked issue, record a clean LGTM state; the watcher script may dismiss its own blocking request-changes review, submits a non-approval clean comment, and merges."
+        , "If a required task/plan/issue gap is not line-addressable in the PR diff, record it through review_status=new_findings and findings_summary instead of returning clean."
+        , "If there are no actionable issues or suggestions and the implementation satisfies the PR plan and linked issue, record a clean LGTM state; the watcher script submits a non-approval clean comment and merges."
         ]
         <> Text.unlines
           [ ""
@@ -389,7 +389,7 @@ reviewerTemplate =
         ]
         [ "Use inline GitHub PR review comments for concrete line-addressable issues on changed lines."
         , "Do not duplicate existing review comments."
-        , "If a task/plan/issue gap is not line-addressable in the PR diff, put it in findings_summary rather than returning clean."
+        , "If a task/plan/issue gap is not line-addressable in the PR diff, use review_status=new_findings and put it in findings_summary rather than returning clean."
         , "Report only through the active output schema."
         ]
         <> Text.unlines
@@ -411,7 +411,7 @@ reviewerTemplate =
           , "{{verificationInstructions}}"
           , ""
           , "Use inline GitHub PR review comments for concrete line-addressable issues on changed lines."
-          , "For concrete task-completion gaps with no changed line to comment on, describe them in findings_summary; do not create a fake clean review."
+          , "For concrete task-completion gaps with no changed line to comment on, use review_status=new_findings and describe them in findings_summary; do not create a fake clean review."
           , "Do not duplicate existing review comments."
           , "Do not edit files, commit, push, approve, or resolve threads."
           , ""

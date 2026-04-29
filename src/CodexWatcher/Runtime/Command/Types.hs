@@ -39,7 +39,8 @@ data RuntimeCommand
   | GhUpdatePullRequestBody FilePath IssueConfig PrNumber FilePath
   | GhIssueFollowUp IssueConfig ReviewEvidence
   | GhResolveReviewThread ReviewThreadId
-  | GhPrRequestChanges PrConfig ReviewEvidence
+  | GhReplyReviewThread ReviewThreadId Text
+  | GhPrCommentReviewFindings PrConfig ReviewEvidence
   | GhPrMerge RepoName PrNumber Text
   | GhPrDismissRequestChanges PrConfig CleanReviewEvidence
   | GhPrCleanReviewAndMerge RepoName PrNumber CleanReviewEvidence Text

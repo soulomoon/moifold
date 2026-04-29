@@ -137,6 +137,7 @@ prop_ghGitParsesReviewThreadsGraphql =
                                                       [ "nodes"
                                                           .= [ object
                                                                 [ "id" .= ("comment-1" :: Text)
+                                                                , "url" .= ("https://github.com/soulomoon/mlf2/pull/1#discussion_r1" :: Text)
                                                                 , "body" .= ("please fix" :: Text)
                                                                 , "author" .= object ["login" .= ("reviewer" :: Text)]
                                                                 ]
@@ -161,6 +162,8 @@ prop_ghGitParsesReviewThreadsGraphql =
           fmap reviewThreadId report.unresolvedReviewThreads == [ReviewThreadId "thread-unresolved"]
             && length report.reviewThreads == 2
             && maybe False ((== Just "reviewer") . reviewCommentAuthorLogin) (listToMaybe report.reviewThreads >>= listToMaybe . reviewThreadComments)
+            && maybe False ((== Just "https://github.com/soulomoon/mlf2/pull/1#discussion_r1") . reviewCommentUrl) (listToMaybe report.reviewThreads >>= listToMaybe . reviewThreadComments)
+            && maybe False ((== Just "https://github.com/soulomoon/mlf2/pull/1#discussion_r1") . reviewThreadUrl) (listToMaybe report.reviewThreads)
         Left _ -> False
 
 prop_ghGitParsesGitOutputs :: Bool

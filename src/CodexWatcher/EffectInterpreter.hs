@@ -44,6 +44,7 @@ import CodexWatcher.TurnOutput
   ( issueFinalReviewTurnInput
   , issueFinalReviewTurnOutputSchema
   , issuePlanModeDeveloperInstructions
+  , prReviewWorkerTurnInputWithEvidence
   , reviewerTurnInput
   , reviewerVerificationTurnInput
   )
@@ -126,8 +127,8 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhReviewThreads prConfig)]
     StartPlannerTurn threadId ->
       oneAppServerRequest config.effectRuntimePlannerTurn threadId
-    StartWorkerTurn threadId ->
-      oneAppServerRequest config.effectRuntimeWorkerTurn threadId
+    StartWorkerTurn evidence threadId ->
+      oneAppServerRequest (prReviewWorkerTurnRuntimeConfig config evidence) threadId
     StartIssuePlanWorkerTurn issueConfig prNumber threadId ->
       oneAppServerRequest (issuePlanTurnRuntimeConfig config issueConfig prNumber) threadId
     StartIssueImplementationWorkerTurn threadId ->
@@ -152,8 +153,10 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhIssueClose issueConfig prNumber)]
     ResolveReviewThread reviewThreadId ->
       unchanged [PlannedCommand (GhResolveReviewThread reviewThreadId)]
-    RequestChangesReview prConfig evidence ->
-      unchanged [PlannedCommand (GhPrRequestChanges prConfig evidence)]
+    ReplyReviewThread reviewThreadId comment ->
+      unchanged [PlannedCommand (GhReplyReviewThread reviewThreadId comment)]
+    PublishReviewFindings prConfig evidence ->
+      unchanged [PlannedCommand (GhPrCommentReviewFindings prConfig evidence)]
     DismissRequestChangesReview prConfig evidence ->
       unchanged [PlannedCommand (GhPrDismissRequestChanges prConfig evidence)]
     RecordIssuePlan issueConfig prNumber planMarkdown ->
@@ -200,6 +203,13 @@ turnStartOptions config threadId =
     , turnOutputSchema = config.turnRuntimeOutputSchema
     , turnCollaborationMode = config.turnRuntimeCollaborationMode
     }
+
+prReviewWorkerTurnRuntimeConfig :: EffectRuntimeConfig -> ReviewEvidence -> TurnRuntimeConfig
+prReviewWorkerTurnRuntimeConfig config evidence =
+  let workerTurn = config.effectRuntimeWorkerTurn
+   in workerTurn
+        { turnRuntimeInput = prReviewWorkerTurnInputWithEvidence workerTurn.turnRuntimeInput evidence
+        }
 
 reviewerTurnRuntimeConfig :: EffectRuntimeConfig -> PrConfig -> CommitSha -> TurnRuntimeConfig
 reviewerTurnRuntimeConfig config prConfig reviewTargetSha =

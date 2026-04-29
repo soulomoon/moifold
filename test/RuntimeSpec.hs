@@ -9,7 +9,8 @@ module RuntimeSpec
   , prop_runtimeGhIssueCloseCommentsAndCloses
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
-  , prop_runtimeGhPrRequestChangesBlocksReview
+  , prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
+  , prop_runtimeGhPrCommentReviewFindingsUsesPrComment
   , prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
@@ -36,7 +37,7 @@ import CodexWatcher.Core.Ids
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), reviewEvidenceFromSummaries)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), reviewEvidenceFromSummaries, reviewEvidenceFromThreadCommentRefs)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text qualified as Text
 
@@ -57,7 +58,8 @@ runtimeCommandExamples =
   , GhCreatePullRequest "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example"))
   , GhUpdatePullRequestBody "/tmp/work" (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/example")) (PrNumber 7) "/tmp/work/.watcher/issue-plan.md"
   , GhResolveReviewThread (ReviewThreadId "PRRT_test")
-  , GhPrRequestChanges (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (reviewEvidenceFromSummaries ("tests fail" :| []) (CommitSha "abc123"))
+  , GhReplyReviewThread (ReviewThreadId "PRRT_test") "still applies"
+  , GhPrCommentReviewFindings (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (reviewEvidenceFromSummaries ("tests fail" :| []) (CommitSha "abc123"))
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
   , GhPrDismissRequestChanges (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (CleanReviewEvidence (CommitSha "abc123") "LGTM")
   , GhPrCleanReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
@@ -219,9 +221,16 @@ prop_runtimeGhPrCreateKeepsStdoutJsonOnly config =
   let spec = renderRuntimeCommand (GhCreatePullRequest "/tmp/work" config)
       script = Text.pack (spec.args !! 1)
    in spec.command == "bash"
-        && "git checkout -B \"$branch\" >/dev/null" `Text.isInfixOf` script
+        && "default_branch=$(gh repo view \"$repo\" --json defaultBranchRef" `Text.isInfixOf` script
+        && "git checkout \"$branch\" >/dev/null" `Text.isInfixOf` script
+        && "git checkout -B \"$branch\" \"origin/$branch\" >/dev/null" `Text.isInfixOf` script
+        && "git checkout -B \"$branch\" \"$base\" >/dev/null" `Text.isInfixOf` script
+        && "worktree has uncommitted changes on branch" `Text.isInfixOf` script
+        && "git add -A" `Text.isInfixOf` script
+        && "git commit -m \"Implement issue #$issue\" >/dev/null" `Text.isInfixOf` script
         && "git commit --allow-empty -m \"Start issue #$issue implementation\" >/dev/null" `Text.isInfixOf` script
         && "git push -u origin \"$branch\" >/dev/null" `Text.isInfixOf` script
+        && "gh pr create --repo \"$repo\" --head \"$branch\" --base \"$default_branch\"" `Text.isInfixOf` script
         && "gh pr view \"$existing\" --repo \"$repo\" --json body,closingIssuesReferences" `Text.isInfixOf` script
         && "already uses branch" `Text.isInfixOf` script
         && "but is not linked to issue" `Text.isInfixOf` script
@@ -248,28 +257,54 @@ prop_runtimeGhPrBodyUpdateUsesPlanFile config prNumber =
              , planPath
              ]
 
-prop_runtimeGhPrRequestChangesBlocksReview :: PrNumber -> Bool
-prop_runtimeGhPrRequestChangesBlocksReview prNumber =
+prop_runtimeGhPrCommentReviewFindingsUsesPrComment :: PrNumber -> Bool
+prop_runtimeGhPrCommentReviewFindingsUsesPrComment prNumber =
   let repo = RepoName "soulomoon/mlf2"
       config = PrConfig repo prNumber (BranchName "codex/example")
       commit = CommitSha "abc123"
       finding = "implementation does not satisfy the PR plan"
-      spec = renderRuntimeCommand (GhPrRequestChanges config (reviewEvidenceFromSummaries (finding :| []) commit))
+      spec = renderRuntimeCommand (GhPrCommentReviewFindings config (reviewEvidenceFromSummaries (finding :| []) commit))
+      threadUrl = "https://github.com/soulomoon/mlf2/pull/6#discussion_r1"
+      threadSpec =
+        renderRuntimeCommand
+          ( GhPrCommentReviewFindings
+              config
+              (reviewEvidenceFromThreadCommentRefs ((ReviewThreadId "PRRT_test", Just threadUrl, "still applies") :| []) commit)
+          )
    in spec.command == "gh"
         && spec.args
           == [ "pr"
-             , "review"
+             , "comment"
              , show (unPrNumber prNumber)
              , "--repo"
              , Text.unpack (unRepoName repo)
-             , "--request-changes"
              , "--body-file"
              , "-"
              ]
-        && "Review did not pass" `Text.isInfixOf` spec.stdin
-        && "blocking request-changes review" `Text.isInfixOf` spec.stdin
+        && "Review findings require rework" `Text.isInfixOf` spec.stdin
+        && not ("Haskell PR review watcher" `Text.isInfixOf` spec.stdin)
         && unCommitSha commit `Text.isInfixOf` spec.stdin
         && finding `Text.isInfixOf` spec.stdin
+        && ("[Unresolved review thread](" <> threadUrl <> ")") `Text.isInfixOf` threadSpec.stdin
+        && "still applies" `Text.isInfixOf` threadSpec.stdin
+        && not ("PRRT_test" `Text.isInfixOf` threadSpec.stdin)
+
+prop_runtimeGhReplyReviewThreadUsesGraphqlMutation :: Bool
+prop_runtimeGhReplyReviewThreadUsesGraphqlMutation =
+  let spec = renderRuntimeCommand (GhReplyReviewThread (ReviewThreadId "PRRT_test") "still applies")
+   in spec.command == "gh"
+        && spec.args
+          == [ "api"
+             , "graphql"
+             , "-f"
+             , "query=mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}"
+             , "-f"
+             , "threadId=PRRT_test"
+             , "-f"
+             , "body=still applies"
+             ]
+        && spec.cwd == Nothing
+        && spec.stdin == ""
 
 prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker :: PrNumber -> CleanReviewEvidence -> Bool
 prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker prNumber evidence =

@@ -34,7 +34,7 @@ import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath, runtimeWorkdirPath)
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, nextIssueAttemptBranch, validatePhaseActionPlan)
-import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
+import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
 import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), ThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
@@ -50,7 +50,8 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 runIssueReadyToPlan
-  :: DomainLoopOps m
+  :: Monad m
+  => DomainLoopOps m
   -> ActionExecutor m
   -> DaemonLoopConfig
   -> [WatcherEvent]
@@ -59,13 +60,16 @@ runIssueReadyToPlan
   -> ThreadId
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runIssueReadyToPlan ops executor config events issueConfig prNumber workerThread =
-  ops.loopPrestartAndObserve
-    executor
-    config
-    events
-    (StartIssuePlanWorkerTurnKind issueConfig prNumber)
-    workerThread
-    (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
+  if issueWorkerRefreshNeededAfterFollowUp events
+    then ensureIssueWorkerThread ops executor config events issueConfig
+    else
+      ops.loopPrestartAndObserve
+        executor
+        config
+        events
+        (StartIssuePlanWorkerTurnKind issueConfig prNumber)
+        workerThread
+        (DaemonIssueImplementObservation . ObservedPlanTurnStarted)
 
 runIssuePlanActive
   :: Monad m
@@ -504,6 +508,52 @@ retryCloseIssue executor config replay issueConfig prNumber =
         Just failure -> Left (DaemonLoopDaemonFailure failure)
         Nothing ->
           Right (idleTickResult replay ("closed issue after merged PR #" <> Text.pack (show (unPrNumber prNumber)) <> "; waiting to observe closed issue") reports)
+
+issueWorkerRefreshNeededAfterFollowUp :: [WatcherEvent] -> Bool
+issueWorkerRefreshNeededAfterFollowUp =
+  foldl' step False
+ where
+  step _needed IssuePostMergeReviewFollowUpEvent {} = True
+  step _needed IssueWorkerThreadRefreshed {} = False
+  step needed _event = needed
+
+ensureIssueWorkerThread
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> IssueConfig
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+ensureIssueWorkerThread ops executor config events issueConfig =
+  case config.loopDaemonOptions.daemonExecutionMode of
+    DryRunActions ->
+      ops.loopObserveWithExecutor
+        executor
+        config
+        events
+        (DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed (ThreadId "dry-run-issue-worker-thread")))
+    ExecuteActions -> do
+      let requestId = config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId
+          instructions =
+            issueImplementerThreadDeveloperInstructions
+              (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
+              (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir)
+              issueConfig
+      started <-
+        startThreadWithInterpreter
+          executor.actionAppServer
+          requestId
+          (defaultThreadStartOptions (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir) instructions)
+      case started of
+        Left failure ->
+          pure (Left (DaemonLoopAppServerFailure failure))
+        Right workerThread ->
+          ops.loopObserveWithExecutor
+            executor
+            config
+            events
+            (DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed workerThread))
 
 ensureIssueReviewerThread
   :: Monad m

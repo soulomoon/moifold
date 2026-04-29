@@ -15,10 +15,12 @@ module CodexWatcher.GhGit
   , RemoteIssue (..)
   , RemoteIssueState (..)
   , RemotePullRequest (..)
+  , RemotePullRequestMergeStateStatus (..)
   , RemotePullRequestState (..)
   , ReviewComment (..)
   , ReviewThread (..)
   , ReviewThreadsReport (..)
+  , classifyRemotePullRequestMergeState
   , parseGhIssueList
   , parseGhIssueView
   , parseGhPrList
@@ -32,6 +34,7 @@ module CodexWatcher.GhGit
   , remoteIssueIsClosed
   , remotePullRequestIsOpen
   , remotePullRequestIsMerged
+  , remotePullRequestMergeStateFixMessage
   , renderRemoteIssueState
   , renderRemotePullRequestState
   , runGitWorktreeStatus
@@ -51,6 +54,7 @@ import CodexWatcher.Runtime.Json (decodeJsonText, parseCommandJson)
 import CodexWatcher.JsonPath (decodeAtPath, decodeValue, valueText)
 import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RepoName, ReviewThreadId (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig)
+import Control.Applicative ((<|>))
 import Data.Aeson
   ( FromJSON (..)
   , Object
@@ -188,6 +192,14 @@ data RemotePullRequestState
   | RemotePullRequestOther Text
   deriving stock (Eq, Show, Generic)
 
+data RemotePullRequestMergeStateStatus
+  = RemotePullRequestMergeStateUnavailable
+  | RemotePullRequestMergeStateClean Text
+  | RemotePullRequestMergeStateTransient Text
+  | RemotePullRequestMergeStateFixRequired Text
+  | RemotePullRequestMergeStateBlocked Text
+  deriving stock (Eq, Show, Generic)
+
 instance FromJSON RemotePullRequest where
   parseJSON = withObject "RemotePullRequest" \objectValue ->
     RemotePullRequest
@@ -206,6 +218,24 @@ remotePullRequestIsOpen pullRequest =
 remotePullRequestIsMerged :: RemotePullRequest -> Bool
 remotePullRequestIsMerged pullRequest =
   pullRequest.remotePullRequestState == RemotePullRequestMerged
+
+classifyRemotePullRequestMergeState :: Maybe Text -> RemotePullRequestMergeStateStatus
+classifyRemotePullRequestMergeState Nothing =
+  RemotePullRequestMergeStateUnavailable
+classifyRemotePullRequestMergeState (Just status)
+  | normalized `elem` ["CLEAN", "HAS_HOOKS"] = RemotePullRequestMergeStateClean status
+  | normalized `elem` ["UNSTABLE", "UNKNOWN"] = RemotePullRequestMergeStateTransient status
+  | normalized `elem` ["DIRTY", "BEHIND", "CONFLICTING"] = RemotePullRequestMergeStateFixRequired status
+  | otherwise = RemotePullRequestMergeStateBlocked status
+ where
+  normalized = Text.toUpper (Text.strip status)
+
+remotePullRequestMergeStateFixMessage :: Text -> Text -> Text
+remotePullRequestMergeStateFixMessage context status =
+  context
+    <> " is "
+    <> status
+    <> ": the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
 
 parseRemotePullRequestState :: Text -> RemotePullRequestState
 parseRemotePullRequestState state =
@@ -228,6 +258,7 @@ data ReviewComment = ReviewComment
   , reviewCommentPath :: Maybe Text
   , reviewCommentLine :: Maybe Int
   , reviewCommentAuthorLogin :: Maybe Text
+  , reviewCommentUrl :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
@@ -239,6 +270,7 @@ instance FromJSON ReviewComment where
       <*> objectValue .:? "path"
       <*> objectValue .:? "line"
       <*> parseAuthorLogin objectValue
+      <*> objectValue .:? "url"
 
 data ReviewThread = ReviewThread
   { reviewThreadId :: ReviewThreadId
@@ -248,19 +280,37 @@ data ReviewThread = ReviewThread
   , reviewThreadLine :: Maybe Int
   , reviewThreadStartLine :: Maybe Int
   , reviewThreadComments :: [ReviewComment]
+  , reviewThreadUrl :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
 
 instance FromJSON ReviewThread where
-  parseJSON = withObject "ReviewThread" \objectValue ->
-    ReviewThread
-      <$> (ReviewThreadId <$> objectValue .: "id")
-      <*> objectValue .: "isResolved"
-      <*> objectValue .:? "isOutdated" .!= False
-      <*> objectValue .:? "path"
-      <*> objectValue .:? "line"
-      <*> objectValue .:? "startLine"
-      <*> parseComments objectValue
+  parseJSON = withObject "ReviewThread" \objectValue -> do
+    threadId <- ReviewThreadId <$> objectValue .: "id"
+    isResolved <- objectValue .: "isResolved"
+    isOutdated <- objectValue .:? "isOutdated" .!= False
+    path <- objectValue .:? "path"
+    line <- objectValue .:? "line"
+    startLine <- objectValue .:? "startLine"
+    comments <- parseComments objectValue
+    threadUrl <- objectValue .:? "url"
+    pure
+      ReviewThread
+        { reviewThreadId = threadId
+        , reviewThreadResolved = isResolved
+        , reviewThreadOutdated = isOutdated
+        , reviewThreadPath = path
+        , reviewThreadLine = line
+        , reviewThreadStartLine = startLine
+        , reviewThreadComments = comments
+        , reviewThreadUrl = threadUrl <|> firstReviewCommentUrl comments
+        }
+
+firstReviewCommentUrl :: [ReviewComment] -> Maybe Text
+firstReviewCommentUrl comments =
+  case [url | comment <- comments, Just url <- [comment.reviewCommentUrl]] of
+    firstUrl : _ -> Just firstUrl
+    [] -> Nothing
 
 data ReviewThreadsReport = ReviewThreadsReport
   { reviewThreads :: [ReviewThread]

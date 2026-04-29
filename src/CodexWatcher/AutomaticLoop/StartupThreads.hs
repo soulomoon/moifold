@@ -25,11 +25,15 @@ import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prR
 import CodexWatcher.Core.Ids (RequestId, ThreadId, nextRequestId)
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
-import CodexWatcher.Core.Thread (ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.PrReview.Types (PrConfig)
 import Data.Text qualified as Text
 import System.Exit (die)
+
+data PrReviewStartupThreadRefresh
+  = RefreshPrReviewIdleThreads PrConfig
+  | RefreshPrReviewReviewerForActiveWorker PrConfig ThreadId
 
 refreshStartupThreads :: ActionExecutor IO -> LoopCli -> ActionExecutionMode -> DaemonLoopConfig -> IO DaemonLoopConfig
 refreshStartupThreads _executor cli _executionMode loopConfig
@@ -69,15 +73,20 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
         pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
   refreshPrReviewThreads replay =
-    case idlePrReviewConfig replay.replayState of
+    case prReviewStartupThreadRefresh replay.replayState of
       Nothing ->
         pure loopConfig
-      Just prConfig -> do
+      Just (RefreshPrReviewIdleThreads prConfig) -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
         workerThread <- startFreshThread executor requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
         reviewerThread <- startFreshThread executor (nextRequestId requestId) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
         appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
         pure (withNextRequestId (nextRequestId (nextRequestId requestId)) loopConfig)
+      Just (RefreshPrReviewReviewerForActiveWorker prConfig workerThread) -> do
+        let requestId = runtimeConfig.effectRuntimeNextRequestId
+        reviewerThread <- startFreshThread executor requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
+        pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
   appendStartupThreadRefresh event = do
     events <- either die pure =<< loadEventLogFile cli.loopCliEventsPath
@@ -115,9 +124,11 @@ idleIssueConfig = \case
   SomeWatcherState (IssueImplementationReady config _maybePr (WorkerIdle _threadId)) -> Just config
   _ -> Nothing
 
-idlePrReviewConfig :: SomeWatcherState -> Maybe PrConfig
-idlePrReviewConfig = \case
-  SomeWatcherState (PrCheckingReviews config (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
-  SomeWatcherState (PrVerifyingReviewFix config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
-  SomeWatcherState (PrWaitingForMergeability config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just config
+prReviewStartupThreadRefresh :: SomeWatcherState -> Maybe PrReviewStartupThreadRefresh
+prReviewStartupThreadRefresh = \case
+  SomeWatcherState (PrCheckingReviews config (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just (RefreshPrReviewIdleThreads config)
+  SomeWatcherState (PrReviewFixQueued config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just (RefreshPrReviewIdleThreads config)
+  SomeWatcherState (PrFixingReviews config _evidence (WorkerActive (ActiveTurn workerThread _turnId)) (ReviewerIdle _reviewerThread)) -> Just (RefreshPrReviewReviewerForActiveWorker config workerThread)
+  SomeWatcherState (PrVerifyingReviewFix config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just (RefreshPrReviewIdleThreads config)
+  SomeWatcherState (PrWaitingForMergeability config _evidence (WorkerIdle _workerThread) (ReviewerIdle _reviewerThread)) -> Just (RefreshPrReviewIdleThreads config)
   _ -> Nothing

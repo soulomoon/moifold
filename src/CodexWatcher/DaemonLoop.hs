@@ -134,8 +134,10 @@ runFromState executor config events replay = do
       PrReviewLoop.runPrCheckingReviews domainLoopOps executor config events prConfig workerThread reviewerThread
     SomeWatcherState (PrFixingReviews _prConfig _evidence (WorkerActive activeTurn) _reviewer) ->
       PrReviewLoop.runPrFixingReviews domainLoopOps executor config events replay activeTurn
-    SomeWatcherState (PrVerifyingReviewFix prConfig evidence _worker (ReviewerIdle reviewerThread)) ->
-      PrReviewLoop.runPrVerifyingReviewFix domainLoopOps executor config events prConfig evidence reviewerThread
+    SomeWatcherState (PrReviewFixQueued _prConfig evidence (WorkerIdle workerThread) _reviewer) ->
+      PrReviewLoop.runPrReviewFixQueued domainLoopOps executor config events evidence workerThread
+    SomeWatcherState (PrVerifyingReviewFix prConfig evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
+      PrReviewLoop.runPrVerifyingReviewFix domainLoopOps executor config events prConfig evidence workerThread reviewerThread
     SomeWatcherState (PrReviewingClean _prConfig commit _verification _worker (ReviewerActive activeTurn)) ->
       PrReviewLoop.runPrReviewingClean domainLoopOps executor config events replay commit activeTurn
     SomeWatcherState (PrWaitingForMergeability prConfig evidence _worker _reviewer) ->

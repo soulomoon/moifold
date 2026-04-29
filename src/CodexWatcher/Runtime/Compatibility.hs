@@ -120,6 +120,10 @@ compatibilityStateWrites stateDir state =
       [ write "watcher-state.json" (prWatcherStateJson config (activeThreadId activeTurn) reviewerThread "worker_active" (Just (reviewedCommit evidence)) Nothing)
       , write "checker-state.json" (checkerStateJson config evidence)
       ]
+    SomeWatcherState (PrReviewFixQueued config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
+      [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "worker_queued" (Just (reviewedCommit evidence)) Nothing)
+      , write "checker-state.json" (checkerStateJson config evidence)
+      ]
     SomeWatcherState (PrVerifyingReviewFix config evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "verifying_fix" (Just (reviewedCommit evidence)) Nothing)
       , write "checker-state.json" (checkerStateJson config evidence)
@@ -229,8 +233,8 @@ reviewerStateJson evidence =
     , "lgtm_comment" .= cleanReviewComment evidence
     , "findings_summary" .= ([] :: [Text])
     , "blocked_reason" .= Null
-    , "resolved_review_thread_ids" .= ([] :: [Text])
-    , "remaining_review_thread_ids" .= ([] :: [Text])
+    , "solved_threads" .= ([] :: [Value])
+    , "remaining_review_threads" .= ([] :: [Value])
     ]
 
 blockedStateJson :: BlockedReason -> Value

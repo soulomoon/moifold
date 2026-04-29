@@ -91,7 +91,8 @@ data ActionKind
   | UpdateIssueFollowUpAction
   | CloseIssueAction
   | ResolveReviewThreadAction
-  | RequestChangesReviewAction
+  | ReplyReviewThreadAction
+  | PublishReviewFindingsAction
   | DismissRequestChangesReviewAction
   | RecordIssuePlanAction
   | RecordPlanningGraphAction

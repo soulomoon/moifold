@@ -54,6 +54,12 @@ data FanoutValidationResult
   | FanoutValidationBlocked BlockedReason FailureClassification
   deriving stock (Eq, Show)
 
+data ReadyIssueReconciliation = ReadyIssueReconciliation
+  { reconciledReadyStatuses :: [(IssueNumber, WatcherRuntimeStatus)]
+  , reconciledClosedIssues :: [IssueNumber]
+  }
+  deriving stock (Eq, Show)
+
 issuePlanningFanoutAfterTick :: ActionExecutor IO -> LoopCli -> AppServerEndpoint -> ActionExecutionMode -> DaemonLoopTickResult -> IO Bool
 issuePlanningFanoutAfterTick executor cli endpoint executionMode tick =
   case (cli.loopCliDomain, cli.loopCliImplementersRoot) of
@@ -86,102 +92,160 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
           , fanoutThreadPrefix = cli.loopCliThreadPrefix
           }
   statuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
-  activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
-  let fanoutPlan =
-        planReadyIssueFanout
-          fanoutConfig
-          plannerConfig
-          activeIssues
-          (zip readyIssues (fmap readyIssueStatusFromRuntime statuses))
-      launches = fanoutPlan.readyIssueLaunches
-      launchEndpoint =
-        case executionMode of
-          ExecuteActions -> Just endpoint
-          DryRunActions -> Nothing
-      stoppedActiveLaunches = fanoutPlan.readyIssueRestarts
-      allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
-  validation <- validateReadyIssueFanout plannerConfig (planningGraphFromState planningState) (zip readyIssues statuses) (launches <> stoppedActiveLaunches)
-  case validation of
-    FanoutValidationBlocked reason classification -> do
+  reconciliation <- reconcileReadyIssueStatuses plannerConfig (zip readyIssues statuses)
+  case reconciliation of
+    Left classification -> do
       Log.logWatcher
         executor.actionLogger
         ( Log.watcherLog
             Log.Warn
-            "fanout_validation_failed"
-            "ready issue fanout validation failed"
-            [ "reason" .= reason.unBlockedReason
-            , "failureClass" .= failureClassText classification.failureClass
-            , "failureReason" .= classification.failureReason
-            ]
-        )
-      blockPlanningFanout executionMode cli planningState reason
-      pure False
-    FanoutValidationRetry classification -> do
-      Log.logWatcher
-        executor.actionLogger
-        ( Log.watcherLog
-            Log.Warn
-            "fanout_validation_retry"
-            "ready issue fanout validation hit a retryable external failure"
+            "fanout_reconcile_retry"
+            "ready issue fanout reconciliation hit a retryable external failure"
             [ "failureClass" .= failureClassText classification.failureClass
             , "failureReason" .= classification.failureReason
             ]
         )
       putStrLn ("planner fanout will retry: " <> Text.unpack classification.failureReason)
       pure False
-    FanoutValidationPassed -> do
-      Log.logWatcher
-        executor.actionLogger
-        ( Log.watcherLog
-            Log.Info
-            "fanout_decision"
-            "ready issue fanout decision computed"
-            [ "readyIssues" .= fmap unIssueNumber readyIssues
-            , "launches" .= length launches
-            , "restarts" .= length stoppedActiveLaunches
-            , "allReadyIssuesTerminal" .= allReadyIssuesTerminal
-            ]
-        )
-      childLaunch <-
-        issueImplementerChildLaunchMode
-          cli.loopCliStartChildren
-          (Just cli.loopCliPollSeconds)
-          cli.loopCliChildPollSeconds
-          executionMode
-          (Just endpoint)
-      launchResults <- runIssueImplementerLaunchesDetailed executionMode launchEndpoint childLaunch launches
-      restartResults <- traverse (startIssueImplementerChildDetailed childLaunch) stoppedActiveLaunches
-      let childStartProblems = mapMaybe issueImplementerChildStartProblem (launchResults <> restartResults)
-      Log.logWatcher
-        executor.actionLogger
-        ( Log.watcherLog
-            Log.Info
-            "child_launch_decision"
-            "issue implementer child launch decision applied"
-            [ "launches" .= length launches
-            , "restarts" .= length stoppedActiveLaunches
-            , "startProblems" .= length childStartProblems
-            ]
-        )
-      putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
-      putStrLn ("planner fanout launches: " <> show (length launches))
-      putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
-      when (not (null childStartProblems)) do
+    Right reconciled -> maintainReconciledReadyIssues fanoutConfig reconciled
+ where
+  maintainReconciledReadyIssues fanoutConfig reconciled = do
+    activeIssues <- resolveFanoutActiveIssues cli.loopCliActiveIssues plannerConfig.plannerRepo implementersRoot
+    let readyStatuses = reconciled.reconciledReadyStatuses
+        fanoutPlan =
+          planReadyIssueFanout
+            fanoutConfig
+            plannerConfig
+            activeIssues
+            (fmap (fmap readyIssueStatusFromRuntime) readyStatuses)
+        launches = fanoutPlan.readyIssueLaunches
+        launchEndpoint =
+          case executionMode of
+            ExecuteActions -> Just endpoint
+            DryRunActions -> Nothing
+        stoppedActiveLaunches = fanoutPlan.readyIssueRestarts
+        allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
+    validation <- validateReadyIssueFanout plannerConfig (planningGraphFromState planningState) readyStatuses (launches <> stoppedActiveLaunches)
+    case validation of
+      FanoutValidationBlocked reason classification -> do
         Log.logWatcher
           executor.actionLogger
           ( Log.watcherLog
               Log.Warn
-              "child_launch_not_ready"
-              "issue implementer child did not become ready; planner will keep waiting"
-              ["problems" .= fmap childStartProblemJson childStartProblems]
+              "fanout_validation_failed"
+              "ready issue fanout validation failed"
+              [ "reason" .= reason.unBlockedReason
+              , "failureClass" .= failureClassText classification.failureClass
+              , "failureReason" .= classification.failureReason
+              ]
           )
-        putStrLn ("planner fanout child start problems: " <> show (length childStartProblems))
-      finalStatuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
-      let allReadyIssuesTerminalAfterLaunch =
-            not (null readyIssues) && all (== WatcherTerminal TerminalComplete) finalStatuses
-      when (allReadyIssuesTerminal || allReadyIssuesTerminalAfterLaunch) $
-        markPlanningReadyIssuesFixed executionMode cli planningState
-      pure False
+        blockPlanningFanout executionMode cli planningState reason
+        pure False
+      FanoutValidationRetry classification -> do
+        Log.logWatcher
+          executor.actionLogger
+          ( Log.watcherLog
+              Log.Warn
+              "fanout_validation_retry"
+              "ready issue fanout validation hit a retryable external failure"
+              [ "failureClass" .= failureClassText classification.failureClass
+              , "failureReason" .= classification.failureReason
+              ]
+          )
+        putStrLn ("planner fanout will retry: " <> Text.unpack classification.failureReason)
+        pure False
+      FanoutValidationPassed -> do
+        Log.logWatcher
+          executor.actionLogger
+          ( Log.watcherLog
+              Log.Info
+              "fanout_decision"
+              "ready issue fanout decision computed"
+              [ "readyIssues" .= fmap unIssueNumber readyIssues
+              , "closedReadyIssues" .= fmap unIssueNumber reconciled.reconciledClosedIssues
+              , "launches" .= length launches
+              , "restarts" .= length stoppedActiveLaunches
+              , "allReadyIssuesTerminal" .= allReadyIssuesTerminal
+              ]
+          )
+        childLaunch <-
+          issueImplementerChildLaunchMode
+            cli.loopCliStartChildren
+            (Just cli.loopCliPollSeconds)
+            cli.loopCliChildPollSeconds
+            executionMode
+            (Just endpoint)
+        launchResults <- runIssueImplementerLaunchesDetailed executionMode launchEndpoint childLaunch launches
+        restartResults <- traverse (startIssueImplementerChildDetailed childLaunch) stoppedActiveLaunches
+        let childStartProblems = mapMaybe issueImplementerChildStartProblem (launchResults <> restartResults)
+        Log.logWatcher
+          executor.actionLogger
+          ( Log.watcherLog
+              Log.Info
+              "child_launch_decision"
+              "issue implementer child launch decision applied"
+              [ "launches" .= length launches
+              , "restarts" .= length stoppedActiveLaunches
+              , "startProblems" .= length childStartProblems
+              ]
+          )
+        putStrLn ("planner ready issues: " <> show (fmap unIssueNumber readyIssues))
+        putStrLn ("planner fanout closed ready issues: " <> show (fmap unIssueNumber reconciled.reconciledClosedIssues))
+        putStrLn ("planner fanout launches: " <> show (length launches))
+        putStrLn ("planner fanout restarts: " <> show (length stoppedActiveLaunches))
+        when (not (null childStartProblems)) do
+          Log.logWatcher
+            executor.actionLogger
+            ( Log.watcherLog
+                Log.Warn
+                "child_launch_not_ready"
+                "issue implementer child did not become ready; planner will keep waiting"
+                ["problems" .= fmap childStartProblemJson childStartProblems]
+            )
+          putStrLn ("planner fanout child start problems: " <> show (length childStartProblems))
+        finalStatuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
+        finalReconciliation <- reconcileReadyIssueStatuses plannerConfig (zip readyIssues finalStatuses)
+        let allReadyIssuesTerminalAfterLaunch =
+              case finalReconciliation of
+                Left _classification -> False
+                Right finalReconciled ->
+                  not (null readyIssues) && all ((== WatcherTerminal TerminalComplete) . snd) finalReconciled.reconciledReadyStatuses
+        when (allReadyIssuesTerminal || allReadyIssuesTerminalAfterLaunch) $
+          markPlanningReadyIssuesFixed executionMode cli planningState
+        pure False
+
+reconcileReadyIssueStatuses :: PlannerConfig -> [(IssueNumber, WatcherRuntimeStatus)] -> IO (Either FailureClassification ReadyIssueReconciliation)
+reconcileReadyIssueStatuses plannerConfig readyStatuses = do
+  remoteResults <- traverse reconcileIssue readyStatuses
+  pure case firstRetry remoteResults of
+    Just retry -> Left retry
+    Nothing ->
+      let closedIssues = [issue | Right (issue, _status, True) <- remoteResults]
+          observedReadyStatuses = [(issue, status) | Right (issue, status, _closed) <- remoteResults]
+       in
+      Right
+        ReadyIssueReconciliation
+          { reconciledReadyStatuses = completeClosedReadyIssueStatuses closedIssues observedReadyStatuses
+          , reconciledClosedIssues = closedIssues
+          }
+ where
+  firstRetry [] = Nothing
+  firstRetry (Left retry : _rest) = Just retry
+  firstRetry (Right _ : rest) = firstRetry rest
+  reconcileIssue (issue, status)
+    | status == WatcherTerminal TerminalComplete =
+        pure (Right (issue, status, False))
+    | otherwise = do
+        remote <- runGhIssueView ioRuntimeInterpreter plannerConfig.plannerRepo issue
+        case remote of
+          Left reason -> do
+            putStrLn ("planner fanout warning: ready issue #" <> show (unIssueNumber issue) <> " could not be read from GitHub; will retry next tick: " <> Text.unpack reason)
+            pure (Left (classifyExternalFailureText reason))
+          Right remoteIssue
+            | remoteIssueIsClosed remoteIssue ->
+                pure (Right (issue, status, True))
+            | otherwise ->
+                pure (Right (issue, status, False))
 
 issueImplementerChildStartProblem :: IssueImplementerChildStartResult -> Maybe (IssueNumber, Text.Text, WatcherRuntimeStatus)
 issueImplementerChildStartProblem = \case
@@ -214,17 +278,8 @@ validateReadyIssueFanout plannerConfig maybeGraph readyStatuses launchPlans =
             pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is already active"))
           Just (WatcherTerminal TerminalComplete) ->
             pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is already terminal complete"))
-          _ -> do
-            remote <- runGhIssueView ioRuntimeInterpreter plannerConfig.plannerRepo issue
-            case remote of
-              Left reason -> do
-                putStrLn ("planner fanout warning: ready issue #" <> show (unIssueNumber issue) <> " could not be read from GitHub; will retry next tick: " <> Text.unpack reason)
-                pure (FanoutValidationRetry (classifyExternalFailureText reason))
-              Right remoteIssue
-                | remoteIssueIsClosed remoteIssue ->
-                    pure (blocked ExternalStateMismatch ("ready issue #" <> issueText issue <> " is already closed on GitHub"))
-                | otherwise ->
-                    pure FanoutValidationPassed
+          _ ->
+            pure FanoutValidationPassed
   blocked failureClass reason =
     FanoutValidationBlocked (BlockedReason reason) (FailureClassification failureClass reason)
 

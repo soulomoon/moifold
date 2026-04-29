@@ -1,4 +1,4 @@
-# codex-watcher-hs
+# moifold
 
 Haskell-first rewrite of the Codex watcher system.
 
@@ -35,13 +35,13 @@ cabal test all
 Replay a watcher event log:
 
 ```bash
-cabal run codex-watcher-hs -- replay-events /path/to/events.jsonl
+cabal run moifold -- replay-events /path/to/events.jsonl
 ```
 
 Run the read-only Haskell healthcheck over watcher state:
 
 ```bash
-bin=$(cabal list-bin codex-watcher-hs)
+bin=$(cabal list-bin moifold)
 "$bin" healthcheck --state-root /workspace/artifacts
 ```
 
@@ -50,7 +50,7 @@ The command emits JSON and checks command availability, `gh auth`, watcher state
 Dry-run one typed watcher observation against an event log:
 
 ```bash
-bin=$(cabal list-bin codex-watcher-hs)
+bin=$(cabal list-bin moifold)
 "$bin" observe-once \
   --events /path/to/events.jsonl \
   --state-dir /path/to/state \
@@ -66,7 +66,7 @@ The command replays the log, applies the observation through the typed watcher p
 Run one automatic typed daemon iteration:
 
 ```bash
-bin=$(cabal list-bin codex-watcher-hs)
+bin=$(cabal list-bin moifold)
 "$bin" run-issue-implement \
   --events /path/to/events.jsonl \
   --state-dir /path/to/state \

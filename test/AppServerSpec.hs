@@ -140,7 +140,7 @@ prop_appServerClientDetectsSystemErrorThreadStatus =
 
 prop_appServerClientMatchesSuccessResponse :: Bool
 prop_appServerClientMatchesSuccessResponse =
-  let request = initializeRequest (RequestId 80) "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 80) "moifold" "0.1.0"
       result = object ["server" .= ("ready" :: Text)]
       response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (80 :: Int), "result" .= result]
    in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
@@ -149,7 +149,7 @@ prop_appServerClientMatchesSuccessResponse =
 
 prop_appServerClientSkipsNotifications :: Bool
 prop_appServerClientSkipsNotifications =
-  let request = initializeRequest (RequestId 81) "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 81) "moifold" "0.1.0"
       notification = object ["jsonrpc" .= ("2.0" :: Text), "method" .= ("turn/update" :: Text), "params" .= object ["status" .= ("running" :: Text)]]
    in case decodeAppServerIncomingValue notification >>= matchAppServerIncoming request of
         Right Nothing -> True
@@ -157,7 +157,7 @@ prop_appServerClientSkipsNotifications =
 
 prop_appServerClientRejectsMismatchedResponseIds :: Bool
 prop_appServerClientRejectsMismatchedResponseIds =
-  let request = initializeRequest (RequestId 82) "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 82) "moifold" "0.1.0"
       response = object ["jsonrpc" .= ("2.0" :: Text), "id" .= (83 :: Int), "result" .= object []]
    in case decodeAppServerIncomingValue response >>= matchAppServerIncoming request of
         Left (AppServerResponseIdMismatch (RequestId 82) (RequestId 83)) -> True
@@ -165,7 +165,7 @@ prop_appServerClientRejectsMismatchedResponseIds =
 
 prop_appServerClientSurfacesJsonRpcErrors :: Bool
 prop_appServerClientSurfacesJsonRpcErrors =
-  let request = initializeRequest (RequestId 84) "codex-watcher-hs" "0.1.0"
+  let request = initializeRequest (RequestId 84) "moifold" "0.1.0"
       response =
         object
           [ "jsonrpc" .= ("2.0" :: Text)

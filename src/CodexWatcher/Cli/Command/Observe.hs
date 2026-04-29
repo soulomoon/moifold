@@ -199,7 +199,7 @@ reviewThreadsReportFromCli cli =
  where
   unresolvedThreads =
     fmap
-      (\threadId -> ReviewThread threadId False False Nothing Nothing Nothing [])
+      (\threadId -> ReviewThread threadId False False Nothing Nothing Nothing [] Nothing)
       cli.observeCliReviewThreadIds
 
 requiredCleanReviewEvidence :: ObserveOnceCli -> IO CleanReviewEvidence

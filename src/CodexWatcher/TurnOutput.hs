@@ -16,6 +16,7 @@ module CodexWatcher.TurnOutput
   , prReviewWorkerTurnOutputSchema
   , prReviewThreadDeveloperInstructions
   , plannerTurnInput
+  , prReviewWorkerTurnInputWithEvidence
   , reviewerPromptVersion
   , reviewerTurnInput
   , reviewerTurnOutputSchema
@@ -50,7 +51,7 @@ import CodexWatcher.Core.Ids
   , ReviewThreadId (..)
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
-import CodexWatcher.Domain.PrReview.Types (PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadIds)
+import CodexWatcher.Domain.PrReview.Types (PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadComments, reviewEvidenceThreadIds)
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key
@@ -122,13 +123,13 @@ reviewerTurnOutputSchema =
     , "lgtm_comment"
     , "findings_summary"
     , "blocked_reason"
-    , "resolved_review_thread_ids"
-    , "remaining_review_thread_ids"
+    , "solved_threads"
+    , "remaining_review_threads"
     ]
     [ ( "review_status"
       , object
           [ "type" .= ("string" :: Text)
-          , "enum" .= (["clean", "comments_added", "remaining_findings", "incomplete", "blocked"] :: [Text])
+          , "enum" .= (["clean", "new_findings", "remaining_findings", "incomplete", "blocked"] :: [Text])
           ]
       )
     , ("reviewed_commit_sha", stringField)
@@ -137,8 +138,8 @@ reviewerTurnOutputSchema =
     , ("lgtm_comment", nullableStringField)
     , ("findings_summary", object ["type" .= ("array" :: Text), "items" .= stringField])
     , ("blocked_reason", nullableStringField)
-    , ("resolved_review_thread_ids", stringArrayField)
-    , ("remaining_review_thread_ids", stringArrayField)
+    , ("solved_threads", solvedReviewThreadsField)
+    , ("remaining_review_threads", remainingReviewThreadsField)
     ]
 
 issueFinalReviewTurnOutputSchema :: Value
@@ -151,6 +152,7 @@ issueFinalReviewTurnOutputSchema =
     , "plan_implemented"
     , "tests_sufficient"
     , "rework_required"
+    , "verification_summary"
     , "findings_summary"
     , "blocked_reason"
     , "lgtm_comment"
@@ -167,6 +169,7 @@ issueFinalReviewTurnOutputSchema =
     , ("plan_implemented", booleanField)
     , ("tests_sufficient", booleanField)
     , ("rework_required", booleanField)
+    , ("verification_summary", stringArrayField)
     , ("findings_summary", stringArrayField)
     , ("blocked_reason", nullableStringField)
     , ("lgtm_comment", nullableStringField)
@@ -215,6 +218,16 @@ issueImplementationTurnInput =
 prReviewWorkerTurnInput :: Text
 prReviewWorkerTurnInput =
   renderTemplate prReviewWorkerTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
+
+prReviewWorkerTurnInputWithEvidence :: Text -> ReviewEvidence -> Text
+prReviewWorkerTurnInputWithEvidence baseInput evidence =
+  Text.unlines
+    [ baseInput
+    , ""
+    , "Watcher-provided review feedback to address in this turn:"
+    , reviewFeedbackBullets evidence
+    , "Read the full GitHub thread/review context if needed, then fix these items, validate, commit, and push."
+    ]
 
 prReviewThreadDeveloperInstructions :: FilePath -> FilePath -> PrConfig -> Text -> Text
 prReviewThreadDeveloperInstructions workdir stateDir config role
@@ -324,6 +337,8 @@ issueFinalReviewTurnInput workdir reviewerStatePath config prNumber reviewTarget
     , "- Decide whether the implementation truly solved the issue and whether the PR plan was actually implemented."
     , "- Do not treat an empty PR diff against the base branch as clean by itself; post-merge review must validate behavior against the issue and PR plan."
     , "- If the issue is not solved, the plan is not implemented, tests are insufficient, or follow-up work is needed, use completion_status=rework_required."
+    , "- Put only actionable rework items in findings_summary. Do not put successful validation evidence there."
+    , "- Put successful validation evidence, inspected files, and test results in verification_summary."
     , "- If everything is solved and no follow-up is needed, use completion_status=clean."
     , "- If you cannot complete the check, use completion_status=incomplete or blocked with a concrete blocked_reason."
     , ""
@@ -360,7 +375,8 @@ noVerificationInstructions =
   Text.unlines
     [ "Review-thread resolution fields:"
     , "- This is a normal review pass with no watcher-owned prior thread verification."
-    , "- Return empty arrays for resolved_review_thread_ids and remaining_review_thread_ids."
+    , "- Return empty arrays for solved_threads and remaining_review_threads."
+    , "- If you find any new actionable finding, use review_status=new_findings and put a concrete summary in findings_summary; the watcher will publish it to the PR as a non-approval findings comment and route it to the worker."
     ]
 
 verificationInstructions :: ReviewEvidence -> Text
@@ -369,21 +385,32 @@ verificationInstructions evidence =
     [ "Review-feedback verification:"
     , "- The previous worker turn claimed to fix this review feedback from commit " <> unCommitSha evidence.reviewedCommit <> ":"
     , reviewFeedbackBullets evidence
-    , "- Re-read those GitHub review threads and request-changes reviews as applicable, then inspect the current local PR code."
-    , "- Put fixed prior thread IDs in resolved_review_thread_ids."
-    , "- Put prior thread IDs that still apply in remaining_review_thread_ids."
-    , "- If any prior thread or request-changes finding still applies and you do not add a new non-duplicate inline comment, use review_status=remaining_findings and describe it in findings_summary."
-    , "- If prior threads are fixed but you add new review comments, use review_status=comments_added."
+    , "- Re-read those GitHub review threads and watcher review-findings comments as applicable, then inspect the current local PR code."
+    , "- Put fixed prior review threads in solved_threads as structured objects with thread_id and resolution_summary; the watcher will resolve only those solved threads."
+    , "- Put prior review threads that still apply in remaining_review_threads as structured objects with thread_id and comment; the watcher will add those comments as replies under the remaining GitHub review threads."
+    , "- If any prior thread still applies and you do not add a new non-duplicate inline comment, use review_status=remaining_findings and leave top-level findings_summary empty."
+    , "- If prior summary-only watcher feedback still applies, or if prior threads are fixed but you find new actionable problems, use review_status=new_findings and put concrete summaries in findings_summary."
     , "- If all prior feedback is fixed and there are no new actionable findings, use review_status=clean."
-    , "- Do not resolve GitHub review threads yourself; the watcher resolves only the IDs you list as resolved."
+    , "- Do not resolve GitHub review threads yourself; the watcher resolves only the threads you list in solved_threads."
     ]
 
 reviewFeedbackBullets :: ReviewEvidence -> Text
 reviewFeedbackBullets evidence =
-  Text.unlines (threadBullets <> summaryBullets)
+  Text.unlines (threadCommentBullets <> threadBullets <> summaryBullets)
  where
+  threadCommentPairs =
+    reviewEvidenceThreadComments evidence
+  threadCommentIds =
+    fmap fst threadCommentPairs
+  threadCommentBullets =
+    [ "- review thread " <> unReviewThreadId threadId <> ": " <> Text.strip comment
+    | (threadId, comment) <- threadCommentPairs
+    ]
   threadBullets =
-    ["- review thread " <> unReviewThreadId threadId | threadId <- reviewEvidenceThreadIds evidence]
+    [ "- review thread " <> unReviewThreadId threadId
+    | threadId <- reviewEvidenceThreadIds evidence
+    , threadId `notElem` threadCommentIds
+    ]
   summaryBullets =
     ["- " <> summary | summary <- reviewEvidenceSummaries evidence]
 
@@ -451,6 +478,30 @@ stringArrayField =
   object
     [ "type" .= ("array" :: Text)
     , "items" .= stringField
+    ]
+
+solvedReviewThreadsField :: Value
+solvedReviewThreadsField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items"
+        .= strictObjectSchema
+          ["thread_id", "resolution_summary"]
+          [ ("thread_id", stringField)
+          , ("resolution_summary", stringField)
+          ]
+    ]
+
+remainingReviewThreadsField :: Value
+remainingReviewThreadsField =
+  object
+    [ "type" .= ("array" :: Text)
+    , "items"
+        .= strictObjectSchema
+          ["thread_id", "comment"]
+          [ ("thread_id", stringField)
+          , ("comment", stringField)
+          ]
     ]
 
 strictObjectSchema :: [Text] -> [(Text, Value)] -> Value

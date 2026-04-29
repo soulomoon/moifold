@@ -41,6 +41,7 @@ data IssueFinalReviewReport = IssueFinalReviewReport
   , finalReviewReportPlanImplemented :: Maybe Bool
   , finalReviewReportTestsSufficient :: Maybe Bool
   , finalReviewReportReworkRequired :: Maybe Bool
+  , finalReviewReportVerificationSummary :: Maybe [Text]
   , finalReviewReportFindingsSummary :: Maybe [Text]
   , finalReviewReportBlockedReasonPresent :: Bool
   , finalReviewReportBlockedReason :: Maybe Text
@@ -68,6 +69,7 @@ instance FromJSON IssueFinalReviewReport where
       <*> objectValue .:? "plan_implemented"
       <*> objectValue .:? "tests_sufficient"
       <*> objectValue .:? "rework_required"
+      <*> objectValue .:? "verification_summary"
       <*> objectValue .:? "findings_summary"
       <*> pure (has "blocked_reason")
       <*> objectValue .:? "blocked_reason"
@@ -189,8 +191,10 @@ validateCompleteIssueFinalReviewReport expectedCommit report =
           IssueFinalReviewIncomplete "clean final review must set tests_sufficient=true"
       | report.finalReviewReportReworkRequired /= Just False ->
           IssueFinalReviewIncomplete "clean final review must set rework_required=false"
+      | null (requiredFindings report.finalReviewReportVerificationSummary) ->
+          IssueFinalReviewIncomplete "clean final review must include at least one verification_summary item"
       | not (null (requiredFindings report.finalReviewReportFindingsSummary)) ->
-          IssueFinalReviewRework (reviewEvidenceFromSummaries (firstFinding (requiredFindings report.finalReviewReportFindingsSummary)) expectedCommit)
+          IssueFinalReviewIncomplete "clean final review must leave findings_summary empty; use verification_summary for successful validation evidence"
       | otherwise ->
           IssueFinalReviewClean (CleanReviewEvidence expectedCommit (finalReviewCleanComment report))
     "rework_required"
@@ -224,6 +228,7 @@ missingIssueFinalReviewFields report =
     , missing "plan_implemented" report.finalReviewReportPlanImplemented
     , missing "tests_sufficient" report.finalReviewReportTestsSufficient
     , missing "rework_required" report.finalReviewReportReworkRequired
+    , missing "verification_summary" report.finalReviewReportVerificationSummary
     , missing "findings_summary" report.finalReviewReportFindingsSummary
     , missingPresence "blocked_reason" report.finalReviewReportBlockedReasonPresent
     , missingPresence "lgtm_comment" report.finalReviewReportLgtmCommentPresent

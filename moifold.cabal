@@ -1,5 +1,5 @@
 cabal-version: 3.8
-name:          codex-watcher-hs
+name:          moifold
 version:       0.1.0.0
 synopsis:      Type-level Codex watcher state machine core
 description:   Haskell-first rewrite of Codex watcher orchestration with type-level lifecycle invariants.
@@ -11,7 +11,7 @@ build-type:    Simple
 
 source-repository head
   type:     git
-  location: https://github.com/soulomoon/codex-watcher-hs.git
+  location: https://github.com/soulomoon/moifold.git
 
 common warnings
   ghc-options:
@@ -142,13 +142,13 @@ library
     websockets >=0.13 && <0.14
   default-language: GHC2021
 
-executable codex-watcher-hs
+executable moifold
   import:           warnings
   hs-source-dirs:   app
   main-is:          Main.hs
   build-depends:
     base >=4.18 && <5,
-    codex-watcher-hs
+    moifold
   default-language: GHC2021
 
 test-suite watcher-core-test
@@ -168,7 +168,7 @@ test-suite watcher-core-test
     base >=4.18 && <5,
     bytestring >=0.12 && <0.13,
     co-log-core >=0.3.2.6 && <0.4,
-    codex-watcher-hs,
+    moifold,
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
     process >=1.6 && <1.7,

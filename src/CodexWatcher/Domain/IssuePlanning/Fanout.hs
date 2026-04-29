@@ -22,6 +22,7 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   , planIssueImplementerLaunches
   , readyIssueAllowedByPlannerScope
   , withLaunchThreadId
+  , completeClosedReadyIssueStatuses
   ) where
 
 import CodexWatcher.Runtime.Compatibility
@@ -34,6 +35,7 @@ import CodexWatcher.Core.Thread (WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Scope (planningGraphScopeContains)
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..), PlanningGraph)
+import CodexWatcher.WatcherRuntimeStatus (WatcherRuntimeStatus (..), WatcherTerminalReason (..))
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
 import Data.Char (isAlphaNum)
@@ -116,6 +118,15 @@ planReadyIssueFanout fanoutConfig plannerConfig activeIssues readyIssueStatuses 
              , status == ReadyIssueActiveStopped || status == ReadyIssueActiveRunning
              ]
       )
+
+completeClosedReadyIssueStatuses :: [IssueNumber] -> [(IssueNumber, WatcherRuntimeStatus)] -> [(IssueNumber, WatcherRuntimeStatus)]
+completeClosedReadyIssueStatuses closedIssues =
+  fmap
+    ( \(issue, status) ->
+        if issue `elem` closedIssues
+          then (issue, WatcherTerminal TerminalComplete)
+          else (issue, status)
+    )
 
 readyIssueAllowedByPlannerScope :: PlannerConfig -> Maybe PlanningGraph -> IssueNumber -> Bool
 readyIssueAllowedByPlannerScope plannerConfig maybeGraph issue =

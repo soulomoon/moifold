@@ -416,6 +416,7 @@ data PreMergeGateResult
   = PreMergeGatePassed
   | PreMergeGateRetry Text
   | PreMergeGateRecheck Text
+  | PreMergeGateFixRequired Text
   | PreMergeGateBlocked Text
 
 runPreMergeGate :: Monad m => ActionExecutor m -> PrConfig -> CleanReviewEvidence -> m PreMergeGateResult
@@ -462,14 +463,18 @@ preMergeExternalFailure prefix reason =
         else PreMergeGateBlocked message
 
 mergeStateGateResult :: Maybe Text -> Maybe PreMergeGateResult
-mergeStateGateResult Nothing =
-  Just (PreMergeGateRetry "pre-merge merge state could not be read")
-mergeStateGateResult (Just status)
-  | normalized `elem` ["CLEAN", "HAS_HOOKS"] = Nothing
-  | normalized `elem` ["UNSTABLE", "UNKNOWN"] = Just (PreMergeGateRetry ("pre-merge merge state is " <> status))
-  | otherwise = Just (PreMergeGateBlocked ("pre-merge merge state is " <> status))
- where
-  normalized = Text.toUpper (Text.strip status)
+mergeStateGateResult status =
+  case classifyRemotePullRequestMergeState status of
+    RemotePullRequestMergeStateUnavailable ->
+      Just (PreMergeGateRetry "pre-merge merge state could not be read")
+    RemotePullRequestMergeStateClean _ ->
+      Nothing
+    RemotePullRequestMergeStateTransient rawStatus ->
+      Just (PreMergeGateRetry ("pre-merge merge state is " <> rawStatus))
+    RemotePullRequestMergeStateFixRequired rawStatus ->
+      Just (PreMergeGateFixRequired (remotePullRequestMergeStateFixMessage "pre-merge merge state" rawStatus))
+    RemotePullRequestMergeStateBlocked rawStatus ->
+      Just (PreMergeGateBlocked ("pre-merge merge state is " <> rawStatus))
 
 checkPassed :: GhPullRequestCheck -> Bool
 checkPassed check =

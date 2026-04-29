@@ -24,7 +24,7 @@ parseCliCommand :: [String] -> Either String CliCommand
 parseCliCommand args =
   case execParserPure parserPrefs cliCommandParserInfo args of
     Success parsedCommand -> Right parsedCommand
-    Failure failure -> Left (fst (renderFailure failure "codex-watcher-hs"))
+    Failure failure -> Left (fst (renderFailure failure "moifold"))
     CompletionInvoked completion -> Left (show completion)
 
 cliCommandParserInfo :: ParserInfo CliCommand
@@ -33,7 +33,7 @@ cliCommandParserInfo =
     (helper <*> cliCommandParser)
     ( fullDesc
         <> progDesc "Typed Haskell watcher runtime"
-        <> header "codex-watcher-hs"
+        <> header "moifold"
     )
 
 parserPrefs :: ParserPrefs

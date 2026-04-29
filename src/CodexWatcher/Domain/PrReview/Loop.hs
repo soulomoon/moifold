@@ -6,6 +6,7 @@ module CodexWatcher.Domain.PrReview.Loop
   ( runPrCheckingReviews
   , runPrFixingReviews
   , runPrMerging
+  , runPrReviewFixQueued
   , runPrReviewingClean
   , runPrVerifyingReviewFix
   , runPrWaitingForMergeability
@@ -47,21 +48,24 @@ runPrCheckingReviews ops executor config events prConfig workerThread reviewerTh
   case status.gitHeadSha of
     Nothing -> pure (Left (DaemonLoopExternalFailure "could not determine git HEAD for review-thread check"))
     Just commit -> do
-      report <- runGhReviewThreads executor.actionRuntime prConfig
-      case report of
+      remoteResult <- runGhPrView executor.actionRuntime prConfig.prRepo prConfig.prNumber
+      case remoteResult of
         Left reason -> pure (Left (DaemonLoopExternalFailure reason))
-        Right reviewReport
-          | not (null reviewReport.unresolvedReviewThreads) ->
-              ops.loopPrestartAndObserve executor config events StartWorkerTurnKind workerThread \turnId ->
-                DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
+        Right remote
+          | Just evidence <- branchMergeFixEvidence commit remote ->
+              ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind evidence) workerThread \turnId ->
+                DaemonPrReviewObservation (ObservedReviewFeedback evidence turnId)
           | otherwise -> do
-              remoteResult <- runGhPrView executor.actionRuntime prConfig.prRepo prConfig.prNumber
-              case remoteResult of
+              report <- runGhReviewThreads executor.actionRuntime prConfig
+              case report of
                 Left reason -> pure (Left (DaemonLoopExternalFailure reason))
-                Right remote
+                Right reviewReport
+                  | Just evidence <- unresolvedReviewEvidence reviewReport commit ->
+                      ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind evidence) workerThread \turnId ->
+                        DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
                   | isChangesRequested remote.remotePullRequestReviewDecision ->
                       let evidence = reviewEvidenceFromSummaries (changesRequestedFinding prConfig :| []) commit
-                       in ops.loopPrestartAndObserve executor config events StartWorkerTurnKind workerThread \turnId ->
+                       in ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind evidence) workerThread \turnId ->
                             DaemonPrReviewObservation (ObservedReviewFeedback evidence turnId)
                   | otherwise ->
                       ops.loopPrestartAndObserve executor config events (StartReviewerTurnKind prConfig commit) reviewerThread \turnId ->
@@ -80,6 +84,18 @@ runPrFixingReviews ops executor config events replay activeTurn =
   observeClassifiedActiveTurn ops executor config events replay activeTurn \turn ->
     fmap DaemonPrReviewObservation (classifyPrReviewWorkerTurn turn)
 
+runPrReviewFixQueued
+  :: DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> ReviewEvidence
+  -> ThreadId
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+runPrReviewFixQueued ops executor config events evidence workerThread =
+  ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind evidence) workerThread \turnId ->
+    DaemonPrReviewObservation (ObservedReviewFeedback evidence turnId)
+
 runPrVerifyingReviewFix
   :: Monad m
   => DomainLoopOps m
@@ -89,8 +105,9 @@ runPrVerifyingReviewFix
   -> PrConfig
   -> ReviewEvidence
   -> ThreadId
+  -> ThreadId
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
-runPrVerifyingReviewFix ops executor config events prConfig evidence reviewerThread = do
+runPrVerifyingReviewFix ops executor config events prConfig evidence workerThread reviewerThread = do
   status <-
     runGitWorktreeStatus
       executor.actionRuntime
@@ -98,9 +115,17 @@ runPrVerifyingReviewFix ops executor config events prConfig evidence reviewerThr
       prConfig.prBranch
   case status.gitHeadSha of
     Nothing -> pure (Left (DaemonLoopExternalFailure "could not determine git HEAD for review-fix verification"))
-    Just reviewTargetSha ->
-      ops.loopPrestartAndObserve executor config events (StartReviewerVerificationTurnKind prConfig evidence reviewTargetSha) reviewerThread \turnId ->
-        DaemonPrReviewObservation (ObservedReviewFixVerificationStarted reviewTargetSha turnId)
+    Just reviewTargetSha -> do
+      remoteResult <- runGhPrView executor.actionRuntime prConfig.prRepo prConfig.prNumber
+      case remoteResult of
+        Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+        Right remote
+          | Just fixEvidence <- branchMergeFixEvidence reviewTargetSha remote ->
+              ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind fixEvidence) workerThread \turnId ->
+                DaemonPrReviewObservation (ObservedReviewFeedback fixEvidence turnId)
+          | otherwise ->
+              ops.loopPrestartAndObserve executor config events (StartReviewerVerificationTurnKind prConfig evidence reviewTargetSha) reviewerThread \turnId ->
+                DaemonPrReviewObservation (ObservedReviewFixVerificationStarted reviewTargetSha turnId)
 
 runPrReviewingClean
   :: Monad m
@@ -135,6 +160,8 @@ runPrWaitingForMergeability ops executor config events prConfig evidence = do
             ObservedMergeabilityRetry reason
           PreMergeGateRecheck reason ->
             ObservedMergeabilityRecheck reason
+          PreMergeGateFixRequired reason ->
+            ObservedMergeabilityFixRequired (reviewEvidenceFromSummaries (reason :| []) evidence.cleanReviewCommit)
           PreMergeGateBlocked reason ->
             ObservedPrReviewBlocked (BlockedReason reason)
   ops.loopObserveWithExecutor executor config events (DaemonPrReviewObservation observation)
@@ -162,6 +189,13 @@ runPrMerging ops executor config events replay prConfig = do
 isChangesRequested :: Maybe Text -> Bool
 isChangesRequested =
   maybe False ((== "CHANGES_REQUESTED") . Text.toUpper . Text.strip)
+
+branchMergeFixEvidence :: CommitSha -> RemotePullRequest -> Maybe ReviewEvidence
+branchMergeFixEvidence commit remote =
+  case classifyRemotePullRequestMergeState remote.remotePullRequestMergeStateStatus of
+    RemotePullRequestMergeStateFixRequired status ->
+      Just (reviewEvidenceFromSummaries (remotePullRequestMergeStateFixMessage "branch merge state" status :| []) commit)
+    _ -> Nothing
 
 changesRequestedFinding :: PrConfig -> Text
 changesRequestedFinding prConfig =

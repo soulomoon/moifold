@@ -16,8 +16,8 @@ import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import CodexWatcher.Core.Ids (CommitSha (..), ReviewThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromParts, reviewEvidenceFromSummaries)
-import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromThreadComments, reviewEvidenceFromSummaries)
+import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:), (.:?))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List.NonEmpty (NonEmpty (..))
@@ -35,10 +35,34 @@ data ReviewerTurnReport = ReviewerTurnReport
   , reviewerReportFindingsSummary :: Maybe [Text]
   , reviewerReportBlockedReasonPresent :: Bool
   , reviewerReportBlockedReason :: Maybe Text
-  , reviewerReportResolvedThreadIds :: Maybe [ReviewThreadId]
-  , reviewerReportRemainingThreadIds :: Maybe [ReviewThreadId]
+  , reviewerReportSolvedThreads :: Maybe [SolvedReviewThread]
+  , reviewerReportRemainingThreads :: Maybe [RemainingReviewThread]
   }
   deriving stock (Eq, Show)
+
+data SolvedReviewThread = SolvedReviewThread
+  { solvedReviewThreadId :: ReviewThreadId
+  , solvedReviewThreadSummary :: Text
+  }
+  deriving stock (Eq, Show)
+
+data RemainingReviewThread = RemainingReviewThread
+  { remainingReviewThreadId :: ReviewThreadId
+  , remainingReviewThreadComment :: Text
+  }
+  deriving stock (Eq, Show)
+
+instance FromJSON SolvedReviewThread where
+  parseJSON = withObject "SolvedReviewThread" \objectValue ->
+    SolvedReviewThread
+      <$> (ReviewThreadId <$> objectValue .: "thread_id")
+      <*> objectValue .: "resolution_summary"
+
+instance FromJSON RemainingReviewThread where
+  parseJSON = withObject "RemainingReviewThread" \objectValue ->
+    RemainingReviewThread
+      <$> (ReviewThreadId <$> objectValue .: "thread_id")
+      <*> objectValue .: "comment"
 
 instance FromJSON ReviewerTurnReport where
   parseJSON = withObject "ReviewerTurnReport" \objectValue -> do
@@ -53,8 +77,8 @@ instance FromJSON ReviewerTurnReport where
       <*> objectValue .:? "findings_summary"
       <*> pure (has "blocked_reason")
       <*> objectValue .:? "blocked_reason"
-      <*> (fmap (fmap ReviewThreadId) <$> objectValue .:? "resolved_review_thread_ids")
-      <*> (fmap (fmap ReviewThreadId) <$> objectValue .:? "remaining_review_thread_ids")
+      <*> objectValue .:? "solved_threads"
+      <*> objectValue .:? "remaining_review_threads"
 
 classifyPrReviewWorkerTurn :: AppServerTurn -> Maybe PrReviewObservation
 classifyPrReviewWorkerTurn turn =
@@ -117,38 +141,42 @@ validateCompleteReviewerTurnReport expectedCommit report
               ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
           | report.reviewerReportAddedCommentCount /= Just 0 ->
               ReviewerIncomplete "clean review must record added_review_comment_count as 0"
-          | not (null (requiredReviewThreadIds report.reviewerReportRemainingThreadIds)) ->
-              ReviewerIncomplete "clean review must not record remaining_review_thread_ids"
+          | not (null (requiredRemainingReviewThreads report.reviewerReportRemainingThreads)) ->
+              ReviewerIncomplete "clean review must not record remaining_review_threads"
           | hasOverlappingResolution report ->
-              ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
+              ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap"
           | otherwise ->
-              ReviewerClean (CleanReviewEvidence expectedCommit (reviewerCleanComment report)) (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
-        "comments_added"
+              ReviewerClean (CleanReviewEvidence expectedCommit (reviewerCleanComment report)) (solvedReviewThreadIds report)
+        "new_findings"
           | report.reviewerReportCommit /= Just expectedCommit ->
               ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
           | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
               ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
-          | maybe True (< 1) report.reviewerReportAddedCommentCount ->
-              ReviewerIncomplete "comments_added review must record at least one added review comment"
+          | not (null (requiredRemainingReviewThreads report.reviewerReportRemainingThreads)) ->
+              ReviewerIncomplete "new_findings review must not record remaining_review_threads"
           | hasOverlappingResolution report ->
-              ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
+              ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap"
           | null (requiredFindings report.reviewerReportFindingsSummary) ->
-              ReviewerIncomplete "comments_added review must include at least one findings_summary item"
+              ReviewerIncomplete "new_findings review must include at least one findings_summary item"
           | otherwise ->
-              ReviewerProblemsAdded (reviewEvidenceFromSummaries (firstFinding (requiredFindings report.reviewerReportFindingsSummary)) expectedCommit) (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+              ReviewerProblemsAdded (reviewEvidenceFromSummaries (firstFinding (requiredFindings report.reviewerReportFindingsSummary)) expectedCommit) (solvedReviewThreadIds report)
         "remaining_findings"
           | report.reviewerReportCommit /= Just expectedCommit ->
               ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
           | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
               ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
-          | null (requiredReviewThreadIds report.reviewerReportRemainingThreadIds) ->
-              ReviewerIncomplete "remaining_findings review must record remaining_review_thread_ids"
+          | null (requiredRemainingReviewThreads report.reviewerReportRemainingThreads) ->
+              ReviewerIncomplete "remaining_findings review must record remaining_review_threads"
+          | any (Text.null . Text.strip . remainingReviewThreadComment) (requiredRemainingReviewThreads report.reviewerReportRemainingThreads) ->
+              ReviewerIncomplete "remaining_review_threads entries must include non-empty comment"
+          | not (null (requiredFindings report.reviewerReportFindingsSummary)) ->
+              ReviewerIncomplete "remaining_findings review must leave top-level findings_summary empty; put each remaining prior thread comment in remaining_review_threads"
           | hasOverlappingResolution report ->
-              ReviewerIncomplete "resolved_review_thread_ids and remaining_review_thread_ids must not overlap"
+              ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap"
           | otherwise ->
-              case reviewEvidenceFromParts (requiredReviewThreadIds report.reviewerReportRemainingThreadIds) (requiredFindings report.reviewerReportFindingsSummary) expectedCommit of
-                Just evidence -> ReviewerProblemsAdded evidence (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
-                Nothing -> ReviewerIncomplete "remaining_findings review must include review thread IDs or findings_summary"
+              case remainingReviewThreadComments report of
+                Just comments -> ReviewerProblemsAdded (reviewEvidenceFromThreadComments comments expectedCommit) (solvedReviewThreadIds report)
+                Nothing -> ReviewerIncomplete "remaining_findings review must include remaining_review_threads"
         other ->
           ReviewerIncomplete ("unsupported review_status: " <> other)
 
@@ -162,8 +190,8 @@ missingReviewerFields report =
     , missingPresence "lgtm_comment" report.reviewerReportLgtmCommentPresent
     , missing "findings_summary" report.reviewerReportFindingsSummary
     , missingPresence "blocked_reason" report.reviewerReportBlockedReasonPresent
-    , missing "resolved_review_thread_ids" report.reviewerReportResolvedThreadIds
-    , missing "remaining_review_thread_ids" report.reviewerReportRemainingThreadIds
+    , missing "solved_threads" report.reviewerReportSolvedThreads
+    , missing "remaining_review_threads" report.reviewerReportRemainingThreads
     ]
  where
   missing _fieldName (Just _) = []
@@ -176,9 +204,30 @@ requiredText :: Maybe Text -> Text
 requiredText =
   maybe "" id
 
-requiredReviewThreadIds :: Maybe [ReviewThreadId] -> [ReviewThreadId]
-requiredReviewThreadIds =
+requiredSolvedReviewThreads :: Maybe [SolvedReviewThread] -> [SolvedReviewThread]
+requiredSolvedReviewThreads =
   maybe [] id
+
+requiredRemainingReviewThreads :: Maybe [RemainingReviewThread] -> [RemainingReviewThread]
+requiredRemainingReviewThreads =
+  maybe [] id
+
+solvedReviewThreadIds :: ReviewerTurnReport -> [ReviewThreadId]
+solvedReviewThreadIds report =
+  fmap solvedReviewThreadId (requiredSolvedReviewThreads report.reviewerReportSolvedThreads)
+
+remainingReviewThreadIds :: ReviewerTurnReport -> [ReviewThreadId]
+remainingReviewThreadIds report =
+  fmap remainingReviewThreadId (requiredRemainingReviewThreads report.reviewerReportRemainingThreads)
+
+remainingReviewThreadComments :: ReviewerTurnReport -> Maybe (NonEmpty (ReviewThreadId, Text))
+remainingReviewThreadComments report =
+  case fmap threadComment (requiredRemainingReviewThreads report.reviewerReportRemainingThreads) of
+    first : rest -> Just (first :| rest)
+    [] -> Nothing
+ where
+  threadComment remainingThread =
+    (remainingThread.remainingReviewThreadId, remainingThread.remainingReviewThreadComment)
 
 requiredFindings :: Maybe [Text] -> [Text]
 requiredFindings =
@@ -196,7 +245,7 @@ reviewerCleanComment report =
 
 hasOverlappingResolution :: ReviewerTurnReport -> Bool
 hasOverlappingResolution report =
-  any (`elem` requiredReviewThreadIds report.reviewerReportRemainingThreadIds) (requiredReviewThreadIds report.reviewerReportResolvedThreadIds)
+  any (`elem` remainingReviewThreadIds report) (solvedReviewThreadIds report)
 
 classifyStructuredPrReviewWorker :: StructuredTurnOutcome -> Maybe WorkerOutcome
 classifyStructuredPrReviewWorker = \case

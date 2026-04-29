@@ -181,7 +181,7 @@ startThreadWithInterpreter interpreter =
 appServerRequestSession :: AppServerRequest -> [AppServerRequest]
 appServerRequestSession request
   | request.requestMethod == "initialize" = [request]
-  | otherwise = [initializeRequest (RequestId 0) "codex-watcher-hs" "0.1.0", request]
+  | otherwise = [initializeRequest (RequestId 0) "moifold" "0.1.0", request]
 
 sendAppServerRequestSession :: AppServerConnection -> AppServerClientOptions -> [AppServerRequest] -> IO (Either AppServerClientFailure Value)
 sendAppServerRequestSession _connection _options [] =

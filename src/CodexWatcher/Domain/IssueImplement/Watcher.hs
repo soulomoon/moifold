@@ -35,6 +35,7 @@ data IssueImplementObservation
   = ObservedPlanTurnStarted TurnId
   | ObservedPlanCompleted Text (Maybe TurnId)
   | ObservedIssueAttemptBranchAdvanced BranchName
+  | ObservedIssueWorkerThreadRefreshed ThreadId
   | ObservedPullRequestCreated PrNumber
   | ObservedPullRequestReused PrNumber
   | ObservedPullRequestBodyUpdated PrNumber
@@ -62,11 +63,17 @@ data IssueImplementTick = IssueImplementTick
 issueImplementObserve :: SomeWatcherState -> IssueImplementObservation -> Either Text IssueImplementTick
 issueImplementObserve (SomeWatcherState state@(IssueReadyToPlan _config _prNumber (WorkerIdle threadId))) (ObservedPlanTurnStarted turnId) =
   Right (tick (IssuePlanTurnStartedEvent turnId) (step state (StartReadyIssuePlanTurn (ActiveTurn threadId turnId))))
+issueImplementObserve (SomeWatcherState state@IssueReadyToPlan {}) (ObservedIssueWorkerThreadRefreshed threadId) =
+  Right (tick (IssueWorkerThreadRefreshed threadId) (step state (IssueWorkerThreadReady threadId)))
 issueImplementObserve (SomeWatcherState state@(IssueInPlanMode _config _prNumber (WorkerActive activeTurn))) (ObservedPlanCompleted planMarkdown maybeImplementationTurnId) =
   let nextTurn = ActiveTurn (activeThreadId activeTurn) <$> maybeImplementationTurnId
    in Right (tick (IssuePlanCompletedEvent planMarkdown maybeImplementationTurnId) (step state (IssuePlanCompleted planMarkdown nextTurn)))
+issueImplementObserve (SomeWatcherState state@IssuePlanReady {}) (ObservedIssueWorkerThreadRefreshed threadId) =
+  Right (tick (IssueWorkerThreadRefreshed threadId) (step state (IssueWorkerThreadReady threadId)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedIssueAttemptBranchAdvanced branch) =
   Right (tick (IssueAttemptBranchAdvancedEvent branch) (step state (IssueAttemptBranchAdvanced branch)))
+issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedIssueWorkerThreadRefreshed threadId) =
+  Right (tick (IssueWorkerThreadRefreshed threadId) (step state (IssueWorkerThreadReady threadId)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestCreated prNumber) =
   Right (tick (IssuePullRequestCreatedEvent prNumber) (step state (IssuePullRequestReady prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestReused prNumber) =

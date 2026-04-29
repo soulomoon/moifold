@@ -35,6 +35,7 @@ import CodexWatcher.Domain.PrReview.Types
   , PrConfig (..)
   , ReviewEvidence (..)
   , reviewEvidenceHasSummaries
+  , reviewEvidenceThreadComments
   , reviewEvidenceThreadIds
   )
 import Control.Monad (guard)
@@ -67,6 +68,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   StartReadyIssuePlanTurn :: ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssuePlanCompleted :: Text.Text -> Maybe ActiveTurn -> Event 'IssueImplement 'PlanMode
   IssueAttemptBranchAdvanced :: BranchName -> Event 'IssueImplement 'Implementing
+  IssueWorkerThreadReady :: ThreadId -> Event 'IssueImplement phase
   IssuePullRequestReady :: PrNumber -> Event 'IssueImplement 'Implementing
   IssuePullRequestBodyUpdated :: PrNumber -> Event 'IssueImplement 'Implementing
   StartIssueImplementationTurn :: ActiveTurn -> Event 'IssueImplement 'Implementing
@@ -93,6 +95,7 @@ data Event (domain :: Domain) (phase :: Phase) where
   MergeabilityClean :: Event 'PrReview 'WaitingMergeability
   MergeabilityRetryLater :: Text.Text -> Event 'PrReview 'WaitingMergeability
   MergeabilityRecheckReviews :: Text.Text -> Event 'PrReview 'WaitingMergeability
+  MergeabilityFixRequired :: ReviewEvidence -> Event 'PrReview 'WaitingMergeability
   MergeCompleted :: MergeCommit -> Event 'PrReview 'Merging
 
   MarkBlocked :: CanBlock phase => BlockedReason -> Event domain phase
@@ -161,7 +164,7 @@ checkActionPermission state action
         PlanningWaitingForReadyIssues {} ->
           allowOneOf [SomeEffectAction SSleepUntilNextPollAction] action
         IssueReadyToPlan {} ->
-          allowOneOf [SomeEffectAction SStartIssuePlanWorkerTurnAction] action
+          allowOneOf [SomeEffectAction SStartIssuePlanWorkerTurnAction, SomeEffectAction SSleepUntilNextPollAction] action
         IssueInPlanMode {} ->
           allowOneOf [SomeEffectAction SRecordIssuePlanAction, SomeEffectAction SSleepUntilNextPollAction] action
         IssuePlanReady {} ->
@@ -188,19 +191,22 @@ checkActionPermission state action
           allowOneOf [SomeEffectAction SStartWorkerTurnAction, SomeEffectAction SStartReviewerTurnAction] action
         PrFixingReviews {} ->
           allowOneOf [SomeEffectAction SReadReviewThreadsAction, SomeEffectAction SSleepUntilNextPollAction] action
+        PrReviewFixQueued {} ->
+          allowOneOf [SomeEffectAction SStartWorkerTurnAction, SomeEffectAction SSleepUntilNextPollAction] action
         PrVerifyingReviewFix {} ->
           allowOneOf [SomeEffectAction SStartWorkerTurnAction, SomeEffectAction SStartReviewerTurnAction, SomeEffectAction SStartReviewerVerificationTurnAction] action
         PrReviewingClean {} ->
           allowOneOf
             [ SomeEffectAction SResolveReviewThreadAction
+            , SomeEffectAction SReplyReviewThreadAction
             , SomeEffectAction SDismissRequestChangesReviewAction
-            , SomeEffectAction SRequestChangesReviewAction
+            , SomeEffectAction SPublishReviewFindingsAction
             , SomeEffectAction SReadReviewThreadsAction
             , SomeEffectAction SSleepUntilNextPollAction
             ]
             action
         PrWaitingForMergeability {} ->
-          allowOneOf [SomeEffectAction SMergePullRequestAction, SomeEffectAction SReadReviewThreadsAction, SomeEffectAction SSleepUntilNextPollAction] action
+          allowOneOf [SomeEffectAction SMergePullRequestAction, SomeEffectAction SReadReviewThreadsAction, SomeEffectAction SPublishReviewFindingsAction, SomeEffectAction SSleepUntilNextPollAction] action
         PrMerging {} ->
           allowOneOf [SomeEffectAction SSleepUntilNextPollAction] action
         BlockedState {} ->
@@ -248,7 +254,8 @@ sameActionKind SUpdatePullRequestBodyAction SUpdatePullRequestBodyAction = Just 
 sameActionKind SUpdateIssueFollowUpAction SUpdateIssueFollowUpAction = Just Refl
 sameActionKind SCloseIssueAction SCloseIssueAction = Just Refl
 sameActionKind SResolveReviewThreadAction SResolveReviewThreadAction = Just Refl
-sameActionKind SRequestChangesReviewAction SRequestChangesReviewAction = Just Refl
+sameActionKind SReplyReviewThreadAction SReplyReviewThreadAction = Just Refl
+sameActionKind SPublishReviewFindingsAction SPublishReviewFindingsAction = Just Refl
 sameActionKind SDismissRequestChangesReviewAction SDismissRequestChangesReviewAction = Just Refl
 sameActionKind SRecordIssuePlanAction SRecordIssuePlanAction = Just Refl
 sameActionKind SRecordPlanningGraphAction SRecordPlanningGraphAction = Just Refl
@@ -300,11 +307,19 @@ step (IssueReadyToPlan config prNumber (WorkerIdle threadId)) (StartReadyIssuePl
   Decision
     (IssueInPlanMode config prNumber (WorkerActive activeTurn))
     [SomeEffect (StartIssuePlanWorkerTurn config prNumber threadId)]
+step (IssueReadyToPlan config prNumber _oldWorker) (IssueWorkerThreadReady threadId) =
+  Decision
+    (IssueReadyToPlan config prNumber (WorkerIdle threadId))
+    [SomeEffect SleepUntilNextPoll]
 step (IssueInPlanMode config prNumber (WorkerActive activeTurn)) (IssuePlanCompleted planMarkdown maybeNextTurn) =
   let nextTurn = maybe activeTurn id maybeNextTurn
    in Decision
         (IssuePlanReady config prNumber (WorkerIdle (activeThreadId nextTurn)))
         [SomeEffect (RecordIssuePlan config prNumber planMarkdown), SomeEffect SleepUntilNextPoll]
+step (IssuePlanReady config prNumber _oldWorker) (IssueWorkerThreadReady threadId) =
+  Decision
+    (IssuePlanReady config prNumber (WorkerIdle threadId))
+    [SomeEffect SleepUntilNextPoll]
 step (IssueImplementationReady config Nothing worker) (IssueAttemptBranchAdvanced branch) =
   Decision
     (IssueImplementationReady (config {issueBranch = branch}) Nothing worker)
@@ -319,6 +334,10 @@ step (IssueImplementationReady _config (Just prNumber) _worker) (IssueAttemptBra
               <> " is already known"
           )
    in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
+step (IssueImplementationReady config maybePr _oldWorker) (IssueWorkerThreadReady threadId) =
+  Decision
+    (IssueImplementationReady config maybePr (WorkerIdle threadId))
+    [SomeEffect SleepUntilNextPoll]
 step (IssueImplementationReady config _maybePr worker) (IssuePullRequestReady prNumber) =
   Decision
     (IssueReadyToPlan config prNumber worker)
@@ -391,10 +410,10 @@ step state@(IssueWaitingForPrMerge _config expectedPrNumber _worker _reviewer) (
       Decision state [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step (IssueWaitingForPrMerge config expectedPrNumber worker reviewer) (IssuePullRequestMerged prNumber)
+step (IssueWaitingForPrMerge config expectedPrNumber worker _reviewer) (IssuePullRequestMerged prNumber)
   | expectedPrNumber == prNumber =
       Decision
-        (IssuePostMergeReviewReady config prNumber worker reviewer)
+        (IssuePostMergeReviewReady config prNumber worker Nothing)
         [SomeEffect SleepUntilNextPoll]
   | otherwise =
       let reason =
@@ -462,7 +481,11 @@ step state@IssueWaitingForIssueClose {} (IssuePullRequestMerged _prNumber) =
 step (PrCheckingReviews config _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
   Decision
     (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (StartWorkerTurn (activeThreadId activeTurn))]
+    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
+step (PrReviewFixQueued config _queuedEvidence _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
+  Decision
+    (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
+    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
 step (PrCheckingReviews config (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
   Decision
     (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
@@ -470,7 +493,7 @@ step (PrCheckingReviews config (WorkerIdle workerThreadId) _reviewer) (NoReviewT
 step (PrVerifyingReviewFix config _oldEvidence _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
   Decision
     (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (StartWorkerTurn (activeThreadId activeTurn))]
+    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
 step (PrVerifyingReviewFix config _oldEvidence (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
   Decision
     (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
@@ -485,13 +508,13 @@ step (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle re
     [SomeEffect SleepUntilNextPoll]
 step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixIncomplete =
   Decision
-    (PrCheckingReviews config (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (ReadReviewThreads config)]
+    (PrReviewFixQueued config _evidence (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
+    [SomeEffect SleepUntilNextPoll]
 step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds)
   | reviewEvidenceHasSummaries verification =
       Decision
-        (PrWaitingForMergeability config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-        (resolveReviewThreads (Just verification) resolvedThreadIds <> [SomeEffect (DismissRequestChangesReview config evidence), SomeEffect SleepUntilNextPoll])
+        (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+        (resolveReviewThreads (Just verification) resolvedThreadIds <> [SomeEffect (DismissRequestChangesReview config evidence), SomeEffect (ReadReviewThreads config)])
 step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean _evidence resolvedThreadIds) =
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
@@ -502,8 +525,8 @@ step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (Revie
     (resolveReviewThreads Nothing resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
 step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems evidence resolvedThreadIds) =
   Decision
-    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads verification resolvedThreadIds <> [SomeEffect (RequestChangesReview config evidence), SomeEffect (ReadReviewThreads config)])
+    (PrReviewFixQueued config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
+    (resolveReviewThreads verification resolvedThreadIds <> replyReviewThreads evidence <> [SomeEffect (PublishReviewFindings config evidence), SomeEffect SleepUntilNextPoll])
 step (PrReviewingClean config _commit (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
   Decision
     (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
@@ -522,6 +545,10 @@ step (PrWaitingForMergeability config _evidence (WorkerIdle workerThreadId) (Rev
   Decision
     (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId))
     [SomeEffect (ReadReviewThreads config)]
+step (PrWaitingForMergeability config _cleanEvidence (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId)) (MergeabilityFixRequired evidence) =
+  Decision
+    (PrReviewFixQueued config evidence (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId))
+    [SomeEffect (PublishReviewFindings config evidence), SomeEffect SleepUntilNextPoll]
 step (PrMerging _config _evidence) (MergeCompleted mergeCommit) =
   Decision
     (CompleteState (PrMerged mergeCommit))
@@ -554,6 +581,12 @@ resolveReviewThreads (Just evidence) resolvedThreadIds =
   [ SomeEffect (ResolveReviewThread threadId)
   | threadId <- reviewEvidenceThreadIds evidence
   , threadId `elem` resolvedThreadIds
+  ]
+
+replyReviewThreads :: ReviewEvidence -> EffectPlan
+replyReviewThreads evidence =
+  [ SomeEffect (ReplyReviewThread threadId comment)
+  | (threadId, comment) <- reviewEvidenceThreadComments evidence
   ]
 
 postMergeReworkIssueConfig :: IssueConfig -> IssueConfig

@@ -19,6 +19,7 @@ module CodexWatcher.Cli.Command.IssueFanout
   , resolveFanoutActiveIssues
   , issueImplementerRuntimeStatus
   , readyIssueStatusFromRuntime
+  , retryableLaunchCommandFailure
   ) where
 
 import CodexWatcher.ActionExecutor
@@ -29,6 +30,7 @@ import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog.Types
+import CodexWatcher.Failure (transientFailureText)
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Runtime.Command.Render (commandText, renderRuntimeCommand)
@@ -47,13 +49,14 @@ import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))
-import Control.Monad (unless, when)
+import Control.Concurrent (threadDelay)
+import Control.Monad (when)
 import Data.Aeson (Value, object, (.=))
 import Data.List (nub, sortOn)
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removeFile)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, doesPathExist, listDirectory, removeFile, removePathForcibly)
 import System.Exit (die)
 import System.FilePath (takeDirectory, (</>))
 
@@ -240,17 +243,69 @@ prepareIssueImplementerWorkdir launch =
           mapM_ (ensureLaunchCommand launch) (issueImplementerWorkdirSetupCommands launch)
 
 ensureLaunchCommand :: IssueImplementerLaunchPlan -> RuntimeCommand -> IO ()
-ensureLaunchCommand launch command = do
-  report <- runRuntimeCommand command
-  unless report.ok $
-    die
-      ( "failed to prepare workdir for issue "
-          <> show (unIssueNumber (launchIssueNumber launch))
-          <> " with "
-          <> show (renderRuntimeCommand command)
-          <> ": "
-          <> Text.unpack (commandText report)
-      )
+ensureLaunchCommand launch command =
+  go launchCommandRetryDelaysMicros
+ where
+  go retryDelays = do
+    report <- runRuntimeCommand command
+    if report.ok
+      then pure ()
+      else
+        case retryDelays of
+          delayMicros : remainingDelays
+            | retryableLaunchCommandFailure command report -> do
+                cleanupRetryableLaunchCommand command
+                putStrLn
+                  ( "retrying workdir setup for issue "
+                      <> show (unIssueNumber (launchIssueNumber launch))
+                      <> " after transient "
+                      <> commandNameForMessage command
+                      <> " failure: "
+                      <> Text.unpack (commandText report)
+                  )
+                threadDelay delayMicros
+                go remainingDelays
+          _ ->
+            die
+              ( "failed to prepare workdir for issue "
+                  <> show (unIssueNumber (launchIssueNumber launch))
+                  <> " with "
+                  <> show (renderRuntimeCommand command)
+                  <> ": "
+                  <> Text.unpack (commandText report)
+              )
+
+launchCommandRetryDelaysMicros :: [Int]
+launchCommandRetryDelaysMicros =
+  [2 * 1000 * 1000, 5 * 1000 * 1000, 10 * 1000 * 1000]
+
+retryableLaunchCommandFailure :: RuntimeCommand -> CommandReport -> Bool
+retryableLaunchCommandFailure command report =
+  isGhRepoClone command && transientFailureText (commandText report)
+
+cleanupRetryableLaunchCommand :: RuntimeCommand -> IO ()
+cleanupRetryableLaunchCommand command =
+  case ghRepoCloneWorkdir command of
+    Nothing -> pure ()
+    Just workdir -> do
+      exists <- doesPathExist workdir
+      when exists (removePathForcibly workdir)
+
+isGhRepoClone :: RuntimeCommand -> Bool
+isGhRepoClone command =
+  case ghRepoCloneWorkdir command of
+    Just _ -> True
+    Nothing -> False
+
+ghRepoCloneWorkdir :: RuntimeCommand -> Maybe FilePath
+ghRepoCloneWorkdir = \case
+  RawCommand "gh" ["repo", "clone", _repo, workdir] Nothing -> Just workdir
+  _ -> Nothing
+
+commandNameForMessage :: RuntimeCommand -> String
+commandNameForMessage = \case
+  RawCommand command _ _ -> command
+  _ -> "command"
 
 prepareIssueImplementerLaunch :: Maybe AppServerEndpoint -> RequestId -> IssueImplementerLaunchPlan -> IO IssueImplementerLaunchPlan
 prepareIssueImplementerLaunch Nothing _requestId launch =

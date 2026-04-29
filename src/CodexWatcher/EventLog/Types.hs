@@ -66,6 +66,7 @@ data WatcherEvent
   | PrReviewMergeabilityClean CommitSha
   | PrReviewMergeabilityWaiting Text
   | PrReviewMergeabilityRecheck Text
+  | PrReviewMergeabilityFixRequired ReviewEvidence
   | PrReviewMergeCompleted MergeCommit
   | IssueImplementInitialized IssueConfig ThreadId
   | IssueWorkerThreadRefreshed ThreadId
@@ -148,7 +149,9 @@ instance ToJSON WatcherEvent where
       PrReviewFeedbackFound evidence workerTurnId ->
         eventType event
           <> reviewEvidenceFields evidence
-          <> ["workerTurnId" .= unTurnId workerTurnId]
+          <> [ "commitSha" .= unCommitSha (reviewedCommit evidence)
+             , "workerTurnId" .= unTurnId workerTurnId
+             ]
       PrReviewNoUnresolvedFound commitSha reviewerTurnId ->
         eventType event
           <> [ "commitSha" .= unCommitSha commitSha
@@ -185,6 +188,10 @@ instance ToJSON WatcherEvent where
         eventType event <> ["reason" .= reason]
       PrReviewMergeabilityRecheck reason ->
         eventType event <> ["reason" .= reason]
+      PrReviewMergeabilityFixRequired evidence ->
+        eventType event
+          <> reviewEvidenceFields evidence
+          <> ["commitSha" .= unCommitSha (reviewedCommit evidence)]
       PrReviewMergeCompleted mergeCommit ->
         eventType event <> ["mergeCommitSha" .= unCommitSha (unMergeCommit mergeCommit)]
       IssueImplementInitialized config workerThreadId ->
@@ -328,6 +335,9 @@ instance FromJSON WatcherEvent where
       "pr_review_mergeability_recheck" ->
         PrReviewMergeabilityRecheck
           <$> (objectValue .:? "reason" .!= "rechecking reviews")
+      "pr_review_mergeability_fix_required" ->
+        PrReviewMergeabilityFixRequired
+          <$> parseReviewEvidence objectValue "commitSha" (Just "pre-merge mergeability requires a worker fix")
       "pr_review_merge_completed" ->
         PrReviewMergeCompleted . MergeCommit . CommitSha
           <$> nonEmptyTextField objectValue "mergeCommitSha"
@@ -577,6 +587,7 @@ eventName = \case
   PrReviewMergeabilityClean {} -> "pr_review_mergeability_clean"
   PrReviewMergeabilityWaiting {} -> "pr_review_mergeability_waiting"
   PrReviewMergeabilityRecheck {} -> "pr_review_mergeability_recheck"
+  PrReviewMergeabilityFixRequired {} -> "pr_review_mergeability_fix_required"
   PrReviewMergeCompleted {} -> "pr_review_merge_completed"
   IssueImplementInitialized {} -> "issue_implement_initialized"
   IssueWorkerThreadRefreshed {} -> "issue_worker_thread_refreshed"
