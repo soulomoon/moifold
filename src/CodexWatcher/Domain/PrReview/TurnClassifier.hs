@@ -86,7 +86,7 @@ classifyPrReviewWorkerTurn turn =
     TurnStillRunning ->
       Nothing
     TurnFailed reason ->
-      Just (WorkerBlocked (BlockedReason reason))
+      maybe (Just (WorkerBlocked (BlockedReason reason))) classifyStructuredPrReviewWorker (parseStructuredTurnOutcome reason)
     TurnCompleted output
       | Just outcome <- missingOutputBlocked "worker turn completed without output" WorkerBlocked output ->
           Just outcome

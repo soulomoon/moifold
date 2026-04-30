@@ -175,11 +175,6 @@ instance Arbitrary BranchName where
 instance Arbitrary ReviewThreadId where
   arbitrary = ReviewThreadId . Text.pack <$> listOf1 (elements ['a' .. 'z'])
 
-instance Arbitrary (NonEmpty ReviewThreadId) where
-  arbitrary = (:|) <$> arbitrary <*> listOf arbitrary
-  shrink (threadId :| threadIds) =
-    [shrunkenThreadId :| shrunkenThreadIds | shrunkenThreadId : shrunkenThreadIds <- shrink (threadId : threadIds)]
-
 instance Arbitrary CommitSha where
   arbitrary = CommitSha . Text.pack <$> vectorOf 12 (elements (['a' .. 'f'] <> ['0' .. '9']))
 
@@ -2047,6 +2042,8 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyIssueImplementationTurn (Just (PrNumber 7)) Nothing (AppServerTurn (TurnId "impl-clean") "completed" (Just "{\"outcome\":\"clean\",\"summary\":\"review-only\"}")) == Just (ObservedImplementationIncomplete "implementation turn completed without structured outcome")
     && classifyIssueImplementationTurn (Just (PrNumber 7)) Nothing (AppServerTurn (TurnId "impl-problems") "completed" (Just "{\"outcome\":\"problems\",\"summary\":\"review-only\"}")) == Just (ObservedImplementationIncomplete "implementation turn completed without structured outcome")
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker-failed-complete") "failed" (Just "{\"comment\":\"fix applied\",\"evidence\":\"\",\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"\"}")) == Just (ObservedWorkerOutcome WorkerCompleted)
+    && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker-failed-incomplete") "failed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-clean-null-comment") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: review_status, reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, lgtm_comment, findings_summary, blocked_reason, solved_threads, remaining_review_threads"))
