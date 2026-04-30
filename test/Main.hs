@@ -1415,6 +1415,8 @@ prop_issuePlanningFanoutTreatsClosedReadyIssuesAsTerminal =
         && fmap (issueNumberOfConfig . launchIssueConfig) fanoutPlan.readyIssueLaunches == [IssueNumber 69]
         && null fanoutPlan.readyIssueRestarts
         && not fanoutPlan.readyIssuesAllTerminal
+        && readyIssueStatusesNeedReplanning reconciledStatuses
+        && not (readyIssueStatusesNeedReplanning [(IssueNumber 69, WatcherMissing), (IssueNumber 70, WatcherActiveRunning)])
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
 

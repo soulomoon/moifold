@@ -125,6 +125,7 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
             DryRunActions -> Nothing
         stoppedActiveLaunches = fanoutPlan.readyIssueRestarts
         allReadyIssuesTerminal = fanoutPlan.readyIssuesAllTerminal
+        readyIssuesNeedReplanning = readyIssueStatusesNeedReplanning readyStatuses
     validation <- validateReadyIssueFanout plannerConfig (planningGraphFromState planningState) readyStatuses (launches <> stoppedActiveLaunches)
     case validation of
       FanoutValidationBlocked reason classification -> do
@@ -166,6 +167,7 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
               , "launches" .= length launches
               , "restarts" .= length stoppedActiveLaunches
               , "allReadyIssuesTerminal" .= allReadyIssuesTerminal
+              , "readyIssuesNeedReplanning" .= readyIssuesNeedReplanning
               ]
           )
         childLaunch <-
@@ -205,12 +207,12 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
           putStrLn ("planner fanout child start problems: " <> show (length childStartProblems))
         finalStatuses <- traverse (issueImplementerRuntimeStatus fanoutConfig plannerConfig) readyIssues
         finalReconciliation <- reconcileReadyIssueStatuses plannerConfig (zip readyIssues finalStatuses)
-        let allReadyIssuesTerminalAfterLaunch =
+        let readyIssuesNeedReplanningAfterLaunch =
               case finalReconciliation of
                 Left _classification -> False
                 Right finalReconciled ->
-                  not (null readyIssues) && all ((== WatcherTerminal TerminalComplete) . snd) finalReconciled.reconciledReadyStatuses
-        when (allReadyIssuesTerminal || allReadyIssuesTerminalAfterLaunch) $
+                  readyIssueStatusesNeedReplanning finalReconciled.reconciledReadyStatuses
+        when (readyIssuesNeedReplanning || readyIssuesNeedReplanningAfterLaunch) $
           markPlanningReadyIssuesFixed executionMode cli planningState
         pure False
 

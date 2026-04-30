@@ -21,6 +21,7 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   , planReadyIssueFanout
   , planIssueImplementerLaunches
   , readyIssueAllowedByPlannerScope
+  , readyIssueStatusesNeedReplanning
   , withLaunchThreadId
   , completeClosedReadyIssueStatuses
   ) where
@@ -127,6 +128,10 @@ completeClosedReadyIssueStatuses closedIssues =
           then (issue, WatcherTerminal TerminalComplete)
           else (issue, status)
     )
+
+readyIssueStatusesNeedReplanning :: [(IssueNumber, WatcherRuntimeStatus)] -> Bool
+readyIssueStatusesNeedReplanning =
+  any ((== WatcherTerminal TerminalComplete) . snd)
 
 readyIssueAllowedByPlannerScope :: PlannerConfig -> Maybe PlanningGraph -> IssueNumber -> Bool
 readyIssueAllowedByPlannerScope plannerConfig maybeGraph issue =
