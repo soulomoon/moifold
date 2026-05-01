@@ -4,7 +4,6 @@
 
 module CodexWatcher.PromptTemplates
   ( PromptTemplate (..)
-  , completionContractTemplate
   , issueImplementationTemplate
   , issueImplementThreadDeveloperTemplate
   , issuePlanModeDeveloperTemplate
@@ -83,16 +82,18 @@ plannerTemplate =
         , "Respect target scope exactly when scope instructions are present."
         ]
         [ "{{structuredInstructions}}"
-        , "For fanout decisions, return one JSON object with outcome=complete plus the dependency graph fields needed for the watcher to continue; the watcher computes canonical ready_issues and blocked_issues from GitHub facts."
+        , "For issue graph decisions, return outcome=complete plus the dependency graph fields needed for the watcher to continue."
         , "Minimal {\"outcome\":\"complete\"} is only allowed when all scoped work is finished and no fanout, issue creation, or dependency decision remains."
         , "Do not return minimal complete JSON while any open scoped work or pending dependency decision remains."
-        , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]} and should include only semantic dependencies between scoped open issues."
+        , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]} and include only semantic dependencies between scoped open issues."
         , "Do not omit an open scoped issue from dependencies just because it has no blockers; use an empty dependsOn list."
         , "ready_issues and blocked_issues are optional hints only; they are not authoritative."
         ]
         <> Text.unlines
           [ ""
           , "Planning guidance:"
+          , "- Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
+          , "- Inspect existing GitHub issues and sub-issues when needed before deciding."
           , "- Prefer small independent implementation units."
           , "- Use subissues_to_create for GitHub sub-issues; each item must include title, concrete body, and parentIssueNumber."
           , "- A sub-issue body must describe scope, acceptance criteria, dependencies/blockers, and compatibility with sibling sub-issues."
@@ -150,7 +151,7 @@ prReviewWorkerTemplate =
         [ "Focus on unresolved review comments, watcher review-findings feedback, and the directly related code."
         , "Run relevant validation, commit, and push fixes when ready."
         , "Never mutate watcher events.jsonl, daemon/checker state, pid/lock/runtime-owner files, or unspecified watcher state."
-        , "Only write state files explicitly named by the completion contract."
+        , "Do not write watcher state files; report status only through the active output schema."
         ]
         [ "{{structuredInstructions}}"
         , "Return complete with a non-empty summary and empty reason when review feedback was addressed."
@@ -170,7 +171,7 @@ validationProtocolTemplate =
         , "- If `cabal` or `ghc` is missing and Haskell validation is needed, install the current Haskell toolchain with ghcup."
         , "- Interactive install command: `curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh`."
         , "- For unattended app-server work, prefer: `curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | env BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_INSTALL_HLS=0 sh`, then source the ghcup environment if needed before rerunning validation."
-        , "- Record validation commands and results in {{agentStatePath}}."
+        , "- Include validation commands and results in the structured turn output evidence when available."
         ]
     )
 
@@ -190,28 +191,7 @@ publishProtocolTemplate =
         , "- Run `git fetch origin {{prHeadBranch}}`. Never force-push; if local work cannot be safely applied on top of `origin/{{prHeadBranch}}`, mark blocked with the reason."
         , "- Publish with `git push origin HEAD:{{prHeadBranch}}`."
         , "- Verify `git ls-remote origin refs/heads/{{prHeadBranch}}` equals local `git rev-parse HEAD`."
-        , "- Record publish status and `published_commit_sha` in {{agentStatePath}}."
-        ]
-    )
-
-completionContractTemplate :: PromptTemplate
-completionContractTemplate =
-  PromptTemplate
-    "completion-contract.md"
-    ( Text.unlines
-        [ "Completion contract:"
-        , "- At the end of the turn, {{agentStatePath}} must contain these top-level fields:"
-        , "{"
-        , "  \"completion_status\": \"complete\" | \"incomplete\" | \"blocked\","
-        , "  \"published_commit_sha\": \"<sha or null>\","
-        , "  \"resolved_thread_ids\": [\"...\"],"
-        , "  \"remaining_unresolved_thread_ids\": [\"...\"],"
-        , "  \"resolve_blockers\": [\"...\"],"
-        , "  \"blocked_reason\": \"<string or null>\""
-        , "}"
-        , "- Use \"complete\" only after re-checking PR review threads and either no unresolved thread remains or every remaining unresolved thread has an explicit blocker."
-        , "- Use \"blocked\" when the task cannot proceed without external intervention, such as missing gh auth, unavailable required tools that cannot be installed, non-fast-forward publish risk, or an unrecoverable repository/API permission problem."
-        , "- Use \"incomplete\" for transient or retryable failures."
+        , "- Include publish status and the pushed commit SHA in the structured turn output evidence when available."
         ]
     )
 
@@ -221,7 +201,7 @@ prReviewWorkerThreadDeveloperTemplate =
     "thread-developer.md"
     ( agentPrincipleFrame
         "You are the dedicated English-only PR review fixer for {{repoFullName}}#{{prNumber}}."
-        "Resolve review feedback on the PR branch, validate it, publish it, and leave exact completion state for the watcher."
+        "Resolve review feedback on the PR branch, validate it, publish it, and report exact completion state through the active turn output."
         [ "PR URL: {{prUrl}}."
         , "Your working directory is {{workdir}}."
         , "The PR branch is {{branchOrUnknownUseTools}}."
@@ -230,8 +210,9 @@ prReviewWorkerThreadDeveloperTemplate =
         , "Do not use dynamic client-only tools such as js_repl."
         , "Use English for every message in this thread."
         ]
-        [ "Follow the validation, publishing, and completion contracts below exactly."
-        , "Record required status in the referenced agent-state file."
+        [ "Follow the validation and publishing protocols below."
+        , "Do not write watcher state files; report status only through the active output schema."
+        , "Return final status only through the active structured turn output."
         ]
         <> Text.unlines
           [ ""
@@ -242,8 +223,6 @@ prReviewWorkerThreadDeveloperTemplate =
           , "{{validationProtocol}}"
           , ""
           , "{{publishProtocol}}"
-          , ""
-          , "{{completionContract}}"
           ]
     )
 

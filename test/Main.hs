@@ -1947,7 +1947,6 @@ prop_prReviewRemainingThreadsReplyAndQueueWorker config workerThread reviewerThr
             && effects
               == [ SomeEffect (ResolveReviewThread solvedThreadId)
                  , SomeEffect (ReplyReviewThread remainingThreadId "still applies")
-                 , SomeEffect (PublishReviewFindings config remainingEvidence)
                  , SomeEffect SleepUntilNextPoll
                  ]
 
@@ -2378,9 +2377,8 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
         workerPrompt
         [ "Publishing protocol, required for this environment:"
         , "gh auth setup-git"
-        , "Completion contract:"
-        , "remaining_unresolved_thread_ids"
-        , "/tmp/state/pr29/agent-state.json"
+        , "Return final status only through the active structured turn output."
+        , "Do not write watcher state files"
         , "Stage only files related to the current issue/PR"
         , "never stage watcher state or runtime files"
         , "If unrelated dirty changes make safe staging unclear"
@@ -2424,9 +2422,10 @@ prop_threadDeveloperPromptTemplatesPortNodeProtocols =
           , "Inspect existing GitHub issues and sub-issues when needed before deciding."
           , "Return only JSON matching the active output schema"
           , "Include every schema field, using empty arrays, empty strings, or null parentIssueNumber when a field is not applicable."
-          , "For issue planning, inspect existing GitHub issues and existing sub-issues before splitting work."
-          , "dependencies must use objects shaped as {\"issueNumber\": 27, \"dependsOn\": [26]}"
-          , "Target scope: only these root issues"
+          , "dependencies is the authoritative planning graph input"
+          , "dependencies must use {\"issueNumber\": 27, \"dependsOn\": [26]}"
+          , "ready_issues and blocked_issues are optional hints only; they are not authoritative."
+          , "Target scope:"
           , "12"
           ]
         && promptContainsAll
@@ -2474,32 +2473,33 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
 
 prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =
-  promptContainsAll
-    plannerTurnInput
-    [ "Read the current issue snapshot"
-    , "return the issue-planning decision JSON"
-    , "Inspect existing GitHub issues and sub-issues when needed"
-    ]
-    && promptContainsNone
-      plannerTurnInput
-      [ "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies"
-      , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"}"
-      ]
-    && promptContainsAll
-      issueImplementationTurnInput
-      [ "Never mutate watcher events.jsonl"
-      , "pid/lock/runtime-owner files"
-      , "Do not write watcher state files"
-      , "structured turn output"
-      , "optional evidence field for validation and publish details"
-      ]
-    && promptContainsAll
-      prReviewWorkerTurnInput
-      [ "Never mutate watcher events.jsonl"
-      , "pid/lock/runtime-owner files"
-      , "Only write state files explicitly named by the completion contract"
-      , "optional evidence field for validation, publish, and review-thread check details"
-      ]
+  let plannerPrompt = plannerTurnInputForScope []
+   in promptContainsAll
+        plannerPrompt
+        [ "Read the current issue snapshot"
+        , "return the issue-planning decision JSON"
+        , "Inspect existing GitHub issues and sub-issues when needed"
+        ]
+        && promptContainsNone
+          plannerPrompt
+          [ "For fanout decisions, return one JSON object with outcome=complete, reason, summary, and dependencies"
+          , "Minimal {\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"all scoped work finished\"}"
+          ]
+        && promptContainsAll
+          issueImplementationTurnInput
+          [ "Never mutate watcher events.jsonl"
+          , "pid/lock/runtime-owner files"
+          , "Do not write watcher state files"
+          , "structured turn output"
+          , "optional evidence field for validation and publish details"
+          ]
+        && promptContainsAll
+          prReviewWorkerTurnInput
+          [ "Never mutate watcher events.jsonl"
+          , "pid/lock/runtime-owner files"
+          , "Do not write watcher state files"
+          , "optional evidence field for validation, publish, and review-thread check details"
+          ]
 
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions :: Bool
 prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions =

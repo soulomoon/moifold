@@ -526,7 +526,7 @@ step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (Revie
 step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems evidence resolvedThreadIds) =
   Decision
     (PrReviewFixQueued config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads verification resolvedThreadIds <> replyReviewThreads evidence <> [SomeEffect (PublishReviewFindings config evidence), SomeEffect SleepUntilNextPoll])
+    (resolveReviewThreads verification resolvedThreadIds <> replyReviewThreads evidence <> publishReviewFindingsWhenNeeded config evidence <> [SomeEffect SleepUntilNextPoll])
 step (PrReviewingClean config _commit (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
   Decision
     (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
@@ -588,6 +588,11 @@ replyReviewThreads evidence =
   [ SomeEffect (ReplyReviewThread threadId comment)
   | (threadId, comment) <- reviewEvidenceThreadComments evidence
   ]
+
+publishReviewFindingsWhenNeeded :: PrConfig -> ReviewEvidence -> EffectPlan
+publishReviewFindingsWhenNeeded config evidence
+  | reviewEvidenceHasSummaries evidence = [SomeEffect (PublishReviewFindings config evidence)]
+  | otherwise = []
 
 postMergeReworkIssueConfig :: IssueConfig -> IssueConfig
 postMergeReworkIssueConfig config =

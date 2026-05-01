@@ -15,7 +15,7 @@ module CodexWatcher.TurnOutput
   , prReviewWorkerTurnInput
   , prReviewWorkerTurnOutputSchema
   , prReviewThreadDeveloperInstructions
-  , plannerTurnInput
+  , plannerTurnInputForScope
   , prReviewWorkerTurnInputWithEvidence
   , reviewerPromptVersion
   , reviewerTurnInput
@@ -26,12 +26,12 @@ module CodexWatcher.TurnOutput
   ) where
 
 import CodexWatcher.PromptTemplates
-  ( completionContractTemplate
-  , issueImplementationTemplate
+  ( issueImplementationTemplate
   , issueImplementThreadDeveloperTemplate
   , issuePlanModeDeveloperTemplate
   , issuePlanTemplate
   , issuePlanningThreadDeveloperTemplate
+  , plannerTemplate
   , prReviewReviewerThreadDeveloperTemplate
   , prReviewWorkerThreadDeveloperTemplate
   , prReviewWorkerTemplate
@@ -185,6 +185,29 @@ structuredTurnOutcomeInstructions =
     , "Use outcome=complete with a non-empty summary when the turn is done; reason may be an empty string."
     ]
 
+issuePlanStructuredTurnOutcomeInstructions :: Text
+issuePlanStructuredTurnOutcomeInstructions =
+  Text.unlines
+    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
+    , "Include every schema field, using an empty string when a string field is not applicable."
+    , "Use outcome=blocked with a non-empty reason when planning cannot proceed safely."
+    , "Use outcome=complete with a non-empty summary, empty reason, and non-empty plan_markdown when the plan is ready."
+    , "Do not use outcome=incomplete; this planning schema only accepts complete or blocked."
+    ]
+
+plannerStructuredTurnOutcomeInstructions :: Text
+plannerStructuredTurnOutcomeInstructions =
+  Text.unlines
+    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
+    , "Include every schema field, using empty arrays, empty strings, or null parentIssueNumber when a field is not applicable."
+    , "Use outcome=blocked with a reason when you cannot proceed safely."
+    , "Use outcome=incomplete with a reason when follow-up investigation or issue creation re-entry is required."
+    , "Use outcome=complete with a summary when the issue graph is stable enough for the watcher to continue."
+    , "issues_to_create and subissues_to_create are watcher-applied requests; do not create issues directly."
+    , "dependencies is the authoritative planning graph input. The watcher recomputes canonical ready_issues and blocked_issues from dependencies and current GitHub issue facts."
+    , "ready_issues and blocked_issues must still be present for schema compatibility, but treat them as non-authoritative hints."
+    ]
+
 turnOutcomeSchema :: [Text] -> [(Text, Value)] -> Value
 turnOutcomeSchema outcomes extraProperties =
   let properties =
@@ -200,16 +223,17 @@ turnOutcomeSchema outcomes extraProperties =
           <> extraProperties
    in strictObjectSchema (fmap fst properties) properties
 
-plannerTurnInput :: Text
-plannerTurnInput =
-  Text.unlines
-    [ "Read the current issue snapshot and return the issue-planning decision JSON for the current scope."
-    , "Inspect existing GitHub issues and sub-issues when needed before deciding."
+plannerTurnInputForScope :: [IssueNumber] -> Text
+plannerTurnInputForScope scopeIssues =
+  renderTemplate
+    plannerTemplate
+    [ ("structuredInstructions", plannerStructuredTurnOutcomeInstructions)
+    , ("scopeInstructions", plannerTurnScopeInstructions scopeIssues)
     ]
 
 issuePlanTurnInput :: Text
 issuePlanTurnInput =
-  renderTemplate issuePlanTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
+  renderTemplate issuePlanTemplate [("structuredInstructions", issuePlanStructuredTurnOutcomeInstructions)]
 
 issueImplementationTurnInput :: Text
 issueImplementationTurnInput =
@@ -237,7 +261,7 @@ prReviewThreadDeveloperInstructions workdir stateDir config role
       renderPrReviewWorkerThreadDeveloperInstructions workdir stateDir config
 
 renderPrReviewWorkerThreadDeveloperInstructions :: FilePath -> FilePath -> PrConfig -> Text
-renderPrReviewWorkerThreadDeveloperInstructions workdir stateDir config =
+renderPrReviewWorkerThreadDeveloperInstructions workdir _stateDir config =
   renderTemplate
     prReviewWorkerThreadDeveloperTemplate
     [ ("repoFullName", unRepoName config.prRepo)
@@ -247,9 +271,8 @@ renderPrReviewWorkerThreadDeveloperInstructions workdir stateDir config =
     , ("branchOrUnknownUseTools", branchOrUnknownUseTools config.prBranch)
     , ("workerModel", defaultModel)
     , ("workerEffort", defaultEffort)
-    , ("validationProtocol", validationProtocol (stateDir </> "agent-state.json"))
-    , ("publishProtocol", publishProtocol (stateDir </> "agent-state.json") config.prBranch)
-    , ("completionContract", completionContract (stateDir </> "agent-state.json"))
+    , ("validationProtocol", validationProtocol)
+    , ("publishProtocol", publishProtocol config.prBranch)
     ]
 
 renderPrReviewReviewerThreadDeveloperInstructions :: FilePath -> PrConfig -> Text
@@ -357,7 +380,7 @@ reviewerVerificationTurnInput workdir reviewerStatePath config evidence reviewTa
     (verificationInstructions evidence)
 
 reviewerTurnInputWithVerification :: FilePath -> FilePath -> PrConfig -> CommitSha -> Text -> Text
-reviewerTurnInputWithVerification workdir reviewerStatePath config reviewTargetSha verificationInstructionsText =
+reviewerTurnInputWithVerification workdir _reviewerStatePath config reviewTargetSha verificationInstructionsText =
   renderTemplate
     reviewerTemplate
     [ ("repoFullName", unRepoName config.prRepo)
@@ -366,7 +389,6 @@ reviewerTurnInputWithVerification workdir reviewerStatePath config reviewTargetS
     , ("branch", unBranchName config.prBranch)
     , ("reviewTargetSha", unCommitSha reviewTargetSha)
     , ("reviewerPromptVersion", reviewerPromptVersion)
-    , ("reviewerStatePath", Text.pack reviewerStatePath)
     , ("verificationInstructions", verificationInstructionsText)
     ]
 
@@ -414,27 +436,20 @@ reviewFeedbackBullets evidence =
   summaryBullets =
     ["- " <> summary | summary <- reviewEvidenceSummaries evidence]
 
-validationProtocol :: FilePath -> Text
-validationProtocol agentStatePath =
+validationProtocol :: Text
+validationProtocol =
   renderTemplate
     validationProtocolTemplate
-    [("agentStatePath", Text.pack agentStatePath)]
+    []
 
-publishProtocol :: FilePath -> BranchName -> Text
-publishProtocol agentStatePath branch =
+publishProtocol :: BranchName -> Text
+publishProtocol branch =
   renderTemplate
     publishProtocolTemplate
-    [ ("agentStatePath", Text.pack agentStatePath)
-    , ("gitUserName", "codex-watcher")
+    [ ("gitUserName", "codex-watcher")
     , ("gitUserEmail", "codex-watcher@users.noreply.github.com")
     , ("prHeadBranch", unBranchName branch)
     ]
-
-completionContract :: FilePath -> Text
-completionContract agentStatePath =
-  renderTemplate
-    completionContractTemplate
-    [("agentStatePath", Text.pack agentStatePath)]
 
 prUrl :: RepoName -> PrNumber -> Text
 prUrl repo number =
@@ -459,6 +474,19 @@ issuePlanningScopeInstructions scopeIssues =
     , "- Only these root issues and their existing or newly created GitHub sub-issues are in scope: " <> issueNumbersText scopeIssues <> "."
     , "- Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees."
     , "- If a scoped root issue needs decomposition, propose concrete GitHub sub-issues under that root, then let the watcher re-enter planning."
+    ]
+
+plannerTurnScopeInstructions :: [IssueNumber] -> Text
+plannerTurnScopeInstructions [] =
+  ""
+plannerTurnScopeInstructions scopeIssues =
+  Text.unlines
+    [ ""
+    , "Target scope:"
+    , "- Only these root issues and their existing or newly created GitHub sub-issues are in scope: " <> issueNumbersText scopeIssues <> "."
+    , "- Do not create, classify, mark ready, mark blocked, or start work for issues outside these issue trees."
+    , "- If a scoped root issue needs decomposition, propose concrete GitHub sub-issues under that root, then let the watcher re-enter planning."
+    , "- When returning dependencies, include only scoped root issues and descendants that belong to these issue trees."
     ]
 
 stringField :: Value
