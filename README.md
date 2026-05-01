@@ -86,6 +86,23 @@ Clear an inactive runtime lease for a watcher state directory:
 
 The command refuses to clear a lease whose pid is still running. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during maintenance.
 
+For local maintenance, `scripts/restart-watcher` combines the common cleanup and restart steps. It stops the current daemon pid if present, removes stale pid/lease/block/active-turn compatibility files, and starts the watcher through the state's `restart-command.sh` with stdout/stderr redirected back into the state directory:
+
+```bash
+scripts/restart-watcher \
+  --state-dir /workspace/artifacts/issue-planners/soulomoon__mlf2 \
+  --domain issue-planning
+```
+
+When a failed app-server turn has already written a terminal `watcher_blocked` event, add `--drop-blocked-tail` to back up `events.jsonl` and remove the trailing `watcher_blocked` event plus the immediately preceding `*_turn_started` event:
+
+```bash
+scripts/restart-watcher \
+  --state-dir /workspace/artifacts/issue-planners/soulomoon__mlf2 \
+  --domain issue-planning \
+  --drop-blocked-tail
+```
+
 Use `render-service` with the same watcher loop flags to print a systemd unit and matching logrotate snippet. The command is render-only; it does not install or enable host services.
 
 Prepare issue implementer child state from a planner selection:

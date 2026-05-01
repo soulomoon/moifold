@@ -90,6 +90,7 @@ library
     CodexWatcher.Logging
     CodexWatcher.Observation
     CodexWatcher.PromptTemplates
+    CodexWatcher.Runtime.BlockedState
     CodexWatcher.Runtime.Command.Render
     CodexWatcher.Runtime.Command.Types
     CodexWatcher.Runtime.Compatibility

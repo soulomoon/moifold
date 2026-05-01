@@ -8,3 +8,4 @@ cabal.sandbox.config
 result
 .DS_Store
 bin/
+output/

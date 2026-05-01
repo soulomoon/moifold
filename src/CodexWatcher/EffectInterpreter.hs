@@ -26,10 +26,10 @@ import CodexWatcher.Core.Ids
   , ThreadId
   , nextRequestId
   )
-import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig, ReviewEvidence)
 import CodexWatcher.Effects
+import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Paths
   ( RuntimeCwd
   , RuntimeStateDir
@@ -50,9 +50,7 @@ import CodexWatcher.TurnOutput
   )
 import Data.Aeson
   ( Value
-  , object
   , toJSON
-  , (.=)
   )
 import Data.List (mapAccumL)
 import Data.Text (Text)
@@ -260,10 +258,3 @@ issuePlanTurnRuntimeConfig config issueConfig prNumber =
     { turnRuntimeInput = instructions <> "\n\n" <> config.effectRuntimeIssuePlanTurn.turnRuntimeInput
     , turnRuntimeCollaborationMode = Nothing
     }
-
-blockedStateJson :: BlockedReason -> Value
-blockedStateJson reason =
-  object
-    [ "blocked" .= True
-    , "reason" .= unBlockedReason reason
-    ]

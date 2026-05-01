@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/restart-watcher --state-dir PATH --domain DOMAIN [options]
+
+Stop a watcher if it is still running, clear stale compatibility state, and
+restart it from the state's restart-command.sh.
+
+Required:
+  --state-dir PATH              Watcher state directory
+  --domain DOMAIN               pr-review | issue-implement | issue-planning
+
+Options:
+  --command-file PATH           Restart command script (default: STATE/restart-command.sh)
+  --pid-file PATH               Explicit pid file (default depends on domain)
+  --drop-blocked-tail           If events.jsonl ends in watcher_blocked, back it up and
+                                drop that event plus a preceding *_turn_started event
+  --log-basename NAME           Log basename in state dir (default: daemon)
+  --term-grace SECONDS          Seconds to wait after TERM (default: 10)
+  --force-kill                  Send KILL if TERM does not stop the process
+  --no-start                    Only stop and clean state
+  -h, --help                    Show this help
+EOF
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+state_dir=
+domain=
+command_file=
+pid_file=
+drop_blocked_tail=0
+log_basename=daemon
+term_grace=10
+force_kill=0
+no_start=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --state-dir)
+      [ "$#" -ge 2 ] || die "--state-dir requires a value"
+      state_dir=$2
+      shift 2
+      ;;
+    --domain)
+      [ "$#" -ge 2 ] || die "--domain requires a value"
+      domain=$2
+      shift 2
+      ;;
+    --command-file)
+      [ "$#" -ge 2 ] || die "--command-file requires a value"
+      command_file=$2
+      shift 2
+      ;;
+    --pid-file)
+      [ "$#" -ge 2 ] || die "--pid-file requires a value"
+      pid_file=$2
+      shift 2
+      ;;
+    --drop-blocked-tail)
+      drop_blocked_tail=1
+      shift
+      ;;
+    --log-basename)
+      [ "$#" -ge 2 ] || die "--log-basename requires a value"
+      log_basename=$2
+      shift 2
+      ;;
+    --term-grace)
+      [ "$#" -ge 2 ] || die "--term-grace requires a value"
+      term_grace=$2
+      shift 2
+      ;;
+    --force-kill)
+      force_kill=1
+      shift
+      ;;
+    --no-start)
+      no_start=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+[ -n "$state_dir" ] || die "--state-dir is required"
+[ -n "$domain" ] || die "--domain is required"
+[ -d "$state_dir" ] || die "state dir does not exist: $state_dir"
+
+case "$domain" in
+  pr-review)
+    default_pid_file="$state_dir/watcher.pid"
+    ;;
+  issue-implement)
+    default_pid_file="$state_dir/issue-watcher.pid"
+    ;;
+  issue-planning)
+    default_pid_file="$state_dir/issue-planning-watcher.pid"
+    ;;
+  *)
+    die "unsupported domain: $domain"
+    ;;
+esac
+
+if [ -z "$pid_file" ]; then
+  pid_file=$default_pid_file
+fi
+
+if [ -z "$command_file" ]; then
+  command_file="$state_dir/restart-command.sh"
+fi
+
+if [ "$no_start" -eq 0 ]; then
+  [ -f "$command_file" ] || die "restart command does not exist: $command_file"
+fi
+
+is_pid_alive() {
+  case "$1" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+  kill -0 "$1" 2>/dev/null
+}
+
+read_pid_file() {
+  local path=$1
+  [ -f "$path" ] || return 0
+  tr -cd '0-9' < "$path"
+}
+
+read_runtime_owner_pid() {
+  local path="$state_dir/runtime-owner.json"
+  [ -f "$path" ] || return 0
+  sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*"\([0-9][0-9]*\)".*/\1/p' "$path" | head -n 1
+}
+
+stop_pid() {
+  local pid=$1
+  [ -n "$pid" ] || return 0
+  if ! is_pid_alive "$pid"; then
+    return 0
+  fi
+
+  info "stopping pid $pid"
+  kill -TERM "$pid" 2>/dev/null || true
+
+  local waited=0
+  while is_pid_alive "$pid" && [ "$waited" -lt "$term_grace" ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  if is_pid_alive "$pid"; then
+    if [ "$force_kill" -eq 1 ]; then
+      info "force killing pid $pid"
+      kill -KILL "$pid" 2>/dev/null || true
+    else
+      die "pid $pid is still running after TERM; rerun with --force-kill if appropriate"
+    fi
+  fi
+}
+
+drop_blocked_tail_if_requested() {
+  [ "$drop_blocked_tail" -eq 1 ] || return 0
+
+  local events="$state_dir/events.jsonl"
+  [ -f "$events" ] || die "cannot drop blocked tail without events.jsonl: $events"
+  [ -s "$events" ] || die "cannot drop blocked tail from empty events.jsonl"
+
+  local last_line
+  last_line=$(tail -n 1 "$events")
+  if [[ "$last_line" != *'"type":"watcher_blocked"'* ]]; then
+    info "events.jsonl does not end in watcher_blocked; leaving event log unchanged"
+    return 0
+  fi
+
+  local line_count
+  line_count=$(wc -l < "$events" | tr -d ' ')
+  local drop_count=1
+  if [ "$line_count" -ge 2 ]; then
+    local previous_line
+    previous_line=$(tail -n 2 "$events" | head -n 1)
+    if [[ "$previous_line" == *'"type":"'*"turn_started"'"'* ]]; then
+      drop_count=2
+    fi
+  fi
+
+  [ "$line_count" -gt "$drop_count" ] || die "refusing to remove all events from events.jsonl"
+
+  local timestamp backup keep_count
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  backup="$events.backup-$timestamp"
+  keep_count=$((line_count - drop_count))
+
+  cp "$events" "$backup"
+  head -n "$keep_count" "$backup" > "$events"
+  info "dropped $drop_count blocked-tail event(s); backup: $backup"
+}
+
+cleanup_state() {
+  rm -f \
+    "$pid_file" \
+    "$default_pid_file" \
+    "$state_dir/runtime-owner.json" \
+    "$state_dir/block-state.json" \
+    "$state_dir/daemon-state.json" \
+    "$state_dir/stale-active-turn.json"
+}
+
+start_watcher() {
+  local stdout_log="$state_dir/$log_basename.log"
+  local stderr_log="$state_dir/$log_basename.err.log"
+
+  info "starting watcher via $command_file"
+  if [ -x "$command_file" ]; then
+    setsid "$command_file" > "$stdout_log" 2> "$stderr_log" < /dev/null &
+  else
+    setsid bash "$command_file" > "$stdout_log" 2> "$stderr_log" < /dev/null &
+  fi
+  local pid=$!
+  info "started pid $pid"
+
+  sleep 1
+  if ! is_pid_alive "$pid"; then
+    printf 'watcher exited immediately; stderr tail follows:\n' >&2
+    tail -n 40 "$stderr_log" >&2 || true
+    printf 'stdout tail follows:\n' >&2
+    tail -n 40 "$stdout_log" >&2 || true
+    exit 1
+  fi
+}
+
+pid_from_file=$(read_pid_file "$pid_file")
+pid_from_default=
+if [ "$default_pid_file" != "$pid_file" ]; then
+  pid_from_default=$(read_pid_file "$default_pid_file")
+fi
+pid_from_owner=$(read_runtime_owner_pid)
+
+stop_pid "$pid_from_file"
+stop_pid "$pid_from_default"
+stop_pid "$pid_from_owner"
+
+drop_blocked_tail_if_requested
+cleanup_state
+
+if [ "$no_start" -eq 1 ]; then
+  info "cleaned watcher state without restart"
+else
+  start_watcher
+fi

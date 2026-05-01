@@ -35,6 +35,7 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceSummaries
   , reviewEvidenceThreadIds
   )
+import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import Data.Aeson (Value (..), object, toJSON, (.=))
@@ -235,13 +236,6 @@ reviewerStateJson evidence =
     , "blocked_reason" .= Null
     , "solved_threads" .= ([] :: [Value])
     , "remaining_review_threads" .= ([] :: [Value])
-    ]
-
-blockedStateJson :: BlockedReason -> Value
-blockedStateJson reason =
-  object
-    [ "blocked" .= True
-    , "reason" .= unBlockedReason reason
     ]
 
 idleDaemonJson :: Value
