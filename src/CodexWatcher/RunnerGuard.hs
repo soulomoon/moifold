@@ -290,6 +290,8 @@ checkReplayState config events = \case
     pure Nothing
   SomeWatcherState (IssueWaitingForPrMerge {}) ->
     pure Nothing
+  SomeWatcherState (IssuePostMergeReviewPendingReviewer {}) ->
+    staleProblem config "issue implementer has not started post-merge review" ["last event: " <> lastEventName events]
   SomeWatcherState (IssuePostMergeReviewReady {}) ->
     staleProblem config "issue implementer has not started post-merge review" ["last event: " <> lastEventName events]
   SomeWatcherState (IssuePostMergeReviewing _ _ _ _ (ReviewerActive activeTurn)) ->

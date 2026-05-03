@@ -10,6 +10,7 @@ module CodexWatcher.Domain.IssueImplement.Loop
   , runIssueImplementing
   , runIssuePlanActive
   , runIssuePlanReady
+  , runIssuePostMergeReviewPendingReviewer
   , runIssuePostMergeReviewReady
   , runIssuePostMergeReviewing
   , runIssueReadyToPlan
@@ -175,7 +176,7 @@ runIssueWaitingForPrMerge ops executor config events replay issueConfig prNumber
       | otherwise ->
           ops.loopIdle executor config replay ("waiting for PR merge before post-merge review: #" <> Text.pack (show (unPrNumber prNumber)))
 
-runIssuePostMergeReviewReady
+runIssuePostMergeReviewPendingReviewer
   :: Monad m
   => DomainLoopOps m
   -> ActionExecutor m
@@ -184,28 +185,36 @@ runIssuePostMergeReviewReady
   -> EventReplayResult
   -> IssueConfig
   -> PrNumber
-  -> Maybe ThreadId
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
-runIssuePostMergeReviewReady ops executor config events replay issueConfig prNumber maybeReviewerThread =
-  case maybeReviewerThread of
-    Nothing ->
-      ensureIssueReviewerThread ops executor config events replay issueConfig prNumber
-    Just reviewerThread -> do
-      pullRequest <- runGhPrView executor.actionRuntime issueConfig.issueRepo prNumber
-      case pullRequest of
-        Left reason -> pure (Left (DaemonLoopExternalFailure reason))
-        Right remote ->
-          case remote.remotePullRequestHeadRefOid of
-            Nothing ->
-              pure (Left (DaemonLoopExternalFailure ("merged PR #" <> Text.pack (show (unPrNumber prNumber)) <> " did not expose headRefOid for post-merge review")))
-            Just reviewTargetSha ->
-              ops.loopPrestartAndObserve
-                executor
-                config
-                events
-                (StartIssueFinalReviewTurnKind issueConfig prNumber reviewTargetSha)
-                reviewerThread
-                (DaemonIssueImplementObservation . ObservedPostMergeReviewStarted reviewTargetSha)
+runIssuePostMergeReviewPendingReviewer ops executor config events replay issueConfig prNumber =
+  ensureIssueReviewerThread ops executor config events replay issueConfig prNumber
+
+runIssuePostMergeReviewReady
+  :: Monad m
+  => DomainLoopOps m
+  -> ActionExecutor m
+  -> DaemonLoopConfig
+  -> [WatcherEvent]
+  -> IssueConfig
+  -> PrNumber
+  -> ThreadId
+  -> m (Either DaemonLoopFailure DaemonLoopTickResult)
+runIssuePostMergeReviewReady ops executor config events issueConfig prNumber reviewerThread = do
+  pullRequest <- runGhPrView executor.actionRuntime issueConfig.issueRepo prNumber
+  case pullRequest of
+    Left reason -> pure (Left (DaemonLoopExternalFailure reason))
+    Right remote ->
+      case remote.remotePullRequestHeadRefOid of
+        Nothing ->
+          pure (Left (DaemonLoopExternalFailure ("merged PR #" <> Text.pack (show (unPrNumber prNumber)) <> " did not expose headRefOid for post-merge review")))
+        Just reviewTargetSha ->
+          ops.loopPrestartAndObserve
+            executor
+            config
+            events
+            (StartIssueFinalReviewTurnKind issueConfig prNumber reviewTargetSha)
+            reviewerThread
+            (DaemonIssueImplementObservation . ObservedPostMergeReviewStarted reviewTargetSha)
 
 runIssuePostMergeReviewing
   :: Monad m

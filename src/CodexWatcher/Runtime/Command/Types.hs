@@ -42,7 +42,6 @@ data RuntimeCommand
   | GhReplyReviewThread ReviewThreadId Text
   | GhPrCommentReviewFindings PrConfig ReviewEvidence
   | GhPrMerge RepoName PrNumber Text
-  | GhPrDismissRequestChanges PrConfig CleanReviewEvidence
   | GhPrCleanReviewAndMerge RepoName PrNumber CleanReviewEvidence Text
   | CheckNonEmptyFile FilePath
   | GitBranchCurrent FilePath

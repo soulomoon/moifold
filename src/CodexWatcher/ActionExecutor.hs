@@ -302,7 +302,6 @@ runtimeCommandName = \case
   GhReplyReviewThread {} -> "gh_reply_review_thread"
   GhPrCommentReviewFindings {} -> "gh_pr_comment_review_findings"
   GhPrMerge {} -> "gh_pr_merge"
-  GhPrDismissRequestChanges {} -> "gh_pr_dismiss_request_changes"
   GhPrCleanReviewAndMerge {} -> "gh_pr_clean_review_and_merge"
   CheckNonEmptyFile {} -> "check_non_empty_file"
   GitBranchCurrent {} -> "git_branch_current"

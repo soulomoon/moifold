@@ -16,27 +16,72 @@ import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import CodexWatcher.Core.Ids (CommitSha (..), ReviewThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromThreadComments, reviewEvidenceFromSummaries)
+import CodexWatcher.Domain.PrReview.Types
+  ( CleanReviewEvidence (..)
+  , NewFindingsStatus (..)
+  , PriorFindingsStatus (..)
+  , ReviewEvidence (..)
+  , ReviewFinding (..)
+  , parseNewFindingsStatus
+  , parsePriorFindingsStatus
+  )
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:), (.:?))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 
-data ReviewerTurnReport = ReviewerTurnReport
-  { reviewerReportStatus :: Maybe Text
-  , reviewerReportCommit :: Maybe CommitSha
-  , reviewerReportPromptVersion :: Maybe Text
-  , reviewerReportAddedCommentCount :: Maybe Int
-  , reviewerReportLgtmCommentPresent :: Bool
-  , reviewerReportLgtmComment :: Maybe Text
-  , reviewerReportFindingsSummary :: Maybe [Text]
-  , reviewerReportBlockedReasonPresent :: Bool
-  , reviewerReportBlockedReason :: Maybe Text
-  , reviewerReportSolvedThreads :: Maybe [SolvedReviewThread]
-  , reviewerReportRemainingThreads :: Maybe [RemainingReviewThread]
+data RawReviewerTurnReport = RawReviewerTurnReport
+  { rawReviewerReportCommit :: Maybe CommitSha
+  , rawReviewerReportPromptVersion :: Maybe Text
+  , rawReviewerReportAddedCommentCount :: Maybe Int
+  , rawReviewerReportPriorFindingsStatus :: Maybe Text
+  , rawReviewerReportNewFindingsStatus :: Maybe Text
+  , rawReviewerReportLgtmCommentPresent :: Bool
+  , rawReviewerReportLgtmComment :: Maybe Text
+  , rawReviewerReportPriorFindingsSummary :: Maybe [Text]
+  , rawReviewerReportNewFindingsSummary :: Maybe [Text]
+  , rawReviewerReportBlockedReasonPresent :: Bool
+  , rawReviewerReportBlockedReason :: Maybe Text
+  , rawReviewerReportSolvedThreads :: Maybe [SolvedReviewThread]
+  , rawReviewerReportRemainingThreads :: Maybe [RemainingReviewThread]
+  }
+  deriving stock (Eq, Show)
+
+data RequiredReviewerTurnReport = RequiredReviewerTurnReport
+  { requiredReviewerReportCommit :: CommitSha
+  , requiredReviewerReportPromptVersion :: Text
+  , requiredReviewerReportAddedCommentCount :: Int
+  , requiredReviewerReportPriorFindingsStatus :: Text
+  , requiredReviewerReportNewFindingsStatus :: Text
+  , requiredReviewerReportLgtmComment :: Maybe Text
+  , requiredReviewerReportPriorFindingsSummary :: [Text]
+  , requiredReviewerReportNewFindingsSummary :: [Text]
+  , requiredReviewerReportBlockedReason :: Maybe Text
+  , requiredReviewerReportSolvedThreads :: [SolvedReviewThread]
+  , requiredReviewerReportRemainingThreads :: [RemainingReviewThread]
+  }
+  deriving stock (Eq, Show)
+
+data PriorReviewResult
+  = NoPriorFeedback
+  | PriorFeedbackResolved [SolvedReviewThread]
+  | PriorFeedbackUnresolved (NonEmpty ReviewFinding) [SolvedReviewThread]
+  deriving stock (Eq, Show)
+
+data NewReviewResult
+  = NoNewReviewFindings
+  | NewReviewFindings (NonEmpty Text)
+  deriving stock (Eq, Show)
+
+data ValidReviewerTurnReport = ValidReviewerTurnReport
+  { validReviewerReportAddedCommentCount :: Int
+  , validReviewerReportPriorResult :: PriorReviewResult
+  , validReviewerReportNewResult :: NewReviewResult
+  , validReviewerReportLgtmComment :: Maybe Text
   }
   deriving stock (Eq, Show)
 
@@ -64,17 +109,19 @@ instance FromJSON RemainingReviewThread where
       <$> (ReviewThreadId <$> objectValue .: "thread_id")
       <*> objectValue .: "comment"
 
-instance FromJSON ReviewerTurnReport where
-  parseJSON = withObject "ReviewerTurnReport" \objectValue -> do
+instance FromJSON RawReviewerTurnReport where
+  parseJSON = withObject "RawReviewerTurnReport" \objectValue -> do
     let has key = KeyMap.member (Key.fromString key) objectValue
-    ReviewerTurnReport
-      <$> objectValue .:? "review_status"
-      <*> (fmap CommitSha <$> objectValue .:? "reviewed_commit_sha")
+    RawReviewerTurnReport
+      <$> (fmap CommitSha <$> objectValue .:? "reviewed_commit_sha")
       <*> objectValue .:? "reviewer_prompt_version"
       <*> objectValue .:? "added_review_comment_count"
+      <*> objectValue .:? "prior_findings_status"
+      <*> objectValue .:? "new_findings_status"
       <*> pure (has "lgtm_comment")
       <*> objectValue .:? "lgtm_comment"
-      <*> objectValue .:? "findings_summary"
+      <*> objectValue .:? "prior_findings_summary"
+      <*> objectValue .:? "new_findings_summary"
       <*> pure (has "blocked_reason")
       <*> objectValue .:? "blocked_reason"
       <*> objectValue .:? "solved_threads"
@@ -110,88 +157,120 @@ classifyPrReviewReviewerTurn commit turn =
       | otherwise ->
           Just (ReviewerIncomplete "reviewer turn completed without reviewer-state JSON")
 
-parseReviewerTurnReport :: Text -> Maybe ReviewerTurnReport
+parseReviewerTurnReport :: Text -> Maybe RawReviewerTurnReport
 parseReviewerTurnReport output =
   case eitherDecodeStrict' (Text.Encoding.encodeUtf8 (Text.strip output)) of
     Left _ -> Nothing
     Right report -> Just report
 
-validateReviewerTurnReport :: CommitSha -> ReviewerTurnReport -> ReviewerOutcome
-validateReviewerTurnReport expectedCommit report =
+validateReviewerTurnReport :: CommitSha -> RawReviewerTurnReport -> ReviewerOutcome
+validateReviewerTurnReport expectedCommit rawReport =
+  case requireReviewerTurnReport rawReport of
+    Left missingFields ->
+      ReviewerIncomplete ("reviewer state missing required fields: " <> Text.intercalate ", " missingFields)
+    Right report ->
+      case validateRequiredReviewerTurnReport expectedCommit report of
+        Left outcome -> outcome
+        Right validReport -> reviewerOutcomeFromValidReport expectedCommit validReport
+
+requireReviewerTurnReport :: RawReviewerTurnReport -> Either [Text] RequiredReviewerTurnReport
+requireReviewerTurnReport report =
   case missingReviewerFields report of
-    firstMissing : restMissing ->
-      ReviewerIncomplete ("reviewer state missing required fields: " <> Text.intercalate ", " (firstMissing : restMissing))
     [] ->
-      validateCompleteReviewerTurnReport expectedCommit report
+      case
+        ( rawReviewerReportCommit report
+        , rawReviewerReportPromptVersion report
+        , rawReviewerReportAddedCommentCount report
+        , rawReviewerReportPriorFindingsStatus report
+        , rawReviewerReportNewFindingsStatus report
+        , rawReviewerReportPriorFindingsSummary report
+        , rawReviewerReportNewFindingsSummary report
+        , rawReviewerReportSolvedThreads report
+        , rawReviewerReportRemainingThreads report
+        )
+      of
+        (Just commit, Just promptVersion, Just commentCount, Just priorStatus, Just newStatus, Just priorSummary, Just newSummary, Just solvedThreads, Just remainingThreads) ->
+          Right
+            RequiredReviewerTurnReport
+              { requiredReviewerReportCommit = commit
+              , requiredReviewerReportPromptVersion = promptVersion
+              , requiredReviewerReportAddedCommentCount = commentCount
+              , requiredReviewerReportPriorFindingsStatus = priorStatus
+              , requiredReviewerReportNewFindingsStatus = newStatus
+              , requiredReviewerReportLgtmComment = rawReviewerReportLgtmComment report
+              , requiredReviewerReportPriorFindingsSummary = priorSummary
+              , requiredReviewerReportNewFindingsSummary = newSummary
+              , requiredReviewerReportBlockedReason = rawReviewerReportBlockedReason report
+              , requiredReviewerReportSolvedThreads = solvedThreads
+              , requiredReviewerReportRemainingThreads = remainingThreads
+              }
+        _ -> Left ["internal reviewer state presence validation failed"]
+    missingFields -> Left missingFields
 
-validateCompleteReviewerTurnReport :: CommitSha -> ReviewerTurnReport -> ReviewerOutcome
-validateCompleteReviewerTurnReport expectedCommit report
-  | maybe False (< 0) report.reviewerReportAddedCommentCount =
-      ReviewerIncomplete "added_review_comment_count must be a non-negative integer"
+validateRequiredReviewerTurnReport :: CommitSha -> RequiredReviewerTurnReport -> Either ReviewerOutcome ValidReviewerTurnReport
+validateRequiredReviewerTurnReport expectedCommit report
+  | report.requiredReviewerReportAddedCommentCount < 0 =
+      Left (ReviewerIncomplete "added_review_comment_count must be a non-negative integer")
+  | report.requiredReviewerReportCommit /= expectedCommit =
+      Left (ReviewerIncomplete ("reviewer inspected " <> unCommitSha report.requiredReviewerReportCommit <> ", expected " <> unCommitSha expectedCommit))
+  | report.requiredReviewerReportPromptVersion /= reviewerPromptVersion =
+      Left (ReviewerIncomplete ("reviewer used prompt version " <> report.requiredReviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion))
+  | hasOverlappingResolution report =
+      Left (ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap")
   | otherwise =
-      case normalize (requiredText report.reviewerReportStatus) of
-        "blocked" ->
-          ReviewerBlocked (BlockedReason (maybe "reviewer marked blocked without a reason" nonEmptyOutput report.reviewerReportBlockedReason))
-        "incomplete" ->
-          ReviewerIncomplete (maybe "reviewer marked review_status incomplete" nonEmptyOutput report.reviewerReportBlockedReason)
-        "clean"
-          | report.reviewerReportCommit /= Just expectedCommit ->
-              ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
-          | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
-              ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
-          | report.reviewerReportAddedCommentCount /= Just 0 ->
-              ReviewerIncomplete "clean review must record added_review_comment_count as 0"
-          | not (null (requiredRemainingReviewThreads report.reviewerReportRemainingThreads)) ->
-              ReviewerIncomplete "clean review must not record remaining_review_threads"
-          | hasOverlappingResolution report ->
-              ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap"
-          | otherwise ->
-              ReviewerClean (CleanReviewEvidence expectedCommit (reviewerCleanComment report)) (solvedReviewThreadIds report)
-        "new_findings"
-          | report.reviewerReportCommit /= Just expectedCommit ->
-              ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
-          | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
-              ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
-          | not (null (requiredRemainingReviewThreads report.reviewerReportRemainingThreads)) ->
-              ReviewerIncomplete "new_findings review must not record remaining_review_threads"
-          | hasOverlappingResolution report ->
-              ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap"
-          | null (requiredFindings report.reviewerReportFindingsSummary) ->
-              ReviewerIncomplete "new_findings review must include at least one findings_summary item"
-          | otherwise ->
-              ReviewerProblemsAdded (reviewEvidenceFromSummaries (firstFinding (requiredFindings report.reviewerReportFindingsSummary)) expectedCommit) (solvedReviewThreadIds report)
-        "remaining_findings"
-          | report.reviewerReportCommit /= Just expectedCommit ->
-              ReviewerIncomplete ("reviewer inspected " <> maybe "missing commit" unCommitSha report.reviewerReportCommit <> ", expected " <> unCommitSha expectedCommit)
-          | report.reviewerReportPromptVersion /= Just reviewerPromptVersion ->
-              ReviewerIncomplete ("reviewer used prompt version " <> maybe "missing" id report.reviewerReportPromptVersion <> ", expected " <> reviewerPromptVersion)
-          | null (requiredRemainingReviewThreads report.reviewerReportRemainingThreads) ->
-              ReviewerIncomplete "remaining_findings review must record remaining_review_threads"
-          | any (Text.null . Text.strip . remainingReviewThreadComment) (requiredRemainingReviewThreads report.reviewerReportRemainingThreads) ->
-              ReviewerIncomplete "remaining_review_threads entries must include non-empty comment"
-          | not (null (requiredFindings report.reviewerReportFindingsSummary)) ->
-              ReviewerIncomplete "remaining_findings review must leave top-level findings_summary empty; put each remaining prior thread comment in remaining_review_threads"
-          | hasOverlappingResolution report ->
-              ReviewerIncomplete "solved_threads and remaining_review_threads must not overlap"
-          | otherwise ->
-              case remainingReviewThreadComments report of
-                Just comments -> ReviewerProblemsAdded (reviewEvidenceFromThreadComments comments expectedCommit) (solvedReviewThreadIds report)
-                Nothing -> ReviewerIncomplete "remaining_findings review must include remaining_review_threads"
-        other ->
-          ReviewerIncomplete ("unsupported review_status: " <> other)
+      case (parsePriorFindingsStatus report.requiredReviewerReportPriorFindingsStatus, parseNewFindingsStatus report.requiredReviewerReportNewFindingsStatus) of
+        (Nothing, _) ->
+          Left (ReviewerIncomplete ("unsupported prior_findings_status: " <> normalize report.requiredReviewerReportPriorFindingsStatus))
+        (_, Nothing) ->
+          Left (ReviewerIncomplete ("unsupported new_findings_status: " <> normalize report.requiredReviewerReportNewFindingsStatus))
+        (Just PriorFindingsBlocked, _) ->
+          Left (ReviewerBlocked (BlockedReason (maybe "reviewer marked blocked without a reason" id blockedReason)))
+        (_, Just NewFindingsBlocked) ->
+          Left (ReviewerBlocked (BlockedReason (maybe "reviewer marked blocked without a reason" id blockedReason)))
+        (Just PriorFindingsInconclusive, _) ->
+          Left (ReviewerIncomplete (maybe "reviewer marked findings status inconclusive" id blockedReason))
+        (_, Just NewFindingsInconclusive) ->
+          Left (ReviewerIncomplete (maybe "reviewer marked findings status inconclusive" id blockedReason))
+        (Just priorStatus, Just newStatus) ->
+          case (buildPriorReviewResult priorStatus report, buildNewReviewResult newStatus report) of
+            (Left reason, _) -> Left (ReviewerIncomplete reason)
+            (_, Left reason) -> Left (ReviewerIncomplete reason)
+            (Right priorResult, Right newResult) ->
+              Right
+                ValidReviewerTurnReport
+                  { validReviewerReportAddedCommentCount = report.requiredReviewerReportAddedCommentCount
+                  , validReviewerReportPriorResult = priorResult
+                  , validReviewerReportNewResult = newResult
+                  , validReviewerReportLgtmComment = report.requiredReviewerReportLgtmComment
+                  }
+ where
+  blockedReason = nonEmptyOutput <$> report.requiredReviewerReportBlockedReason
 
-missingReviewerFields :: ReviewerTurnReport -> [Text]
+reviewerOutcomeFromValidReport :: CommitSha -> ValidReviewerTurnReport -> ReviewerOutcome
+reviewerOutcomeFromValidReport expectedCommit report
+  | isCleanReviewerReport report =
+      if report.validReviewerReportAddedCommentCount == 0
+        then ReviewerClean (CleanReviewEvidence expectedCommit (reviewerCleanComment report)) (priorReviewSolvedThreadIds report.validReviewerReportPriorResult)
+        else ReviewerIncomplete "clean review must record added_review_comment_count as 0"
+  | otherwise =
+      case reviewerProblemEvidence report expectedCommit of
+        Just evidence -> ReviewerProblemsAdded evidence (priorReviewSolvedThreadIds report.validReviewerReportPriorResult)
+        Nothing -> ReviewerIncomplete "reviewer reported findings status without actionable findings"
+
+missingReviewerFields :: RawReviewerTurnReport -> [Text]
 missingReviewerFields report =
   concat
-    [ missing "review_status" report.reviewerReportStatus
-    , missing "reviewed_commit_sha" report.reviewerReportCommit
-    , missing "reviewer_prompt_version" report.reviewerReportPromptVersion
-    , missing "added_review_comment_count" report.reviewerReportAddedCommentCount
-    , missingPresence "lgtm_comment" report.reviewerReportLgtmCommentPresent
-    , missing "findings_summary" report.reviewerReportFindingsSummary
-    , missingPresence "blocked_reason" report.reviewerReportBlockedReasonPresent
-    , missing "solved_threads" report.reviewerReportSolvedThreads
-    , missing "remaining_review_threads" report.reviewerReportRemainingThreads
+    [ missing "reviewed_commit_sha" report.rawReviewerReportCommit
+    , missing "reviewer_prompt_version" report.rawReviewerReportPromptVersion
+    , missing "added_review_comment_count" report.rawReviewerReportAddedCommentCount
+    , missing "prior_findings_status" report.rawReviewerReportPriorFindingsStatus
+    , missing "new_findings_status" report.rawReviewerReportNewFindingsStatus
+    , missingPresence "lgtm_comment" report.rawReviewerReportLgtmCommentPresent
+    , missing "prior_findings_summary" report.rawReviewerReportPriorFindingsSummary
+    , missing "new_findings_summary" report.rawReviewerReportNewFindingsSummary
+    , missingPresence "blocked_reason" report.rawReviewerReportBlockedReasonPresent
+    , missing "solved_threads" report.rawReviewerReportSolvedThreads
+    , missing "remaining_review_threads" report.rawReviewerReportRemainingThreads
     ]
  where
   missing _fieldName (Just _) = []
@@ -200,52 +279,119 @@ missingReviewerFields report =
     | present = []
     | otherwise = [fieldName]
 
-requiredText :: Maybe Text -> Text
-requiredText =
-  maybe "" id
-
-requiredSolvedReviewThreads :: Maybe [SolvedReviewThread] -> [SolvedReviewThread]
-requiredSolvedReviewThreads =
-  maybe [] id
-
-requiredRemainingReviewThreads :: Maybe [RemainingReviewThread] -> [RemainingReviewThread]
-requiredRemainingReviewThreads =
-  maybe [] id
-
-solvedReviewThreadIds :: ReviewerTurnReport -> [ReviewThreadId]
-solvedReviewThreadIds report =
-  fmap solvedReviewThreadId (requiredSolvedReviewThreads report.reviewerReportSolvedThreads)
-
-remainingReviewThreadIds :: ReviewerTurnReport -> [ReviewThreadId]
-remainingReviewThreadIds report =
-  fmap remainingReviewThreadId (requiredRemainingReviewThreads report.reviewerReportRemainingThreads)
-
-remainingReviewThreadComments :: ReviewerTurnReport -> Maybe (NonEmpty (ReviewThreadId, Text))
-remainingReviewThreadComments report =
-  case fmap threadComment (requiredRemainingReviewThreads report.reviewerReportRemainingThreads) of
-    first : rest -> Just (first :| rest)
-    [] -> Nothing
+buildPriorReviewResult :: PriorFindingsStatus -> RequiredReviewerTurnReport -> Either Text PriorReviewResult
+buildPriorReviewResult status report =
+  case status of
+    PriorFindingsNotApplicable
+      | not (null solvedThreads) ->
+          Left "solved_threads require prior_findings_status=resolved or unresolved"
+      | not (null remainingThreads) ->
+          Left "remaining_review_threads require prior_findings_status=unresolved"
+      | not (null priorFindings) ->
+          Left "prior_findings_summary requires prior_findings_status=unresolved"
+      | otherwise ->
+          Right NoPriorFeedback
+    PriorFindingsResolved
+      | not (null remainingThreads) ->
+          Left "remaining_review_threads require prior_findings_status=unresolved"
+      | not (null priorFindings) ->
+          Left "prior_findings_summary requires prior_findings_status=unresolved"
+      | otherwise ->
+          Right (PriorFeedbackResolved solvedThreads)
+    PriorFindingsUnresolved
+      | any (Text.null . Text.strip . remainingReviewThreadComment) remainingThreads ->
+          Left "remaining_review_threads entries must include non-empty comment"
+      | otherwise ->
+          case nonEmptyList (priorReviewFindings report) of
+            Nothing -> Left "prior_findings_status=unresolved requires remaining_review_threads or prior_findings_summary"
+            Just findings -> Right (PriorFeedbackUnresolved findings solvedThreads)
+    PriorFindingsInconclusive ->
+      Left "reviewer marked findings status inconclusive"
+    PriorFindingsBlocked ->
+      Left "reviewer marked blocked without a reason"
  where
-  threadComment remainingThread =
-    (remainingThread.remainingReviewThreadId, remainingThread.remainingReviewThreadComment)
+  solvedThreads = report.requiredReviewerReportSolvedThreads
+  remainingThreads = report.requiredReviewerReportRemainingThreads
+  priorFindings = requiredFindings report.requiredReviewerReportPriorFindingsSummary
 
-requiredFindings :: Maybe [Text] -> [Text]
+buildNewReviewResult :: NewFindingsStatus -> RequiredReviewerTurnReport -> Either Text NewReviewResult
+buildNewReviewResult status report =
+  case status of
+    NewFindingsNone
+      | not (null findings) ->
+          Left "new_findings_summary requires new_findings_status=found"
+      | otherwise ->
+          Right NoNewReviewFindings
+    NewFindingsFound ->
+      case nonEmptyList findings of
+        Nothing -> Left "new_findings_status=found requires at least one new_findings_summary item"
+        Just summaries -> Right (NewReviewFindings summaries)
+    NewFindingsInconclusive ->
+      Left "reviewer marked findings status inconclusive"
+    NewFindingsBlocked ->
+      Left "reviewer marked blocked without a reason"
+ where
+  findings = requiredFindings report.requiredReviewerReportNewFindingsSummary
+
+isCleanReviewerReport :: ValidReviewerTurnReport -> Bool
+isCleanReviewerReport report =
+  case (report.validReviewerReportPriorResult, report.validReviewerReportNewResult) of
+    (NoPriorFeedback, NoNewReviewFindings) -> True
+    (PriorFeedbackResolved {}, NoNewReviewFindings) -> True
+    _ -> False
+
+priorReviewSolvedThreadIds :: PriorReviewResult -> [ReviewThreadId]
+priorReviewSolvedThreadIds = \case
+  NoPriorFeedback -> []
+  PriorFeedbackResolved solvedThreads -> fmap solvedReviewThreadId solvedThreads
+  PriorFeedbackUnresolved _findings solvedThreads -> fmap solvedReviewThreadId solvedThreads
+
+reviewerProblemEvidence :: ValidReviewerTurnReport -> CommitSha -> Maybe ReviewEvidence
+reviewerProblemEvidence report commit =
+  case priorFindings <> newFindings of
+    [] -> Nothing
+    first : rest -> Just (ReviewEvidence (first :| rest) commit)
+ where
+  priorFindings =
+    case report.validReviewerReportPriorResult of
+      PriorFeedbackUnresolved findings _solvedThreads -> NonEmpty.toList findings
+      _ -> []
+  newFindings =
+    case report.validReviewerReportNewResult of
+      NewReviewFindings summaries -> ReviewSummaryFinding <$> NonEmpty.toList summaries
+      NoNewReviewFindings -> []
+
+priorReviewFindings :: RequiredReviewerTurnReport -> [ReviewFinding]
+priorReviewFindings report =
+  remainingThreadFindings <> priorSummaryFindings
+ where
+  remainingThreadFindings =
+    [ ReviewThreadCommentFinding thread.remainingReviewThreadId Nothing thread.remainingReviewThreadComment
+    | thread <- report.requiredReviewerReportRemainingThreads
+    ]
+  priorSummaryFindings =
+    ReviewSummaryFinding <$> requiredFindings report.requiredReviewerReportPriorFindingsSummary
+
+requiredFindings :: [Text] -> [Text]
 requiredFindings =
-  maybe [] (filter (not . Text.null . Text.strip))
+  filter (not . Text.null . Text.strip)
 
-firstFinding :: [Text] -> NonEmpty Text
-firstFinding [] = "reviewer reported problems" :| []
-firstFinding (first : rest) = first :| rest
-
-reviewerCleanComment :: ReviewerTurnReport -> Text
+reviewerCleanComment :: ValidReviewerTurnReport -> Text
 reviewerCleanComment report =
-  case Text.strip <$> report.reviewerReportLgtmComment of
+  case Text.strip <$> report.validReviewerReportLgtmComment of
     Just comment | not (Text.null comment) -> comment
     _ -> "LGTM"
 
-hasOverlappingResolution :: ReviewerTurnReport -> Bool
+hasOverlappingResolution :: RequiredReviewerTurnReport -> Bool
 hasOverlappingResolution report =
-  any (`elem` remainingReviewThreadIds report) (solvedReviewThreadIds report)
+  any (`elem` remainingReviewThreadIds) solvedReviewThreadIds
+ where
+  solvedReviewThreadIds = fmap solvedReviewThreadId report.requiredReviewerReportSolvedThreads
+  remainingReviewThreadIds = fmap remainingReviewThreadId report.requiredReviewerReportRemainingThreads
+
+nonEmptyList :: [a] -> Maybe (NonEmpty a)
+nonEmptyList [] = Nothing
+nonEmptyList (first : rest) = Just (first :| rest)
 
 classifyStructuredPrReviewWorker :: StructuredTurnOutcome -> Maybe WorkerOutcome
 classifyStructuredPrReviewWorker = \case

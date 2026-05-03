@@ -144,7 +144,6 @@ import RuntimeSpec
   , prop_runtimeGhPrCreateKeepsStdoutJsonOnly
   , prop_runtimeGhPrCommentReviewFindingsUsesPrComment
   , prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
-  , prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
@@ -295,7 +294,6 @@ data EffectTag
   | ResolveReviewThreadTag
   | ReplyReviewThreadTag
   | PublishReviewFindingsTag
-  | DismissRequestChangesReviewTag
   | RecordIssuePlanTag
   | RecordPlanningGraphTag
   | RecordBlockedTag
@@ -325,7 +323,6 @@ effectTag = \case
   SomeEffect ResolveReviewThread {} -> ResolveReviewThreadTag
   SomeEffect ReplyReviewThread {} -> ReplyReviewThreadTag
   SomeEffect PublishReviewFindings {} -> PublishReviewFindingsTag
-  SomeEffect DismissRequestChangesReview {} -> DismissRequestChangesReviewTag
   SomeEffect RecordIssuePlan {} -> RecordIssuePlanTag
   SomeEffect RecordPlanningGraph {} -> RecordPlanningGraphTag
   SomeEffect RecordBlocked {} -> RecordBlockedTag
@@ -430,7 +427,7 @@ prop_noUnresolvedReviewsStartsReviewerOnly config workerThread reviewerThread co
 
 prop_cleanReviewWaitsForMergeability :: PrConfig -> CommitSha -> ThreadId -> ActiveTurn -> CleanReviewEvidence -> Bool
 prop_cleanReviewWaitsForMergeability config commit workerThread reviewerActive cleanEvidence =
-  case step (PrReviewingClean config commit Nothing (WorkerIdle workerThread) (ReviewerActive reviewerActive)) (ReviewerFoundClean cleanEvidence []) of
+  case step (PrReviewingClean config commit normalReviewContext (WorkerIdle workerThread) (ReviewerActive reviewerActive)) (ReviewerFoundClean cleanEvidence []) of
     Decision state effects ->
       phaseOf state == WaitingMergeability
         && hasEffect SleepUntilNextPollTag effects
@@ -595,9 +592,9 @@ prop_eventLogFullIssueImplementationPathCompletes config workerThread planTurn i
           someDomain replay.replayState == IssueImplement
             && somePhase replay.replayState == Complete
 
-prop_eventLogLegacyPostMergeReviewStartWithoutFreshReviewerReplays :: IssueConfig -> ThreadId -> TurnId -> TurnId -> PrNumber -> Bool
-prop_eventLogLegacyPostMergeReviewStartWithoutFreshReviewerReplays config workerThread planTurn implementationTurn prNumber =
-  let reviewerThread = ThreadId "legacy-handoff-reviewer"
+prop_eventLogPostMergeReviewStartUsesExistingReviewer :: IssueConfig -> ThreadId -> TurnId -> TurnId -> PrNumber -> Bool
+prop_eventLogPostMergeReviewStartUsesExistingReviewer config workerThread planTurn implementationTurn prNumber =
+  let reviewerThread = ThreadId "handoff-reviewer"
       reviewedCommit = CommitSha "0123456789abcdef"
       reviewerTurn = TurnId "post-merge-review"
    in replaySatisfies
@@ -670,7 +667,7 @@ prop_eventLogRefreshesPrReviewVerificationThreads config oldWorker oldReviewer n
         ]
         \replay ->
           case replay.replayState of
-            SomeWatcherState (PrReviewingClean _ _ (Just _) (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
+            SomeWatcherState (PrReviewingClean _ _ (SomeReviewContext (VerificationReviewContext _)) (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
               workerThread == newWorker && activeTurn.activeThreadId == newReviewer
             _ ->
               False
@@ -687,7 +684,7 @@ prop_eventLogRefreshesPrReviewReviewerWhileWorkerActive config workerThread oldR
         ]
         \replay ->
           case replay.replayState of
-            SomeWatcherState (PrReviewingClean _ _ (Just _) (WorkerIdle idleWorker) (ReviewerActive activeTurn)) ->
+            SomeWatcherState (PrReviewingClean _ _ (SomeReviewContext (VerificationReviewContext _)) (WorkerIdle idleWorker) (ReviewerActive activeTurn)) ->
               idleWorker == workerThread && activeTurn.activeThreadId == newReviewer
             _ ->
               False
@@ -836,7 +833,8 @@ prop_issueImplementWatcherMergedStartsPostMergeReview config prNumber workerThre
           && lacksEffect CloseIssueTag tick.issueImplementTickEffects
           && lacksEffect StopDaemonTag tick.issueImplementTickEffects
           && case tick.issueImplementTickState of
-            SomeWatcherState (IssuePostMergeReviewReady _ _ _ Nothing) -> True
+            SomeWatcherState (IssuePostMergeReviewReady _ _ _ (ReviewerIdle readyReviewerThread)) ->
+              readyReviewerThread == reviewerThread
             _ -> False
 
 prop_issueImplementPostMergeFollowUpUsesNextAttemptBranch :: IssueConfig -> PrNumber -> ThreadId -> ThreadId -> TurnId -> CommitSha -> Bool
@@ -938,7 +936,7 @@ prop_prReviewCompatibilityClearsCheckerState =
       commit = CommitSha "abc123"
       states =
         [ SomeWatcherState (PrCheckingReviews config (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
-        , SomeWatcherState (PrReviewingClean config commit Nothing (WorkerIdle workerThread) (ReviewerActive (ActiveTurn reviewerThread (TurnId "reviewer-turn"))))
+        , SomeWatcherState (PrReviewingClean config commit normalReviewContext (WorkerIdle workerThread) (ReviewerActive (ActiveTurn reviewerThread (TurnId "reviewer-turn"))))
         , SomeWatcherState (PrWaitingForMergeability config (CleanReviewEvidence commit "LGTM") (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
         , SomeWatcherState (PrMerging config (CleanReviewEvidence commit "LGTM"))
         ]
@@ -1652,7 +1650,8 @@ prop_eventLogRepairRejectsValidEventLog config workerThread planTurn implementat
 
 prop_protocolPrReviewWorkerCompletedReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn =
-  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+  let evidence = reviewEvidenceFromThreads reviewThreadIds reviewedCommit
+      session = newPrReviewWorkerSession config workerThread evidence
       (_finished, events) = runPrReviewWorkerProtocol workerTurn WorkerCompleted session
    in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
         Right replay ->
@@ -1662,7 +1661,8 @@ prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread review
 
 prop_protocolPrReviewWorkerIncompleteReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
 prop_protocolPrReviewWorkerIncompleteReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reason =
-  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+  let evidence = reviewEvidenceFromThreads reviewThreadIds reviewedCommit
+      session = newPrReviewWorkerSession config workerThread evidence
       (_finished, events) = runPrReviewWorkerProtocol workerTurn (WorkerIncomplete (unBlockedReason reason)) session
    in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
         Right replay ->
@@ -1672,7 +1672,8 @@ prop_protocolPrReviewWorkerIncompleteReturnsToChecking config workerThread revie
 
 prop_protocolPrReviewWorkerBlockedStopsInBlocked :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> BlockedReason -> Bool
 prop_protocolPrReviewWorkerBlockedStopsInBlocked config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn reason =
-  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+  let evidence = reviewEvidenceFromThreads reviewThreadIds reviewedCommit
+      session = newPrReviewWorkerSession config workerThread evidence
       (_finished, events) = runPrReviewWorkerProtocol workerTurn (WorkerBlocked reason) session
    in case replayEventLog (PrReviewInitialized config workerThread reviewerThread : events) of
         Right replay ->
@@ -1682,12 +1683,12 @@ prop_protocolPrReviewWorkerBlockedStopsInBlocked config workerThread reviewerThr
 
 prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent :: PrConfig -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewWorkerEmitsStartThenTerminalEvent config workerThread reviewThreadIds reviewedCommit workerTurn =
-  let session = newPrReviewWorkerSession config workerThread reviewThreadIds reviewedCommit
+  let evidence = reviewEvidenceFromThreads reviewThreadIds reviewedCommit
+      session = newPrReviewWorkerSession config workerThread evidence
       (_finished, events) = runPrReviewWorkerProtocol workerTurn WorkerCompleted session
    in case events of
-        [PrReviewUnresolvedFound emittedThreads emittedCommit emittedTurn, PrReviewFixCompleted] ->
-          emittedThreads == reviewThreadIds
-            && emittedCommit == reviewedCommit
+        [PrReviewFeedbackFound emittedEvidence emittedTurn, PrReviewFixCompleted] ->
+          emittedEvidence == evidence
             && emittedTurn == workerTurn
         _ -> False
 
@@ -1746,11 +1747,12 @@ prop_protocolPrReviewReviewerEmitsStartThenCleanEvent config reviewerThread revi
 
 prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> TurnId -> TurnId -> MergeCommit -> Bool
 prop_protocolPrReviewWorkerThenReviewerThenMergeCompletes config workerThread reviewerThread reviewThreadIds commit workerTurn verificationTurn finalReviewTurn mergeCommit =
-  let workerSession = newPrReviewWorkerSession config workerThread reviewThreadIds commit
+  let reviewEvidence = reviewEvidenceFromThreads reviewThreadIds commit
+      workerSession = newPrReviewWorkerSession config workerThread reviewEvidence
       (_workerFinished, workerEvents) = runPrReviewWorkerProtocol workerTurn WorkerCompleted workerSession
       cleanEvidence = CleanReviewEvidence commit "LGTM"
       reviewerEvents =
-        [ PrReviewFixVerificationStarted (reviewEvidenceFromThreads reviewThreadIds commit) commit verificationTurn
+        [ PrReviewFixVerificationStarted reviewEvidence commit verificationTurn
         , PrReviewCleanFound cleanEvidence (Foldable.toList reviewThreadIds)
         , PrReviewNoUnresolvedFound commit finalReviewTurn
         , PrReviewCleanFound cleanEvidence []
@@ -1851,7 +1853,7 @@ prop_prReviewWatcherCleanReviewerWaitsForMergeability config workerThread review
           ( PrReviewingClean
               config
               commit
-              Nothing
+              normalReviewContext
               (WorkerIdle workerThread)
               (ReviewerActive (ActiveTurn reviewerThread turnId))
           )
@@ -1863,19 +1865,22 @@ prop_prReviewWatcherCleanReviewerWaitsForMergeability config workerThread review
             && lacksEffect MergePullRequestTag tick.prReviewTickEffects
         Left _ -> False
 
+prReviewingCleanVerificationState :: PrConfig -> ReviewEvidence -> ThreadId -> ThreadId -> CommitSha -> TurnId -> SomeWatcherState
+prReviewingCleanVerificationState config evidence workerThread reviewerThread reviewTarget turnId =
+  SomeWatcherState
+    ( PrReviewingClean
+        config
+        reviewTarget
+        (verificationReviewContext evidence)
+        (WorkerIdle workerThread)
+        (ReviewerActive (ActiveTurn reviewerThread turnId))
+    )
+
 prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks :: PrConfig -> ThreadId -> ThreadId -> ReviewThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
 prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
   let evidence = reviewEvidenceFromThreads (reviewThreadId :| []) oldCommit
       cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
-      state =
-        SomeWatcherState
-          ( PrReviewingClean
-              config
-              reviewTarget
-              (Just evidence)
-              (WorkerIdle workerThread)
-              (ReviewerActive (ActiveTurn reviewerThread turnId))
-          )
+      state = prReviewingCleanVerificationState config evidence workerThread reviewerThread reviewTarget turnId
    in case prReviewObserve state (ObservedReviewerOutcome (ReviewerClean cleanEvidence [reviewThreadId])) of
         Right tick ->
           prReviewTickEvent tick == PrReviewCleanFound cleanEvidence [reviewThreadId]
@@ -1885,25 +1890,17 @@ prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks config workerThrea
             && lacksEffect MergePullRequestTag tick.prReviewTickEffects
         Left _ -> False
 
-prop_prReviewVerificationCleanDismissesSummaryRequestChanges :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
-prop_prReviewVerificationCleanDismissesSummaryRequestChanges config workerThread reviewerThread oldCommit reviewTarget turnId =
+prop_prReviewVerificationCleanRechecksSummaryOnlyEvidence :: PrConfig -> ThreadId -> ThreadId -> CommitSha -> CommitSha -> TurnId -> Bool
+prop_prReviewVerificationCleanRechecksSummaryOnlyEvidence config workerThread reviewerThread oldCommit reviewTarget turnId =
   let evidence = reviewEvidenceFromSummaries ("GitHub reports reviewDecision=CHANGES_REQUESTED" :| []) oldCommit
       cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
-      state =
-        SomeWatcherState
-          ( PrReviewingClean
-              config
-              reviewTarget
-              (Just evidence)
-              (WorkerIdle workerThread)
-              (ReviewerActive (ActiveTurn reviewerThread turnId))
-          )
+      state = prReviewingCleanVerificationState config evidence workerThread reviewerThread reviewTarget turnId
    in case prReviewObserve state (ObservedReviewerOutcome (ReviewerClean cleanEvidence [])) of
         Right tick ->
           prReviewTickEvent tick == PrReviewCleanFound cleanEvidence []
             && somePhase tick.prReviewTickState == CheckingReviews
-            && hasEffect DismissRequestChangesReviewTag tick.prReviewTickEffects
             && hasEffect ReadReviewThreadsTag tick.prReviewTickEffects
+            && lacksEffect ResolveReviewThreadTag tick.prReviewTickEffects
             && lacksEffect SleepUntilNextPollTag tick.prReviewTickEffects
             && lacksEffect MergePullRequestTag tick.prReviewTickEffects
         Left _ -> False
@@ -1912,15 +1909,7 @@ prop_prReviewVerificationCleanRequiresResolvedThreadIds :: PrConfig -> ThreadId 
 prop_prReviewVerificationCleanRequiresResolvedThreadIds config workerThread reviewerThread reviewThreadId oldCommit reviewTarget turnId =
   let evidence = reviewEvidenceFromThreads (reviewThreadId :| []) oldCommit
       cleanEvidence = CleanReviewEvidence reviewTarget "LGTM"
-      state =
-        SomeWatcherState
-          ( PrReviewingClean
-              config
-              reviewTarget
-              (Just evidence)
-              (WorkerIdle workerThread)
-              (ReviewerActive (ActiveTurn reviewerThread turnId))
-          )
+      state = prReviewingCleanVerificationState config evidence workerThread reviewerThread reviewTarget turnId
    in case prReviewObserve state (ObservedReviewerOutcome (ReviewerClean cleanEvidence [])) of
         Right tick ->
           case prReviewTickEvent tick of
@@ -1938,7 +1927,7 @@ prop_prReviewRemainingThreadsReplyAndQueueWorker config workerThread reviewerThr
         PrReviewingClean
           config
           reviewTarget
-          (Just oldEvidence)
+          (verificationReviewContext oldEvidence)
           (WorkerIdle workerThread)
           (ReviewerActive (ActiveTurn reviewerThread turnId))
    in case step state (ReviewerFoundProblems remainingEvidence [solvedThreadId]) of
@@ -1954,25 +1943,39 @@ jsonText :: Value -> Text
 jsonText =
   Text.Encoding.decodeUtf8 . LazyByteString.toStrict . encode
 
-reviewerStateOutput :: Text -> CommitSha -> Text -> Int -> Maybe Text -> [Text] -> Maybe Text -> Text
-reviewerStateOutput status commit promptVersion commentCount lgtmComment findings blockedReason =
-  reviewerStateOutputWithRemaining status commit promptVersion commentCount lgtmComment findings blockedReason []
+reviewerStateOutput :: Text -> Text -> CommitSha -> Text -> Int -> Maybe Text -> [Text] -> [Text] -> Maybe Text -> Text
+reviewerStateOutput priorStatus newStatus commit promptVersion commentCount lgtmComment priorFindings newFindings blockedReason =
+  reviewerStateOutputWithRemaining priorStatus newStatus commit promptVersion commentCount lgtmComment priorFindings newFindings blockedReason []
 
-reviewerStateOutputWithRemaining :: Text -> CommitSha -> Text -> Int -> Maybe Text -> [Text] -> Maybe Text -> [(ReviewThreadId, Text)] -> Text
-reviewerStateOutputWithRemaining status commit promptVersion commentCount lgtmComment findings blockedReason remainingThreads =
+reviewerStateOutputWithRemaining :: Text -> Text -> CommitSha -> Text -> Int -> Maybe Text -> [Text] -> [Text] -> Maybe Text -> [(ReviewThreadId, Text)] -> Text
+reviewerStateOutputWithRemaining priorStatus newStatus commit promptVersion commentCount lgtmComment priorFindings newFindings blockedReason remainingThreads =
+  reviewerStateOutputWithSolvedAndRemaining priorStatus newStatus commit promptVersion commentCount lgtmComment priorFindings newFindings blockedReason [] remainingThreads
+
+reviewerStateOutputWithSolvedAndRemaining :: Text -> Text -> CommitSha -> Text -> Int -> Maybe Text -> [Text] -> [Text] -> Maybe Text -> [(ReviewThreadId, Text)] -> [(ReviewThreadId, Text)] -> Text
+reviewerStateOutputWithSolvedAndRemaining priorStatus newStatus commit promptVersion commentCount lgtmComment priorFindings newFindings blockedReason solvedThreads remainingThreads =
   jsonText
     ( object
-        [ "review_status" .= status
-        , "reviewed_commit_sha" .= unCommitSha commit
+        [ "reviewed_commit_sha" .= unCommitSha commit
         , "reviewer_prompt_version" .= promptVersion
         , "added_review_comment_count" .= commentCount
+        , "prior_findings_status" .= priorStatus
+        , "new_findings_status" .= newStatus
         , "lgtm_comment" .= lgtmComment
-        , "findings_summary" .= findings
+        , "prior_findings_summary" .= priorFindings
+        , "new_findings_summary" .= newFindings
         , "blocked_reason" .= blockedReason
-        , "solved_threads" .= ([] :: [Value])
+        , "solved_threads" .= solvedReviewThreadsJson solvedThreads
         , "remaining_review_threads" .= remainingReviewThreadsJson remainingThreads
         ]
     )
+
+solvedReviewThreadsJson :: [(ReviewThreadId, Text)] -> [Value]
+solvedReviewThreadsJson =
+  fmap \(threadId, summary) ->
+    object
+      [ "thread_id" .= unReviewThreadId threadId
+      , "resolution_summary" .= summary
+      ]
 
 remainingReviewThreadsJson :: [(ReviewThreadId, Text)] -> [Value]
 remainingReviewThreadsJson =
@@ -2009,7 +2012,7 @@ prop_turnClassifierCompletionStates =
 prop_turnClassifierMapsDomainOutputs :: Bool
 prop_turnClassifierMapsDomainOutputs =
   let reviewerCommit = CommitSha "abc123"
-      cleanReviewOutput = reviewerStateOutput "clean" reviewerCommit reviewerPromptVersion 0 (Just "LGTM") [] Nothing
+      cleanReviewOutput = reviewerStateOutput "not_applicable" "none" reviewerCommit reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing
       cleanFinalReviewOutput = issueFinalReviewOutput "clean" reviewerCommit reviewerPromptVersion True True True False ["validated issue and plan"] [] Nothing (Just "LGTM")
    in
   classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "stable issue set")) == Just (ObservedPlanningBlocked (BlockedReason "planning turn completed without structured outcome"))
@@ -2030,6 +2033,12 @@ prop_turnClassifierPrefersStructuredOutputs =
           [IssueDependency (IssueNumber 16) [IssueNumber 15]]
       remainingThreadEvidence =
         reviewEvidenceFromThreadComments ((ReviewThreadId "thread-1", "still not fixed") :| []) (CommitSha "abc123")
+      combinedPriorAndNewEvidence =
+        ReviewEvidence
+          ( ReviewThreadCommentFinding (ReviewThreadId "thread-1") Nothing "still not fixed"
+              :| [ReviewSummaryFinding "new summary finding"]
+          )
+          (CommitSha "abc123")
    in parseStructuredTurnOutcome "{\"outcome\":\"blocked\",\"reason\":\"schema blocker\"}" == Just (StructuredBlocked "schema blocker")
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning") "completed" (Just "{\"outcome\":\"complete\",\"issues_to_create\":[{\"title\":\"Subissue A\",\"body\":\"Split from parent\"}]}")) == Just (ObservedPlanningIssuesRequested (issueRequest :| []))
     && classifyIssuePlanningTurn (AppServerTurn (TurnId "planning-subissue") "completed" (Just "{\"outcome\":\"complete\",\"subissues_to_create\":[{\"title\":\"Subissue B\",\"body\":\"Split from existing parent\",\"parentIssueNumber\":8}]}")) == Just (ObservedPlanningIssuesRequested (subissueRequest :| []))
@@ -2045,12 +2054,14 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker") "completed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker-failed-complete") "failed" (Just "{\"comment\":\"fix applied\",\"evidence\":\"\",\"outcome\":\"complete\",\"reason\":\"\",\"summary\":\"\"}")) == Just (ObservedWorkerOutcome WorkerCompleted)
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker-failed-incomplete") "failed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-clean-null-comment") "completed" (Just (reviewerStateOutput "clean" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: review_status, reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, lgtm_comment, findings_summary, blocked_reason, solved_threads, remaining_review_threads"))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-new-findings") "completed" (Just (reviewerStateOutput "new_findings" (CommitSha "abc123") reviewerPromptVersion 0 Nothing ["left summary finding"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (reviewEvidenceFromSummaries ("left summary finding" :| []) (CommitSha "abc123")) []))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-remaining-thread") "completed" (Just (reviewerStateOutputWithRemaining "remaining_findings" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] Nothing [(ReviewThreadId "thread-1", "still not fixed")]))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded remainingThreadEvidence []))
-    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-sha-mismatch") "completed" (Just (reviewerStateOutput "clean" (CommitSha "def456") reviewerPromptVersion 0 (Just "LGTM") [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer inspected def456, expected abc123"))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "not_applicable" "none" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-clean-null-comment") "completed" (Just (reviewerStateOutput "not_applicable" "none" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, prior_findings_status, new_findings_status, lgtm_comment, prior_findings_summary, new_findings_summary, blocked_reason, solved_threads, remaining_review_threads"))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-new-findings") "completed" (Just (reviewerStateOutput "not_applicable" "found" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] ["left summary finding"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (reviewEvidenceFromSummaries ("left summary finding" :| []) (CommitSha "abc123")) []))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-remaining-thread") "completed" (Just (reviewerStateOutputWithRemaining "unresolved" "none" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] [] Nothing [(ReviewThreadId "thread-1", "still not fixed")]))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded remainingThreadEvidence []))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-prior-and-new-findings") "completed" (Just (reviewerStateOutputWithSolvedAndRemaining "unresolved" "found" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] ["new summary finding"] Nothing [(ReviewThreadId "thread-fixed", "fixed")] [(ReviewThreadId "thread-1", "still not fixed")]))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded combinedPriorAndNewEvidence [ReviewThreadId "thread-fixed"]))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-not-applicable-solved-thread") "completed" (Just (reviewerStateOutputWithSolvedAndRemaining "not_applicable" "none" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] [] Nothing [(ReviewThreadId "thread-fixed", "fixed")] []))) == Just (ObservedReviewerOutcome (ReviewerIncomplete "solved_threads require prior_findings_status=resolved or unresolved"))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-sha-mismatch") "completed" (Just (reviewerStateOutput "not_applicable" "none" (CommitSha "def456") reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer inspected def456, expected abc123"))
     && classifyIssueFinalReviewTurn (CommitSha "abc123") (AppServerTurn (TurnId "final-review-clean") "completed" (Just (issueFinalReviewOutput "clean" (CommitSha "abc123") reviewerPromptVersion True True True False ["validated issue and plan"] [] Nothing Nothing))) == Just (IssueFinalReviewClean (CleanReviewEvidence (CommitSha "abc123") "LGTM"))
     && classifyIssueFinalReviewTurn (CommitSha "abc123") (AppServerTurn (TurnId "final-review-clean-with-findings") "completed" (Just (issueFinalReviewOutput "clean" (CommitSha "abc123") reviewerPromptVersion True True True False ["validated issue and plan"] ["follow-up needed"] Nothing Nothing))) == Just (IssueFinalReviewIncomplete "clean final review must leave findings_summary empty; use verification_summary for successful validation evidence")
     && classifyIssueFinalReviewTurn (CommitSha "abc123") (AppServerTurn (TurnId "final-review-rework") "completed" (Just (issueFinalReviewOutput "rework_required" (CommitSha "abc123") reviewerPromptVersion False True True True [] ["issue not solved"] Nothing Nothing))) == Just (IssueFinalReviewRework (reviewEvidenceFromSummaries ("issue not solved" :| []) (CommitSha "abc123")))
@@ -2319,6 +2330,19 @@ prop_turnOutputSchemasRequireStructuredDetails =
          , "dependencies"
          ]
     && "plan_markdown" `elem` schemaRequiredFields issuePlanTurnOutputSchema
+    && schemaRequiredFields reviewerTurnOutputSchema
+      == [ "reviewed_commit_sha"
+         , "reviewer_prompt_version"
+         , "added_review_comment_count"
+         , "prior_findings_status"
+         , "new_findings_status"
+         , "lgtm_comment"
+         , "prior_findings_summary"
+         , "new_findings_summary"
+         , "blocked_reason"
+         , "solved_threads"
+         , "remaining_review_threads"
+         ]
     && schemaRequiredFields issueFinalReviewTurnOutputSchema
       == [ "completion_status"
          , "reviewed_commit_sha"
@@ -2469,7 +2493,7 @@ prop_structuredTurnOutcomeInstructionsFollowAgentPrinciple =
     , "outcome=incomplete with a non-empty reason"
     , "outcome=complete with a non-empty summary"
     ]
-    && reviewerPromptVersion == "haskell-pro-style-v9-queued-review-findings"
+    && reviewerPromptVersion == "haskell-pro-style-v10-split-review-findings"
 
 prop_promptPipelineAlignmentContracts :: Bool
 prop_promptPipelineAlignmentContracts =
@@ -5707,8 +5731,8 @@ phaseActionValidationRejectsInvalidCombinations = do
       planningWaiting = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
       issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
       issuePr = PrNumber 7
-      issuePostMergeWithoutReviewer = SomeWatcherState (IssuePostMergeReviewReady issueConfig issuePr (WorkerIdle (ThreadId "worker")) Nothing)
-      issuePostMergeWithReviewer = SomeWatcherState (IssuePostMergeReviewReady issueConfig issuePr (WorkerIdle (ThreadId "worker")) (Just (ReviewerIdle (ThreadId "reviewer"))))
+      issuePostMergeWithoutReviewer = SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig issuePr (WorkerIdle (ThreadId "worker")))
+      issuePostMergeWithReviewer = SomeWatcherState (IssuePostMergeReviewReady issueConfig issuePr (WorkerIdle (ThreadId "worker")) (ReviewerIdle (ThreadId "reviewer")))
       prConfig = PrConfig (RepoName "soulomoon/mlf2") (PrNumber 8) (BranchName "codex/pr-8")
       prFixing = SomeWatcherState (PrFixingReviews prConfig (reviewEvidenceFromSummaries ("fix" :| []) (CommitSha "abc123")) (WorkerActive (ActiveTurn (ThreadId "worker") (TurnId "turn"))) (ReviewerIdle (ThreadId "reviewer")))
       startPlanner = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
@@ -5771,8 +5795,8 @@ phaseActionValidationAcceptsStateMachineDecisions = do
         , decisionAllowed "issue restarts incomplete implementation" (IssueImplementing issueConfig (Just prNumber) workerActive) IssueImplementationIncomplete
         , decisionAllowed "issue completes implementation" (IssueImplementing issueConfig (Just prNumber) workerActive) (IssueImplementationCompleted prNumber (Just reviewerThread))
         , decisionAllowed "issue enters post-merge review" (IssueWaitingForPrMerge issueConfig prNumber workerIdle (Just reviewerIdle)) (IssuePullRequestMerged prNumber)
-        , decisionAllowed "issue records reviewer thread" (IssuePostMergeReviewReady issueConfig prNumber workerIdle Nothing) (IssueReviewerThreadReady reviewerThread)
-        , decisionAllowed "issue starts final review" (IssuePostMergeReviewReady issueConfig prNumber workerIdle (Just reviewerIdle)) (StartIssuePostMergeReview commit reviewerTurn)
+        , decisionAllowed "issue records reviewer thread" (IssuePostMergeReviewPendingReviewer issueConfig prNumber workerIdle) (IssueReviewerThreadReady reviewerThread)
+        , decisionAllowed "issue starts final review" (IssuePostMergeReviewReady issueConfig prNumber workerIdle reviewerIdle) (StartIssuePostMergeReview commit reviewerTurn)
         , decisionAllowed "issue closes after final clean" (IssuePostMergeReviewing issueConfig prNumber workerIdle commit reviewerActive) (IssuePostMergeReviewSatisfied cleanEvidence)
         , decisionAllowed "issue requests follow-up" (IssuePostMergeReviewing issueConfig prNumber workerIdle commit reviewerActive) (IssuePostMergeReviewFollowUp reviewEvidence)
         , decisionAllowed "issue retries incomplete final review" (IssuePostMergeReviewing issueConfig prNumber workerIdle commit reviewerActive) (IssuePostMergeReviewIncomplete "retry")
@@ -5784,10 +5808,10 @@ phaseActionValidationAcceptsStateMachineDecisions = do
         , decisionAllowed "PR verifying starts worker on new findings" (PrVerifyingReviewFix prConfig reviewEvidence workerIdle reviewerIdle) (ReviewThreadsFound reviewEvidence implementationTurn)
         , decisionAllowed "PR verifying starts normal reviewer" (PrVerifyingReviewFix prConfig reviewEvidence workerIdle reviewerIdle) (NoReviewThreadsFound commit reviewerTurn)
         , decisionAllowed "PR verifying starts verification reviewer" (PrVerifyingReviewFix prConfig reviewEvidence workerIdle reviewerIdle) (StartReviewFixVerification commit reviewerTurn)
-        , decisionAllowed "PR clean reviewer approves clean" (PrReviewingClean prConfig commit Nothing workerIdle reviewerActive) (ReviewerFoundClean cleanEvidence [])
-        , decisionAllowed "PR verification resolves old findings" (PrReviewingClean prConfig commit (Just reviewEvidence) workerIdle reviewerActive) (ReviewerFoundClean cleanEvidence [ReviewThreadId "thread-1"])
-        , decisionAllowed "PR clean reviewer finds problems" (PrReviewingClean prConfig commit Nothing workerIdle reviewerActive) (ReviewerFoundProblems reviewEvidence [ReviewThreadId "thread-1"])
-        , decisionAllowed "PR clean reviewer incomplete rereads" (PrReviewingClean prConfig commit Nothing workerIdle reviewerActive) ReviewerTurnIncomplete
+        , decisionAllowed "PR clean reviewer approves clean" (PrReviewingClean prConfig commit normalReviewContext workerIdle reviewerActive) (ReviewerFoundClean cleanEvidence [])
+        , decisionAllowed "PR verification resolves old findings" (PrReviewingClean prConfig commit (verificationReviewContext reviewEvidence) workerIdle reviewerActive) (ReviewerFoundClean cleanEvidence [ReviewThreadId "thread-1"])
+        , decisionAllowed "PR clean reviewer finds problems" (PrReviewingClean prConfig commit normalReviewContext workerIdle reviewerActive) (ReviewerFoundProblems reviewEvidence [ReviewThreadId "thread-1"])
+        , decisionAllowed "PR clean reviewer incomplete rereads" (PrReviewingClean prConfig commit normalReviewContext workerIdle reviewerActive) ReviewerTurnIncomplete
         , decisionAllowed "PR waits then merges" (PrWaitingForMergeability prConfig cleanEvidence workerIdle reviewerIdle) MergeabilityClean
         , decisionAllowed "PR mergeability retries" (PrWaitingForMergeability prConfig cleanEvidence workerIdle reviewerIdle) (MergeabilityRetryLater "pending")
         , decisionAllowed "PR mergeability rechecks reviews" (PrWaitingForMergeability prConfig cleanEvidence workerIdle reviewerIdle) (MergeabilityRecheckReviews "review changed")
@@ -5880,7 +5904,7 @@ main = do
       , quickCheckResult prop_eventLogCannotReviewCleanWhileFixing
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
-      , quickCheckResult prop_eventLogLegacyPostMergeReviewStartWithoutFreshReviewerReplays
+      , quickCheckResult prop_eventLogPostMergeReviewStartUsesExistingReviewer
       , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
       , quickCheckResult prop_eventLogRefreshesIdleIssueWorkerThread
       , quickCheckResult prop_eventLogRefreshesIdlePrReviewThreads
@@ -5951,7 +5975,7 @@ main = do
       , quickCheckResult prop_prReviewWatcherWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_prReviewWatcherCleanReviewerWaitsForMergeability
       , quickCheckResult prop_prReviewVerificationCleanResolvesFixedThreadsAndRechecks
-      , quickCheckResult prop_prReviewVerificationCleanDismissesSummaryRequestChanges
+      , quickCheckResult prop_prReviewVerificationCleanRechecksSummaryOnlyEvidence
       , quickCheckResult prop_prReviewVerificationCleanRequiresResolvedThreadIds
       , quickCheckResult prop_prReviewRemainingThreadsReplyAndQueueWorker
       , quickCheckResult prop_runtimeCommandSpecsHaveExecutable
@@ -5966,7 +5990,6 @@ main = do
       , quickCheckResult prop_runtimeGhPrBodyUpdateUsesPlanFile
       , quickCheckResult prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
       , quickCheckResult prop_runtimeGhPrCommentReviewFindingsUsesPrComment
-      , quickCheckResult prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
       , quickCheckResult prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists

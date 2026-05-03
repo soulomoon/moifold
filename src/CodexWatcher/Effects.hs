@@ -50,7 +50,6 @@ data Effect (action :: ActionKind) (mutability :: Mutability) where
   ResolveReviewThread :: ReviewThreadId -> Effect 'ResolveReviewThreadAction 'CanMutateGitHub
   ReplyReviewThread :: ReviewThreadId -> Text -> Effect 'ReplyReviewThreadAction 'CanMutateGitHub
   PublishReviewFindings :: PrConfig -> ReviewEvidence -> Effect 'PublishReviewFindingsAction 'CanMutateGitHub
-  DismissRequestChangesReview :: PrConfig -> CleanReviewEvidence -> Effect 'DismissRequestChangesReviewAction 'CanMutateGitHub
   RecordIssuePlan :: IssueConfig -> PrNumber -> Text -> Effect 'RecordIssuePlanAction 'CanMutateLocal
   RecordPlanningGraph :: PlanningGraph -> Effect 'RecordPlanningGraphAction 'CanMutateLocal
   RecordBlocked :: BlockedReason -> Effect 'RecordBlockedAction 'CanMutateLocal
@@ -110,7 +109,6 @@ actionKindText SCloseIssueAction = "CloseIssue"
 actionKindText SResolveReviewThreadAction = "ResolveReviewThread"
 actionKindText SReplyReviewThreadAction = "ReplyReviewThread"
 actionKindText SPublishReviewFindingsAction = "PublishReviewFindings"
-actionKindText SDismissRequestChangesReviewAction = "DismissRequestChangesReview"
 actionKindText SRecordIssuePlanAction = "RecordIssuePlan"
 actionKindText SRecordPlanningGraphAction = "RecordPlanningGraph"
 actionKindText SRecordBlockedAction = "RecordBlocked"

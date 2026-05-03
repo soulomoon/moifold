@@ -38,7 +38,7 @@ renderTemplate template variables =
 
 reviewerPromptVersion :: Text
 reviewerPromptVersion =
-  "haskell-pro-style-v9-queued-review-findings"
+  "haskell-pro-style-v10-split-review-findings"
 
 agentPrincipleFrame :: Text -> Text -> [Text] -> [Text] -> Text
 agentPrincipleFrame role mission hardConstraints outputContract =
@@ -241,7 +241,7 @@ prReviewReviewerThreadDeveloperTemplate =
         , "Use English for every message in this thread."
         ]
         [ "If you find actionable line-addressable problems or worthwhile simplifications, add inline GitHub PR review comments that create unresolved review threads."
-        , "If a required task/plan/issue gap is not line-addressable in the PR diff, record it through review_status=new_findings and findings_summary instead of returning clean."
+        , "If a required task/plan/issue gap is not line-addressable in the PR diff, record it with new_findings_status=found and new_findings_summary instead of returning clean."
         , "If there are no actionable issues or suggestions and the implementation satisfies the PR plan and linked issue, record a clean LGTM state; the watcher script submits a non-approval clean comment and merges."
         ]
         <> Text.unlines
@@ -368,7 +368,7 @@ reviewerTemplate =
         ]
         [ "Use inline GitHub PR review comments for concrete line-addressable issues on changed lines."
         , "Do not duplicate existing review comments."
-        , "If a task/plan/issue gap is not line-addressable in the PR diff, use review_status=new_findings and put it in findings_summary rather than returning clean."
+        , "If a task/plan/issue gap is not line-addressable in the PR diff, use new_findings_status=found and put it in new_findings_summary rather than returning clean."
         , "Report only through the active output schema."
         ]
         <> Text.unlines
@@ -390,7 +390,7 @@ reviewerTemplate =
           , "{{verificationInstructions}}"
           , ""
           , "Use inline GitHub PR review comments for concrete line-addressable issues on changed lines."
-          , "For concrete task-completion gaps with no changed line to comment on, use review_status=new_findings and describe them in findings_summary; do not create a fake clean review."
+          , "For concrete task-completion gaps with no changed line to comment on, use new_findings_status=found and describe them in new_findings_summary; do not create a fake clean review."
           , "Do not duplicate existing review comments."
           , "Do not edit files, commit, push, approve, or resolve threads."
           , ""

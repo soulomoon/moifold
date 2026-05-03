@@ -23,7 +23,7 @@ module CodexWatcher.StateMachine
 
 import CodexWatcher.Effects
 import CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..), PrNumber (..), ReviewThreadId, ThreadId)
-import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..), SActionKind (..))
+import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..), SActionKind (..), ThreadActivity (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
@@ -34,6 +34,10 @@ import CodexWatcher.Domain.PrReview.Types
   , MergeCommit
   , PrConfig (..)
   , ReviewEvidence (..)
+  , ReviewContext (..)
+  , SomeReviewContext (..)
+  , normalReviewContext
+  , verificationReviewContext
   , reviewEvidenceHasSummaries
   , reviewEvidenceThreadComments
   , reviewEvidenceThreadIds
@@ -179,10 +183,10 @@ checkActionPermission state action
           allowOneOf [SomeEffectAction SSleepUntilNextPollAction] action
         IssueWaitingForPrMerge {} ->
           allowOneOf [SomeEffectAction SSleepUntilNextPollAction] action
-        IssuePostMergeReviewReady _config _prNumber _worker maybeReviewer ->
-          case maybeReviewer of
-            Just {} -> allowOneOf [SomeEffectAction SStartIssueFinalReviewTurnAction, SomeEffectAction SSleepUntilNextPollAction] action
-            Nothing -> allowOneOf [SomeEffectAction SSleepUntilNextPollAction] action
+        IssuePostMergeReviewPendingReviewer {} ->
+          allowOneOf [SomeEffectAction SSleepUntilNextPollAction] action
+        IssuePostMergeReviewReady {} ->
+          allowOneOf [SomeEffectAction SStartIssueFinalReviewTurnAction, SomeEffectAction SSleepUntilNextPollAction] action
         IssuePostMergeReviewing {} ->
           allowOneOf [SomeEffectAction SCloseIssueAction, SomeEffectAction SUpdateIssueFollowUpAction, SomeEffectAction SSleepUntilNextPollAction] action
         IssueWaitingForIssueClose {} ->
@@ -199,7 +203,6 @@ checkActionPermission state action
           allowOneOf
             [ SomeEffectAction SResolveReviewThreadAction
             , SomeEffectAction SReplyReviewThreadAction
-            , SomeEffectAction SDismissRequestChangesReviewAction
             , SomeEffectAction SPublishReviewFindingsAction
             , SomeEffectAction SReadReviewThreadsAction
             , SomeEffectAction SSleepUntilNextPollAction
@@ -256,7 +259,6 @@ sameActionKind SCloseIssueAction SCloseIssueAction = Just Refl
 sameActionKind SResolveReviewThreadAction SResolveReviewThreadAction = Just Refl
 sameActionKind SReplyReviewThreadAction SReplyReviewThreadAction = Just Refl
 sameActionKind SPublishReviewFindingsAction SPublishReviewFindingsAction = Just Refl
-sameActionKind SDismissRequestChangesReviewAction SDismissRequestChangesReviewAction = Just Refl
 sameActionKind SRecordIssuePlanAction SRecordIssuePlanAction = Just Refl
 sameActionKind SRecordPlanningGraphAction SRecordPlanningGraphAction = Just Refl
 sameActionKind SRecordBlockedAction SRecordBlockedAction = Just Refl
@@ -410,10 +412,10 @@ step state@(IssueWaitingForPrMerge _config expectedPrNumber _worker _reviewer) (
       Decision state [SomeEffect SleepUntilNextPoll]
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
-step (IssueWaitingForPrMerge config expectedPrNumber worker _reviewer) (IssuePullRequestMerged prNumber)
+step (IssueWaitingForPrMerge config expectedPrNumber worker maybeReviewer) (IssuePullRequestMerged prNumber)
   | expectedPrNumber == prNumber =
       Decision
-        (IssuePostMergeReviewReady config prNumber worker Nothing)
+        (postMergeReviewState config prNumber worker maybeReviewer)
         [SomeEffect SleepUntilNextPoll]
   | otherwise =
       let reason =
@@ -422,14 +424,14 @@ step (IssueWaitingForPrMerge config expectedPrNumber worker _reviewer) (IssuePul
                   <> Text.pack (" while waiting for PR #" <> show (unPrNumber expectedPrNumber))
               )
        in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
-step (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle reviewerThreadId))) (StartIssuePostMergeReview reviewTargetSha activeTurn) =
+step (IssuePostMergeReviewReady config prNumber worker (ReviewerIdle reviewerThreadId)) (StartIssuePostMergeReview reviewTargetSha activeTurn) =
   Decision
     (IssuePostMergeReviewing config prNumber worker reviewTargetSha (ReviewerActive activeTurn))
     [SomeEffect (StartIssueFinalReviewTurn config prNumber reviewTargetSha reviewerThreadId)]
+step (IssuePostMergeReviewPendingReviewer config prNumber worker) (IssueReviewerThreadReady reviewerThreadId) =
+  postMergeReviewerReady config prNumber worker reviewerThreadId
 step (IssuePostMergeReviewReady config prNumber worker _oldReviewer) (IssueReviewerThreadReady reviewerThreadId) =
-  Decision
-    (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle reviewerThreadId)))
-    [SomeEffect SleepUntilNextPoll]
+  postMergeReviewerReady config prNumber worker reviewerThreadId
 step (IssueHandoffReady config prNumber worker _oldReviewer) (IssueReviewerThreadReady reviewerThreadId) =
   Decision
     (IssueHandoffReady config prNumber worker (Just (ReviewerIdle reviewerThreadId)))
@@ -453,7 +455,7 @@ step (IssuePostMergeReviewing config _prNumber (WorkerIdle workerThreadId) _revi
         [SomeEffect (UpdateIssueFollowUp followUpConfig evidence), SomeEffect SleepUntilNextPoll]
 step (IssuePostMergeReviewing config prNumber worker _reviewTargetSha (ReviewerActive activeTurn)) (IssuePostMergeReviewIncomplete _reason) =
   Decision
-    (IssuePostMergeReviewReady config prNumber worker (Just (ReviewerIdle (activeThreadId activeTurn))))
+    (IssuePostMergeReviewReady config prNumber worker (ReviewerIdle (activeThreadId activeTurn)))
     [SomeEffect SleepUntilNextPoll]
 step (IssueWaitingForIssueClose _config expectedPrNumber) (IssueClosed prNumber)
   | expectedPrNumber == prNumber =
@@ -463,44 +465,34 @@ step (IssueWaitingForIssueClose _config expectedPrNumber) (IssueClosed prNumber)
   | otherwise =
       prMismatchBlocked (Just expectedPrNumber) prNumber
 step state@(IssueImplementing {}) (IssuePullRequestMerged _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
 step state@(IssueImplementationReady {}) (IssuePullRequestMerged _prNumber) =
-  Decision
-    state
-    [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
 step state@(IssueHandoffReady {}) (IssuePullRequestMerged _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
 step state@(IssueHandoffInitialized {}) (IssuePullRequestMerged _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
+step state@(IssuePostMergeReviewPendingReviewer {}) (IssuePullRequestMerged _prNumber) =
+  ignoreMergedPrEvent state
 step state@(IssuePostMergeReviewReady {}) (IssuePullRequestMerged _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
 step state@(IssuePostMergeReviewing {}) (IssuePullRequestMerged _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
 step state@IssueWaitingForIssueClose {} (IssuePullRequestMerged _prNumber) =
-  Decision state [SomeEffect SleepUntilNextPoll]
+  ignoreMergedPrEvent state
 step (PrCheckingReviews config _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
-  Decision
-    (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
+  startPrReviewWorker config evidence activeTurn reviewerThreadId
 step (PrReviewFixQueued config _queuedEvidence _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
-  Decision
-    (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
+  startPrReviewWorker config evidence activeTurn reviewerThreadId
 step (PrCheckingReviews config (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
-  Decision
-    (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
-    [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
+  startCleanReviewer config workerThreadId commit activeTurn
 step (PrVerifyingReviewFix config _oldEvidence _worker (ReviewerIdle reviewerThreadId)) (ReviewThreadsFound evidence activeTurn) =
-  Decision
-    (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
+  startPrReviewWorker config evidence activeTurn reviewerThreadId
 step (PrVerifyingReviewFix config _oldEvidence (WorkerIdle workerThreadId) _reviewer) (NoReviewThreadsFound commit activeTurn) =
-  Decision
-    (PrReviewingClean config commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
-    [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
+  startCleanReviewer config workerThreadId commit activeTurn
 step (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) _reviewer) (StartReviewFixVerification reviewTargetSha activeTurn) =
   Decision
-    (PrReviewingClean config reviewTargetSha (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
+    (PrReviewingClean config reviewTargetSha (verificationReviewContext evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
     [SomeEffect (StartReviewerVerificationTurn config evidence reviewTargetSha (activeThreadId activeTurn))]
 step (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId)) ReviewFixCompleted =
   Decision
@@ -510,31 +502,22 @@ step (PrFixingReviews config _evidence (WorkerActive activeTurn) (ReviewerIdle r
   Decision
     (PrReviewFixQueued config _evidence (WorkerIdle (activeThreadId activeTurn)) (ReviewerIdle reviewerThreadId))
     [SomeEffect SleepUntilNextPoll]
-step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds)
-  | reviewEvidenceHasSummaries verification =
-      Decision
-        (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-        (resolveReviewThreads (Just verification) resolvedThreadIds <> [SomeEffect (DismissRequestChangesReview config evidence), SomeEffect (ReadReviewThreads config)])
-step (PrReviewingClean config _commit (Just verification) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean _evidence resolvedThreadIds) =
-  Decision
-    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads (Just verification) resolvedThreadIds <> [SomeEffect (ReadReviewThreads config)])
-step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds) =
+step (PrReviewingClean config _commit (SomeReviewContext (VerificationReviewContext verification)) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean _evidence resolvedThreadIds) =
+  recheckPrReviews config workerThreadId (activeThreadId activeTurn) (resolveReviewThreads (verificationReviewContext verification) resolvedThreadIds)
+step (PrReviewingClean config _commit (SomeReviewContext NormalReviewContext) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundClean evidence resolvedThreadIds) =
   Decision
     (PrWaitingForMergeability config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads Nothing resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
-step (PrReviewingClean config _commit verification (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems evidence resolvedThreadIds) =
+    (resolveReviewThreads normalReviewContext resolvedThreadIds <> [SomeEffect SleepUntilNextPoll])
+step (PrReviewingClean config _commit reviewContext (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) (ReviewerFoundProblems evidence resolvedThreadIds) =
   Decision
     (PrReviewFixQueued config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    (resolveReviewThreads verification resolvedThreadIds <> replyReviewThreads evidence <> publishReviewFindingsWhenNeeded config evidence <> [SomeEffect SleepUntilNextPoll])
-step (PrReviewingClean config _commit (Just evidence) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
+    (resolveReviewThreads reviewContext resolvedThreadIds <> replyReviewThreads evidence <> publishReviewFindingsWhenNeeded config evidence <> [SomeEffect SleepUntilNextPoll])
+step (PrReviewingClean config _commit (SomeReviewContext (VerificationReviewContext evidence)) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
   Decision
     (PrVerifyingReviewFix config evidence (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
     [SomeEffect SleepUntilNextPoll]
-step (PrReviewingClean config _commit Nothing (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
-  Decision
-    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle (activeThreadId activeTurn)))
-    [SomeEffect (ReadReviewThreads config)]
+step (PrReviewingClean config _commit (SomeReviewContext NormalReviewContext) (WorkerIdle workerThreadId) (ReviewerActive activeTurn)) ReviewerTurnIncomplete =
+  recheckPrReviews config workerThreadId (activeThreadId activeTurn) []
 step (PrWaitingForMergeability config evidence _worker _reviewer) MergeabilityClean =
   Decision
     (PrMerging config evidence)
@@ -542,9 +525,7 @@ step (PrWaitingForMergeability config evidence _worker _reviewer) MergeabilityCl
 step state@PrWaitingForMergeability {} (MergeabilityRetryLater _reason) =
   Decision state [SomeEffect SleepUntilNextPoll]
 step (PrWaitingForMergeability config _evidence (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId)) (MergeabilityRecheckReviews _reason) =
-  Decision
-    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId))
-    [SomeEffect (ReadReviewThreads config)]
+  recheckPrReviews config workerThreadId reviewerThreadId []
 step (PrWaitingForMergeability config _cleanEvidence (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId)) (MergeabilityFixRequired evidence) =
   Decision
     (PrReviewFixQueued config evidence (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId))
@@ -574,10 +555,26 @@ prMismatchBlocked expected actual =
           )
    in Decision (BlockedState reason) [SomeEffect (RecordBlocked reason), SomeEffect StopDaemon]
 
-resolveReviewThreads :: Maybe ReviewEvidence -> [ReviewThreadId] -> EffectPlan
-resolveReviewThreads Nothing _resolvedThreadIds =
+postMergeReviewState :: IssueConfig -> PrNumber -> WorkerThread 'Idle -> Maybe (ReviewerThread 'Idle) -> WatcherState 'IssueImplement 'Implementing
+postMergeReviewState config prNumber worker Nothing =
+  IssuePostMergeReviewPendingReviewer config prNumber worker
+postMergeReviewState config prNumber worker (Just reviewer) =
+  IssuePostMergeReviewReady config prNumber worker reviewer
+
+postMergeReviewerReady :: IssueConfig -> PrNumber -> WorkerThread 'Idle -> ThreadId -> Decision 'IssueImplement
+postMergeReviewerReady config prNumber worker reviewerThreadId =
+  Decision
+    (IssuePostMergeReviewReady config prNumber worker (ReviewerIdle reviewerThreadId))
+    [SomeEffect SleepUntilNextPoll]
+
+ignoreMergedPrEvent :: WatcherState 'IssueImplement 'Implementing -> Decision 'IssueImplement
+ignoreMergedPrEvent state =
+  Decision state [SomeEffect SleepUntilNextPoll]
+
+resolveReviewThreads :: SomeReviewContext -> [ReviewThreadId] -> EffectPlan
+resolveReviewThreads (SomeReviewContext NormalReviewContext) _resolvedThreadIds =
   []
-resolveReviewThreads (Just evidence) resolvedThreadIds =
+resolveReviewThreads (SomeReviewContext (VerificationReviewContext evidence)) resolvedThreadIds =
   [ SomeEffect (ResolveReviewThread threadId)
   | threadId <- reviewEvidenceThreadIds evidence
   , threadId `elem` resolvedThreadIds
@@ -593,6 +590,24 @@ publishReviewFindingsWhenNeeded :: PrConfig -> ReviewEvidence -> EffectPlan
 publishReviewFindingsWhenNeeded config evidence
   | reviewEvidenceHasSummaries evidence = [SomeEffect (PublishReviewFindings config evidence)]
   | otherwise = []
+
+startPrReviewWorker :: PrConfig -> ReviewEvidence -> ActiveTurn -> ThreadId -> Decision 'PrReview
+startPrReviewWorker config evidence activeTurn reviewerThreadId =
+  Decision
+    (PrFixingReviews config evidence (WorkerActive activeTurn) (ReviewerIdle reviewerThreadId))
+    [SomeEffect (StartWorkerTurn evidence (activeThreadId activeTurn))]
+
+startCleanReviewer :: PrConfig -> ThreadId -> CommitSha -> ActiveTurn -> Decision 'PrReview
+startCleanReviewer config workerThreadId commit activeTurn =
+  Decision
+    (PrReviewingClean config commit normalReviewContext (WorkerIdle workerThreadId) (ReviewerActive activeTurn))
+    [SomeEffect (StartReviewerTurn config commit (activeThreadId activeTurn))]
+
+recheckPrReviews :: PrConfig -> ThreadId -> ThreadId -> EffectPlan -> Decision 'PrReview
+recheckPrReviews config workerThreadId reviewerThreadId beforeReadEffects =
+  Decision
+    (PrCheckingReviews config (WorkerIdle workerThreadId) (ReviewerIdle reviewerThreadId))
+    (beforeReadEffects <> [SomeEffect (ReadReviewThreads config)])
 
 postMergeReworkIssueConfig :: IssueConfig -> IssueConfig
 postMergeReworkIssueConfig config =

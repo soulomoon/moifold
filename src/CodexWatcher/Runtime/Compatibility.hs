@@ -101,6 +101,10 @@ compatibilityStateWrites stateDir state =
       [ write "issue-state.json" (issueStateJson config "waiting_pr_merge" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
       ]
+    SomeWatcherState (IssuePostMergeReviewPendingReviewer config prNumber _worker) ->
+      [ write "issue-state.json" (issueStateJson config "post_merge_review" (Just prNumber) Nothing)
+      , write "daemon-state.json" idleDaemonJson
+      ]
     SomeWatcherState (IssuePostMergeReviewReady config prNumber _worker _reviewer) ->
       [ write "issue-state.json" (issueStateJson config "post_merge_review" (Just prNumber) Nothing)
       , write "daemon-state.json" idleDaemonJson
@@ -129,7 +133,7 @@ compatibilityStateWrites stateDir state =
       [ write "watcher-state.json" (prWatcherStateJson config workerThread reviewerThread "verifying_fix" (Just (reviewedCommit evidence)) Nothing)
       , write "checker-state.json" (checkerStateJson config evidence)
       ]
-    SomeWatcherState (PrReviewingClean config commit _verification (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
+    SomeWatcherState (PrReviewingClean config commit _reviewContext (WorkerIdle workerThread) (ReviewerActive activeTurn)) ->
       [ write "watcher-state.json" (prWatcherStateJson config workerThread (activeThreadId activeTurn) "reviewer_active" (Just commit) (Just commit))
       , write "checker-state.json" (checkerStateClearJson config)
       ]
@@ -227,12 +231,14 @@ checkerStateClearJson config =
 reviewerStateJson :: CleanReviewEvidence -> Value
 reviewerStateJson evidence =
   object
-    [ "review_status" .= ("clean" :: Text)
-    , "reviewed_commit_sha" .= unCommitSha (cleanReviewCommit evidence)
+    [ "reviewed_commit_sha" .= unCommitSha (cleanReviewCommit evidence)
     , "reviewer_prompt_version" .= reviewerPromptVersion
     , "added_review_comment_count" .= (0 :: Int)
+    , "prior_findings_status" .= ("not_applicable" :: Text)
+    , "new_findings_status" .= ("none" :: Text)
     , "lgtm_comment" .= cleanReviewComment evidence
-    , "findings_summary" .= ([] :: [Text])
+    , "prior_findings_summary" .= ([] :: [Text])
+    , "new_findings_summary" .= ([] :: [Text])
     , "blocked_reason" .= Null
     , "solved_threads" .= ([] :: [Value])
     , "remaining_review_threads" .= ([] :: [Value])

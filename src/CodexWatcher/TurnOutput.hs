@@ -51,7 +51,17 @@ import CodexWatcher.Core.Ids
   , ReviewThreadId (..)
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
-import CodexWatcher.Domain.PrReview.Types (PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadComments, reviewEvidenceThreadIds)
+import CodexWatcher.Domain.PrReview.Types
+  ( PrConfig (..)
+  , ReviewEvidence (..)
+  , allNewFindingsStatuses
+  , allPriorFindingsStatuses
+  , newFindingsStatusText
+  , priorFindingsStatusText
+  , reviewEvidenceSummaries
+  , reviewEvidenceThreadComments
+  , reviewEvidenceThreadIds
+  )
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson.Key qualified as Key
@@ -116,27 +126,36 @@ prReviewWorkerTurnOutputSchema =
 reviewerTurnOutputSchema :: Value
 reviewerTurnOutputSchema =
   strictObjectSchema
-    [ "review_status"
-    , "reviewed_commit_sha"
+    [ "reviewed_commit_sha"
     , "reviewer_prompt_version"
     , "added_review_comment_count"
+    , "prior_findings_status"
+    , "new_findings_status"
     , "lgtm_comment"
-    , "findings_summary"
+    , "prior_findings_summary"
+    , "new_findings_summary"
     , "blocked_reason"
     , "solved_threads"
     , "remaining_review_threads"
     ]
-    [ ( "review_status"
-      , object
-          [ "type" .= ("string" :: Text)
-          , "enum" .= (["clean", "new_findings", "remaining_findings", "incomplete", "blocked"] :: [Text])
-          ]
-      )
-    , ("reviewed_commit_sha", stringField)
+    [ ("reviewed_commit_sha", stringField)
     , ("reviewer_prompt_version", stringField)
     , ("added_review_comment_count", object ["type" .= ("integer" :: Text), "minimum" .= (0 :: Int)])
+    , ( "prior_findings_status"
+      , object
+          [ "type" .= ("string" :: Text)
+          , "enum" .= fmap priorFindingsStatusText allPriorFindingsStatuses
+          ]
+      )
+    , ( "new_findings_status"
+      , object
+          [ "type" .= ("string" :: Text)
+          , "enum" .= fmap newFindingsStatusText allNewFindingsStatuses
+          ]
+      )
     , ("lgtm_comment", nullableStringField)
-    , ("findings_summary", object ["type" .= ("array" :: Text), "items" .= stringField])
+    , ("prior_findings_summary", object ["type" .= ("array" :: Text), "items" .= stringField])
+    , ("new_findings_summary", object ["type" .= ("array" :: Text), "items" .= stringField])
     , ("blocked_reason", nullableStringField)
     , ("solved_threads", solvedReviewThreadsField)
     , ("remaining_review_threads", remainingReviewThreadsField)
@@ -397,8 +416,10 @@ noVerificationInstructions =
   Text.unlines
     [ "Review-thread resolution fields:"
     , "- This is a normal review pass with no watcher-owned prior thread verification."
+    , "- Use prior_findings_status=not_applicable."
     , "- Return empty arrays for solved_threads and remaining_review_threads."
-    , "- If you find any new actionable finding, use review_status=new_findings and put a concrete summary in findings_summary; the watcher will publish it to the PR as a non-approval findings comment and route it to the worker."
+    , "- If you find any new actionable finding, use new_findings_status=found and put a concrete summary in new_findings_summary; the watcher will publish it to the PR as a non-approval findings comment and route it to the worker."
+    , "- If you find no actionable finding, use new_findings_status=none and leave new_findings_summary empty."
     ]
 
 verificationInstructions :: ReviewEvidence -> Text
@@ -410,9 +431,11 @@ verificationInstructions evidence =
     , "- Re-read those GitHub review threads and watcher review-findings comments as applicable, then inspect the current local PR code."
     , "- Put fixed prior review threads in solved_threads as structured objects with thread_id and resolution_summary; the watcher will resolve only those solved threads."
     , "- Put prior review threads that still apply in remaining_review_threads as structured objects with thread_id and comment; the watcher will add those comments as replies under the remaining GitHub review threads."
-    , "- If any prior thread still applies and you do not add a new non-duplicate inline comment, use review_status=remaining_findings and leave top-level findings_summary empty."
-    , "- If prior summary-only watcher feedback still applies, or if prior threads are fixed but you find new actionable problems, use review_status=new_findings and put concrete summaries in findings_summary."
-    , "- If all prior feedback is fixed and there are no new actionable findings, use review_status=clean."
+    , "- Set prior_findings_status=resolved only when all prior feedback is fixed."
+    , "- Set prior_findings_status=unresolved when prior thread or summary feedback still applies; include remaining prior threads in remaining_review_threads and prior summary feedback in prior_findings_summary."
+    , "- Set new_findings_status=found only when you find actionable problems beyond the prior feedback; put those items in new_findings_summary."
+    , "- Set new_findings_status=none when you find no new actionable findings."
+    , "- If all prior feedback is fixed and there are no new actionable findings, use prior_findings_status=resolved and new_findings_status=none."
     , "- Do not resolve GitHub review threads yourself; the watcher resolves only the threads you list in solved_threads."
     ]
 

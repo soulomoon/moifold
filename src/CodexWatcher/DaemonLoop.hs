@@ -124,8 +124,10 @@ runFromState executor config events replay = do
       IssueImplementationLoop.runIssueHandoffInitialized domainLoopOps executor config events prNumber
     SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber _worker _reviewer) ->
       IssueImplementationLoop.runIssueWaitingForPrMerge domainLoopOps executor config events replay issueConfig prNumber
-    SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber _worker maybeReviewer) ->
-      IssueImplementationLoop.runIssuePostMergeReviewReady domainLoopOps executor config events replay issueConfig prNumber (reviewerThreadId <$> maybeReviewer)
+    SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig prNumber _worker) ->
+      IssueImplementationLoop.runIssuePostMergeReviewPendingReviewer domainLoopOps executor config events replay issueConfig prNumber
+    SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber _worker reviewer) ->
+      IssueImplementationLoop.runIssuePostMergeReviewReady domainLoopOps executor config events issueConfig prNumber (reviewerThreadId reviewer)
     SomeWatcherState (IssuePostMergeReviewing _issueConfig _prNumber _worker commit (ReviewerActive activeTurn)) ->
       IssueImplementationLoop.runIssuePostMergeReviewing domainLoopOps executor config events replay commit activeTurn
     SomeWatcherState (IssueWaitingForIssueClose issueConfig prNumber) ->
@@ -138,7 +140,7 @@ runFromState executor config events replay = do
       PrReviewLoop.runPrReviewFixQueued domainLoopOps executor config events evidence workerThread
     SomeWatcherState (PrVerifyingReviewFix prConfig evidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread)) ->
       PrReviewLoop.runPrVerifyingReviewFix domainLoopOps executor config events prConfig evidence workerThread reviewerThread
-    SomeWatcherState (PrReviewingClean _prConfig commit _verification _worker (ReviewerActive activeTurn)) ->
+    SomeWatcherState (PrReviewingClean _prConfig commit _reviewContext _worker (ReviewerActive activeTurn)) ->
       PrReviewLoop.runPrReviewingClean domainLoopOps executor config events replay commit activeTurn
     SomeWatcherState (PrWaitingForMergeability prConfig evidence _worker _reviewer) ->
       PrReviewLoop.runPrWaitingForMergeability domainLoopOps executor config events prConfig evidence

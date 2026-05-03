@@ -93,7 +93,6 @@ data ActionKind
   | ResolveReviewThreadAction
   | ReplyReviewThreadAction
   | PublishReviewFindingsAction
-  | DismissRequestChangesReviewAction
   | RecordIssuePlanAction
   | RecordPlanningGraphAction
   | RecordBlockedAction

@@ -348,7 +348,12 @@ prCheckingReviewsState snapshot =
 
 reviewerSaysClean :: NodePrReviewSnapshot -> Bool
 reviewerSaysClean snapshot =
-  maybe False ((`elem` ["clean", "approved", "lgtm"]) . Text.toLower) (snapshot.reviewerState >>= (.reviewStatus))
+  maybe False reviewerStateSaysClean snapshot.reviewerState
+
+reviewerStateSaysClean :: NodeReviewerState -> Bool
+reviewerStateSaysClean state =
+  maybe False ((`elem` ["not_applicable", "resolved"]) . Text.toLower) state.priorFindingsStatus
+    && maybe False ((== "none") . Text.toLower) state.newFindingsStatus
 
 issueStatusText :: NodeIssueImplementSnapshot -> Maybe Text
 issueStatusText snapshot = snapshot.issueState >>= (.issueStatus)

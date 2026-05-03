@@ -134,7 +134,8 @@ instance FromJSON NodeAgentState where
       <*> object .:? "blocked_reason"
 
 data NodeReviewerState = NodeReviewerState
-  { reviewStatus :: Maybe Text
+  { priorFindingsStatus :: Maybe Text
+  , newFindingsStatus :: Maybe Text
   , reviewedCommitSha :: Maybe Text
   , addedReviewCommentCount :: Maybe Int
   , blockedReason :: Maybe Text
@@ -144,7 +145,8 @@ data NodeReviewerState = NodeReviewerState
 instance FromJSON NodeReviewerState where
   parseJSON = withObject "NodeReviewerState" \object ->
     NodeReviewerState
-      <$> object .:? "review_status"
+      <$> object .:? "prior_findings_status"
+      <*> object .:? "new_findings_status"
       <*> object .:? "reviewed_commit_sha"
       <*> object .:? "added_review_comment_count"
       <*> object .:? "blocked_reason"

@@ -31,7 +31,6 @@ import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, ThreadId, TurnId)
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.Thread (ActiveTurn (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig, ReviewEvidence)
-import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 
 data SessionPhase
@@ -41,22 +40,20 @@ data SessionPhase
   | SessionFinished
 
 data WorkerPurpose
-  = FixPrReviewThreads
+  = FixPrReviewFeedback
   deriving stock (Eq, Show)
 
 data WorkerSession (phase :: SessionPhase) where
   PrReviewWorkerIdle
     :: PrConfig
     -> ThreadId
-    -> NonEmpty ReviewThreadId
-    -> CommitSha
+    -> ReviewEvidence
     -> WorkerSession 'SessionIdle
 
   PrReviewWorkerActive
     :: PrConfig
     -> ActiveTurn
-    -> NonEmpty ReviewThreadId
-    -> CommitSha
+    -> ReviewEvidence
     -> WorkerSession 'SessionActive
 
   PrReviewWorkerObserved
@@ -113,23 +110,23 @@ data ReviewerOutcome
   | ReviewerBlocked BlockedReason
   deriving stock (Eq, Show)
 
-newPrReviewWorkerSession :: PrConfig -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> WorkerSession 'SessionIdle
+newPrReviewWorkerSession :: PrConfig -> ThreadId -> ReviewEvidence -> WorkerSession 'SessionIdle
 newPrReviewWorkerSession = PrReviewWorkerIdle
 
 newPrReviewReviewerSession :: PrConfig -> ThreadId -> CommitSha -> ReviewerSession 'SessionIdle
 newPrReviewReviewerSession = PrReviewReviewerIdle
 
 startWorkerTurn :: TurnId -> WorkerSession 'SessionIdle -> WorkerSession 'SessionActive
-startWorkerTurn turnId (PrReviewWorkerIdle config threadId unresolved commit) =
-  PrReviewWorkerActive config (ActiveTurn threadId turnId) unresolved commit
+startWorkerTurn turnId (PrReviewWorkerIdle config threadId evidence) =
+  PrReviewWorkerActive config (ActiveTurn threadId turnId) evidence
 
 startWorkerTurnEvent :: TurnId -> WorkerSession 'SessionIdle -> (WorkerSession 'SessionActive, WatcherEvent)
-startWorkerTurnEvent turnId session@(PrReviewWorkerIdle _config _threadId unresolved commit) =
+startWorkerTurnEvent turnId session@(PrReviewWorkerIdle _config _threadId evidence) =
   let active = startWorkerTurn turnId session
-   in (active, PrReviewUnresolvedFound unresolved commit turnId)
+   in (active, PrReviewFeedbackFound evidence turnId)
 
 waitWorkerTurn :: WorkerOutcome -> WorkerSession 'SessionActive -> WorkerSession 'SessionObserved
-waitWorkerTurn outcome (PrReviewWorkerActive config activeTurn _unresolved _commit) =
+waitWorkerTurn outcome (PrReviewWorkerActive config activeTurn _evidence) =
   PrReviewWorkerObserved config activeTurn outcome
 
 emitWorkerEvent :: WorkerSession 'SessionObserved -> WorkerSession 'SessionFinished

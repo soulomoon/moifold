@@ -155,8 +155,6 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhReplyReviewThread reviewThreadId comment)]
     PublishReviewFindings prConfig evidence ->
       unchanged [PlannedCommand (GhPrCommentReviewFindings prConfig evidence)]
-    DismissRequestChangesReview prConfig evidence ->
-      unchanged [PlannedCommand (GhPrDismissRequestChanges prConfig evidence)]
     RecordIssuePlan issueConfig prNumber planMarkdown ->
       unchanged [PlannedWriteText (runtimeStateDirFile config.effectRuntimeStateDir "issue-plan.md") (issuePlanFileText issueConfig prNumber planMarkdown)]
     RecordPlanningGraph graph ->

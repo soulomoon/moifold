@@ -1,9 +1,27 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module CodexWatcher.Domain.PrReview.Types
   ( PrConfig (..)
+  , PriorFindingsStatus (..)
+  , priorFindingsStatusText
+  , parsePriorFindingsStatus
+  , allPriorFindingsStatuses
+  , NewFindingsStatus (..)
+  , newFindingsStatusText
+  , parseNewFindingsStatus
+  , allNewFindingsStatuses
   , ReviewFinding (..)
   , ReviewEvidence (..)
+  , ReviewMode (..)
+  , ReviewContext (..)
+  , SomeReviewContext (..)
+  , normalReviewContext
+  , verificationReviewContext
   , reviewEvidenceFromThreadComments
   , reviewEvidenceFromThreadCommentRefs
   , reviewEvidenceFromThreadRefs
@@ -24,6 +42,7 @@ import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, RepoName, ReviewT
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)
+import Data.Text qualified as Text
 
 data PrConfig = PrConfig
   { prRepo :: RepoName
@@ -31,6 +50,72 @@ data PrConfig = PrConfig
   , prBranch :: BranchName
   }
   deriving stock (Eq, Show)
+
+data PriorFindingsStatus
+  = PriorFindingsNotApplicable
+  | PriorFindingsResolved
+  | PriorFindingsUnresolved
+  | PriorFindingsInconclusive
+  | PriorFindingsBlocked
+  deriving stock (Eq, Show)
+
+priorFindingsStatusText :: PriorFindingsStatus -> Text
+priorFindingsStatusText = \case
+  PriorFindingsNotApplicable -> "not_applicable"
+  PriorFindingsResolved -> "resolved"
+  PriorFindingsUnresolved -> "unresolved"
+  PriorFindingsInconclusive -> "inconclusive"
+  PriorFindingsBlocked -> "blocked"
+
+parsePriorFindingsStatus :: Text -> Maybe PriorFindingsStatus
+parsePriorFindingsStatus status =
+  case Text.toLower (Text.strip status) of
+    "not_applicable" -> Just PriorFindingsNotApplicable
+    "resolved" -> Just PriorFindingsResolved
+    "unresolved" -> Just PriorFindingsUnresolved
+    "inconclusive" -> Just PriorFindingsInconclusive
+    "blocked" -> Just PriorFindingsBlocked
+    _ -> Nothing
+
+allPriorFindingsStatuses :: [PriorFindingsStatus]
+allPriorFindingsStatuses =
+  [ PriorFindingsNotApplicable
+  , PriorFindingsResolved
+  , PriorFindingsUnresolved
+  , PriorFindingsInconclusive
+  , PriorFindingsBlocked
+  ]
+
+data NewFindingsStatus
+  = NewFindingsNone
+  | NewFindingsFound
+  | NewFindingsInconclusive
+  | NewFindingsBlocked
+  deriving stock (Eq, Show)
+
+newFindingsStatusText :: NewFindingsStatus -> Text
+newFindingsStatusText = \case
+  NewFindingsNone -> "none"
+  NewFindingsFound -> "found"
+  NewFindingsInconclusive -> "inconclusive"
+  NewFindingsBlocked -> "blocked"
+
+parseNewFindingsStatus :: Text -> Maybe NewFindingsStatus
+parseNewFindingsStatus status =
+  case Text.toLower (Text.strip status) of
+    "none" -> Just NewFindingsNone
+    "found" -> Just NewFindingsFound
+    "inconclusive" -> Just NewFindingsInconclusive
+    "blocked" -> Just NewFindingsBlocked
+    _ -> Nothing
+
+allNewFindingsStatuses :: [NewFindingsStatus]
+allNewFindingsStatuses =
+  [ NewFindingsNone
+  , NewFindingsFound
+  , NewFindingsInconclusive
+  , NewFindingsBlocked
+  ]
 
 data ReviewFinding
   = ReviewThreadFinding ReviewThreadId (Maybe Text)
@@ -43,6 +128,36 @@ data ReviewEvidence = ReviewEvidence
   , reviewedCommit :: CommitSha
   }
   deriving stock (Eq, Show)
+
+data ReviewMode = NormalReview | VerificationReview
+  deriving stock (Eq, Show)
+
+data ReviewContext mode where
+  NormalReviewContext :: ReviewContext 'NormalReview
+  VerificationReviewContext :: ReviewEvidence -> ReviewContext 'VerificationReview
+
+deriving stock instance Eq (ReviewContext mode)
+deriving stock instance Show (ReviewContext mode)
+
+data SomeReviewContext where
+  SomeReviewContext :: ReviewContext mode -> SomeReviewContext
+
+instance Eq SomeReviewContext where
+  SomeReviewContext NormalReviewContext == SomeReviewContext NormalReviewContext = True
+  SomeReviewContext (VerificationReviewContext left) == SomeReviewContext (VerificationReviewContext right) = left == right
+  _ == _ = False
+
+instance Show SomeReviewContext where
+  show (SomeReviewContext NormalReviewContext) = "SomeReviewContext NormalReviewContext"
+  show (SomeReviewContext (VerificationReviewContext evidence)) = "SomeReviewContext (VerificationReviewContext " <> show evidence <> ")"
+
+normalReviewContext :: SomeReviewContext
+normalReviewContext =
+  SomeReviewContext NormalReviewContext
+
+verificationReviewContext :: ReviewEvidence -> SomeReviewContext
+verificationReviewContext evidence =
+  SomeReviewContext (VerificationReviewContext evidence)
 
 reviewEvidenceFromThreads :: NonEmpty ReviewThreadId -> CommitSha -> ReviewEvidence
 reviewEvidenceFromThreads threads commit =

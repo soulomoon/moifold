@@ -17,7 +17,7 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.Observation
 import CodexWatcher.StateMachine
 import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, ThreadId, TurnId)
-import CodexWatcher.Core.Kinds (Domain (..), ThreadActivity (..))
+import CodexWatcher.Core.Kinds (Domain (..), Phase (..), ThreadActivity (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
@@ -115,22 +115,22 @@ issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (Obser
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedImplementationCompleted prNumber maybeReviewerThreadId) =
   Right (tick (IssueImplementationCompletedEvent prNumber maybeReviewerThreadId) (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId)))
 issueImplementObserve (SomeWatcherState state@IssueHandoffReady {}) (ObservedIssueReviewerThreadReady reviewerThreadId) =
-  Right (tick (IssueReviewerThreadReadyEvent reviewerThreadId) (step state (IssueReviewerThreadReady reviewerThreadId)))
+  Right (reviewerThreadReadyTick state reviewerThreadId)
 issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (ObservedIssueReviewerThreadReady reviewerThreadId) =
-  Right (tick (IssueReviewerThreadReadyEvent reviewerThreadId) (step state (IssueReviewerThreadReady reviewerThreadId)))
+  Right (reviewerThreadReadyTick state reviewerThreadId)
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedIssueReviewerThreadReady reviewerThreadId) =
-  Right (tick (IssueReviewerThreadReadyEvent reviewerThreadId) (step state (IssueReviewerThreadReady reviewerThreadId)))
+  Right (reviewerThreadReadyTick state reviewerThreadId)
+issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewPendingReviewer {}) (ObservedIssueReviewerThreadReady reviewerThreadId) =
+  Right (reviewerThreadReadyTick state reviewerThreadId)
 issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewReady {}) (ObservedIssueReviewerThreadReady reviewerThreadId) =
-  Right (tick (IssueReviewerThreadReadyEvent reviewerThreadId) (step state (IssueReviewerThreadReady reviewerThreadId)))
+  Right (reviewerThreadReadyTick state reviewerThreadId)
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedPullRequestMerged prNumber) =
   Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
-issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewReady {}) (ObservedPostMergeReviewStarted commit turnId) =
-  case state of
-    IssuePostMergeReviewReady _config _prNumber _worker (Just reviewer) ->
-      let activeTurn = ActiveTurn (reviewerIdleThreadId reviewer) turnId
-       in Right (tick (IssuePostMergeReviewStartedEvent commit turnId) (step state (StartIssuePostMergeReview commit activeTurn)))
-    IssuePostMergeReviewReady {} ->
-      Left "cannot start post-merge reviewer without reviewer thread"
+issueImplementObserve (SomeWatcherState state@(IssuePostMergeReviewReady _config _prNumber _worker reviewer)) (ObservedPostMergeReviewStarted commit turnId) =
+  let activeTurn = ActiveTurn (reviewerIdleThreadId reviewer) turnId
+   in Right (tick (IssuePostMergeReviewStartedEvent commit turnId) (step state (StartIssuePostMergeReview commit activeTurn)))
+issueImplementObserve (SomeWatcherState IssuePostMergeReviewPendingReviewer {}) (ObservedPostMergeReviewStarted _commit _turnId) =
+  Left "cannot start post-merge reviewer without reviewer thread"
 issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewing {}) (ObservedPostMergeReviewerOutcome outcome) =
   case outcome of
     IssueFinalReviewClean evidence ->
@@ -159,6 +159,8 @@ issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (Obser
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
+issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewPendingReviewer {}) (ObservedIssueImplementBlocked reason) =
+  Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewReady {}) (ObservedIssueImplementBlocked reason) =
   Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
 issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewing {}) (ObservedIssueImplementBlocked reason) =
@@ -179,6 +181,10 @@ fromObservedTick observed =
     , issueImplementTickState = observed.observedState
     , issueImplementTickEffects = observed.observedEffects
     }
+
+reviewerThreadReadyTick :: WatcherState 'IssueImplement 'Implementing -> ThreadId -> IssueImplementTick
+reviewerThreadReadyTick state reviewerThreadId =
+  tick (IssueReviewerThreadReadyEvent reviewerThreadId) (step state (IssueReviewerThreadReady reviewerThreadId))
 
 reviewerIdleThreadId :: ReviewerThread 'Idle -> ThreadId
 reviewerIdleThreadId (ReviewerIdle threadId) = threadId

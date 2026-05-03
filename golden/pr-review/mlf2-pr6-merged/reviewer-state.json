@@ -1,10 +1,13 @@
 {
-  "review_status": "blocked",
   "reviewed_commit_sha": "ba1faf7645ca86c48104cd640a708cca0311b204",
-  "reviewer_prompt_version": "haskell-pro-style-v1",
+  "reviewer_prompt_version": "haskell-pro-style-v10-split-review-findings",
   "added_review_comment_count": 0,
-  "submitted_approval": false,
-  "approval_comment": null,
-  "findings_summary": [],
-  "blocked_reason": "GitHub rejected the approval review for ba1faf7645ca86c48104cd640a708cca0311b204: Review Can not approve your own pull request."
+  "prior_findings_status": "not_applicable",
+  "new_findings_status": "blocked",
+  "lgtm_comment": null,
+  "prior_findings_summary": [],
+  "new_findings_summary": [],
+  "blocked_reason": "GitHub rejected the approval review for ba1faf7645ca86c48104cd640a708cca0311b204: Review Can not approve your own pull request.",
+  "solved_threads": [],
+  "remaining_review_threads": []
 }

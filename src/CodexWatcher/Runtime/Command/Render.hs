@@ -203,18 +203,6 @@ renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
     ]
     Nothing
     ""
-renderRuntimeCommand (GhPrDismissRequestChanges config evidence) =
-  RuntimeCommandSpec
-    "bash"
-    [ "-lc"
-    , Text.unpack dismissRequestChangesScript
-    , "codex-watcher-gh-pr-dismiss-request-changes"
-    , show (unPrNumber (prNumber config))
-    , Text.unpack (unRepoName (prRepo config))
-    , Text.unpack (unCommitSha (cleanReviewCommit evidence))
-    ]
-    Nothing
-    ""
 renderRuntimeCommand (GhPrCleanReviewAndMerge repo prNumber evidence mergeMethod) =
   RuntimeCommandSpec
     "bash"
@@ -448,24 +436,6 @@ cleanReviewAndMergeScript =
     , "merge_flag=\"$3\""
     , "gh pr review \"$pr_number\" --repo \"$repo\" --comment --body-file -"
     , "gh pr merge \"$pr_number\" --repo \"$repo\" \"$merge_flag\""
-    ]
-
-dismissRequestChangesScript :: Text
-dismissRequestChangesScript =
-  Text.unlines
-    [ "set -euo pipefail"
-    , "pr_number=\"$1\""
-    , "repo=\"$2\""
-    , "reviewed_commit=\"$3\""
-    , "owner=\"${repo%%/*}\""
-    , "name=\"${repo#*/}\""
-    , "viewer=\"$(gh api user --jq .login)\""
-    , "query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(last:100){nodes{databaseId state body author{login}}}}}}'"
-    , "review_ids=\"$(gh api graphql -f owner=\"$owner\" -f name=\"$name\" -F number=\"$pr_number\" -f query=\"$query\" --jq \".data.repository.pullRequest.reviews.nodes[] | select(.state == \\\"CHANGES_REQUESTED\\\" and .author.login == \\\"$viewer\\\" and (.body // \\\"\\\" | contains(\\\"Submitted by Haskell PR review watcher as a blocking request-changes review.\\\"))) | .databaseId\")\""
-    , "for review_id in $review_ids; do"
-    , "  [ -n \"$review_id\" ] || continue"
-    , "  gh api --method PUT \"repos/$repo/pulls/$pr_number/reviews/$review_id/dismissals\" -f message=\"Resolved by watcher clean review at $reviewed_commit before merge.\" >/dev/null"
-    , "done"
     ]
 
 reviewFindingsCommentBody :: ReviewEvidence -> Text

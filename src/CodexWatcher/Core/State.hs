@@ -107,11 +107,17 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
     -> Maybe (ReviewerThread 'Idle)
     -> WatcherState 'IssueImplement 'Implementing
 
+  IssuePostMergeReviewPendingReviewer
+    :: IssueConfig
+    -> PrNumber
+    -> WorkerThread 'Idle
+    -> WatcherState 'IssueImplement 'Implementing
+
   IssuePostMergeReviewReady
     :: IssueConfig
     -> PrNumber
     -> WorkerThread 'Idle
-    -> Maybe (ReviewerThread 'Idle)
+    -> ReviewerThread 'Idle
     -> WatcherState 'IssueImplement 'Implementing
 
   IssuePostMergeReviewing
@@ -157,7 +163,7 @@ data WatcherState (domain :: Domain) (phase :: Phase) where
   PrReviewingClean
     :: PrConfig
     -> CommitSha
-    -> Maybe ReviewEvidence
+    -> SomeReviewContext
     -> WorkerThread 'Idle
     -> ReviewerThread 'Active
     -> WatcherState 'PrReview 'ReviewingClean

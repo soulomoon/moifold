@@ -11,7 +11,6 @@ module RuntimeSpec
   , prop_runtimeGhPrBodyUpdateUsesPlanFile
   , prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
   , prop_runtimeGhPrCommentReviewFindingsUsesPrComment
-  , prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesRequiredCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
@@ -61,7 +60,6 @@ runtimeCommandExamples =
   , GhReplyReviewThread (ReviewThreadId "PRRT_test") "still applies"
   , GhPrCommentReviewFindings (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (reviewEvidenceFromSummaries ("tests fail" :| []) (CommitSha "abc123"))
   , GhPrMerge (RepoName "soulomoon/mlf2") (PrNumber 6) "merge"
-  , GhPrDismissRequestChanges (PrConfig (RepoName "soulomoon/mlf2") (PrNumber 6) (BranchName "codex/example")) (CleanReviewEvidence (CommitSha "abc123") "LGTM")
   , GhPrCleanReviewAndMerge (RepoName "soulomoon/mlf2") (PrNumber 6) (CleanReviewEvidence (CommitSha "abc123") "LGTM") "merge"
   , CheckNonEmptyFile "/tmp/work/.watcher/issue-plan.md"
   , GitBranchCurrent "/tmp/work"
@@ -305,28 +303,6 @@ prop_runtimeGhReplyReviewThreadUsesGraphqlMutation =
              ]
         && spec.cwd == Nothing
         && spec.stdin == ""
-
-prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker :: PrNumber -> CleanReviewEvidence -> Bool
-prop_runtimeGhPrDismissRequestChangesUsesWatcherMarker prNumber evidence =
-  let repo = RepoName "soulomoon/mlf2"
-      config = PrConfig repo prNumber (BranchName "codex/example")
-      spec = renderRuntimeCommand (GhPrDismissRequestChanges config evidence)
-      script = Text.pack (spec.args !! 1)
-   in spec.command == "bash"
-        && take 2 spec.args == ["-lc", Text.unpack script]
-        && spec.args
-          == [ "-lc"
-             , Text.unpack script
-             , "codex-watcher-gh-pr-dismiss-request-changes"
-             , show (unPrNumber prNumber)
-             , Text.unpack (unRepoName repo)
-             , Text.unpack (unCommitSha (cleanReviewCommit evidence))
-             ]
-        && "gh api graphql" `Text.isInfixOf` script
-        && "CHANGES_REQUESTED" `Text.isInfixOf` script
-        && "Submitted by Haskell PR review watcher as a blocking request-changes review." `Text.isInfixOf` script
-        && "dismissals" `Text.isInfixOf` script
-        && not ("--approve" `Text.isInfixOf` script)
 
 prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
 prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge prNumber evidence =
