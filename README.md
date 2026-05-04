@@ -121,6 +121,8 @@ Without `--open-issues`, fanout discovers open issues with `gh issue list`. With
 
 The runtime event format is documented in `docs/event-log-schema.md`.
 
+For a handoff-ready guide that another agent can use to set up, start, or resume watchers for a specific repository, issue, or PR, see `docs/watcher-agent-runbook/README.md`. The companion helpers live under `scripts/watcher-init/`, including a Docker setup smoke, a check-only setup probe that reports target-project dependencies before the operator decides whether to install them, and state initialization scripts.
+
 Automatic turn starts now include an output schema and prompts that ask for structured JSON. Classification first accepts outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
 
 ## Design Rule
