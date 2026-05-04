@@ -150,6 +150,7 @@ issueImplementerRuntimeStatusFromStateDir repo issueNumber' stateDir = do
 data IssueImplementerChildLaunch
   = PrintChildLaunchCommands AppServerEndpoint PollSeconds
   | StartChildLaunches AppServerEndpoint PollSeconds
+  deriving stock (Eq, Show)
 
 data IssueImplementerChildStartResult
   = IssueImplementerChildStarted IssueNumber

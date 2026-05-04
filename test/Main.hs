@@ -5974,7 +5974,7 @@ main = do
       , quickCheckResult prop_issuePlanningFanoutUsesOnlyReadyIssues
       , quickCheckResult prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers
       , quickCheckResult prop_issuePlanningFanoutTreatsClosedReadyIssuesAsTerminal
-      , quickCheckResult prop_issuePlanningFanoutDefaultsToStartingChildWatchers
+      , quickCheckResult (ioProperty prop_issuePlanningFanoutDefaultsToStartingChildWatchers)
       , quickCheckResult prop_issuePlanningFanoutAllowsScopedDependencyClosure
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
