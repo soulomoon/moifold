@@ -202,6 +202,16 @@ staleSecondsForTest value =
     Just parsed -> parsed
     Nothing -> error ("invalid test stale seconds: " <> show value)
 
+pollSecondsForTest :: Int -> PollSeconds
+pollSecondsForTest value =
+  case mkPollSeconds value of
+    Just parsed -> parsed
+    Nothing -> error ("invalid test poll seconds: " <> show value)
+
+sequenceAnd :: [IO Bool] -> IO Bool
+sequenceAnd =
+  fmap and . sequence
+
 instance Arbitrary IssueCreationRequest where
   arbitrary = do
     title <- Text.pack <$> listOf1 (elements (['a' .. 'z'] <> [' ', '-']))
