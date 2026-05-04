@@ -44,4 +44,3 @@ renderServiceParser =
     <*> intOptionDefault "restart-seconds" 10 "SECONDS" "systemd restart delay"
     <*> intOptionDefault "rotate" 14 "COUNT" "logrotate retention count"
     <*> optional (strOption (long "implementers-root" <> metavar "PATH" <> help "Issue implementer child state root"))
-    <*> switch (long "start-children" <> help "Start issue implementer children after planning fanout")

@@ -172,9 +172,7 @@ maintainReadyIssueImplementers executor cli endpoint executionMode implementersR
           )
         childLaunch <-
           issueImplementerChildLaunchMode
-            cli.loopCliStartChildren
             (Just cli.loopCliPollSeconds)
-            cli.loopCliChildPollSeconds
             executionMode
             (Just endpoint)
         launchResults <- runIssueImplementerLaunchesDetailed executionMode launchEndpoint childLaunch launches

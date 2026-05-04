@@ -43,6 +43,7 @@ PY
 server_pid=$!
 trap "kill $server_pid >/dev/null 2>&1 || true" EXIT
 
+cabal update
 cabal "--builddir=$builddir" build all
 watcher_bin="$(cabal "--builddir=$builddir" list-bin moifold)"
 
@@ -50,14 +51,13 @@ cat > /tmp/watcher-smoke.env <<EOF
 WATCHER_REPO=/work/moifold
 WATCHER_BIN=$watcher_bin
 REPO_FULL_NAME=example/project
-PROJECT_KEY=example_project
 TARGET_WORKDIR=/work/moifold
 APP_SERVER_HOST=127.0.0.1
 APP_SERVER_PORT=4500
 APP_SERVER_PATH=/
-ALLOW_DEPENDENCY_INSTALL=false
+APP_SERVER_CHECK_MODE=tcp
 STATE_ROOT=$state_root
-PLANNER_STATE_DIR=$state_root/issue-planners/example__project
+PLANNER_STATE_DIR=$state_root/issue-planners/example_project
 IMPLEMENTERS_ROOT=$state_root/issue-implementers
 PR_REVIEW_ROOT=$state_root/pr-review-watchers
 ISSUE_WORKDIR_ROOT=$state_root/issue-workdirs
@@ -68,11 +68,13 @@ MAX_PARALLEL=1
 ISSUE_NUMBER=123
 PR_NUMBER=456
 ISSUE_BRANCH=codex/issue-123
-WORKER_THREAD_ID=issue-worker-123
-REVIEWER_THREAD_ID=reviewer-456
+ISSUE_WORKER_THREAD_ID=issue-worker-123
+PR_WORKER_THREAD_ID=pr-worker-456
+PR_REVIEWER_THREAD_ID=pr-reviewer-456
 PLANNER_THREAD_ID=planner-example-project
 EOF
 
+scripts/watcher-init/check-app-server.sh /tmp/watcher-smoke.env
 scripts/watcher-init/check-project-setup.sh /tmp/watcher-smoke.env
 
 planner_state="$(scripts/watcher-init/init-issue-planning-state.sh /tmp/watcher-smoke.env)"
@@ -82,6 +84,9 @@ pr_state="$(scripts/watcher-init/init-pr-review-state.sh /tmp/watcher-smoke.env)
 bash -n "$planner_state/restart-command.sh"
 bash -n "$issue_state/restart-command.sh"
 bash -n "$pr_state/restart-command.sh"
+bash -n "$planner_state/dry-run-command.sh"
+bash -n "$issue_state/dry-run-command.sh"
+bash -n "$pr_state/dry-run-command.sh"
 
 "$watcher_bin" replay-events "$planner_state/events.jsonl" >/tmp/planner-replay.txt
 "$watcher_bin" replay-events "$issue_state/events.jsonl" >/tmp/issue-replay.txt
@@ -96,4 +101,3 @@ printf "planner_state=%s\n" "$planner_state"
 printf "issue_state=%s\n" "$issue_state"
 printf "pr_state=%s\n" "$pr_state"
 '
-

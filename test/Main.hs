@@ -28,7 +28,7 @@ import CodexWatcher.EventLogRepair
 import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
-import CodexWatcher.Cli.Command.IssueFanout (readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
+import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildLaunchMode, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Fanout
@@ -114,7 +114,8 @@ import AppServerSpec
   , prop_appServerTurnStartPlanModeEncodesCollaborationMode
   )
 import CliSpec
-  ( prop_cliParsesGenericRunnerGuardDomains
+  ( prop_cliParsesAppServerProbe
+  , prop_cliParsesGenericRunnerGuardDomains
   , prop_cliParsesHealthcheckAndRunLoop
   , prop_cliRejectsBadDomain
   )
@@ -1417,6 +1418,19 @@ prop_issuePlanningFanoutTreatsClosedReadyIssuesAsTerminal =
         && not (readyIssueStatusesNeedReplanning [(IssueNumber 69, WatcherMissing), (IssueNumber 70, WatcherActiveRunning)])
  where
   issueNumberOfConfig (IssueConfig _ issue _) = issue
+
+prop_issuePlanningFanoutDefaultsToStartingChildWatchers :: IO Bool
+prop_issuePlanningFanoutDefaultsToStartingChildWatchers = do
+  let endpoint = AppServerEndpoint "127.0.0.1" 4500 "/"
+      pollSeconds = pollSecondsForTest 17
+  dryRunLaunch <- issueImplementerChildLaunchMode (Just pollSeconds) DryRunActions (Just endpoint)
+  executeLaunch <- issueImplementerChildLaunchMode (Just pollSeconds) ExecuteActions (Just endpoint)
+  sequenceAnd
+    [ assert "dry-run fanout prints child watcher launch commands by default" $
+        dryRunLaunch == PrintChildLaunchCommands endpoint pollSeconds
+    , assert "execute fanout starts child watcher daemons by default" $
+        executeLaunch == StartChildLaunches endpoint pollSeconds
+    ]
 
 prop_issuePlanningFanoutAllowsScopedDependencyClosure :: Bool
 prop_issuePlanningFanoutAllowsScopedDependencyClosure =
@@ -5950,6 +5964,7 @@ main = do
       , quickCheckResult prop_issuePlanningFanoutUsesOnlyReadyIssues
       , quickCheckResult prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers
       , quickCheckResult prop_issuePlanningFanoutTreatsClosedReadyIssuesAsTerminal
+      , quickCheckResult prop_issuePlanningFanoutDefaultsToStartingChildWatchers
       , quickCheckResult prop_issuePlanningFanoutAllowsScopedDependencyClosure
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
@@ -6046,6 +6061,7 @@ main = do
       , quickCheckResult prop_healthcheckSummaryJsonKeepsKindField
       , quickCheckResult prop_healthcheckTypedAnalyzerDispatch
       , quickCheckResult prop_cliParsesHealthcheckAndRunLoop
+      , quickCheckResult prop_cliParsesAppServerProbe
       , quickCheckResult prop_cliRejectsBadDomain
       , quickCheckResult prop_cliParsesGenericRunnerGuardDomains
       , quickCheckResult prop_supervisorRendersRestartAndLogrotate

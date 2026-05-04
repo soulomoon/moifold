@@ -11,7 +11,6 @@ module CodexWatcher.Domain.PrReview.LaunchCli
   , prReviewWatcherLaunchPlan
   , prReviewWatcherRuntimeStatus
   , launchPrReviewWatcher
-  , startPrReviewWatcherChildIfEnabled
   ) where
 
 import CodexWatcher.ActionExecutor
@@ -66,10 +65,10 @@ ensurePrReviewWatcherForHandoff cli endpoint executionMode issueConfig prNumber 
   status <- prReviewWatcherRuntimeStatus launch.reviewLaunchStateDir
   case status of
     WatcherMissing -> do
-      launchPrReviewWatcher executionMode (Just endpoint) cli.loopCliPollSeconds cli.loopCliStartChildren launch
+      launchPrReviewWatcher executionMode (Just endpoint) cli.loopCliPollSeconds launch
       pure Nothing
     WatcherActiveStopped -> do
-      startPrReviewWatcherChildIfEnabled cli.loopCliStartChildren endpoint cli.loopCliPollSeconds launch
+      startPrReviewWatcherChild endpoint cli.loopCliPollSeconds launch
       pure Nothing
     WatcherActiveRunning -> do
       putStrLn ("PR review watcher already running for #" <> show (unPrNumber prNumber))
@@ -137,17 +136,17 @@ withPrReviewThreadIds workerThread reviewerThread launch =
  where
   initialState = SomeWatcherState (PrCheckingReviews launch.reviewLaunchPrConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
 
-launchPrReviewWatcher :: ActionExecutionMode -> Maybe AppServerEndpoint -> PollSeconds -> Bool -> PrReviewWatcherLaunchPlan -> IO ()
-launchPrReviewWatcher DryRunActions maybeEndpoint pollSeconds startChildren launch = do
+launchPrReviewWatcher :: ActionExecutionMode -> Maybe AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
+launchPrReviewWatcher DryRunActions maybeEndpoint pollSeconds launch = do
   printPrReviewWatcherLaunch launch
-  maybe (pure ()) (\endpoint -> when startChildren (printPrReviewWatcherChildLaunch endpoint pollSeconds launch)) maybeEndpoint
-launchPrReviewWatcher ExecuteActions maybeEndpoint pollSeconds startChildren launch = do
+  maybe (pure ()) (\endpoint -> printPrReviewWatcherChildLaunch endpoint pollSeconds launch) maybeEndpoint
+launchPrReviewWatcher ExecuteActions maybeEndpoint pollSeconds launch = do
   ensurePrReviewWatcherLaunchWritable launch
-  writePrReviewWatcherLaunchPending startChildren launch
+  writePrReviewWatcherLaunchPending launch
   preparedLaunch <- preparePrReviewWatcherLaunch maybeEndpoint launch
   writePrReviewWatcherLaunch preparedLaunch
-  writePrReviewWatcherLaunchFinalized startChildren preparedLaunch
-  maybe (pure ()) (\endpoint -> when startChildren (startPrReviewWatcherChild endpoint pollSeconds preparedLaunch)) maybeEndpoint
+  writePrReviewWatcherLaunchFinalized preparedLaunch
+  maybe (pure ()) (\endpoint -> startPrReviewWatcherChild endpoint pollSeconds preparedLaunch) maybeEndpoint
 
 preparePrReviewWatcherLaunch :: Maybe AppServerEndpoint -> PrReviewWatcherLaunchPlan -> IO PrReviewWatcherLaunchPlan
 preparePrReviewWatcherLaunch Nothing launch =
@@ -205,22 +204,22 @@ ensurePrReviewWatcherLaunchStateEmpty launch = do
   when (configExists || eventsExists || finalizedExists) $
     die ("refusing to overwrite existing PR review watcher state: " <> launch.reviewLaunchStateDir)
 
-writePrReviewWatcherLaunchPending :: Bool -> PrReviewWatcherLaunchPlan -> IO ()
-writePrReviewWatcherLaunchPending startChildren launch =
+writePrReviewWatcherLaunchPending :: PrReviewWatcherLaunchPlan -> IO ()
+writePrReviewWatcherLaunchPending launch =
   writeJsonValue
     (launchPendingManifestPath launch.reviewLaunchStateDir)
-    (prReviewLaunchManifest "pending" startChildren launch)
+    (prReviewLaunchManifest "pending" launch)
 
-writePrReviewWatcherLaunchFinalized :: Bool -> PrReviewWatcherLaunchPlan -> IO ()
-writePrReviewWatcherLaunchFinalized startChildren launch = do
+writePrReviewWatcherLaunchFinalized :: PrReviewWatcherLaunchPlan -> IO ()
+writePrReviewWatcherLaunchFinalized launch = do
   writeJsonValue
     (launchFinalizedManifestPath launch.reviewLaunchStateDir)
-    (prReviewLaunchManifest "finalized" startChildren launch)
+    (prReviewLaunchManifest "finalized" launch)
   pendingExists <- doesFileExist (launchPendingManifestPath launch.reviewLaunchStateDir)
   when pendingExists (removeFile (launchPendingManifestPath launch.reviewLaunchStateDir))
 
-prReviewLaunchManifest :: Text.Text -> Bool -> PrReviewWatcherLaunchPlan -> Value
-prReviewLaunchManifest status startChildren launch =
+prReviewLaunchManifest :: Text.Text -> PrReviewWatcherLaunchPlan -> Value
+prReviewLaunchManifest status launch =
   object
     [ "status" .= status
     , "launchKind" .= ("pr-review" :: Text.Text)
@@ -233,7 +232,7 @@ prReviewLaunchManifest status startChildren launch =
     , "intendedThreadRoles" .= (["worker", "reviewer"] :: [Text.Text])
     , "workerThreadId" .= unThreadId launch.reviewLaunchWorkerThreadId
     , "reviewerThreadId" .= unThreadId launch.reviewLaunchReviewerThreadId
-    , "childLaunch" .= if startChildren then ("start" :: Text.Text) else "disabled"
+    , "childLaunch" .= ("start" :: Text.Text)
     , "createdAt" .= ("unknown" :: Text.Text)
     ]
 
@@ -262,12 +261,6 @@ printPrReviewWatcherChildLaunch :: AppServerEndpoint -> PollSeconds -> PrReviewW
 printPrReviewWatcherChildLaunch endpoint pollSeconds launch = do
   executable <- stableExecutablePath
   putStrLn ("PR review child command: " <> unwords (executable : prReviewWatcherChildArgs endpoint pollSeconds launch))
-
-startPrReviewWatcherChildIfEnabled :: Bool -> AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
-startPrReviewWatcherChildIfEnabled False _endpoint _pollSeconds _launch =
-  pure ()
-startPrReviewWatcherChildIfEnabled True endpoint pollSeconds launch =
-  startPrReviewWatcherChild endpoint pollSeconds launch
 
 startPrReviewWatcherChild :: AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
 startPrReviewWatcherChild endpoint pollSeconds launch = do

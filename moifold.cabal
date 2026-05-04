@@ -34,6 +34,7 @@ library
     CodexWatcher.AppServerProtocol
     CodexWatcher.AutomaticLoop.Runner
     CodexWatcher.ChildDaemon
+    CodexWatcher.Cli.Command.AppServerProbe
     CodexWatcher.Cli.Command.DaemonControl
     CodexWatcher.Cli.Command.IssueFanout
     CodexWatcher.Cli.Command.Observe
@@ -117,6 +118,7 @@ library
     CodexWatcher.AutomaticLoop.Output
     CodexWatcher.AutomaticLoop.PrReviewHandoff
     CodexWatcher.AutomaticLoop.StartupThreads
+    CodexWatcher.Cli.Parser.AppServerProbe
     CodexWatcher.Cli.Parser.Common
     CodexWatcher.Cli.Parser.Fanout
     CodexWatcher.Cli.Parser.Guard

@@ -2,7 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module CliSpec
-  ( prop_cliParsesHealthcheckAndRunLoop
+  ( prop_cliParsesAppServerProbe
+  , prop_cliParsesHealthcheckAndRunLoop
   , prop_cliRejectsBadDomain
   , prop_cliParsesGenericRunnerGuardDomains
   ) where
@@ -13,6 +14,34 @@ import CodexWatcher.Cli.Types
 import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), ThreadId (..))
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Limits (PollSeconds, StaleSeconds, mkPollSeconds, mkStaleSeconds)
+
+prop_cliParsesAppServerProbe :: Bool
+prop_cliParsesAppServerProbe =
+  parseCliCommand
+    [ "probe-app-server"
+    , "--app-server-host"
+    , "127.0.0.1"
+    , "--app-server-port"
+    , "4500"
+    , "--app-server-path"
+    , "/rpc"
+    , "--thread-id"
+    , "thread-1"
+    , "--create-smoke-thread"
+    , "--start-smoke-turn"
+    , "--workdir"
+    , "/tmp/repo"
+    ]
+    == Right
+      ( CliProbeAppServer
+          AppServerProbeCli
+            { appServerProbeCliEndpoint = AppServerEndpoint "127.0.0.1" 4500 "/rpc"
+            , appServerProbeCliThreadId = Just (ThreadId "thread-1")
+            , appServerProbeCliCreateSmokeThread = True
+            , appServerProbeCliStartSmokeTurn = True
+            , appServerProbeCliWorkdir = "/tmp/repo"
+            }
+      )
 
 prop_cliParsesHealthcheckAndRunLoop :: Bool
 prop_cliParsesHealthcheckAndRunLoop =
@@ -70,8 +99,6 @@ prop_cliParsesHealthcheckAndRunLoop =
               , loopCliWorkdirRoot = Nothing
               , loopCliBranchPrefix = "codex/issue-"
               , loopCliThreadPrefix = "issue-worker-"
-              , loopCliStartChildren = False
-              , loopCliChildPollSeconds = Nothing
               }
         )
     && parseCliCommand
@@ -124,8 +151,6 @@ prop_cliParsesHealthcheckAndRunLoop =
                     , loopCliWorkdirRoot = Nothing
                     , loopCliBranchPrefix = "codex/issue-"
                     , loopCliThreadPrefix = "issue-worker-"
-                    , loopCliStartChildren = False
-                    , loopCliChildPollSeconds = Nothing
                     }
               , guardCliPidFile = Just "/tmp/state/runner-guard.pid"
               , guardCliPollSeconds = pollSecondsForTest 15

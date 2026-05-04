@@ -39,8 +39,6 @@ serviceConfigFromCliWithExecutable options executable plannerArgs =
         if endpoint.appServerPath == "/" then [] else ["--app-server-path", endpoint.appServerPath]
       implementerArgs =
         maybe [] (\root -> ["--implementers-root", root]) options.renderServiceCliImplementersRoot
-      childArgs =
-        if options.renderServiceCliStartChildren then ["--start-children"] else []
       commandArgs =
         [ "run-" <> domain
         , "--events"
@@ -63,7 +61,6 @@ serviceConfigFromCliWithExecutable options executable plannerArgs =
           <> appServerPathArgs
           <> plannerArgs
           <> implementerArgs
-          <> childArgs
    in
     WatcherServiceConfig
       { serviceName = options.renderServiceCliName

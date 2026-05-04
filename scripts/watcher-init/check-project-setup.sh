@@ -7,7 +7,7 @@ usage: check-project-setup.sh /path/to/watcher.env [--install]
 
 Checks watcher prerequisites and target-project dependency entrypoints.
 Default mode reports missing tools and suggested install/setup commands only.
-Use --install only after the operator has decided dependency installation is allowed.
+Use --install to run all detected setup commands.
 EOF
 }
 
@@ -31,11 +31,9 @@ case "${1:-}" in
     ;;
 esac
 
-set -a
-source "$env_file"
-set +a
-
-export PATH="$HOME/.ghcup/bin:$HOME/.cabal/bin:$PATH"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib.sh"
+load_watcher_env "$env_file"
 
 : "${WATCHER_REPO:?}"
 : "${REPO_FULL_NAME:?}"
@@ -44,10 +42,11 @@ export PATH="$HOME/.ghcup/bin:$HOME/.cabal/bin:$PATH"
 : "${APP_SERVER_HOST:?}"
 : "${APP_SERVER_PORT:?}"
 : "${APP_SERVER_PATH:=/}"
-: "${ALLOW_DEPENDENCY_INSTALL:=false}"
 
 missing_tools=()
-setup_commands=()
+setup_command_labels=()
+setup_command_kinds=()
+setup_command_dirs=()
 service_problems=()
 state_problems=()
 
@@ -65,13 +64,108 @@ require_cmd() {
   fi
 }
 
+shell_quote() {
+  printf '%q' "$1"
+}
+
 add_setup_command() {
-  local command_text="$1"
+  local label="$1"
+  local kind="$2"
+  local dir="$3"
   local existing
-  for existing in "${setup_commands[@]}"; do
-    [[ "$existing" == "$command_text" ]] && return 0
+  for existing in "${setup_command_labels[@]}"; do
+    [[ "$existing" == "$label" ]] && return 0
   done
-  setup_commands+=("$command_text")
+  setup_command_labels+=("$label")
+  setup_command_kinds+=("$kind")
+  setup_command_dirs+=("$dir")
+}
+
+setup_command_text() {
+  local kind="$1"
+  case "$kind" in
+    pnpm-install) printf 'pnpm install --frozen-lockfile' ;;
+    yarn-install) printf 'yarn install --frozen-lockfile' ;;
+    npm-ci) printf 'npm ci' ;;
+    npm-install) printf 'npm install' ;;
+    cabal-build) printf 'cabal build all' ;;
+    stack-deps) printf 'stack build --only-dependencies' ;;
+    cargo-fetch) printf 'cargo fetch' ;;
+    go-download) printf 'go mod download' ;;
+    uv-sync) printf 'uv sync' ;;
+    poetry-install) printf 'poetry install' ;;
+    python-editable) printf 'python3 -m pip install -e .' ;;
+    python-requirements) printf 'python3 -m pip install -r requirements.txt' ;;
+    nix-develop) printf 'nix develop --command true' ;;
+    *)
+      printf 'unknown setup command kind: %s\n' "$kind" >&2
+      exit 2
+      ;;
+  esac
+}
+
+add_project_setup_command() {
+  local dir="$1"
+  local kind="$2"
+  add_setup_command "cd $(shell_quote "$dir") && $(setup_command_text "$kind")" "$kind" "$dir"
+}
+
+add_ghcup_ghc_setup_command() {
+  local version="$1"
+  add_setup_command "ghcup install ghc $(shell_quote "$version")" "ghcup-ghc" "$version"
+}
+
+run_setup_command() {
+  local kind="$1"
+  local dir="$2"
+  case "$kind" in
+    ghcup-ghc)
+      ghcup install ghc "$dir"
+      ;;
+    pnpm-install)
+      (cd "$dir" && pnpm install --frozen-lockfile)
+      ;;
+    yarn-install)
+      (cd "$dir" && yarn install --frozen-lockfile)
+      ;;
+    npm-ci)
+      (cd "$dir" && npm ci)
+      ;;
+    npm-install)
+      (cd "$dir" && npm install)
+      ;;
+    cabal-build)
+      (cd "$dir" && cabal build all)
+      ;;
+    stack-deps)
+      (cd "$dir" && stack build --only-dependencies)
+      ;;
+    cargo-fetch)
+      (cd "$dir" && cargo fetch)
+      ;;
+    go-download)
+      (cd "$dir" && go mod download)
+      ;;
+    uv-sync)
+      (cd "$dir" && uv sync)
+      ;;
+    poetry-install)
+      (cd "$dir" && poetry install)
+      ;;
+    python-editable)
+      (cd "$dir" && python3 -m pip install -e .)
+      ;;
+    python-requirements)
+      (cd "$dir" && python3 -m pip install -r requirements.txt)
+      ;;
+    nix-develop)
+      (cd "$dir" && nix develop --command true)
+      ;;
+    *)
+      printf 'unknown setup command kind: %s\n' "$kind" >&2
+      exit 2
+      ;;
+  esac
 }
 
 print_section() {
@@ -86,12 +180,13 @@ require_cmd ghc
 require_cmd cabal
 require_cmd bash
 require_cmd timeout
+require_cmd python3
 
 print_section "haskell toolchain"
 if have_cmd ghcup; then
   printf 'ok ghcup: %s\n' "$(command -v ghcup)"
 else
-  add_setup_command "curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh"
+  printf 'missing ghcup: complete moifold setup before project watcher setup\n'
 fi
 
 if have_cmd ghc; then
@@ -101,7 +196,7 @@ if have_cmd ghc; then
     *) printf 'warning: ghc is not on a ghcup path: %s\n' "$(command -v ghc)" ;;
   esac
 else
-  add_setup_command "ghcup install ghc recommended && ghcup set ghc recommended"
+  printf 'missing ghc: install through ghcup during moifold setup\n'
 fi
 
 if have_cmd cabal; then
@@ -111,7 +206,7 @@ if have_cmd cabal; then
     *) printf 'warning: cabal is not on a ghcup path: %s\n' "$(command -v cabal)" ;;
   esac
 else
-  add_setup_command "ghcup install cabal recommended && ghcup set cabal recommended"
+  printf 'missing cabal: install through ghcup during moifold setup\n'
 fi
 
 print_section "required services"
@@ -123,7 +218,6 @@ if [[ ! -d "$WATCHER_REPO" ]]; then
   printf 'missing watcher repo: %s\n' "$WATCHER_REPO"
 else
   git -C "$WATCHER_REPO" status --short || true
-  add_setup_command "cd '$WATCHER_REPO' && cabal build all"
 fi
 
 if [[ -n "${WATCHER_BIN:-}" && -x "${WATCHER_BIN:-}" ]]; then
@@ -158,12 +252,49 @@ else
 fi
 
 print_section "app server"
-if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$APP_SERVER_HOST/$APP_SERVER_PORT" 2>/dev/null; then
-  printf 'ok app-server tcp: %s:%s%s\n' "$APP_SERVER_HOST" "$APP_SERVER_PORT" "$APP_SERVER_PATH"
+if "$script_dir/check-app-server.sh" "$env_file"; then
+  printf 'ok app-server check\n'
 else
-  printf 'could not connect to app-server tcp: %s:%s%s\n' "$APP_SERVER_HOST" "$APP_SERVER_PORT" "$APP_SERVER_PATH"
+  printf 'app-server check failed\n'
   service_problems+=("start or fix app-server at $APP_SERVER_HOST:$APP_SERVER_PORT$APP_SERVER_PATH")
 fi
+
+detect_cabal_declared_compiler() {
+  [[ -f cabal.project ]] || return 0
+
+  local compiler
+  compiler="$(
+    awk '
+      /^[[:space:]]*with-compiler[[:space:]]*:/ {
+        sub(/^[^:]*:[[:space:]]*/, "", $0)
+        sub(/[[:space:]]*(--|#).*$/, "", $0)
+        print $1
+      }
+    ' cabal.project | tail -n 1
+  )"
+
+  [[ -n "$compiler" ]] || return 0
+
+  if [[ "$compiler" == ghc-[0-9]* ]]; then
+    local version="${compiler#ghc-}"
+    if have_cmd "$compiler"; then
+      printf 'ok target compiler: %s -> %s\n' "$compiler" "$(command -v "$compiler")"
+    else
+      printf 'missing target compiler: %s declared by cabal.project with-compiler\n' "$compiler"
+      missing_tools+=("$compiler")
+      if have_cmd ghcup; then
+        add_ghcup_ghc_setup_command "$version"
+      fi
+    fi
+  elif [[ -x "$compiler" ]]; then
+    printf 'ok target compiler: %s\n' "$compiler"
+  elif have_cmd "$compiler"; then
+    printf 'ok target compiler: %s -> %s\n' "$compiler" "$(command -v "$compiler")"
+  else
+    printf 'missing target compiler: %s declared by cabal.project with-compiler\n' "$compiler"
+    missing_tools+=("$compiler")
+  fi
+}
 
 detect_target_project() {
   [[ -d "$TARGET_WORKDIR" ]] || return 0
@@ -174,58 +305,59 @@ detect_target_project() {
   if [[ -f package.json ]]; then
     if [[ -f pnpm-lock.yaml ]]; then
       require_cmd pnpm
-      add_setup_command "cd '$TARGET_WORKDIR' && pnpm install --frozen-lockfile"
+      add_project_setup_command "$TARGET_WORKDIR" pnpm-install
     elif [[ -f yarn.lock ]]; then
       require_cmd yarn
-      add_setup_command "cd '$TARGET_WORKDIR' && yarn install --frozen-lockfile"
+      add_project_setup_command "$TARGET_WORKDIR" yarn-install
     elif [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
       require_cmd npm
-      add_setup_command "cd '$TARGET_WORKDIR' && npm ci"
+      add_project_setup_command "$TARGET_WORKDIR" npm-ci
     else
       require_cmd npm
-      add_setup_command "cd '$TARGET_WORKDIR' && npm install"
+      add_project_setup_command "$TARGET_WORKDIR" npm-install
     fi
   fi
 
   if compgen -G "*.cabal" >/dev/null || [[ -f cabal.project ]]; then
     require_cmd cabal
-    add_setup_command "cd '$TARGET_WORKDIR' && cabal build all"
+    detect_cabal_declared_compiler
+    add_project_setup_command "$TARGET_WORKDIR" cabal-build
   fi
 
   if [[ -f stack.yaml ]]; then
     require_cmd stack
-    add_setup_command "cd '$TARGET_WORKDIR' && stack build --only-dependencies"
+    add_project_setup_command "$TARGET_WORKDIR" stack-deps
   fi
 
   if [[ -f Cargo.toml ]]; then
     require_cmd cargo
-    add_setup_command "cd '$TARGET_WORKDIR' && cargo fetch"
+    add_project_setup_command "$TARGET_WORKDIR" cargo-fetch
   fi
 
   if [[ -f go.mod ]]; then
     require_cmd go
-    add_setup_command "cd '$TARGET_WORKDIR' && go mod download"
+    add_project_setup_command "$TARGET_WORKDIR" go-download
   fi
 
   if [[ -f pyproject.toml ]]; then
     if [[ -f uv.lock ]]; then
       require_cmd uv
-      add_setup_command "cd '$TARGET_WORKDIR' && uv sync"
+      add_project_setup_command "$TARGET_WORKDIR" uv-sync
     elif [[ -f poetry.lock ]]; then
       require_cmd poetry
-      add_setup_command "cd '$TARGET_WORKDIR' && poetry install"
+      add_project_setup_command "$TARGET_WORKDIR" poetry-install
     else
       require_cmd python3
-      add_setup_command "cd '$TARGET_WORKDIR' && python3 -m pip install -e ."
+      add_project_setup_command "$TARGET_WORKDIR" python-editable
     fi
   elif [[ -f requirements.txt ]]; then
     require_cmd python3
-    add_setup_command "cd '$TARGET_WORKDIR' && python3 -m pip install -r requirements.txt"
+    add_project_setup_command "$TARGET_WORKDIR" python-requirements
   fi
 
   if [[ -f flake.nix ]]; then
     require_cmd nix
-    add_setup_command "cd '$TARGET_WORKDIR' && nix develop --command true"
+    add_project_setup_command "$TARGET_WORKDIR" nix-develop
   fi
 
   if [[ -f Makefile || -f makefile ]]; then
@@ -236,10 +368,10 @@ detect_target_project() {
 detect_target_project
 
 print_section "suggested setup commands"
-if [[ ${#setup_commands[@]} -eq 0 ]]; then
+if [[ ${#setup_command_labels[@]} -eq 0 ]]; then
   printf 'no project dependency setup command detected\n'
 else
-  printf '%s\n' "${setup_commands[@]}"
+  printf '%s\n' "${setup_command_labels[@]}"
 fi
 
 if [[ ${#missing_tools[@]} -gt 0 ]]; then
@@ -259,28 +391,23 @@ fi
 
 print_section "agent report summary"
 if [[ ${#missing_tools[@]} -eq 0 && ${#service_problems[@]} -eq 0 && ${#state_problems[@]} -eq 0 ]]; then
-  printf 'ready: base tools, writable paths, and app-server TCP check passed\n'
+  printf 'ready: base tools, writable paths, and app-server check passed\n'
 else
   printf 'ready: no\n'
 fi
 printf 'missing_tools_count: %s\n' "${#missing_tools[@]}"
 printf 'services_to_start_count: %s\n' "${#service_problems[@]}"
 printf 'state_problem_count: %s\n' "${#state_problems[@]}"
-printf 'suggested_setup_command_count: %s\n' "${#setup_commands[@]}"
+printf 'suggested_setup_command_count: %s\n' "${#setup_command_labels[@]}"
 
 if [[ "$install" == true ]]; then
-  if [[ "$ALLOW_DEPENDENCY_INSTALL" != "true" ]]; then
-    print_section "install refused"
-    printf 'Set ALLOW_DEPENDENCY_INSTALL=true in the env file before rerunning with --install.\n' >&2
-    exit 3
-  fi
   print_section "running setup commands"
-  for command_text in "${setup_commands[@]}"; do
-    printf '+ %s\n' "$command_text"
-    bash -lc "$command_text"
+  for index in "${!setup_command_labels[@]}"; do
+    printf '+ %s\n' "${setup_command_labels[$index]}"
+    run_setup_command "${setup_command_kinds[$index]}" "${setup_command_dirs[$index]}"
   done
 else
   print_section "decision gate"
   printf 'Default mode did not install dependencies.\n'
-  printf 'Review the suggested commands, install missing system tools if needed, then rerun with --install only if installation is allowed.\n'
+  printf 'Rerun with --install to install missing system tools and run detected setup commands.\n'
 fi

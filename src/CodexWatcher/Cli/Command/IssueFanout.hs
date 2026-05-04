@@ -48,7 +48,6 @@ import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
-import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)
 import Data.Aeson (Value, object, (.=))
@@ -68,9 +67,7 @@ issueFanout options = do
       maybeEndpoint = options.issueFanoutCliEndpoint
   childLaunch <-
     issueImplementerChildLaunchMode
-      options.issueFanoutCliStartChildren
       options.issueFanoutCliPollSeconds
-      options.issueFanoutCliChildPollSeconds
       executionMode
       maybeEndpoint
   let fanoutConfig =
@@ -151,8 +148,7 @@ issueImplementerRuntimeStatusFromStateDir repo issueNumber' stateDir = do
   watcherRuntimeStatus statusConfig
 
 data IssueImplementerChildLaunch
-  = DoNotLaunchChildren
-  | PrintChildLaunchCommands AppServerEndpoint PollSeconds
+  = PrintChildLaunchCommands AppServerEndpoint PollSeconds
   | StartChildLaunches AppServerEndpoint PollSeconds
 
 data IssueImplementerChildStartResult
@@ -161,15 +157,13 @@ data IssueImplementerChildStartResult
   | IssueImplementerChildStartProblem IssueNumber Text.Text WatcherRuntimeStatus
   deriving stock (Eq, Show)
 
-issueImplementerChildLaunchMode :: Bool -> Maybe PollSeconds -> Maybe PollSeconds -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
-issueImplementerChildLaunchMode startChildren maybePollSeconds maybeChildPollSeconds executionMode maybeEndpoint
-  | not startChildren = pure DoNotLaunchChildren
-  | otherwise = do
-      endpoint <- maybe (die "--start-children requires --app-server-host and --app-server-port") pure maybeEndpoint
-      let pollSeconds = fromMaybe defaultChildPollSeconds (maybeChildPollSeconds <|> maybePollSeconds)
-      pure case executionMode of
-        DryRunActions -> PrintChildLaunchCommands endpoint pollSeconds
-        ExecuteActions -> StartChildLaunches endpoint pollSeconds
+issueImplementerChildLaunchMode :: Maybe PollSeconds -> ActionExecutionMode -> Maybe AppServerEndpoint -> IO IssueImplementerChildLaunch
+issueImplementerChildLaunchMode maybePollSeconds executionMode maybeEndpoint = do
+  endpoint <- maybe (die "child watcher launch requires --app-server-host and --app-server-port") pure maybeEndpoint
+  let pollSeconds = fromMaybe defaultChildPollSeconds maybePollSeconds
+  pure case executionMode of
+    DryRunActions -> PrintChildLaunchCommands endpoint pollSeconds
+    ExecuteActions -> StartChildLaunches endpoint pollSeconds
 
 runIssueImplementerLaunches :: ActionExecutionMode -> Maybe AppServerEndpoint -> IssueImplementerChildLaunch -> [IssueImplementerLaunchPlan] -> IO ()
 runIssueImplementerLaunches executionMode maybeEndpoint childLaunch launches = do
@@ -373,7 +367,6 @@ issueImplementerLaunchManifest status childLaunch launch =
 
 issueImplementerChildLaunchText :: IssueImplementerChildLaunch -> Text.Text
 issueImplementerChildLaunchText = \case
-  DoNotLaunchChildren -> "disabled"
   PrintChildLaunchCommands {} -> "print"
   StartChildLaunches {} -> "start"
 
@@ -397,8 +390,6 @@ printIssueImplementerLaunch launch =
     )
 
 printIssueImplementerChildLaunch :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()
-printIssueImplementerChildLaunch DoNotLaunchChildren _launch =
-  pure ()
 printIssueImplementerChildLaunch (PrintChildLaunchCommands endpoint pollSeconds) launch = do
   executable <- stableExecutablePath
   putStrLn ("child command: " <> unwords (executable : issueImplementerChildArgs endpoint pollSeconds launch))
@@ -422,8 +413,6 @@ startIssueImplementerChild childLaunch launch = do
         )
 
 startIssueImplementerChildDetailed :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO IssueImplementerChildStartResult
-startIssueImplementerChildDetailed DoNotLaunchChildren launch =
-  pure (IssueImplementerChildStarted (launchIssueNumber launch))
 startIssueImplementerChildDetailed (PrintChildLaunchCommands endpoint pollSeconds) launch = do
   printIssueImplementerChildLaunch (PrintChildLaunchCommands endpoint pollSeconds) launch
   pure (IssueImplementerChildStarted (launchIssueNumber launch))
@@ -471,7 +460,6 @@ issueImplementerChildArgs endpoint pollSeconds launch =
   , "--loop"
   , "--pid-file"
   , launch.launchStateDir </> "issue-watcher.pid"
-  , "--start-children"
   ]
     <> if endpoint.appServerPath == "/" then [] else ["--app-server-path", endpoint.appServerPath]
 

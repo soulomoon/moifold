@@ -1,20 +1,29 @@
 # Operator Checklist
 
-Before start:
+Before moifold runtime setup is accepted:
 
-- `scripts/watcher-init/docker-setup-smoke.sh` has passed, or the operator has explicitly accepted skipping Docker smoke.
-- `WATCHER_BIN` exists and was built from the expected watcher repo.
-- `ghcup` is installed.
-- `ghc` is installed and preferably selected through `ghcup`.
-- `cabal` is installed and preferably selected through `ghcup`.
-- `scripts/watcher-init/check-project-setup.sh /path/to/watcher.env` has been run in check-only mode.
+- `docker --version` has succeeded.
+- `docker info` has succeeded.
+- The persistent watcher container exists and is running.
+- The watcher repo is mounted in the persistent container at the path recorded in `WATCHER_REPO`.
+- `ghcup`, `ghc`, and `cabal` are installed inside the persistent container and selected through `ghcup`.
+- `WATCHER_BIN` exists inside the persistent container and was built from the expected watcher repo.
+- `gh auth status` succeeds inside the persistent container for the target GitHub account.
+- The app server host and port are reachable from inside the persistent container.
+- The app server supports the Codex thread/turn protocol needed by `moifold`.
+- `docker exec "$WATCHER_DOCKER_CONTAINER" ... scripts/watcher-init/check-app-server.sh /workspace/artifacts/<project>-watcher.env` has passed against the real app-server.
+- If setup scripts, watcher setup code, CLI parser, or this runbook changed, `../runbook-validation.md` has passed.
+
+Before starting a project watcher:
+
+- `scripts/watcher-init/check-project-setup.sh /workspace/artifacts/<project>-watcher.env` has been run in check-only mode inside the persistent watcher container.
 - Missing system tools and detected project dependency setup commands have been reviewed.
 - Project dependencies were installed only after an explicit operator decision.
-- `gh auth status` succeeds for the target GitHub account.
-- `TARGET_WORKDIR` is the target project checkout.
+- `gh auth status` succeeds inside the persistent watcher container for the target GitHub account.
+- `TARGET_WORKDIR` is the target project checkout path inside the persistent watcher container.
 - The target project branch state is understood before execute mode.
-- The app server host and port are reachable.
 - `events.jsonl` replays successfully.
+- `dry-run-command.sh` syntax is valid and its command line matches the intended watcher domain.
 - No watcher pid is currently running for the same state directory.
 - `runtime-owner.json` is absent or belongs to an inactive pid.
 
@@ -27,6 +36,7 @@ Before resume:
 
 Before handing off:
 
+- Record the persistent watcher container name.
 - Record the state directory.
 - Record the watcher domain.
 - Record whether it is dry-run or execute loop.

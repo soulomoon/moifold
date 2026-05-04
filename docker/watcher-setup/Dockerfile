@@ -2,6 +2,7 @@ FROM ubuntu:24.04
 
 ARG GHC_VERSION=9.12.2
 ARG CABAL_VERSION=3.14.2.0
+ARG CODEX_CLI_VERSION=0.128.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/root/.ghcup/bin:/root/.cabal/bin:$PATH
@@ -20,6 +21,8 @@ RUN apt-get update \
     libgmp-dev \
     lsb-release \
     netcat-openbsd \
+    nodejs \
+    npm \
     pkg-config \
     python3 \
     xz-utils \
@@ -42,5 +45,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
   && ghcup set ghc "$GHC_VERSION" \
   && ghcup install cabal "$CABAL_VERSION" \
   && ghcup set cabal "$CABAL_VERSION"
+
+RUN npm install -g "@openai/codex@$CODEX_CLI_VERSION" \
+  && npm cache clean --force \
+  && codex --version
 
 WORKDIR /work/moifold

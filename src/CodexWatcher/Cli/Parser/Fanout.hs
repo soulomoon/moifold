@@ -24,10 +24,8 @@ issueFanoutParser =
     <*> optional (option (issueNumbersReader "--open-issues") (long "open-issues" <> metavar "1,2" <> help "Open issue numbers to consider"))
     <*> optional (option (issueNumbersReader "--active-issues") (long "active-issues" <> metavar "1,2" <> help "Issue numbers already active"))
     <*> switch (long "execute" <> help "Write child watcher state instead of printing it")
-    <*> switch (long "start-children" <> help "Print or start child watcher loop commands")
     <*> optionalEndpointParser
     <*> optional (strOption (long "workdir-root" <> metavar "PATH" <> help "Root for child workdirs"))
     <*> textOptionDefault "branch-prefix" "codex/issue-" "PREFIX" "Child branch prefix"
     <*> textOptionDefault "thread-prefix" "issue-worker-" "PREFIX" "Child app-server thread prefix"
     <*> optional (pollSecondsOption "poll-seconds" "SECONDS" "Child polling interval")
-    <*> optional (pollSecondsOption "child-poll-seconds" "SECONDS" "Child polling interval override")

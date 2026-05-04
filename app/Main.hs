@@ -4,6 +4,7 @@
 module Main (main) where
 
 import CodexWatcher.AutomaticLoop.Runner (runAutomaticLoop)
+import CodexWatcher.Cli.Command.AppServerProbe (probeAppServer)
 import CodexWatcher.Cli.Parser (execCliCommandParser)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Cli.Command.DaemonControl (stopDaemon)
@@ -23,6 +24,7 @@ main =
 runCliCommand :: CliCommand -> IO ()
 runCliCommand = \case
   CliReplayEvents path -> replayEvents path
+  CliProbeAppServer options -> probeAppServer options
   CliHealthcheck options -> runHealthcheck (healthcheckOptionsFromCli options)
   CliClearRuntimeLease stateDir -> clearRuntimeLease stateDir
   CliStopDaemon options -> stopDaemon options

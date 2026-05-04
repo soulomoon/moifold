@@ -4,6 +4,7 @@
 
 module CodexWatcher.Cli.Types
   ( CliCommand (..)
+  , AppServerProbeCli (..)
   , CliDomain
   , GuardWatcherCli (..)
   , HealthcheckCli (..)
@@ -36,6 +37,7 @@ type CliDomain = Domain
 
 data CliCommand
   = CliReplayEvents FilePath
+  | CliProbeAppServer AppServerProbeCli
   | CliHealthcheck HealthcheckCli
   | CliClearRuntimeLease FilePath
   | CliStopDaemon StopDaemonCli
@@ -45,6 +47,15 @@ data CliCommand
   | CliRunLoop LoopCli
   | CliGuardWatcher GuardWatcherCli
   | CliRepairInvalidState RepairInvalidStateCli
+  deriving stock (Eq, Show, Generic)
+
+data AppServerProbeCli = AppServerProbeCli
+  { appServerProbeCliEndpoint :: AppServerEndpoint
+  , appServerProbeCliThreadId :: Maybe ThreadId
+  , appServerProbeCliCreateSmokeThread :: Bool
+  , appServerProbeCliStartSmokeTurn :: Bool
+  , appServerProbeCliWorkdir :: FilePath
+  }
   deriving stock (Eq, Show, Generic)
 
 data HealthcheckCli = HealthcheckCli
@@ -76,7 +87,6 @@ data RenderServiceCli = RenderServiceCli
   , renderServiceCliRestartSeconds :: Int
   , renderServiceCliRotateCount :: Int
   , renderServiceCliImplementersRoot :: Maybe FilePath
-  , renderServiceCliStartChildren :: Bool
   }
   deriving stock (Eq, Show, Generic)
 
@@ -87,13 +97,11 @@ data IssueFanoutCli = IssueFanoutCli
   , issueFanoutCliOpenIssues :: Maybe [IssueNumber]
   , issueFanoutCliActiveIssues :: Maybe [IssueNumber]
   , issueFanoutCliExecute :: Bool
-  , issueFanoutCliStartChildren :: Bool
   , issueFanoutCliEndpoint :: Maybe AppServerEndpoint
   , issueFanoutCliWorkdirRoot :: Maybe FilePath
   , issueFanoutCliBranchPrefix :: Text
   , issueFanoutCliThreadPrefix :: Text
   , issueFanoutCliPollSeconds :: Maybe PollSeconds
-  , issueFanoutCliChildPollSeconds :: Maybe PollSeconds
   }
   deriving stock (Eq, Show, Generic)
 
@@ -147,8 +155,6 @@ data LoopCli = LoopCli
   , loopCliWorkdirRoot :: Maybe FilePath
   , loopCliBranchPrefix :: Text
   , loopCliThreadPrefix :: Text
-  , loopCliStartChildren :: Bool
-  , loopCliChildPollSeconds :: Maybe PollSeconds
   }
   deriving stock (Eq, Show, Generic)
 

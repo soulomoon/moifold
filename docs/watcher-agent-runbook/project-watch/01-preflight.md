@@ -1,24 +1,24 @@
 # 01 Preflight
 
-Run these checks before creating or resuming a watcher.
+Run these checks inside the persistent watcher container before creating or resuming a watcher.
 
 ```bash
+docker exec "$WATCHER_DOCKER_CONTAINER" bash -lc '
 set -euo pipefail
-source /path/to/watcher.env
+source /workspace/artifacts/<project>-watcher.env
 
 cd "$WATCHER_REPO"
-cabal build all
-WATCHER_BIN="${WATCHER_BIN:-$(cabal list-bin moifold)}"
 
 gh auth status
-git -C "$TARGET_WORKDIR" status --short
+git -C "$TARGET_WORKDIR" status --short --untracked-files=no
 
-"$WATCHER_BIN" healthcheck \
+timeout 30 "$WATCHER_BIN" healthcheck \
   --state-root "$STATE_ROOT" \
   --repo "$REPO_FULL_NAME" \
   --app-server-host "$APP_SERVER_HOST" \
   --app-server-port "$APP_SERVER_PORT" \
   --app-server-path "$APP_SERVER_PATH"
+'
 ```
 
 Rules for the operating agent:

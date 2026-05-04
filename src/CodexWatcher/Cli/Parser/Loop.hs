@@ -9,7 +9,6 @@ import CodexWatcher.Cli.Parser.Common
   , intOption
   , issueNumbersReader
   , plannerThreadOption
-  , pollSecondsOption
   , pollSecondsOptionDefault
   , repoOption
   , requiredEndpointParser
@@ -45,5 +44,3 @@ loopParser domain =
     <*> optional (strOption (long "workdir-root" <> metavar "PATH" <> help "Root for generated workdirs"))
     <*> textOptionDefault "branch-prefix" "codex/issue-" "PREFIX" "Issue implementer branch prefix"
     <*> textOptionDefault "thread-prefix" "issue-worker-" "PREFIX" "Issue implementer thread prefix"
-    <*> switch (long "start-children" <> help "Print or start child watcher loop commands after planning fanout")
-    <*> optional (pollSecondsOption "child-poll-seconds" "SECONDS" "Child polling interval override")

@@ -5,6 +5,7 @@ module CodexWatcher.Cli.Parser
   ) where
 
 import CodexWatcher.Cli.Parser.Common (eventsPathArgument, stateDirOption)
+import CodexWatcher.Cli.Parser.AppServerProbe (appServerProbeParser)
 import CodexWatcher.Cli.Parser.Fanout (issueFanoutParser)
 import CodexWatcher.Cli.Parser.Guard (guardIssuePlanningParser, guardWatcherParser)
 import CodexWatcher.Cli.Parser.Healthcheck (healthcheckParser)
@@ -44,6 +45,7 @@ cliCommandParser :: Parser CliCommand
 cliCommandParser =
   hsubparser
     ( command "replay-events" (info (CliReplayEvents <$> eventsPathArgument) (progDesc "Replay a canonical watcher events.jsonl file"))
+        <> command "probe-app-server" (info (CliProbeAppServer <$> appServerProbeParser) (progDesc "Probe Codex app-server WebSocket and optional thread/turn methods"))
         <> command "healthcheck" (info (CliHealthcheck <$> healthcheckParser) (progDesc "Run the read-only watcher healthcheck"))
         <> command "clear-runtime-lease" (info clearRuntimeLeaseParser (progDesc "Clear an inactive Haskell watcher runtime lease"))
         <> command "stop-daemon" (info (CliStopDaemon <$> stopDaemonParser) (progDesc "Send TERM to a Haskell watcher daemon"))

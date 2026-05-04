@@ -178,8 +178,6 @@ loopCliCommandArgs watcherPidFile cli =
     <> maybe [] (\root -> ["--implementer-workdir-root", Text.pack root]) cli.loopCliImplementerWorkdirRoot
     <> maybe [] (\root -> ["--workdir-root", Text.pack root]) cli.loopCliWorkdirRoot
     <> ["--branch-prefix", cli.loopCliBranchPrefix, "--thread-prefix", cli.loopCliThreadPrefix]
-    <> boolSwitch cli.loopCliStartChildren "--start-children"
-    <> maybe [] (\seconds -> ["--child-poll-seconds", Text.pack (show seconds)]) cli.loopCliChildPollSeconds
 
 runCommandForDomain :: Domain -> String
 runCommandForDomain = \case

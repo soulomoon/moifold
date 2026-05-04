@@ -1,8 +1,61 @@
 # moifold
 
-Haskell-first rewrite of the Codex watcher system.
+moifold is a Haskell-first watcher runtime for turning GitHub issues into coordinated Codex work.
 
-This repository starts with the correctness core instead of runtime glue:
+It gives a repository an operator-grade automation loop: plan a scoped issue tree, fan out ready implementation work, keep child watchers within their issue scope, watch PR review feedback, and resume safely from durable state when a daemon or app-server turn fails.
+
+## Why teams use moifold
+
+- Scoped planning: limit a planning watcher to one root issue or a selected issue set, so Codex plans only the work that matters now instead of roaming the whole repository.
+- Docker-first setup: build and run watchers inside one persistent container, so the Haskell toolchain, `gh`, app-server reachability, target checkout paths, and watcher state all live in one repeatable operating environment.
+- Automatic fanout: turn planner decisions into issue implementer child watchers, with `maxParallel` limits so the system can move several independent issues without flooding the repo.
+- Durable execution: every watcher is driven by an append-only `events.jsonl` log, so state can be replayed, inspected, repaired, and resumed.
+- Typed lifecycle safety: Haskell GADTs, typed domains, typed effects, and QuickCheck properties make illegal watcher transitions hard to express and easier to catch before runtime.
+- Controlled mutation: dry-run is the default; execute mode requires an explicit flag and uses leases/pid files to avoid two daemons owning the same state directory.
+- GitHub-native workflow: watchers use `gh`, git, PRs, issues, review threads, and Codex app-server turns instead of inventing a separate task system.
+- Agent-run runbooks: setup, preflight, start, resume, restart, healthcheck, and validation flows are written so Codex or another agent can execute them directly, with a human operator only reviewing decisions and outputs when needed.
+
+## What moifold automates
+
+### Docker-first setup
+
+moifold provides a persistent watcher container workflow for the runtime and the target project. The setup runbook builds the Docker image, starts the long-lived container, installs/selects the Haskell toolchain inside it, builds the watcher binary, verifies GitHub CLI auth, checks app-server reachability, and probes the target project's dependencies from the same environment that will run the daemons.
+
+The benefit is repeatability: operators do not have to debug one set of paths, credentials, tools, and network assumptions on the host and another set inside the watcher. The same container is used for setup, dry runs, execute loops, restarts, and resume.
+
+### Issue planning
+
+moifold can run a repository planner or a scoped planner for a specific issue tree. The planner reads the current issue snapshot, proposes sub-issues when decomposition is needed, returns dependency data, and produces a canonical planning graph.
+
+The benefit is practical scope control: a team can say "plan this root issue and its descendants" and get a constrained automation loop instead of a broad repo scan.
+
+### Issue implementation
+
+For ready issues, moifold creates or reuses child implementer watcher state, prepares issue workdirs and branches, starts Codex implementation turns, updates PR bodies from issue plans, and hands work off to PR review.
+
+The benefit is parallel delivery with guardrails: independent issues can move at once, while each implementer stays tied to a concrete issue, branch, PR, and state directory.
+
+### PR review and merge readiness
+
+moifold can watch a PR, classify review feedback, start fix turns, track review-clean states, and drive merge readiness through the same replayable event model.
+
+The benefit is less manual babysitting after implementation: review feedback becomes another resumable watcher lifecycle instead of a one-off prompt.
+
+### Operations and recovery
+
+moifold includes healthchecks, dry-run commands, restart scripts, daemon leases, pid guards, event-log repair helpers, and render-only service generation.
+
+The benefit is confidence under failure: operators can inspect what will happen, recover from blocked turns, and resume old watcher state without throwing away history.
+
+### Agent-operable runbooks
+
+moifold's runbooks are designed as executable handoff instructions for Codex or another coding agent. They describe the environment contract, Docker container setup, preflight checks, generated dry-run/restart scripts, and resume paths in the order an agent should run them.
+
+The benefit is lower operating burden: instead of teaching every human operator a long manual procedure, a team can ask Codex to follow the runbook, report preflight results, start the correct watcher, and preserve the same operational pattern across projects.
+
+## Correctness model
+
+moifold starts with the correctness core instead of runtime glue:
 
 - Type-level watcher domains and lifecycle phases.
 - GADT states that prevent impossible state combinations.
@@ -16,114 +69,60 @@ This repository starts with the correctness core instead of runtime glue:
 
 The Haskell runtime is the primary implementation. Legacy Node snapshot support is retained only for golden compatibility checks.
 
-## Current Scope
+## Current scope
 
-The first milestone models the lifecycle shared by:
+moifold currently models the lifecycle shared by:
 
-- repository issue planning
+- repository or scoped issue planning
 - single issue implementation
 - PR review fixing and merging
 
 The core explicitly tracks phases such as plan mode, implementation, review checking, review fixing, merging, blocked, complete, and stopped.
 
-## Build
+## Start here
+
+Ask Codex or another coding agent to follow the [Watcher Agent Runbook](docs/watcher-agent-runbook/README.md). The root README explains why moifold exists and where to go next; the runbook owns the exact command sequences that the agent should execute.
+
+- Runtime setup: [docs/watcher-agent-runbook/moifold-setup/README.md](docs/watcher-agent-runbook/moifold-setup/README.md)
+- Target project watcher setup: [docs/watcher-agent-runbook/project-watch/README.md](docs/watcher-agent-runbook/project-watch/README.md)
+- Maintainer validation: [docs/watcher-agent-runbook/runbook-validation.md](docs/watcher-agent-runbook/runbook-validation.md)
+- Event format reference: [docs/event-log-schema.md](docs/event-log-schema.md)
+
+The normal agent-run path is:
+
+1. Start the persistent Docker watcher container and build `moifold` inside it.
+2. Create a project env file from `docs/watcher-agent-runbook/templates/watcher.env.example`.
+3. Run project setup checks and GitHub/app-server preflight from inside the container.
+4. Initialize the watcher state for issue planning, a specific issue, or a PR review watcher.
+5. Run the generated dry-run command.
+6. Report the dry-run result for review, then start the generated execute loop when it is acceptable.
+
+## Operator entry points
+
+The handoff-ready guide lives in the [Watcher Agent Runbook](docs/watcher-agent-runbook/README.md). It is the main entry point for Codex, another agent, or a human operator to set up, validate, start, and resume watcher daemons.
+
+The runbook covers three practical workflows:
+
+- `moifold` runtime setup: build the Docker setup image, start one persistent watcher container, run Haskell toolchain setup inside that container, `cabal update`, `cabal build all`, `WATCHER_BIN` resolution, mock app-server TCP validation, and real Codex app-server protocol checks from inside the container.
+- Target project watcher operation: project env contract using container paths, check-only dependency probing inside the persistent watcher container, GitHub/app-server preflight, state initialization, generated `dry-run-command.sh` and `restart-command.sh`, dry runs, execute loops, and resume from existing state.
+- Maintainer validation: after changing setup scripts, CLI wiring, watcher setup code, or the runbook itself, run the persistent Docker gate and stale-reference scan from `docs/watcher-agent-runbook/runbook-validation.md`.
+
+The companion helpers live under `scripts/watcher-init/`, including Docker setup smoke, app-server checks, check-only project setup probing, and state initialization scripts for issue planning, issue implementation, and PR review watchers.
+
+Automatic turn starts now include an output schema and prompts that ask for structured JSON. Classification first accepts outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
+
+## Developer commands
+
+For local development outside the operator runbook:
 
 ```bash
 cabal test all
-```
-
-Replay a watcher event log:
-
-```bash
 cabal run moifold -- replay-events /path/to/events.jsonl
-```
-
-Run the read-only Haskell healthcheck over watcher state:
-
-```bash
 bin=$(cabal list-bin moifold)
 "$bin" healthcheck --state-root /workspace/artifacts
 ```
 
-The command emits JSON and checks command availability, `gh auth`, watcher state files, workdir/git health, PR review event-log replay, duplicate ownership, and planner `maxParallel` invariants. It intentionally does not mutate GitHub, app-server threads, or local checkouts. Add `--app-server-host <host> --app-server-port <port>` to inspect configured app-server threads with read-only `thread/read` calls.
-
-Dry-run one typed watcher observation against an event log:
-
-```bash
-bin=$(cabal list-bin moifold)
-"$bin" observe-once \
-  --events /path/to/events.jsonl \
-  --state-dir /path/to/state \
-  --repo owner/name \
-  --domain issue-planning \
-  --observation turn-started \
-  --thread-id planner-thread \
-  --turn-id turn-next
-```
-
-The command replays the log, applies the observation through the typed watcher policy, reports the canonical event, compatibility writes, and planned actions, and defaults to `DryRunActions`. Use `--execute --app-server-host <host> --app-server-port <port>` only when the watcher state is not already leased by a running daemon.
-
-Run one automatic typed daemon iteration:
-
-```bash
-bin=$(cabal list-bin moifold)
-"$bin" run-issue-implement \
-  --events /path/to/events.jsonl \
-  --state-dir /path/to/state \
-  --repo owner/name \
-  --workdir /path/to/checkout \
-  --app-server-host 127.0.0.1 \
-  --app-server-port 3000
-```
-
-The automatic commands are `run-pr-review`, `run-issue-implement`, and `run-issue-planning`. They replay the event log, fetch the next observation from `gh`, `git`, and/or app-server `thread/read`, classify turn output into typed watcher observations, and report the next canonical event and planned actions. They default to a dry run; add `--execute` to append the event, write Haskell-compatible state files, and run the compiled effects. Execute mode creates or renews a `runtime-owner.json` lease for the current daemon process and refuses to start over a running lease pid. Use `--loop --iterations N` for bounded daemon polling, or `--loop` for continuous polling. Loop mode writes the conventional watcher pid file under `--state-dir` unless `--pid-file` is supplied, and refuses to start over a running pid. `run-issue-planning` also requires `--planner-thread-id`. Add `--implementers-root <path>` to `run-issue-planning` to fan out issue implementer child state immediately after a canonical planning-completed event; in execute mode this uses the configured app-server endpoint to create real child threads. Add `--start-children` to print child daemon commands in dry-run mode or start the new child `run-issue-implement --loop --execute` processes after state is written in execute mode.
-
-Clear an inactive runtime lease for a watcher state directory:
-
-```bash
-"$bin" clear-runtime-lease --state-dir /path/to/state
-```
-
-The command refuses to clear a lease whose pid is still running. Use `stop-daemon --pid-file <path>` or `stop-daemon --state-dir <path> --domain <domain>` to send `TERM` to a running Haskell watcher during maintenance.
-
-For local maintenance, `scripts/restart-watcher` combines the common cleanup and restart steps. It stops the current daemon pid if present, removes stale pid/lease/block/active-turn compatibility files, and starts the watcher through the state's `restart-command.sh` with stdout/stderr redirected back into the state directory:
-
-```bash
-scripts/restart-watcher \
-  --state-dir /workspace/artifacts/issue-planners/soulomoon__mlf2 \
-  --domain issue-planning
-```
-
-When a failed app-server turn has already written a terminal `watcher_blocked` event, add `--drop-blocked-tail` to back up `events.jsonl` and remove the trailing `watcher_blocked` event plus the immediately preceding `*_turn_started` event:
-
-```bash
-scripts/restart-watcher \
-  --state-dir /workspace/artifacts/issue-planners/soulomoon__mlf2 \
-  --domain issue-planning \
-  --drop-blocked-tail
-```
-
-Use `render-service` with the same watcher loop flags to print a systemd unit and matching logrotate snippet. The command is render-only; it does not install or enable host services.
-
-Prepare issue implementer child state from a planner selection:
-
-```bash
-"$bin" issue-fanout \
-  --repo owner/name \
-  --implementers-root /workspace/artifacts/issue-implementers \
-  --workdir-root /workspace/artifacts \
-  --max-parallel 3 \
-  --open-issues 101,102,103 \
-  --active-issues 102
-```
-
-Without `--open-issues`, fanout discovers open issues with `gh issue list`. Without `--active-issues`, it scans existing child implementer `config.json` files under `--implementers-root`. Without `--execute`, it prints the selected child implementers. With `--execute`, it creates each child state directory, writes `config.json`, initializes `events.jsonl` with `issue_implement_initialized`, writes compatibility state, and marks the child state as Haskell-owned. Existing child config/event files are never overwritten. Add `--app-server-host <host> --app-server-port <port>` during execute mode to create real app-server threads and persist their returned thread ids; otherwise deterministic thread ids are used for offline rehearsal. Add `--start-children` to print or start child daemon commands; child stdout and stderr are written to `daemon.log` and `daemon.err.log` under each child state directory when started.
-
-The runtime event format is documented in `docs/event-log-schema.md`.
-
-For a handoff-ready guide that another agent can use to set up, start, or resume watchers for a specific repository, issue, or PR, see `docs/watcher-agent-runbook/README.md`. The companion helpers live under `scripts/watcher-init/`, including a Docker setup smoke, a check-only setup probe that reports target-project dependencies before the operator decides whether to install them, and state initialization scripts.
-
-Automatic turn starts now include an output schema and prompts that ask for structured JSON. Classification first accepts outputs with an `outcome`, `status`, or `result` field such as `complete`, `incomplete`, `blocked`, `clean`, or `problems`; older free-text outputs still use the compatibility heuristics.
+Use CLI `--help` output for command details. Use the runbook for real watcher operation.
 
 ## Design Rule
 
