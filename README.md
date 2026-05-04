@@ -1,8 +1,40 @@
 # moifold
 
-moifold is a Haskell-first watcher runtime for turning GitHub issues into coordinated Codex work.
+moifold is a typed control plane for Codex-driven GitHub work.
+
+It is a Haskell-first watcher runtime for turning GitHub issues into coordinated Codex work.
 
 It gives a repository an operator-grade automation loop: plan a scoped issue tree, fan out ready implementation work, keep child watchers within their issue scope, watch PR review feedback, and resume safely from durable state when a daemon or app-server turn fails.
+
+The core thesis is simple: AI coding agents are probabilistic, so the surrounding workflow must be a strongly typed state machine with replayable history and constrained effects.
+
+## Core idea
+
+Most agent workflow systems decay because orchestration logic is informal: prompts, shell scripts, ad-hoc JSON, mutable state, and best-effort conventions.
+
+moifold treats the workflow as a typed protocol:
+
+```text
+Issue tree -> typed watcher state -> event -> decision -> typed effect plan -> runtime interpreter
+```
+
+The agent may be probabilistic. The workflow boundary should not be.
+
+```mermaid
+flowchart TD
+    A["GitHub issue"] --> B["Planner watcher"]
+    B --> C["Subissues and dependency graph"]
+    C --> D["Ready issue"]
+    D --> E["Implementer watcher"]
+    E --> F["Branch and PR"]
+    F --> G["PR review watcher"]
+    G --> H["Review fixes and clean-state checks"]
+    H --> I["Merge or close"]
+    B --> J["events.jsonl"]
+    E --> J
+    G --> J
+    J --> K["Replayable history"]
+```
 
 ## Why teams use moifold
 
@@ -67,7 +99,28 @@ moifold starts with the correctness core instead of runtime glue:
 - A pure effect interpreter that compiles typed effects into ordered runtime/app-server actions.
 - QuickCheck properties for global invariants.
 
+See [docs/correctness-model.md](docs/correctness-model.md) for the detailed `State -> Event -> Decision -> EffectPlan -> Interpreter` model.
+
 The Haskell runtime is the primary implementation. Legacy Node snapshot support is retained only for golden compatibility checks.
+
+## Guarantees and non-guarantees
+
+moifold tries to guarantee:
+
+- A watcher only performs effects allowed by its current domain and phase.
+- PR mismatch, invalid handoff, stale daemon ownership, or impossible replay state becomes blocked state instead of silent corruption.
+- Watcher state can be reconstructed from append-only event logs.
+- Dry-run exposes planned mutation before execute mode.
+- Child watchers remain scoped to concrete issues, branches, PRs, and state directories.
+- Lifecycle invariants are checked with types where practical and with QuickCheck properties where runtime data is unavoidable.
+
+moifold does not guarantee:
+
+- Codex produces correct code.
+- GitHub operations always succeed.
+- Review feedback is semantically complete.
+- The target repository builds unless configured checks enforce it.
+- A human should merge work without reviewing the generated PR and event history.
 
 ## Current scope
 
