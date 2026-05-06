@@ -6093,6 +6093,9 @@ workflowFacadeExtractionTests = do
     sequence
       [ workflowFacadeReplayMatchesEventLog
       , workflowSpecModuleKeepsCoreBoundary
+      , workflowCoreCabalSublibraryKeepsPackageBoundary
+      , workflowCodexCabalSublibraryKeepsPackageBoundary
+      , workflowGithubCabalSublibraryKeepsPackageBoundary
       , workflowFacadeInitialApplyMatchesReplay
       , workflowPermissionFacadeMatchesStateMachine
       , workflowExecutionFacadeDryRunMatchesExecutor
@@ -6125,7 +6128,8 @@ workflowSpecModuleKeepsCoreBoundary = do
   source <-
     Text.pack
       <$> readFile
-        ( "src"
+        ( "agent-workflow-core"
+            </> "src"
             </> "CodexWatcher"
             </> "Workflow"
             </> "Spec.hs"
@@ -6145,6 +6149,174 @@ workflowSpecModuleKeepsCoreBoundary = do
   assert
     "workflow spec module has no moifold-specific imports"
     (keepsCoreDefinitions && not (any (`Text.isInfixOf` source) forbiddenImports))
+
+workflowCoreCabalSublibraryKeepsPackageBoundary :: IO Bool
+workflowCoreCabalSublibraryKeepsPackageBoundary = do
+  cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  let coreSection = cabalComponentSection "library agent-workflow-core" cabalSource
+      forbiddenNeedles =
+        [ "aeson"
+        , "bytestring"
+        , "directory"
+        , "filepath"
+        , "typed-process"
+        , "websockets"
+        , "CodexWatcher.AppServer"
+        , "CodexWatcher.Domain."
+        , "CodexWatcher.Effects"
+        , "CodexWatcher.EventLog"
+        , "CodexWatcher.GhGit"
+        , "CodexWatcher.StateMachine"
+        ]
+      exposesCoreModules =
+        "CodexWatcher.Workflow.Spec" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.DSL" `Text.isInfixOf` coreSection
+      dependsOnlyOnCoreDeps =
+        "base >=4.18 && <5" `Text.isInfixOf` coreSection
+          && "text >=2.0 && <3" `Text.isInfixOf` coreSection
+          && not (any (`Text.isInfixOf` coreSection) forbiddenNeedles)
+      moifoldDependsOnCore =
+        "moifold:agent-workflow-core" `Text.isInfixOf` cabalSource
+  assert
+    "workflow core sublibrary has no moifold-specific package dependencies"
+    (exposesCoreModules && dependsOnlyOnCoreDeps && moifoldDependsOnCore)
+
+workflowCodexCabalSublibraryKeepsPackageBoundary :: IO Bool
+workflowCodexCabalSublibraryKeepsPackageBoundary = do
+  cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  codexSources <-
+    fmap (Text.intercalate "\n")
+      . traverse
+        (fmap Text.pack . readFile)
+      $ [ "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "AppServerProtocol.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Ids.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Types.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Protocol.hs"
+        ]
+  let codexSection = cabalComponentSection "library agent-workflow-codex" cabalSource
+      forbiddenPackageNeedles =
+        [ "containers"
+        , "directory"
+        , "filepath"
+        , "optparse-applicative"
+        , "singletons"
+        , "typed-process"
+        , "unix"
+        , "websockets"
+        , "moifold,"
+        , "moifold:agent-workflow-core"
+        ]
+      forbiddenImportNeedles =
+        [ "CodexWatcher.AppServerClient"
+        , "CodexWatcher.Core.Ids"
+        , "CodexWatcher.Domain."
+        , "CodexWatcher.Effects"
+        , "CodexWatcher.EventLog"
+        , "CodexWatcher.GhGit"
+        , "CodexWatcher.StateMachine"
+        , "CodexWatcher.Workflow.Observation"
+        , "CodexWatcher.Workflow.Types"
+        ]
+      exposesCodexModules =
+        all
+          (`Text.isInfixOf` codexSection)
+          [ "CodexWatcher.AppServerProtocol"
+          , "CodexWatcher.Workflow.Agent.Codex.Protocol"
+          , "CodexWatcher.Workflow.Agent.Ids"
+          , "CodexWatcher.Workflow.Agent.Types"
+          ]
+      dependsOnlyOnCodexDeps =
+        all
+          (`Text.isInfixOf` codexSection)
+          [ "aeson >=2.2 && <3"
+          , "base >=4.18 && <5"
+          , "text >=2.0 && <3"
+          ]
+          && not (any (`Text.isInfixOf` codexSection) forbiddenPackageNeedles)
+      sourceImportsStayInAdapter =
+        not (any (`Text.isInfixOf` codexSources) forbiddenImportNeedles)
+      moifoldDependsOnCodex =
+        "moifold:agent-workflow-codex" `Text.isInfixOf` cabalSource
+  assert
+    "workflow Codex sublibrary has no moifold lifecycle dependencies"
+    (exposesCodexModules && dependsOnlyOnCodexDeps && sourceImportsStayInAdapter && moifoldDependsOnCodex)
+
+workflowGithubCabalSublibraryKeepsPackageBoundary :: IO Bool
+workflowGithubCabalSublibraryKeepsPackageBoundary = do
+  cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  githubSource <-
+    Text.pack
+      <$> readFile
+        ( "agent-workflow-github"
+            </> "src"
+            </> "CodexWatcher"
+            </> "Workflow"
+            </> "GitHub"
+            </> "Ids.hs"
+        )
+  let githubSection = cabalComponentSection "library agent-workflow-github" cabalSource
+      forbiddenPackageNeedles =
+        [ "aeson"
+        , "bytestring"
+        , "containers"
+        , "directory"
+        , "filepath"
+        , "optparse-applicative"
+        , "singletons"
+        , "typed-process"
+        , "unix"
+        , "websockets"
+        , "moifold,"
+        , "moifold:agent-workflow-core"
+        , "moifold:agent-workflow-codex"
+        ]
+      forbiddenImportNeedles =
+        [ "CodexWatcher.AppServer"
+        , "CodexWatcher.Core.State"
+        , "CodexWatcher.Domain."
+        , "CodexWatcher.Effects"
+        , "CodexWatcher.EventLog"
+        , "CodexWatcher.GhGit"
+        , "CodexWatcher.StateMachine"
+        , "CodexWatcher.Workflow.Agent"
+        , "CodexWatcher.Workflow.Observation"
+        , "CodexWatcher.Workflow.Types"
+        ]
+      exposesGithubModules =
+        "CodexWatcher.Workflow.GitHub.Ids" `Text.isInfixOf` githubSection
+      dependsOnlyOnGithubDeps =
+        all
+          (`Text.isInfixOf` githubSection)
+          [ "base >=4.18 && <5"
+          , "text >=2.0 && <3"
+          ]
+          && not (any (`Text.isInfixOf` githubSection) forbiddenPackageNeedles)
+      sourceImportsStayInAdapter =
+        not (any (`Text.isInfixOf` githubSource) forbiddenImportNeedles)
+      moifoldDependsOnGithub =
+        "moifold:agent-workflow-github" `Text.isInfixOf` cabalSource
+  assert
+    "workflow GitHub sublibrary has no moifold state-machine dependencies"
+    (exposesGithubModules && dependsOnlyOnGithubDeps && sourceImportsStayInAdapter && moifoldDependsOnGithub)
+
+cabalComponentSection :: Text -> Text -> Text
+cabalComponentSection componentName cabalSource =
+  case dropWhile (/= componentName) (Text.lines cabalSource) of
+    [] -> ""
+    _component : rest ->
+      Text.unlines (takeWhile (not . isTopLevelComponent) rest)
+ where
+  isTopLevelComponent line =
+    not (Text.null line)
+      && not (" " `Text.isPrefixOf` line)
+      && any
+        (`Text.isPrefixOf` line)
+        [ "common "
+        , "library"
+        , "executable "
+        , "test-suite "
+        , "benchmark "
+        ]
 
 workflowFacadeReplayMatchesEventLog :: IO Bool
 workflowFacadeReplayMatchesEventLog = do

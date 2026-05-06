@@ -11,7 +11,7 @@ import CodexWatcher.AppServerProtocol
   , threadReadRequest
   , turnStartRequest
   )
-import CodexWatcher.Core.Ids (RequestId)
+import CodexWatcher.Workflow.Agent.Ids (RequestId)
 import CodexWatcher.Workflow.Agent.Types
   ( AgentTurnPlan (..)
   , TurnRef (..)

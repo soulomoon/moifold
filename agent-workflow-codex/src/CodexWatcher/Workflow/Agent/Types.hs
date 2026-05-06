@@ -24,7 +24,7 @@ module CodexWatcher.Workflow.Agent.Types
   , reviewerAgentRoleId
   ) where
 
-import CodexWatcher.Core.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
 import Data.Aeson (Value)
 import Data.Text (Text)
 

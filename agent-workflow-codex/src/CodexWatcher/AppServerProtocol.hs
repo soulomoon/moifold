@@ -17,7 +17,7 @@ module CodexWatcher.AppServerProtocol
   , turnStartRequest
   ) where
 
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.Agent.Ids
   ( RequestId (..)
   , ThreadId (..)
   , TurnId (..)
