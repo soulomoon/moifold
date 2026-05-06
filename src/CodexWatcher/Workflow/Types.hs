@@ -6,11 +6,12 @@
 
 module CodexWatcher.Workflow.Types
   ( MoifoldSpec
-  , PlannedTransition (..)
-  , WorkflowSpec (..)
   , legacyObservedPlannedTransition
   , moifoldEventLabel
+  , moifoldObservationLabel
+  , moifoldPlannedTransitionFromEffects
   , moifoldStateLabel
+  , module CodexWatcher.Workflow.Spec
   ) where
 
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
@@ -18,62 +19,13 @@ import CodexWatcher.EventLog.Replay (applyEvent, initializeFromEvent, replayEven
 import CodexWatcher.EventLog.Types (EventReplayResult, ReplayFailure (..), WatcherEvent, eventName)
 import CodexWatcher.Core.State (SomeWatcherState, isTerminalState, someDomain, somePhase)
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
+import CodexWatcher.Workflow.Execution (partitionWorkflowEffectPlan)
 import CodexWatcher.Workflow.Observation (DaemonObservation, ObservedPolicyTick (..), observeDaemonState)
+import CodexWatcher.Workflow.Spec
 import Data.Text (Text)
 import Data.Text qualified as Text
 
 data MoifoldSpec
-
-data PlannedTransition spec = PlannedTransition
-  { plannedEvent :: WorkflowEvent spec
-  , plannedPreCommitEffects :: WorkflowEffectPlan spec
-  , plannedPostCommitEffects :: WorkflowEffectPlan spec
-  }
-
-class WorkflowSpec spec where
-  type WorkflowState spec
-  type WorkflowEvent spec
-  type WorkflowObservation spec
-  type WorkflowObservedTick spec
-  type WorkflowEffect spec
-  type WorkflowEffectPlan spec
-  type WorkflowReplayResult spec
-  type WorkflowError spec
-
-  workflowInitialEvent
-    :: WorkflowEvent spec
-    -> Either (WorkflowError spec) (WorkflowState spec, WorkflowEffectPlan spec)
-
-  workflowApplyEvent
-    :: WorkflowState spec
-    -> WorkflowEvent spec
-    -> Either (WorkflowError spec) (WorkflowState spec, WorkflowEffectPlan spec)
-
-  workflowObserve
-    :: WorkflowState spec
-    -> WorkflowObservation spec
-    -> Either (WorkflowError spec) (WorkflowObservedTick spec)
-
-  workflowReplayEvents
-    :: [WorkflowEvent spec]
-    -> Either (WorkflowError spec) (WorkflowReplayResult spec)
-
-  workflowValidateEffects
-    :: WorkflowState spec
-    -> WorkflowEffectPlan spec
-    -> Either (WorkflowError spec) ()
-
-  workflowIsTerminal
-    :: WorkflowState spec
-    -> Bool
-
-  workflowStateLabel
-    :: WorkflowState spec
-    -> Text
-
-  workflowEventLabel
-    :: WorkflowEvent spec
-    -> Text
 
 instance WorkflowSpec MoifoldSpec where
   type WorkflowState MoifoldSpec = SomeWatcherState
@@ -88,6 +40,8 @@ instance WorkflowSpec MoifoldSpec where
   workflowInitialEvent = initializeFromEvent
   workflowApplyEvent = applyEvent
   workflowObserve = observeDaemonState
+  workflowObservedTransition = legacyObservedPlannedTransition
+  workflowPlanTransition = moifoldPlannedTransitionFromEffects
   workflowReplayEvents events =
     case replayEventLog events of
       Left failure -> Left (formatReplayFailure failure)
@@ -99,14 +53,20 @@ instance WorkflowSpec MoifoldSpec where
   workflowIsTerminal = isTerminalState
   workflowStateLabel = moifoldStateLabel
   workflowEventLabel = moifoldEventLabel
+  workflowObservationLabel = moifoldObservationLabel
 
 legacyObservedPlannedTransition :: ObservedPolicyTick -> PlannedTransition MoifoldSpec
 legacyObservedPlannedTransition observed =
-  PlannedTransition
-    { plannedEvent = observed.observedEvent
-    , plannedPreCommitEffects = observed.observedEffects
-    , plannedPostCommitEffects = []
-    }
+  moifoldPlannedTransitionFromEffects observed.observedEvent observed.observedEffects
+
+moifoldPlannedTransitionFromEffects :: WatcherEvent -> EffectPlan -> PlannedTransition MoifoldSpec
+moifoldPlannedTransitionFromEffects event effects =
+  let (preCommitEffects, postCommitEffects) = partitionWorkflowEffectPlan effects
+   in PlannedTransition
+        { plannedEvent = event
+        , plannedPreCommitEffects = preCommitEffects
+        , plannedPostCommitEffects = postCommitEffects
+        }
 
 moifoldStateLabel :: SomeWatcherState -> Text
 moifoldStateLabel state =
@@ -115,6 +75,10 @@ moifoldStateLabel state =
 moifoldEventLabel :: WatcherEvent -> Text
 moifoldEventLabel =
   eventName
+
+moifoldObservationLabel :: DaemonObservation -> Text
+moifoldObservationLabel =
+  Text.pack . show
 
 formatReplayFailure :: ReplayFailure -> Text
 formatReplayFailure failure =

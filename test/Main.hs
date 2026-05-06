@@ -67,14 +67,18 @@ import CodexWatcher.Domain.PrReview.Types
 import CodexWatcher.Runtime.Paths
 import CodexWatcher.WatcherRuntimeStatus
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
+import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
+import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as WorkflowAgentCodexProtocol
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
+import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
+import CodexWatcher.Workflow.Observation.Agent qualified as WorkflowObservationAgent
 import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
-import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), legacyObservedPlannedTransition)
+import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), WorkflowSpec (..), legacyObservedPlannedTransition, moifoldPlannedTransitionFromEffects, workflowPlanObservation)
 import Control.Exception (try)
 import Control.Monad (when)
 import Data.Aeson
@@ -3515,6 +3519,9 @@ observedDaemonTickDryRunDoesNotMutate = do
           , assert "observed dry-run computes compatibility writes" (length tick.daemonObservedCompatibilityWrites == 2)
           , assert "observed dry-run does not mutate" (null calls)
           , assert "observed dry-run reports planned actions" (length tick.daemonObservedActionReports == 1)
+          , assert "observed dry-run audit records no committed event" (WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing)
+          , assert "observed dry-run audit separates pre-commit reports" (length (WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit) == 1)
+          , assert "observed dry-run audit recommends continuing" (WorkflowEventLog.workflowAuditNextDaemonRecommendation tick.daemonObservedAudit == WorkflowEventLog.WorkflowDaemonContinue)
           ]
       pure (and results)
     Left failure -> do
@@ -3544,6 +3551,7 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
           , assert "observed execute writes compatibility state" (length [() | FakeWriteJson {} <- calls] == length tick.daemonObservedCompatibilityWrites)
           , assert "observed execute runs effect actions" (any isFakeAppServer calls)
           , assert "observed execute reaches plan mode" (somePhase tick.daemonObservedState == PlanMode)
+          , assert "observed execute audit records committed event" (WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started")
           ]
       pure (and results)
     Left failure -> do
@@ -3553,6 +3561,48 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
   isFakeAppServer = \case
     FakeAppServer {} -> True
     _ -> False
+
+observedDaemonTickAuditSeparatesPreAndPostReports :: IO Bool
+observedDaemonTickAuditSeparatesPreAndPostReports = do
+  (executor, getCalls) <- fakeActionExecutor
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 112
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePullRequestReusedEvent prNumber
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        ]
+      observation = DaemonIssueImplementObservation (ObservedPlanCompleted sampleIssuePlanMarkdown Nothing)
+      expectedEvent = IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let audit = tick.daemonObservedAudit
+      results <-
+        sequence
+          [ assert "observed audit records prior state label" (WorkflowEventLog.workflowAuditPriorStateLabel audit == "IssueImplement/PlanMode")
+          , assert "observed audit records observation label" (WorkflowEventLog.workflowAuditObservationLabel audit == Just "DaemonIssueImplementObservation (ObservedPlanCompleted \"Implement the issue in small verified steps.\" Nothing)")
+          , assert "observed audit records committed event label" (WorkflowEventLog.workflowAuditCommittedEventLabel audit == Just "issue_plan_completed")
+          , assert "observed audit records final state label" (WorkflowEventLog.workflowAuditFinalStateLabel audit == Just "IssueImplement/Implementing")
+          , assert "observed audit records pre-commit plan write" (length (WorkflowEventLog.workflowAuditPreCommitReports audit) == 1)
+          , assert "observed audit records post-commit sleep" (length (WorkflowEventLog.workflowAuditPostCommitReports audit) == 1)
+          , assert "observed audit records no failure" (WorkflowEventLog.workflowAuditFailureClassification audit == Nothing)
+          , assert "observed audit recommends continuing" (WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == WorkflowEventLog.WorkflowDaemonContinue)
+          , assert "observed audit still appends event before post-commit sleep" (callBefore (FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)) FakeSleep calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL observed daemon audit: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
 
 observedDaemonTickExecuteCommandFailureDoesNotAppendEvent :: IO Bool
 observedDaemonTickExecuteCommandFailureDoesNotAppendEvent = do
@@ -6042,18 +6092,59 @@ workflowFacadeExtractionTests = do
   results <-
     sequence
       [ workflowFacadeReplayMatchesEventLog
+      , workflowSpecModuleKeepsCoreBoundary
       , workflowFacadeInitialApplyMatchesReplay
       , workflowPermissionFacadeMatchesStateMachine
       , workflowExecutionFacadeDryRunMatchesExecutor
       , workflowPrReviewCheckingFacadeMatchesWatcher
       , workflowPrReviewMergeabilityFacadeMatchesWatcher
       , workflowAgentRoleWrapsPrReviewWorkerClassifier
+      , workflowAgentCodexStartRequestsMatchCompiledEffects
+      , workflowAgentCodexParsesTurnLifecycle
+      , workflowPrReviewAgentRolesClassifyOutputs
+      , workflowAgentObservationKernelMatchesPrReviewClassifiers
+      , workflowPlanObservationLawHoldsForPrReviewAgentObservation
       , workflowPlannedTransitionPreservesObservedEffects
+      , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
+      , workflowEventLogFailureAuditClassifiesRetryRecommendation
       , workflowDslPrReviewFeedbackMatchesStateMachine
+      , workflowDslTransitionLowersToPlannedTransition
       , workflowDocsMigrationSpecProvesSecondWorkflow
+      , workflowDocsMigrationAgentRoleClassifiesCompleteOutput
+      , workflowDocsMigrationUsesCoreExecutionContracts
+      , workflowExecutionMetadataCoversCurrentEffects
+      , workflowExecutionMetadataPartitionPreservesLegacyOrdering
+      , workflowExecutionMetadataDryRunMatchesLegacy
+      , workflowExecutionCheckedActionsStopsOnHardFailure
       ]
   pure (and results)
+
+workflowSpecModuleKeepsCoreBoundary :: IO Bool
+workflowSpecModuleKeepsCoreBoundary = do
+  source <-
+    Text.pack
+      <$> readFile
+        ( "src"
+            </> "CodexWatcher"
+            </> "Workflow"
+            </> "Spec.hs"
+        )
+  let forbiddenImports =
+        [ "CodexWatcher.Effects"
+        , "CodexWatcher.EventLog"
+        , "CodexWatcher.StateMachine"
+        , "CodexWatcher.Workflow.Observation"
+        , "CodexWatcher.Domain."
+        , "CodexWatcher.Core.State"
+        ]
+      keepsCoreDefinitions =
+        "data PlannedTransition spec" `Text.isInfixOf` source
+          && "class WorkflowSpec spec where" `Text.isInfixOf` source
+          && "workflowPlanObservation" `Text.isInfixOf` source
+  assert
+    "workflow spec module has no moifold-specific imports"
+    (keepsCoreDefinitions && not (any (`Text.isInfixOf` source) forbiddenImports))
 
 workflowFacadeReplayMatchesEventLog :: IO Bool
 workflowFacadeReplayMatchesEventLog = do
@@ -6202,6 +6293,317 @@ workflowAgentRoleWrapsPrReviewWorkerClassifier = do
       Right (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentIncomplete (ObservedWorkerOutcome (WorkerIncomplete "needs tests"))) -> True
       _ -> False
 
+workflowAgentCodexStartRequestsMatchCompiledEffects :: IO Bool
+workflowAgentCodexStartRequestsMatchCompiledEffects = do
+  let repo = RepoName "soulomoon/mlf2"
+      config = effectRuntimeConfig repo "/tmp/work" 440
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      commit = CommitSha "abc123"
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) commit
+      thread = ThreadId "agent-thread"
+      requestId = config.effectRuntimeNextRequestId
+      cases =
+        [ ( "planner"
+          , SomeEffect (StartPlannerTurn thread)
+          , WorkflowAgent.plannerAgentRoleId
+          )
+        , ( "pr-review worker"
+          , SomeEffect (StartWorkerTurn evidence thread)
+          , WorkflowAgent.prReviewWorkerAgentRoleId
+          )
+        , ( "issue plan worker"
+          , SomeEffect (StartIssuePlanWorkerTurn issueConfig (PrNumber 6) thread)
+          , WorkflowAgent.issuePlanWorkerAgentRoleId
+          )
+        , ( "issue implementation worker"
+          , SomeEffect (StartIssueImplementationWorkerTurn thread)
+          , WorkflowAgent.issueImplementationWorkerAgentRoleId
+          )
+        , ( "reviewer"
+          , SomeEffect (StartReviewerTurn prConfig commit thread)
+          , WorkflowAgent.reviewerAgentRoleId
+          )
+        , ( "verification reviewer"
+          , SomeEffect (StartReviewerVerificationTurn prConfig evidence commit thread)
+          , WorkflowAgent.prReviewVerificationReviewerAgentRoleId
+          )
+        , ( "final reviewer"
+          , SomeEffect (StartIssueFinalReviewTurn issueConfig (PrNumber 6) commit thread)
+          , WorkflowAgent.finalReviewerAgentRoleId
+          )
+        ]
+  results <-
+    traverse
+      ( \(labelText, effect, expectedRoleId) ->
+          assert ("workflow Codex agent start request matches compiled effect for " <> Text.unpack labelText) $
+            case (agentTurnPlanForEffect config effect, compileEffect config requestId effect) of
+              (Just plan, ([PlannedAppServerRequest request], nextRequestId')) ->
+                plan.agentTurnPlanRoleId == expectedRoleId
+                  && request == WorkflowAgentCodexProtocol.agentTurnStartRequest requestId plan
+                  && nextRequestId' == nextRequestId requestId
+              _ -> False
+      )
+      cases
+  pure (and results)
+
+workflowAgentCodexParsesTurnLifecycle :: IO Bool
+workflowAgentCodexParsesTurnLifecycle = do
+  let plan =
+        WorkflowAgent.AgentTurnPlan
+          { WorkflowAgent.agentTurnPlanRoleId = WorkflowAgent.prReviewWorkerAgentRoleId
+          , WorkflowAgent.agentTurnPlanThreadId = ThreadId "thread-1"
+          , WorkflowAgent.agentTurnPlanCwd = "/tmp/work"
+          , WorkflowAgent.agentTurnPlanEffort = defaultEffort
+          , WorkflowAgent.agentTurnPlanModel = defaultModel
+          , WorkflowAgent.agentTurnPlanApprovalPolicy = defaultApprovalPolicy
+          , WorkflowAgent.agentTurnPlanSandboxPolicy = defaultSandboxPolicy
+          , WorkflowAgent.agentTurnPlanInput = "fix review"
+          , WorkflowAgent.agentTurnPlanOutputSchema = Nothing
+          , WorkflowAgent.agentTurnPlanCollaborationMode = Nothing
+          }
+      turnRef =
+        WorkflowAgent.TurnRef
+          { WorkflowAgent.turnRefThreadId = ThreadId "thread-1"
+          , WorkflowAgent.turnRefTurnId = TurnId "turn-1"
+          }
+      startValue = object ["turnId" .= ("turn-1" :: Text)]
+      readValue =
+        object
+          [ "thread" .= object
+              [ "status" .= object ["type" .= ("systemError" :: Text)]
+              , "turns" .=
+                  [ object
+                      [ "id" .= ("turn-1" :: Text)
+                      , "status" .= ("completed" :: Text)
+                      , "output" .= ("done" :: Text)
+                      ]
+                  ]
+              ]
+          ]
+      missingTurnValue =
+        object ["turns" .= [object ["id" .= ("other-turn" :: Text), "status" .= ("running" :: Text)]]]
+      malformedValue = object ["turn" .= object ["status" .= ("completed" :: Text)]]
+      request = WorkflowAgentCodexProtocol.agentTurnStartRequest (RequestId 440) plan
+      cached =
+        WorkflowAgentCodex.cachedAgentTurnStartInterpreter
+          (AppServerInterpreter \_ -> pure (object ["turnId" .= ("uncached" :: Text)]))
+          request
+          startValue
+  startedViaInterpreter <- WorkflowAgentCodex.startAgentTurn cached (RequestId 440) plan
+  readViaInterpreter <-
+    WorkflowAgentCodex.readAgentTurn
+      (AppServerInterpreter \_ -> pure readValue)
+      (RequestId 441)
+      turnRef
+  results <-
+    sequence
+      [ assert "workflow Codex adapter parses turn start" $
+          WorkflowAgentCodex.parseAgentTurnStart plan startValue
+            == Right (WorkflowAgent.AgentTurnStart WorkflowAgent.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
+      , assert "workflow Codex adapter cached start response is used" $
+          startedViaInterpreter
+            == Right (WorkflowAgent.AgentTurnStart WorkflowAgent.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
+      , assert "workflow Codex adapter parses thread read turn" $
+          case readViaInterpreter of
+            Right readResult ->
+              readResult.agentTurnReadTurn == Just (AppServerTurn (TurnId "turn-1") "completed" (Just "done"))
+                && readResult.agentTurnReadThreadSystemError == Just "systemError"
+            Left _ -> False
+      , assert "workflow Codex adapter reports missing active turn" $
+          case WorkflowAgentCodex.parseAgentTurnReadResult turnRef missingTurnValue of
+            Right readResult -> readResult.agentTurnReadTurn == Nothing
+            Left _ -> False
+      , assert "workflow Codex adapter rejects malformed turn start response" $
+          case WorkflowAgentCodex.parseAgentTurnStart plan malformedValue of
+            Left _ -> True
+            Right _ -> False
+      ]
+  pure (and results)
+
+workflowPrReviewAgentRolesClassifyOutputs :: IO Bool
+workflowPrReviewAgentRolesClassifyOutputs = do
+  let commit = CommitSha "abc123"
+      workerRole = WorkflowPrReviewAgent.prReviewWorkerAgentRole
+      reviewerRole = WorkflowPrReviewAgent.prReviewReviewerAgentRole commit
+      classifiesAs role expected turn =
+        case WorkflowAgent.classifyAgentRoleTurn role turn of
+          Right classified -> classified.classifiedOutputClass == expected
+          Left _ -> False
+      cleanReviewOutput =
+        reviewerStateOutput "not_applicable" "none" commit reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing
+      problemsReviewOutput =
+        reviewerStateOutput "not_applicable" "found" commit reviewerPromptVersion 0 Nothing [] ["left summary finding"] Nothing
+  results <-
+    sequence
+      [ assert "workflow PR-review worker role classifies complete output" $
+          classifiesAs
+            workerRole
+            WorkflowAgent.AgentComplete
+            (AppServerTurn (TurnId "worker-complete") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"done\"}"))
+      , assert "workflow PR-review worker role classifies incomplete output" $
+          classifiesAs
+            workerRole
+            WorkflowAgent.AgentIncomplete
+            (AppServerTurn (TurnId "worker-incomplete") "completed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"needs tests\"}"))
+      , assert "workflow PR-review worker role classifies blocked output" $
+          classifiesAs
+            workerRole
+            WorkflowAgent.AgentBlocked
+            (AppServerTurn (TurnId "worker-blocked") "completed" Nothing)
+      , assert "workflow PR-review worker role classifies malformed output" $
+          classifiesAs
+            workerRole
+            WorkflowAgent.AgentMalformed
+            (AppServerTurn (TurnId "worker-malformed") "completed" (Just "plain text"))
+      , assert "workflow PR-review reviewer role classifies clean output" $
+          classifiesAs
+            reviewerRole
+            WorkflowAgent.AgentClean
+            (AppServerTurn (TurnId "reviewer-clean") "completed" (Just cleanReviewOutput))
+      , assert "workflow PR-review reviewer role classifies problems output" $
+          classifiesAs
+            reviewerRole
+            WorkflowAgent.AgentProblems
+            (AppServerTurn (TurnId "reviewer-problems") "completed" (Just problemsReviewOutput))
+      , assert "workflow PR-review reviewer role classifies malformed output" $
+          classifiesAs
+            reviewerRole
+            WorkflowAgent.AgentMalformed
+            (AppServerTurn (TurnId "reviewer-malformed") "completed" (Just "{\"result\":\"clean\"}"))
+      ]
+  pure (and results)
+
+workflowAgentObservationKernelMatchesPrReviewClassifiers :: IO Bool
+workflowAgentObservationKernelMatchesPrReviewClassifiers = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      workerTurn = ActiveTurn workerThread (TurnId "worker-turn")
+      reviewerTurn = ActiveTurn reviewerThread (TurnId "reviewer-turn")
+      commit = CommitSha "abc123"
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) commit
+      workerState =
+        SomeWatcherState
+          ( PrFixingReviews
+              prConfig
+              evidence
+              (WorkerActive workerTurn)
+              (ReviewerIdle reviewerThread)
+          )
+      reviewerState =
+        SomeWatcherState
+          ( PrReviewingClean
+              prConfig
+              commit
+              normalReviewContext
+              (WorkerIdle workerThread)
+              (ReviewerActive reviewerTurn)
+          )
+      cleanReviewOutput =
+        reviewerStateOutput "not_applicable" "none" commit reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing
+      problemsReviewOutput =
+        reviewerStateOutput "not_applicable" "found" commit reviewerPromptVersion 0 Nothing [] ["left summary finding"] Nothing
+      matchesWorker turn =
+        case classifyPrReviewWorkerTurn turn of
+          Just observation ->
+            agentObservationPlanMatches
+              workerState
+              WorkflowPrReviewAgent.prReviewWorkerAgentRole
+              DaemonPrReviewObservation
+              turn
+              (DaemonPrReviewObservation observation)
+          Nothing ->
+            False
+      matchesReviewer turn =
+        case classifyPrReviewReviewerTurn commit turn of
+          Just observation ->
+            agentObservationPlanMatches
+              reviewerState
+              (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+              DaemonPrReviewObservation
+              turn
+              (DaemonPrReviewObservation observation)
+          Nothing ->
+            False
+  results <-
+    sequence
+      [ assert "workflow agent observation kernel matches worker complete classifier" $
+          matchesWorker (AppServerTurn (TurnId "worker-turn") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"done\"}"))
+      , assert "workflow agent observation kernel matches worker incomplete classifier" $
+          matchesWorker (AppServerTurn (TurnId "worker-turn") "completed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"needs tests\"}"))
+      , assert "workflow agent observation kernel matches worker blocked classifier" $
+          matchesWorker (AppServerTurn (TurnId "worker-turn") "completed" Nothing)
+      , assert "workflow agent observation kernel matches worker malformed classifier" $
+          matchesWorker (AppServerTurn (TurnId "worker-turn") "completed" (Just "plain text"))
+      , assert "workflow agent observation kernel matches reviewer clean classifier" $
+          matchesReviewer (AppServerTurn (TurnId "reviewer-turn") "completed" (Just cleanReviewOutput))
+      , assert "workflow agent observation kernel matches reviewer problems classifier" $
+          matchesReviewer (AppServerTurn (TurnId "reviewer-turn") "completed" (Just problemsReviewOutput))
+      , assert "workflow agent observation kernel matches reviewer malformed classifier" $
+          matchesReviewer (AppServerTurn (TurnId "reviewer-turn") "completed" (Just "{\"result\":\"clean\"}"))
+      ]
+  pure (and results)
+
+workflowPlanObservationLawHoldsForPrReviewAgentObservation :: IO Bool
+workflowPlanObservationLawHoldsForPrReviewAgentObservation = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      workerTurn = ActiveTurn workerThread (TurnId "worker-turn")
+      commit = CommitSha "abc123"
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) commit
+      state =
+        SomeWatcherState
+          ( PrFixingReviews
+              prConfig
+              evidence
+              (WorkerActive workerTurn)
+              (ReviewerIdle reviewerThread)
+          )
+      turn = AppServerTurn (TurnId "worker-turn") "completed" (Just "{\"outcome\":\"complete\",\"summary\":\"done\"}")
+      observation =
+        WorkflowObservationAgent.classifiedAgentTurnObservationPayload
+          WorkflowPrReviewAgent.prReviewWorkerAgentRole
+          DaemonPrReviewObservation
+          turn
+  assert "workflow observation law holds for PR-review agent output" $
+    case observation of
+      Just daemonObservation ->
+        case (workflowObserve @MoifoldSpec state daemonObservation, workflowPlanObservation @MoifoldSpec state daemonObservation) of
+          (Right observed, Right planned) ->
+            case workflowApplyEvent @MoifoldSpec state planned.plannedEvent of
+              Right (appliedState, replayedEffects) ->
+                someDomain appliedState == someDomain observed.observedState
+                  && somePhase appliedState == somePhase observed.observedState
+                  && replayedEffects == planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+              Left _ -> False
+          _ -> False
+      Nothing -> False
+
+agentObservationPlanMatches
+  :: SomeWatcherState
+  -> WorkflowAgent.AgentRole input PrReviewObservation
+  -> (PrReviewObservation -> DaemonObservation)
+  -> AppServerTurn
+  -> DaemonObservation
+  -> Bool
+agentObservationPlanMatches state role toObservation turn expectedObservation =
+  case (oldPlan, newPlan) of
+    (Right old, Right new) ->
+      old.plannedEvent == new.plannedEvent
+        && old.plannedPreCommitEffects == new.plannedPreCommitEffects
+        && old.plannedPostCommitEffects == new.plannedPostCommitEffects
+    _ ->
+      False
+ where
+  oldPlan =
+    legacyObservedPlannedTransition <$> observeDaemonState state expectedObservation
+  newPlan =
+    WorkflowObservationAgent.planAgentTurnObservation @MoifoldSpec state role toObservation turn
+
 workflowPlannedTransitionPreservesObservedEffects :: IO Bool
 workflowPlannedTransitionPreservesObservedEffects = do
   let repo = RepoName "soulomoon/mlf2"
@@ -6214,9 +6616,49 @@ workflowPlannedTransitionPreservesObservedEffects = do
       Right observed ->
         let planned = legacyObservedPlannedTransition observed
          in planned.plannedEvent == observed.observedEvent
-              && planned.plannedPreCommitEffects == observed.observedEffects
-              && null planned.plannedPostCommitEffects
+              && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observed.observedEffects
       Left _ -> False
+
+workflowPlannedTransitionPartitionsPostCommitEffects :: IO Bool
+workflowPlannedTransitionPartitionsPostCommitEffects = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      idleCheckingState =
+        SomeWatcherState
+          (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      waitingState =
+        SomeWatcherState
+          (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      plannedFrom state observation =
+        legacyObservedPlannedTransition <$> observeDaemonState state observation
+  results <-
+    sequence
+      [ assert "workflow planned transition places blocked terminal effects post-commit" $
+          case plannedFrom idleCheckingState (DaemonPrReviewObservation (ObservedPrReviewBlocked (BlockedReason "blocked"))) of
+            Right planned ->
+              hasEffect RecordBlockedTag planned.plannedPostCommitEffects
+                && hasEffect StopDaemonTag planned.plannedPostCommitEffects
+                && lacksEffect RecordBlockedTag planned.plannedPreCommitEffects
+                && lacksEffect StopDaemonTag planned.plannedPreCommitEffects
+                && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observedEffectsFor idleCheckingState (DaemonPrReviewObservation (ObservedPrReviewBlocked (BlockedReason "blocked")))
+            Left _ -> False
+      , assert "workflow planned transition places mergeability retry sleep post-commit" $
+          case plannedFrom waitingState (DaemonPrReviewObservation (ObservedMergeabilityRetry "pending")) of
+            Right planned ->
+              hasEffect SleepUntilNextPollTag planned.plannedPostCommitEffects
+                && lacksEffect SleepUntilNextPollTag planned.plannedPreCommitEffects
+                && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observedEffectsFor waitingState (DaemonPrReviewObservation (ObservedMergeabilityRetry "pending"))
+            Left _ -> False
+      ]
+  pure (and results)
+ where
+  observedEffectsFor state observation =
+    case observeDaemonState state observation of
+      Right observed -> observed.observedEffects
+      Left _ -> []
 
 workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect :: IO Bool
 workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect = do
@@ -6233,8 +6675,31 @@ workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect = do
          in planned.plannedEvent == PrReviewMergeabilityClean commit
               && hasEffect MergePullRequestTag planned.plannedPreCommitEffects
               && null planned.plannedPostCommitEffects
+              && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observed.observedEffects
               && WorkflowPermission.validateMoifoldEffectPlan state planned.plannedPreCommitEffects == Right ()
       Left _ -> False
+
+workflowEventLogFailureAuditClassifiesRetryRecommendation :: IO Bool
+workflowEventLogFailureAuditClassifiesRetryRecommendation = do
+  let repo = RepoName "soulomoon/mlf2"
+      plannerConfig = PlannerConfig repo (maxParallelForTest 2) []
+      priorState = SomeWatcherState (PlanningReady plannerConfig :: WatcherState 'IssuePlanning 'Initialized)
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn"))
+      classification = FailureClassification TransientFailure "network EOF"
+      audit =
+        WorkflowEventLog.workflowFailureAudit @MoifoldSpec
+          priorState
+          (Just observation)
+          Nothing
+          Nothing
+          []
+          []
+          classification
+  assert "workflow event-log failure audit classifies retry recommendation" $
+    WorkflowEventLog.workflowAuditPriorStateLabel audit == "IssuePlanning/Initialized"
+      && maybe False ("ObservedPlanningTurnStarted" `Text.isInfixOf`) (WorkflowEventLog.workflowAuditObservationLabel audit)
+      && WorkflowEventLog.workflowAuditFailureClassification audit == Just classification
+      && WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == WorkflowEventLog.WorkflowDaemonRetry
 
 workflowDslPrReviewFeedbackMatchesStateMachine :: IO Bool
 workflowDslPrReviewFeedbackMatchesStateMachine = do
@@ -6257,6 +6722,40 @@ workflowDslPrReviewFeedbackMatchesStateMachine = do
       Right transition ->
         WorkflowDSL.transitionEvent transition == event
           && WorkflowDSL.transitionEffects transition == effects
+          && WorkflowDSL.transitionPreCommitEffects transition == effects
+          && null (WorkflowDSL.transitionPostCommitEffects transition)
+      Left _ -> False
+
+workflowDslTransitionLowersToPlannedTransition :: IO Bool
+workflowDslTransitionLowersToPlannedTransition = do
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 6
+      event = IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+      effects =
+        [ SomeEffect (RecordIssuePlan issueConfig prNumber sampleIssuePlanMarkdown)
+        , SomeEffect SleepUntilNextPoll
+        ]
+      transitionResult =
+        ( WorkflowDSL.advance
+            event
+            (WorkflowDSL.emit effects :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode ())
+            :: Either Text (WorkflowDSL.Transition MoifoldSpec 'IssueImplement 'PlanMode 'Implementing ())
+        )
+  assert "workflow DSL transition lowers to planned pre/post commit effects" $
+    case transitionResult of
+      Right transition ->
+        let expected = moifoldPlannedTransitionFromEffects event effects
+            planned = WorkflowDSL.transitionPlannedTransition transition
+         in WorkflowDSL.transitionEvent transition == event
+              && WorkflowDSL.transitionEffects transition == effects
+              && hasEffect RecordIssuePlanTag (WorkflowDSL.transitionPreCommitEffects transition)
+              && lacksEffect SleepUntilNextPollTag (WorkflowDSL.transitionPreCommitEffects transition)
+              && hasEffect SleepUntilNextPollTag (WorkflowDSL.transitionPostCommitEffects transition)
+              && lacksEffect RecordIssuePlanTag (WorkflowDSL.transitionPostCommitEffects transition)
+              && planned.plannedEvent == expected.plannedEvent
+              && planned.plannedPreCommitEffects == expected.plannedPreCommitEffects
+              && planned.plannedPostCommitEffects == expected.plannedPostCommitEffects
       Left _ -> False
 
 workflowDocsMigrationSpecProvesSecondWorkflow :: IO Bool
@@ -6282,6 +6781,235 @@ workflowDocsMigrationSpecProvesSecondWorkflow = do
             firstEffects : _ -> DocsMigration.StartDocsMigrationTurn config `elem` firstEffects
             [] -> False
       Left _ -> False
+
+workflowDocsMigrationAgentRoleClassifiesCompleteOutput :: IO Bool
+workflowDocsMigrationAgentRoleClassifiesCompleteOutput = do
+  let turn =
+        AppServerTurn
+          (TurnId "docs-turn")
+          "completed"
+          (Just "{\"draft_markdown\":\"draft markdown\",\"summary\":\"draft ready\"}")
+  assert "workflow docs-migration agent role classifies complete output" $
+    case WorkflowAgent.classifyAgentRoleTurn DocsMigration.docsMigrationAgentRole turn of
+      Right classified ->
+        classified.classifiedOutputClass == WorkflowAgent.AgentComplete
+          && classified.classifiedOutputPayload == DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      Left _ -> False
+
+workflowDocsMigrationUsesCoreExecutionContracts :: IO Bool
+workflowDocsMigrationUsesCoreExecutionContracts = do
+  calls <- newIORef []
+  let record call = modifyIORef' calls (<> [call])
+      config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+      interpreter =
+        DocsMigration.DocsMigrationInterpreter
+          { DocsMigration.docsMigrationStartTurn = \_config -> record "start-turn"
+          , DocsMigration.docsMigrationWriteDraft = \path draft -> record ("write:" <> Text.pack path <> ":" <> draft)
+          , DocsMigration.docsMigrationRunValidation = \path -> record ("validate:" <> Text.pack path)
+          , DocsMigration.docsMigrationStopDaemon = record "stop"
+          }
+      expectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      reportActions = fmap DocsMigration.docsMigrationActionReportAction
+  executeResult <- DocsMigration.runDocsMigrationObservedExecute interpreter events observation
+  executedCalls <- readIORef calls
+  let dryRunResult = DocsMigration.runDocsMigrationObservedDryRun events observation
+  assert "workflow docs-migration reuses core execution contracts" $
+    case (dryRunResult, executeResult) of
+      (Right dryRunTick, Right executeTick) ->
+        DocsMigration.docsMigrationDaemonEvent dryRunTick == expectedEvent
+          && DocsMigration.docsMigrationDaemonState dryRunTick == expectedState
+          && DocsMigration.docsMigrationDaemonCommittedEvents dryRunTick == []
+          && all ((== DryRunActions) . DocsMigration.docsMigrationActionReportMode) dryRunTick.docsMigrationDaemonActionReports
+          && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
+          && length (WorkflowExecution.workflowGenericCompiledActions dryRunTick.docsMigrationDaemonCompiledEffects) == 2
+          && null (WorkflowEventLog.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
+          && length (WorkflowEventLog.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit) == 2
+          && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
+          && DocsMigration.docsMigrationDaemonEvent executeTick == expectedEvent
+          && DocsMigration.docsMigrationDaemonState executeTick == expectedState
+          && DocsMigration.docsMigrationDaemonCommittedEvents executeTick == [expectedEvent]
+          && all ((== ExecuteActions) . DocsMigration.docsMigrationActionReportMode) executeTick.docsMigrationDaemonActionReports
+          && all DocsMigration.docsMigrationActionReportExecuted executeTick.docsMigrationDaemonActionReports
+          && reportActions executeTick.docsMigrationDaemonActionReports == reportActions dryRunTick.docsMigrationDaemonActionReports
+          && executedCalls == ["write:docs/target.md:draft markdown", "validate:docs/target.md"]
+          && null (WorkflowEventLog.workflowAuditPreCommitReports executeTick.docsMigrationDaemonAudit)
+          && length (WorkflowEventLog.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == 2
+          && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
+      _ -> False
+
+workflowExecutionMetadataCoversCurrentEffects :: IO Bool
+workflowExecutionMetadataCoversCurrentEffects = do
+  results <-
+    traverse
+      ( \(effectLabel, effect, expectedCommitOrder, expectedIdempotency) ->
+          let metadata = WorkflowExecution.workflowEffectMetadata effect
+           in assert
+                ("workflow execution metadata for " <> Text.unpack effectLabel)
+                ( metadata.workflowEffectCommitOrder == expectedCommitOrder
+                    && metadata.workflowEffectIdempotency == expectedIdempotency
+                )
+      )
+      workflowMetadataFixtureEffects
+  pure (and results)
+
+workflowExecutionMetadataPartitionPreservesLegacyOrdering :: IO Bool
+workflowExecutionMetadataPartitionPreservesLegacyOrdering = do
+  let repo = RepoName "soulomoon/mlf2"
+      config = effectRuntimeConfig repo "/tmp/work" 401
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 6
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) (CommitSha "abc123")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      effects =
+        [ SomeEffect (PushBranch (BranchName "codex/issue-42"))
+        , SomeEffect (StartWorkerTurn evidence (ThreadId "worker"))
+        , SomeEffect (RecordIssuePlan issueConfig prNumber "plan")
+        , SomeEffect (RecordBlocked (BlockedReason "blocked"))
+        , SomeEffect (MergePullRequest prNumber cleanEvidence)
+        , SomeEffect SleepUntilNextPoll
+        , SomeEffect StopDaemon
+        ]
+      legacy = compileEffectPlan config effects
+      workflow = WorkflowExecution.compileWorkflowEffectPlanWithMetadata config effects
+      (preCommit, postCommit) = WorkflowExecution.partitionWorkflowActions workflow
+      preCommitActions = fmap WorkflowExecution.workflowPlannedAction preCommit
+      postCommitActions = fmap WorkflowExecution.workflowPlannedAction postCommit
+      legacyPartition =
+        ( [legacy.compiledActions !! 0, legacy.compiledActions !! 1, legacy.compiledActions !! 2, legacy.compiledActions !! 4]
+        , [legacy.compiledActions !! 3, legacy.compiledActions !! 5, legacy.compiledActions !! 6]
+        )
+  results <-
+    sequence
+      [ assert "workflow metadata compile preserves legacy action order" $
+          fmap WorkflowExecution.workflowPlannedAction workflow.workflowCompiledActions == legacy.compiledActions
+      , assert "workflow metadata compile preserves request id progression" $
+          WorkflowExecution.workflowCompiledEffectPlanLegacy workflow == legacy
+      , assert "workflow metadata partition preserves pre-commit ordering" $
+          preCommitActions == fst legacyPartition
+      , assert "workflow metadata partition preserves post-commit ordering" $
+          postCommitActions == snd legacyPartition
+      ]
+  pure (and results)
+
+workflowExecutionMetadataDryRunMatchesLegacy :: IO Bool
+workflowExecutionMetadataDryRunMatchesLegacy = do
+  (executor, getCalls) <- fakeActionExecutor
+  let repo = RepoName "soulomoon/mlf2"
+      config = effectRuntimeConfig repo "/tmp/work" 420
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      effects =
+        [ SomeEffect (CreatePullRequest issueConfig)
+        , SomeEffect (RecordPlanningGraph (PlanningGraph [IssueNumber 42] [] []))
+        , SomeEffect SleepUntilNextPoll
+        ]
+      legacyDryRun = dryRunCompiledEffectPlan (compileEffectPlan config effects)
+      workflow = WorkflowExecution.compileWorkflowEffectPlanWithMetadata config effects
+      metadataDryRun = WorkflowExecution.dryRunWorkflowCompiledEffectPlan workflow
+  executedDryRun <- WorkflowExecution.executeWorkflowCompiledEffectPlan executor DryRunActions workflow
+  calls <- getCalls
+  results <-
+    sequence
+      [ assert "workflow metadata dry-run matches legacy dry-run reports" (metadataDryRun == legacyDryRun)
+      , assert "workflow metadata execute dry-run matches legacy dry-run reports" (executedDryRun == legacyDryRun)
+      , assert "workflow metadata dry-run does not call interpreters" (null calls)
+      ]
+  pure (and results)
+
+workflowExecutionCheckedActionsStopsOnHardFailure :: IO Bool
+workflowExecutionCheckedActionsStopsOnHardFailure = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GitPush {} -> failedCommandReport "permission denied"
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let repo = RepoName "soulomoon/mlf2"
+      config = effectRuntimeConfig repo "/tmp/work" 430
+      request = IssueCreationRequest "child" "body" Nothing
+      effects =
+        [ SomeEffect (PushBranch (BranchName "codex/fail"))
+        , SomeEffect (CreateIssue repo request)
+        ]
+      workflow = WorkflowExecution.compileWorkflowEffectPlanWithMetadata config effects
+  result <- WorkflowExecution.executeWorkflowCheckedActions executor workflow.workflowCompiledActions
+  calls <- getCalls
+  results <-
+    sequence
+      [ assert "workflow checked execution stops after first hard failure" $
+          calls == [FakeCommand (GitPush "/tmp/work" (BranchName "codex/fail"))]
+      , assert "workflow checked execution returns classified failure" $
+          case result of
+            Left failure ->
+              failure.workflowFailureClassification.failureClass == PolicyViolation
+                && case failure.workflowFailureCommandReport of
+                  Just report -> not report.ok
+                  Nothing -> False
+            Right _ -> False
+      ]
+  pure (and results)
+
+workflowMetadataFixtureEffects
+  :: [(Text, SomeEffect, WorkflowExecution.EffectCommitOrder, WorkflowExecution.EffectIdempotency)]
+workflowMetadataFixtureEffects =
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 6
+      prConfig = PrConfig repo prNumber (BranchName "codex/issue-42")
+      commit = CommitSha "abc123"
+      thread = ThreadId "thread"
+      reviewThread = ReviewThreadId "review-thread"
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) commit
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      issueRequest = IssueCreationRequest "child issue" "body" Nothing
+      graph = PlanningGraph [IssueNumber 42] [] []
+      blocked = BlockedReason "blocked"
+      pre = WorkflowExecution.PreCommit
+      post = WorkflowExecution.PostCommit
+      idempotent = WorkflowExecution.Idempotent
+      checkThenAct = WorkflowExecution.CheckThenAct
+      atMostOnce = WorkflowExecution.AtMostOnce
+      derivedWrite = WorkflowExecution.DerivedWrite
+   in [ ("ReadOpenIssues", SomeEffect (ReadOpenIssues repo), pre, idempotent)
+      , ("ReadOpenPullRequests", SomeEffect (ReadOpenPullRequests repo), pre, idempotent)
+      , ("ReadReviewThreads", SomeEffect (ReadReviewThreads prConfig), pre, idempotent)
+      , ("StartPlannerTurn", SomeEffect (StartPlannerTurn thread), pre, atMostOnce)
+      , ("StartWorkerTurn", SomeEffect (StartWorkerTurn evidence thread), pre, atMostOnce)
+      , ("StartIssuePlanWorkerTurn", SomeEffect (StartIssuePlanWorkerTurn issueConfig prNumber thread), pre, atMostOnce)
+      , ("StartIssueImplementationWorkerTurn", SomeEffect (StartIssueImplementationWorkerTurn thread), pre, atMostOnce)
+      , ("StartReviewerTurn", SomeEffect (StartReviewerTurn prConfig commit thread), pre, atMostOnce)
+      , ("StartReviewerVerificationTurn", SomeEffect (StartReviewerVerificationTurn prConfig evidence commit thread), pre, atMostOnce)
+      , ("StartIssueFinalReviewTurn", SomeEffect (StartIssueFinalReviewTurn issueConfig prNumber commit thread), pre, atMostOnce)
+      , ("PushBranch", SomeEffect (PushBranch (BranchName "codex/issue-42")), pre, checkThenAct)
+      , ("CreateIssue", SomeEffect (CreateIssue repo issueRequest), pre, atMostOnce)
+      , ("CreatePullRequest", SomeEffect (CreatePullRequest issueConfig), pre, atMostOnce)
+      , ("UpdatePullRequestBody", SomeEffect (UpdatePullRequestBody issueConfig prNumber), pre, checkThenAct)
+      , ("UpdateIssueFollowUp", SomeEffect (UpdateIssueFollowUp issueConfig evidence), pre, atMostOnce)
+      , ("CloseIssue", SomeEffect (CloseIssue issueConfig prNumber), pre, checkThenAct)
+      , ("ResolveReviewThread", SomeEffect (ResolveReviewThread reviewThread), pre, checkThenAct)
+      , ("ReplyReviewThread", SomeEffect (ReplyReviewThread reviewThread "reply"), pre, atMostOnce)
+      , ("PublishReviewFindings", SomeEffect (PublishReviewFindings prConfig evidence), pre, atMostOnce)
+      , ("RecordIssuePlan", SomeEffect (RecordIssuePlan issueConfig prNumber "plan"), pre, derivedWrite)
+      , ("RecordPlanningGraph", SomeEffect (RecordPlanningGraph graph), post, derivedWrite)
+      , ("RecordBlocked", SomeEffect (RecordBlocked blocked), post, derivedWrite)
+      , ("MergePullRequest", SomeEffect (MergePullRequest prNumber cleanEvidence), pre, checkThenAct)
+      , ("StopDaemon", SomeEffect StopDaemon, post, idempotent)
+      , ("SleepUntilNextPoll", SomeEffect SleepUntilNextPoll, post, idempotent)
+      ]
 
 sameReplay :: Either ReplayFailure EventReplayResult -> Either ReplayFailure EventReplayResult -> Bool
 sameReplay (Right left) (Right right) =
@@ -6543,6 +7271,7 @@ main = do
   daemonTickCommandFailureOk <- daemonTickExecuteStopsOnCommandFailure
   observedDaemonDryRunOk <- observedDaemonTickDryRunDoesNotMutate
   observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
+  observedDaemonAuditOk <- observedDaemonTickAuditSeparatesPreAndPostReports
   observedDaemonFailureOk <- observedDaemonTickExecuteCommandFailureDoesNotAppendEvent
   preMergeHeadChangedOk <- observedDaemonTickPreMergeGateRechecksWhenHeadChanged
   preMergeCleanOk <- observedDaemonTickPreMergeGateMergesWhenClean
@@ -6614,6 +7343,7 @@ main = do
       && daemonTickCommandFailureOk
       && observedDaemonDryRunOk
       && observedDaemonExecuteOk
+      && observedDaemonAuditOk
       && observedDaemonFailureOk
       && preMergeHeadChangedOk
       && preMergeCleanOk

@@ -2,25 +2,56 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module CodexWatcher.Workflow.DocsMigration
-  ( DocsMigrationConfig (..)
+  ( DocsMigrationAction (..)
+  , DocsMigrationActionReport (..)
+  , DocsMigrationConfig (..)
+  , DocsMigrationDaemonTickResult (..)
   , DocsMigrationEffect (..)
   , DocsMigrationEvent (..)
+  , DocsMigrationInterpreter (..)
   , DocsMigrationObservation (..)
   , DocsMigrationOutput (..)
   , DocsMigrationReplayResult (..)
   , DocsMigrationSpec
   , DocsMigrationState (..)
   , DocsMigrationTick (..)
+  , classifyDocsMigrationTurn
+  , compileDocsMigrationEffectPlan
+  , docsMigrationAgentRole
+  , docsMigrationEffectMetadata
+  , dryRunDocsMigrationCompiledEffectPlan
+  , executeDocsMigrationCompiledEffectPlan
+  , runDocsMigrationObservedDryRun
+  , runDocsMigrationObservedExecute
   , replayDocsMigrationEvents
   ) where
 
+import CodexWatcher.AppServerClient (AppServerTurn (..))
 import CodexWatcher.Core.Ids (ThreadId, TurnId)
-import CodexWatcher.Workflow.Agent (AgentOutputClass (..), ClassifiedAgentOutput (..), TurnRef (..))
-import CodexWatcher.Workflow.Types (WorkflowSpec (..))
+import CodexWatcher.Workflow.Agent (AgentOutputClass (..), AgentRole (..), ClassifiedAgentOutput (..), TurnRef (..))
+import CodexWatcher.Workflow.EventLog (WorkflowTickAudit, workflowDryRunAudit, workflowSuccessAudit)
+import CodexWatcher.Workflow.Execution
+  ( ActionExecutionMode (..)
+  , EffectCommitOrder (..)
+  , EffectIdempotency (..)
+  , WorkflowCompiledEffectPlanOf
+  , WorkflowEffectMetadata (..)
+  , compileWorkflowGenericEffectPlan
+  , dryRunWorkflowGenericCompiledEffectPlan
+  , executeWorkflowGenericActions
+  , executeWorkflowGenericCompiledEffectPlan
+  , partitionWorkflowGenericActionReports
+  , partitionWorkflowGenericActions
+  )
+import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
+import Data.Aeson (FromJSON (..), eitherDecodeStrict', (.:), (.:?), (.!=), withObject)
 import Data.Text (Text)
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 
 data DocsMigrationSpec
 
@@ -36,6 +67,13 @@ data DocsMigrationOutput = DocsMigrationOutput
   , docsMigrationOutputSummary :: Text
   }
   deriving stock (Eq, Show)
+
+instance FromJSON DocsMigrationOutput where
+  parseJSON =
+    withObject "DocsMigrationOutput" $ \objectValue ->
+      DocsMigrationOutput
+        <$> objectValue .: "draft_markdown"
+        <*> objectValue .:? "summary" .!= "docs migration draft produced"
 
 data DocsMigrationState
   = DocsMigrationReady DocsMigrationConfig
@@ -67,6 +105,38 @@ data DocsMigrationEffect
   | StopDocsMigrationDaemon
   deriving stock (Eq, Show)
 
+data DocsMigrationAction
+  = StartDocsMigrationTurnAction DocsMigrationConfig
+  | WriteDocsMigrationDraftAction FilePath Text
+  | RunDocsMigrationValidationAction FilePath
+  | StopDocsMigrationDaemonAction
+  deriving stock (Eq, Show)
+
+data DocsMigrationActionReport = DocsMigrationActionReport
+  { docsMigrationActionReportMode :: ActionExecutionMode
+  , docsMigrationActionReportAction :: DocsMigrationAction
+  , docsMigrationActionReportExecuted :: Bool
+  }
+  deriving stock (Eq, Show)
+
+data DocsMigrationInterpreter m = DocsMigrationInterpreter
+  { docsMigrationStartTurn :: DocsMigrationConfig -> m ()
+  , docsMigrationWriteDraft :: FilePath -> Text -> m ()
+  , docsMigrationRunValidation :: FilePath -> m ()
+  , docsMigrationStopDaemon :: m ()
+  }
+
+data DocsMigrationDaemonTickResult = DocsMigrationDaemonTickResult
+  { docsMigrationDaemonPriorReplay :: DocsMigrationReplayResult
+  , docsMigrationDaemonEvent :: DocsMigrationEvent
+  , docsMigrationDaemonState :: DocsMigrationState
+  , docsMigrationDaemonCommittedEvents :: [DocsMigrationEvent]
+  , docsMigrationDaemonCompiledEffects :: WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
+  , docsMigrationDaemonActionReports :: [DocsMigrationActionReport]
+  , docsMigrationDaemonAudit :: WorkflowTickAudit DocsMigrationSpec DocsMigrationActionReport
+  }
+  deriving stock (Eq, Show)
+
 data DocsMigrationTick = DocsMigrationTick
   { docsMigrationTickEvent :: DocsMigrationEvent
   , docsMigrationTickState :: DocsMigrationState
@@ -93,6 +163,8 @@ instance WorkflowSpec DocsMigrationSpec where
   workflowInitialEvent = initialDocsMigrationEvent
   workflowApplyEvent = applyDocsMigrationEvent
   workflowObserve = observeDocsMigration
+  workflowObservedTransition = docsMigrationObservedTransition
+  workflowPlanTransition = docsMigrationPlannedTransitionFromEffects
   workflowReplayEvents = replayDocsMigrationEvents
   workflowValidateEffects _state _effects = Right ()
   workflowIsTerminal = \case
@@ -101,6 +173,198 @@ instance WorkflowSpec DocsMigrationSpec where
     _ -> False
   workflowStateLabel = docsMigrationStateLabel
   workflowEventLabel = docsMigrationEventLabel
+  workflowObservationLabel = docsMigrationObservationLabel
+
+docsMigrationAgentRole :: AgentRole DocsMigrationConfig DocsMigrationOutput
+docsMigrationAgentRole =
+  AgentRole
+    { agentRoleName = "docs-migration"
+    , renderAgentInput =
+        \config ->
+          Text.unlines
+            [ "Migrate documentation."
+            , "Source: " <> Text.pack config.docsMigrationSource
+            , "Target: " <> Text.pack config.docsMigrationTarget
+            , "Goal: " <> config.docsMigrationGoal
+            ]
+    , agentOutputSchema = Nothing
+    , agentClassifyTurn = classifyDocsMigrationTurn
+    }
+
+classifyDocsMigrationTurn :: AppServerTurn -> Either Text (ClassifiedAgentOutput DocsMigrationOutput)
+classifyDocsMigrationTurn turn
+  | turn.appServerTurnStatus /= "completed" =
+      Right (classified AgentNoop ("docs migration turn is " <> turn.appServerTurnStatus))
+  | otherwise =
+      case turn.appServerTurnOutput of
+        Nothing ->
+          Right (classified AgentMalformed "docs migration turn completed without output")
+        Just output
+          | Text.strip output == "" ->
+              Right (classified AgentMalformed "docs migration turn completed without output")
+          | otherwise ->
+              case eitherDecodeStrict' (Text.Encoding.encodeUtf8 output) of
+                Right payload ->
+                  Right (ClassifiedAgentOutput AgentComplete payload)
+                Left reason ->
+                  Right (classified AgentMalformed ("docs migration output was malformed: " <> Text.pack reason))
+ where
+  classified outputClass summary =
+    ClassifiedAgentOutput outputClass (DocsMigrationOutput "" summary)
+
+docsMigrationEffectMetadata :: DocsMigrationEffect -> WorkflowEffectMetadata
+docsMigrationEffectMetadata = \case
+  StartDocsMigrationTurn {} ->
+    postCommit AtMostOnce
+  WriteDocsMigrationDraft {} ->
+    postCommit DerivedWrite
+  RunDocsMigrationValidation {} ->
+    postCommit CheckThenAct
+  StopDocsMigrationDaemon ->
+    postCommit Idempotent
+ where
+  postCommit idempotency =
+    WorkflowEffectMetadata
+      { workflowEffectCommitOrder = PostCommit
+      , workflowEffectIdempotency = idempotency
+      }
+
+compileDocsMigrationEffectPlan :: [DocsMigrationEffect] -> WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
+compileDocsMigrationEffectPlan =
+  compileWorkflowGenericEffectPlan docsMigrationEffectMetadata compileDocsMigrationEffect
+
+compileDocsMigrationEffect :: DocsMigrationEffect -> [DocsMigrationAction]
+compileDocsMigrationEffect = \case
+  StartDocsMigrationTurn config ->
+    [StartDocsMigrationTurnAction config]
+  WriteDocsMigrationDraft path draft ->
+    [WriteDocsMigrationDraftAction path draft]
+  RunDocsMigrationValidation path ->
+    [RunDocsMigrationValidationAction path]
+  StopDocsMigrationDaemon ->
+    [StopDocsMigrationDaemonAction]
+
+dryRunDocsMigrationCompiledEffectPlan
+  :: WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
+  -> [DocsMigrationActionReport]
+dryRunDocsMigrationCompiledEffectPlan =
+  dryRunWorkflowGenericCompiledEffectPlan (docsMigrationActionReport DryRunActions False)
+
+executeDocsMigrationCompiledEffectPlan
+  :: Monad m
+  => DocsMigrationInterpreter m
+  -> ActionExecutionMode
+  -> WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
+  -> m [DocsMigrationActionReport]
+executeDocsMigrationCompiledEffectPlan interpreter =
+  executeWorkflowGenericCompiledEffectPlan (executeDocsMigrationAction interpreter)
+
+executeDocsMigrationAction
+  :: Monad m
+  => DocsMigrationInterpreter m
+  -> ActionExecutionMode
+  -> DocsMigrationAction
+  -> m DocsMigrationActionReport
+executeDocsMigrationAction _ DryRunActions action =
+  pure (docsMigrationActionReport DryRunActions False action)
+executeDocsMigrationAction interpreter ExecuteActions action = do
+  case action of
+    StartDocsMigrationTurnAction config ->
+      interpreter.docsMigrationStartTurn config
+    WriteDocsMigrationDraftAction path draft ->
+      interpreter.docsMigrationWriteDraft path draft
+    RunDocsMigrationValidationAction path ->
+      interpreter.docsMigrationRunValidation path
+    StopDocsMigrationDaemonAction ->
+      interpreter.docsMigrationStopDaemon
+  pure (docsMigrationActionReport ExecuteActions True action)
+
+docsMigrationActionReport :: ActionExecutionMode -> Bool -> DocsMigrationAction -> DocsMigrationActionReport
+docsMigrationActionReport mode executed action =
+  DocsMigrationActionReport
+    { docsMigrationActionReportMode = mode
+    , docsMigrationActionReportAction = action
+    , docsMigrationActionReportExecuted = executed
+    }
+
+runDocsMigrationObservedDryRun
+  :: [DocsMigrationEvent]
+  -> DocsMigrationObservation
+  -> Either Text DocsMigrationDaemonTickResult
+runDocsMigrationObservedDryRun events observation = do
+  priorReplay <- replayDocsMigrationEvents events
+  observed <- observeDocsMigration priorReplay.docsMigrationReplayState observation
+  let planned = docsMigrationObservedTransition observed
+      effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+      compiled = compileDocsMigrationEffectPlan effects
+      reports = dryRunDocsMigrationCompiledEffectPlan compiled
+      (preReports, postReports) = partitionWorkflowGenericActionReports compiled reports
+      audit =
+        workflowDryRunAudit @DocsMigrationSpec
+          priorReplay.docsMigrationReplayState
+          observation
+          planned
+          observed.docsMigrationTickState
+          preReports
+          postReports
+  Right
+    DocsMigrationDaemonTickResult
+      { docsMigrationDaemonPriorReplay = priorReplay
+      , docsMigrationDaemonEvent = planned.plannedEvent
+      , docsMigrationDaemonState = observed.docsMigrationTickState
+      , docsMigrationDaemonCommittedEvents = []
+      , docsMigrationDaemonCompiledEffects = compiled
+      , docsMigrationDaemonActionReports = reports
+      , docsMigrationDaemonAudit = audit
+      }
+
+runDocsMigrationObservedExecute
+  :: Monad m
+  => DocsMigrationInterpreter m
+  -> [DocsMigrationEvent]
+  -> DocsMigrationObservation
+  -> m (Either Text DocsMigrationDaemonTickResult)
+runDocsMigrationObservedExecute interpreter events observation =
+  case replayDocsMigrationEvents events of
+    Left reason ->
+      pure (Left reason)
+    Right priorReplay ->
+      case observeDocsMigration priorReplay.docsMigrationReplayState observation of
+        Left reason ->
+          pure (Left reason)
+        Right observed -> do
+          let planned = docsMigrationObservedTransition observed
+              effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+              compiled = compileDocsMigrationEffectPlan effects
+              (preActions, postActions) = partitionWorkflowGenericActions compiled
+          preReports <- executeWorkflowGenericActions (executeDocsMigrationAction interpreter) ExecuteActions preActions
+          let committedEvents = [planned.plannedEvent]
+          case replayDocsMigrationEvents (events <> committedEvents) of
+            Left reason ->
+              pure (Left reason)
+            Right finalReplay -> do
+              postReports <- executeWorkflowGenericActions (executeDocsMigrationAction interpreter) ExecuteActions postActions
+              let reports = preReports <> postReports
+                  audit =
+                    workflowSuccessAudit @DocsMigrationSpec
+                      priorReplay.docsMigrationReplayState
+                      observation
+                      planned
+                      finalReplay.docsMigrationReplayState
+                      preReports
+                      postReports
+              pure
+                ( Right
+                    DocsMigrationDaemonTickResult
+                      { docsMigrationDaemonPriorReplay = priorReplay
+                      , docsMigrationDaemonEvent = planned.plannedEvent
+                      , docsMigrationDaemonState = finalReplay.docsMigrationReplayState
+                      , docsMigrationDaemonCommittedEvents = committedEvents
+                      , docsMigrationDaemonCompiledEffects = compiled
+                      , docsMigrationDaemonActionReports = reports
+                      , docsMigrationDaemonAudit = audit
+                      }
+                )
 
 replayDocsMigrationEvents :: [DocsMigrationEvent] -> Either Text DocsMigrationReplayResult
 replayDocsMigrationEvents [] =
@@ -171,6 +435,18 @@ tickFromApply :: DocsMigrationState -> DocsMigrationEvent -> Either Text DocsMig
 tickFromApply state event = do
   (state', effects) <- applyDocsMigrationEvent state event
   Right DocsMigrationTick {docsMigrationTickEvent = event, docsMigrationTickState = state', docsMigrationTickEffects = effects}
+
+docsMigrationObservedTransition :: DocsMigrationTick -> PlannedTransition DocsMigrationSpec
+docsMigrationObservedTransition tick =
+  docsMigrationPlannedTransitionFromEffects tick.docsMigrationTickEvent tick.docsMigrationTickEffects
+
+docsMigrationPlannedTransitionFromEffects :: DocsMigrationEvent -> [DocsMigrationEffect] -> PlannedTransition DocsMigrationSpec
+docsMigrationPlannedTransitionFromEffects event effects =
+  PlannedTransition
+    { plannedEvent = event
+    , plannedPreCommitEffects = effects
+    , plannedPostCommitEffects = []
+    }
 
 docsMigrationStateLabel :: DocsMigrationState -> Text
 docsMigrationStateLabel = \case

@@ -9,8 +9,6 @@ module CodexWatcher.DaemonLoop.TurnStart
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
-import CodexWatcher.AppServerProtocol
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
@@ -19,7 +17,8 @@ import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Core.Ids (RequestId (..), ThreadId, TurnId (..))
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
-import Data.Aeson (Value)
+import CodexWatcher.Workflow.Agent.Codex qualified as AgentCodex
+import CodexWatcher.Workflow.Agent.Types (AgentTurnStart (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 
@@ -66,24 +65,27 @@ prestartTurn
   -> ThreadId
   -> m (Either DaemonLoopFailure (TurnId, ActionExecutor m))
 prestartTurn executor runtimeConfig kind threadId =
-  case compileEffect runtimeConfig runtimeConfig.effectRuntimeNextRequestId (startTurnEffect kind threadId) of
-    ([PlannedAppServerRequest request], _nextRequestId) -> do
+  case agentTurnPlanForEffect runtimeConfig (startTurnEffect kind threadId) of
+    Just plan -> do
+      let request = AgentCodex.agentTurnStartRequest runtimeConfig.effectRuntimeNextRequestId plan
       response <- executor.actionAppServer.appServerSendRequest request
-      case parseTurnStartTurnId response of
+      case AgentCodex.parseAgentTurnStart plan response of
         Left failure -> pure (Left (DaemonLoopAppServerFailure failure))
-        Right turnId -> pure (Right (turnId, cachedAppServerExecutor executor request response))
-    (actions, _nextRequestId) ->
-      pure (Left (DaemonLoopUnexpectedStartPlan ("expected one app-server start action, got " <> Text.pack (show actions))))
-
-cachedAppServerExecutor :: Monad m => ActionExecutor m -> AppServerRequest -> Value -> ActionExecutor m
-cachedAppServerExecutor executor expectedRequest response =
-  executor
-    { actionAppServer =
-        AppServerInterpreter \request ->
-          if request == expectedRequest
-            then pure response
-            else executor.actionAppServer.appServerSendRequest request
-    }
+        Right turnStart ->
+          pure
+            ( Right
+                ( turnStart.agentTurnStartTurnId
+                , executor
+                    { actionAppServer =
+                        AgentCodex.cachedAgentTurnStartInterpreter
+                          executor.actionAppServer
+                          request
+                          response
+                    }
+                )
+            )
+    Nothing ->
+      pure (Left (DaemonLoopUnexpectedStartPlan ("expected one app-server start action for " <> kindText kind)))
 
 startTurnEffect :: StartTurnKind -> ThreadId -> SomeEffect
 startTurnEffect kind threadId =

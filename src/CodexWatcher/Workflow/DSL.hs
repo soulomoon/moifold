@@ -8,10 +8,14 @@ module CodexWatcher.Workflow.DSL
   , WorkflowM (..)
   , advance
   , emit
+  , transitionEffects
+  , transitionEvent
   , transitionFromPlan
+  , transitionPostCommitEffects
+  , transitionPreCommitEffects
   ) where
 
-import CodexWatcher.Workflow.Types (WorkflowSpec (..))
+import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 import Data.Text (Text)
 
 newtype WorkflowM spec domain phase a = WorkflowM
@@ -40,9 +44,8 @@ instance Monoid (WorkflowEffectPlan spec) => Monad (WorkflowM spec domain phase)
       pure (nextValue, effects <> nextEffects)
 
 data Transition spec domain from to a = Transition
-  { transitionEvent :: WorkflowEvent spec
+  { transitionPlannedTransition :: PlannedTransition spec
   , transitionValue :: a
-  , transitionEffects :: WorkflowEffectPlan spec
   }
 
 emit :: WorkflowEffectPlan spec -> WorkflowM spec domain phase ()
@@ -50,17 +53,38 @@ emit effects =
   WorkflowM (Right ((), effects))
 
 advance
-  :: WorkflowEvent spec
+  :: WorkflowSpec spec
+  => WorkflowEvent spec
   -> WorkflowM spec domain from a
   -> Either Text (Transition spec domain from to a)
 advance event (WorkflowM result) = do
   (value, effects) <- result
-  pure (Transition event value effects)
+  pure (transitionFromPlan event value effects)
 
 transitionFromPlan
-  :: WorkflowEvent spec
+  :: WorkflowSpec spec
+  => WorkflowEvent spec
   -> a
   -> WorkflowEffectPlan spec
   -> Transition spec domain from to a
 transitionFromPlan event value effects =
-  Transition event value effects
+  Transition
+    { transitionPlannedTransition = workflowPlanTransition event effects
+    , transitionValue = value
+    }
+
+transitionEvent :: Transition spec domain from to a -> WorkflowEvent spec
+transitionEvent =
+  plannedEvent . transitionPlannedTransition
+
+transitionPreCommitEffects :: Transition spec domain from to a -> WorkflowEffectPlan spec
+transitionPreCommitEffects =
+  plannedPreCommitEffects . transitionPlannedTransition
+
+transitionPostCommitEffects :: Transition spec domain from to a -> WorkflowEffectPlan spec
+transitionPostCommitEffects =
+  plannedPostCommitEffects . transitionPlannedTransition
+
+transitionEffects :: Semigroup (WorkflowEffectPlan spec) => Transition spec domain from to a -> WorkflowEffectPlan spec
+transitionEffects transition =
+  transitionPreCommitEffects transition <> transitionPostCommitEffects transition

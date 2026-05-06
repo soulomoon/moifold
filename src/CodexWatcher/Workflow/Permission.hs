@@ -16,7 +16,7 @@ import CodexWatcher.StateMachine
   , formatPhaseActionValidationError
   , validatePhaseActionPlan
   )
-import CodexWatcher.Workflow.Types (WorkflowSpec (..))
+import CodexWatcher.Workflow.Spec (WorkflowSpec (..))
 
 validateMoifoldEffectPlan :: SomeWatcherState -> EffectPlan -> Either PhaseActionValidationError ()
 validateMoifoldEffectPlan =

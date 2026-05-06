@@ -114,14 +114,20 @@ library
     CodexWatcher.WatcherLiveness
     CodexWatcher.WatcherRuntimeStatus
     CodexWatcher.Workflow.Agent
+    CodexWatcher.Workflow.Agent.Codex
+    CodexWatcher.Workflow.Agent.Codex.Protocol
+    CodexWatcher.Workflow.Agent.Types
     CodexWatcher.Workflow.DSL
     CodexWatcher.Workflow.DocsMigration
     CodexWatcher.Workflow.EventLog
     CodexWatcher.Workflow.Execution
     CodexWatcher.Workflow.Moifold.PrReview
+    CodexWatcher.Workflow.Moifold.PrReview.Agent
     CodexWatcher.Workflow.Moifold.PrReview.Mergeability
     CodexWatcher.Workflow.Observation
+    CodexWatcher.Workflow.Observation.Agent
     CodexWatcher.Workflow.Permission
+    CodexWatcher.Workflow.Spec
     CodexWatcher.Workflow.Types
   other-modules:
     CodexWatcher.AutomaticLoop.IssuePlanningFanout

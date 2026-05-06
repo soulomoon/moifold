@@ -14,8 +14,6 @@ module CodexWatcher.DaemonLoop.ActiveTurn
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
-import CodexWatcher.AppServerProtocol
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
@@ -31,6 +29,8 @@ import CodexWatcher.Core.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..))
+import CodexWatcher.Workflow.Agent.Types (AgentTurnReadResult (..), TurnRef (..))
+import CodexWatcher.Workflow.Agent.Codex qualified as AgentCodex
 import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (..), fromJSON, object, withObject, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -226,14 +226,20 @@ activeTurnBlockedObservation events state activeTurn =
 
 readActiveTurn :: Monad m => ActionExecutor m -> DaemonLoopConfig -> ActiveTurn -> m (Either DaemonLoopFailure ActiveTurnReadResult)
 readActiveTurn executor config activeTurn = do
-  response <-
-    executor.actionAppServer.appServerSendRequest
-      (threadReadRequest config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId activeTurn.activeThreadId True)
-  pure case parseThreadReadTurns response of
-    Left failure -> Left (DaemonLoopAppServerFailure failure)
-    Right turns ->
+  result <-
+    AgentCodex.readAgentTurn
+      executor.actionAppServer
+      config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeNextRequestId
+      TurnRef
+        { turnRefThreadId = activeTurn.activeThreadId
+        , turnRefTurnId = activeTurn.activeTurnId
+        }
+  pure case result of
+    Left failure ->
+      Left (DaemonLoopAppServerFailure failure)
+    Right readResult ->
       Right
         ActiveTurnReadResult
-          { activeTurnReadTurn = latestTurnById activeTurn.activeTurnId turns
-          , activeTurnReadThreadSystemError = threadSystemError response
+          { activeTurnReadTurn = readResult.agentTurnReadTurn
+          , activeTurnReadThreadSystemError = readResult.agentTurnReadThreadSystemError
           }

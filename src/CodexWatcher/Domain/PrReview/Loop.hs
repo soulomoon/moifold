@@ -18,13 +18,14 @@ import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
 import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
-import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Paths (runtimeWorkdirPath)
 import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ThreadId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence (..), ReviewFinding (..), reviewEvidenceFromSummaries)
+import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
+import CodexWatcher.Workflow.Observation.Agent (classifiedAgentTurnObservationPayload)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -72,7 +73,10 @@ runPrFixingReviews
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runPrFixingReviews ops executor config events replay activeTurn =
   observeClassifiedActiveTurn ops executor config events replay activeTurn \turn ->
-    fmap DaemonPrReviewObservation (classifyPrReviewWorkerTurn turn)
+    classifiedAgentTurnObservationPayload
+      WorkflowPrReviewAgent.prReviewWorkerAgentRole
+      DaemonPrReviewObservation
+      turn
 
 runPrReviewFixQueued
   :: DomainLoopOps m
@@ -202,7 +206,10 @@ runPrReviewingClean
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runPrReviewingClean ops executor config events replay commit activeTurn =
   observeClassifiedActiveTurn ops executor config events replay activeTurn \turn ->
-    fmap DaemonPrReviewObservation (classifyPrReviewReviewerTurn commit turn)
+    classifiedAgentTurnObservationPayload
+      (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+      DaemonPrReviewObservation
+      turn
 
 runPrWaitingForMergeability
   :: Monad m

@@ -4,12 +4,12 @@ module CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)
   , AgentRole (..)
   , ClassifiedAgentOutput (..)
-  , TurnRef (..)
+  , module CodexWatcher.Workflow.Agent.Types
   , classifyAgentRoleTurn
   ) where
 
 import CodexWatcher.AppServerClient (AppServerTurn)
-import CodexWatcher.Core.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.Agent.Types
 import Data.Aeson (Value)
 import Data.Text (Text)
 
@@ -35,12 +35,6 @@ data AgentRole input output = AgentRole
   , agentOutputSchema :: Maybe Value
   , agentClassifyTurn :: AppServerTurn -> Either Text (ClassifiedAgentOutput output)
   }
-
-data TurnRef agentRole output = TurnRef
-  { turnRefThreadId :: ThreadId
-  , turnRefTurnId :: TurnId
-  }
-  deriving stock (Eq, Show)
 
 classifyAgentRoleTurn :: AgentRole input output -> AppServerTurn -> Either Text (ClassifiedAgentOutput output)
 classifyAgentRoleTurn =

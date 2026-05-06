@@ -10,12 +10,13 @@ module CodexWatcher.EffectInterpreter
   , EffectRuntimeConfig (..)
   , PlannedAction (..)
   , TurnRuntimeConfig (..)
+  , agentTurnPlanForEffect
   , compileEffect
   , compileEffectPlan
   , issuePlanFileText
   ) where
 
-import CodexWatcher.AppServerProtocol
+import CodexWatcher.AppServerProtocol (AppServerRequest)
 import CodexWatcher.Core.Ids
   ( BranchName (..)
   , CommitSha
@@ -47,6 +48,18 @@ import CodexWatcher.TurnOutput
   , prReviewWorkerTurnInputWithEvidence
   , reviewerTurnInput
   , reviewerVerificationTurnInput
+  )
+import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as AgentCodexProtocol
+import CodexWatcher.Workflow.Agent.Types
+  ( AgentRoleId
+  , AgentTurnPlan (..)
+  , finalReviewerAgentRoleId
+  , issueImplementationWorkerAgentRoleId
+  , issuePlanWorkerAgentRoleId
+  , plannerAgentRoleId
+  , prReviewVerificationReviewerAgentRoleId
+  , prReviewWorkerAgentRoleId
+  , reviewerAgentRoleId
   )
 import Data.Aeson
   ( Value
@@ -123,20 +136,20 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhPrListOpen repo)]
     ReadReviewThreads prConfig ->
       unchanged [PlannedCommand (GhReviewThreads prConfig)]
-    StartPlannerTurn threadId ->
-      oneAppServerRequest config.effectRuntimePlannerTurn threadId
-    StartWorkerTurn evidence threadId ->
-      oneAppServerRequest (prReviewWorkerTurnRuntimeConfig config evidence) threadId
-    StartIssuePlanWorkerTurn issueConfig prNumber threadId ->
-      oneAppServerRequest (issuePlanTurnRuntimeConfig config issueConfig prNumber) threadId
-    StartIssueImplementationWorkerTurn threadId ->
-      oneAppServerRequest config.effectRuntimeIssueImplementationTurn threadId
-    StartReviewerTurn prConfig reviewTargetSha threadId ->
-      oneAppServerRequest (reviewerTurnRuntimeConfig config prConfig reviewTargetSha) threadId
-    StartReviewerVerificationTurn prConfig evidence reviewTargetSha threadId ->
-      oneAppServerRequest (reviewerVerificationTurnRuntimeConfig config prConfig evidence reviewTargetSha) threadId
-    StartIssueFinalReviewTurn issueConfig prNumber reviewTargetSha threadId ->
-      oneAppServerRequest (issueFinalReviewTurnRuntimeConfig config issueConfig prNumber reviewTargetSha) threadId
+    StartPlannerTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
+    StartWorkerTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
+    StartIssuePlanWorkerTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
+    StartIssueImplementationWorkerTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
+    StartReviewerTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
+    StartReviewerVerificationTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
+    StartIssueFinalReviewTurn {} ->
+      oneAppServerRequest (SomeEffect effect)
     PushBranch branch ->
       unchanged [PlannedCommand (GitPush (runtimeWorkdirPath config.effectRuntimeWorkdir) branch)]
     CreateIssue repo request ->
@@ -169,10 +182,49 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedSleepUntilNextPoll]
  where
   unchanged actions = (actions, requestId)
-  oneAppServerRequest turnConfig threadId =
-    ( [PlannedAppServerRequest (turnStartRequest requestId (turnStartOptions turnConfig threadId))]
-    , nextRequestId requestId
-    )
+  oneAppServerRequest startTurnEffectValue =
+    case agentTurnPlanForEffect config startTurnEffectValue of
+      Just plan ->
+        ( [PlannedAppServerRequest (AgentCodexProtocol.agentTurnStartRequest requestId plan)]
+        , nextRequestId requestId
+        )
+      Nothing ->
+        unchanged []
+
+agentTurnPlanForEffect :: EffectRuntimeConfig -> SomeEffect -> Maybe AgentTurnPlan
+agentTurnPlanForEffect config (SomeEffect effect) =
+  case effect of
+    StartPlannerTurn threadId ->
+      Just (agentTurnPlanFromRuntimeConfig plannerAgentRoleId threadId config.effectRuntimePlannerTurn)
+    StartWorkerTurn evidence threadId ->
+      Just (agentTurnPlanFromRuntimeConfig prReviewWorkerAgentRoleId threadId (prReviewWorkerTurnRuntimeConfig config evidence))
+    StartIssuePlanWorkerTurn issueConfig prNumber threadId ->
+      Just (agentTurnPlanFromRuntimeConfig issuePlanWorkerAgentRoleId threadId (issuePlanTurnRuntimeConfig config issueConfig prNumber))
+    StartIssueImplementationWorkerTurn threadId ->
+      Just (agentTurnPlanFromRuntimeConfig issueImplementationWorkerAgentRoleId threadId config.effectRuntimeIssueImplementationTurn)
+    StartReviewerTurn prConfig reviewTargetSha threadId ->
+      Just (agentTurnPlanFromRuntimeConfig reviewerAgentRoleId threadId (reviewerTurnRuntimeConfig config prConfig reviewTargetSha))
+    StartReviewerVerificationTurn prConfig evidence reviewTargetSha threadId ->
+      Just (agentTurnPlanFromRuntimeConfig prReviewVerificationReviewerAgentRoleId threadId (reviewerVerificationTurnRuntimeConfig config prConfig evidence reviewTargetSha))
+    StartIssueFinalReviewTurn issueConfig prNumber reviewTargetSha threadId ->
+      Just (agentTurnPlanFromRuntimeConfig finalReviewerAgentRoleId threadId (issueFinalReviewTurnRuntimeConfig config issueConfig prNumber reviewTargetSha))
+    _ ->
+      Nothing
+
+agentTurnPlanFromRuntimeConfig :: AgentRoleId -> ThreadId -> TurnRuntimeConfig -> AgentTurnPlan
+agentTurnPlanFromRuntimeConfig roleId threadId config =
+  AgentTurnPlan
+    { agentTurnPlanRoleId = roleId
+    , agentTurnPlanThreadId = threadId
+    , agentTurnPlanCwd = runtimeCwdPath config.turnRuntimeCwd
+    , agentTurnPlanEffort = config.turnRuntimeEffort
+    , agentTurnPlanModel = config.turnRuntimeModel
+    , agentTurnPlanApprovalPolicy = config.turnRuntimeApprovalPolicy
+    , agentTurnPlanSandboxPolicy = config.turnRuntimeSandboxPolicy
+    , agentTurnPlanInput = config.turnRuntimeInput
+    , agentTurnPlanOutputSchema = config.turnRuntimeOutputSchema
+    , agentTurnPlanCollaborationMode = config.turnRuntimeCollaborationMode
+    }
 
 issuePlanFileText :: IssueConfig -> PrNumber -> Text -> Text
 issuePlanFileText issueConfig prNumber planMarkdown =
@@ -185,20 +237,6 @@ issuePlanFileText issueConfig prNumber planMarkdown =
     , ""
     , Text.strip planMarkdown
     ]
-
-turnStartOptions :: TurnRuntimeConfig -> ThreadId -> TurnStartOptions
-turnStartOptions config threadId =
-  TurnStartOptions
-    { turnThreadId = threadId
-    , turnCwd = runtimeCwdPath config.turnRuntimeCwd
-    , turnEffort = config.turnRuntimeEffort
-    , turnModel = config.turnRuntimeModel
-    , turnApprovalPolicy = config.turnRuntimeApprovalPolicy
-    , turnSandboxPolicy = config.turnRuntimeSandboxPolicy
-    , turnInput = config.turnRuntimeInput
-    , turnOutputSchema = config.turnRuntimeOutputSchema
-    , turnCollaborationMode = config.turnRuntimeCollaborationMode
-    }
 
 prReviewWorkerTurnRuntimeConfig :: EffectRuntimeConfig -> ReviewEvidence -> TurnRuntimeConfig
 prReviewWorkerTurnRuntimeConfig config evidence =
