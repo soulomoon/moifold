@@ -22,6 +22,7 @@ module CodexWatcher.Daemon
   , runObservedDaemonTickWithEvents
   , runDaemonTickFromFile
   , runDaemonTickWithEvents
+  , prChecksGate
   , runPreMergeGate
   ) where
 
@@ -404,7 +405,12 @@ runPreMergeGate executor prConfig evidence = do
                 )
             )
       | Just result <- mergeStateGateResult remote.remotePullRequestMergeStateStatus ->
-          pure result
+          case result of
+            PreMergeGateRetry reason
+              | mergeStateRetryCanBeOverriddenByChecks remote.remotePullRequestMergeStateStatus ->
+                  mergeStateRetryWithCheckOverride executor prConfig reason
+            _ ->
+              pure result
       | otherwise -> do
           threadsResult <- runGhReviewThreads executor.actionRuntime prConfig
           case threadsResult of
@@ -412,14 +418,33 @@ runPreMergeGate executor prConfig evidence = do
             Right threads
               | not (null threads.unresolvedReviewThreads) ->
                   pure (PreMergeGateRecheck "pre-merge found unresolved review threads")
-              | otherwise -> do
-                  checksResult <- runGhPrChecks executor.actionRuntime prConfig.prRepo prConfig.prNumber
-                  pure case checksResult of
-                    Left reason -> preMergeExternalFailure "pre-merge required checks could not be read" reason
-                    Right checks
-                      | all checkPassed checks -> PreMergeGatePassed
-                      | any checkPending checks -> PreMergeGateRetry ("pre-merge required checks are still pending: " <> failedCheckNames checks)
-                      | otherwise -> PreMergeGateBlocked ("pre-merge required checks are not successful: " <> failedCheckNames checks)
+              | otherwise -> prChecksGate executor prConfig
+
+mergeStateRetryWithCheckOverride :: Monad m => ActionExecutor m -> PrConfig -> Text -> m PreMergeGateResult
+mergeStateRetryWithCheckOverride executor prConfig mergeStateRetryReason = do
+  checksGate <- prChecksGate executor prConfig
+  pure case checksGate of
+    PreMergeGatePassed -> PreMergeGateRetry mergeStateRetryReason
+    PreMergeGateRetry reason -> PreMergeGateRetry reason
+    PreMergeGateFixRequired reason -> PreMergeGateFixRequired reason
+    PreMergeGateBlocked reason -> PreMergeGateBlocked reason
+    PreMergeGateRecheck reason -> PreMergeGateRecheck reason
+
+prChecksGate :: Monad m => ActionExecutor m -> PrConfig -> m PreMergeGateResult
+prChecksGate executor prConfig = do
+  checksResult <- runGhPrChecks executor.actionRuntime prConfig.prRepo prConfig.prNumber
+  pure case checksResult of
+    Left reason -> preMergeExternalFailure "pre-merge PR checks could not be read" reason
+    Right checks
+      | all checkPassed checks -> PreMergeGatePassed
+      | any checkPending checks -> PreMergeGateRetry ("pre-merge PR checks are still pending: " <> failedCheckNames checks)
+      | otherwise -> PreMergeGateFixRequired ("pre-merge PR checks are not successful: " <> failedCheckNames checks)
+
+mergeStateRetryCanBeOverriddenByChecks :: Maybe Text -> Bool
+mergeStateRetryCanBeOverriddenByChecks status =
+  case classifyRemotePullRequestMergeState status of
+    RemotePullRequestMergeStateTransient _ -> True
+    _ -> False
 
 preMergeExternalFailure :: Text -> Text -> PreMergeGateResult
 preMergeExternalFailure prefix reason =

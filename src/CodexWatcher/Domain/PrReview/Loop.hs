@@ -13,7 +13,7 @@ module CodexWatcher.Domain.PrReview.Loop
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.Daemon (DaemonObservation (..), DaemonOptions (..), PreMergeGateResult (..), runPreMergeGate)
+import CodexWatcher.Daemon (DaemonObservation (..), DaemonOptions (..), PreMergeGateResult (..), prChecksGate, runPreMergeGate)
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
 import CodexWatcher.EventLog.Types
@@ -24,7 +24,7 @@ import CodexWatcher.Runtime.Paths (runtimeWorkdirPath)
 import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ThreadId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
-import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence, reviewEvidenceFromSummaries)
+import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence (..), ReviewFinding (..), reviewEvidenceFromSummaries)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -40,18 +40,24 @@ runPrCheckingReviews
   -> ThreadId
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runPrCheckingReviews ops executor config events prConfig workerThread reviewerThread = do
-  withReviewTargetAfterBranchGate ops executor config events prConfig workerThread "review-thread check" \commit remote -> do
+  withReviewTargetAfterMergeStateFixGate ops executor config events prConfig workerThread "review-thread check" \commit remote -> do
     report <- runGhReviewThreads executor.actionRuntime prConfig
     case report of
       Left reason -> pure (Left (DaemonLoopExternalFailure reason))
-      Right reviewReport
-        | Just evidence <- unresolvedReviewEvidence reviewReport commit ->
+      Right reviewReport -> do
+        checkFindings <- checkingPrCheckFindings executor prConfig
+        let reviewEvidence = unresolvedReviewEvidence reviewReport commit
+            changeFindings =
+              [changesRequestedFinding prConfig | isChangesRequested remote.remotePullRequestReviewDecision]
+            summaryFindings = changeFindings <> checkFindings
+            findingsEvidence = combineReviewEvidence reviewEvidence summaryFindings commit
+        case (reviewEvidence, summaryFindings, findingsEvidence) of
+          (Just evidence, [], _) ->
             ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind evidence) workerThread \turnId ->
               DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
-        | isChangesRequested remote.remotePullRequestReviewDecision ->
-            let evidence = reviewEvidenceFromSummaries (changesRequestedFinding prConfig :| []) commit
-             in startWorkerFeedbackTurn ops executor config events evidence workerThread
-        | otherwise ->
+          (_, _, Just evidence) ->
+            startWorkerFeedbackTurn ops executor config events evidence workerThread
+          (_, _, Nothing) ->
             ops.loopPrestartAndObserve executor config events (StartReviewerTurnKind prConfig commit) reviewerThread \turnId ->
               DaemonPrReviewObservation (ObservedReviewThreads reviewReport commit turnId)
 
@@ -91,11 +97,11 @@ runPrVerifyingReviewFix
   -> ThreadId
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runPrVerifyingReviewFix ops executor config events prConfig evidence workerThread reviewerThread = do
-  withReviewTargetAfterBranchGate ops executor config events prConfig workerThread "review-fix verification" \reviewTargetSha _remote ->
+  withReviewTargetAfterMergeStateFixGate ops executor config events prConfig workerThread "review-fix verification" \reviewTargetSha _remote ->
     ops.loopPrestartAndObserve executor config events (StartReviewerVerificationTurnKind prConfig evidence reviewTargetSha) reviewerThread \turnId ->
       DaemonPrReviewObservation (ObservedReviewFixVerificationStarted reviewTargetSha turnId)
 
-withReviewTargetAfterBranchGate
+withReviewTargetAfterMergeStateFixGate
   :: Monad m
   => DomainLoopOps m
   -> ActionExecutor m
@@ -106,13 +112,13 @@ withReviewTargetAfterBranchGate
   -> Text
   -> (CommitSha -> RemotePullRequest -> m (Either DaemonLoopFailure DaemonLoopTickResult))
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
-withReviewTargetAfterBranchGate ops executor config events prConfig workerThread context onReady = do
+withReviewTargetAfterMergeStateFixGate ops executor config events prConfig workerThread context onReady = do
   targetResult <- loadReviewTargetAndRemote executor config prConfig context
   case targetResult of
     Left failure -> pure (Left failure)
     Right (commit, remote) -> do
-      branchFix <- queueBranchMergeFixIfNeeded ops executor config events workerThread commit remote
-      case branchFix of
+      mergeStateFix <- queueMergeStateFixIfNeeded ops executor config events workerThread commit remote
+      case mergeStateFix of
         Just result -> pure result
         Nothing -> onReady commit remote
 
@@ -137,7 +143,7 @@ loadReviewTargetAndRemote executor config prConfig context = do
         Left reason -> pure (Left (DaemonLoopExternalFailure reason))
         Right remote -> pure (Right (commit, remote))
 
-queueBranchMergeFixIfNeeded
+queueMergeStateFixIfNeeded
   :: Monad m
   => DomainLoopOps m
   -> ActionExecutor m
@@ -147,8 +153,8 @@ queueBranchMergeFixIfNeeded
   -> CommitSha
   -> RemotePullRequest
   -> m (Maybe (Either DaemonLoopFailure DaemonLoopTickResult))
-queueBranchMergeFixIfNeeded ops executor config events workerThread commit remote =
-  case branchMergeFixEvidence commit remote of
+queueMergeStateFixIfNeeded ops executor config events workerThread commit remote =
+  case mergeStateFixEvidence commit remote of
     Nothing -> pure Nothing
     Just evidence ->
       Just <$> startWorkerFeedbackTurn ops executor config events evidence workerThread
@@ -164,6 +170,25 @@ startWorkerFeedbackTurn
 startWorkerFeedbackTurn ops executor config events evidence workerThread =
   ops.loopPrestartAndObserve executor config events (StartWorkerTurnKind evidence) workerThread \turnId ->
     DaemonPrReviewObservation (ObservedReviewFeedback evidence turnId)
+
+checkingPrCheckFindings :: Monad m => ActionExecutor m -> PrConfig -> m [Text]
+checkingPrCheckFindings executor prConfig = do
+  checksGate <- prChecksGate executor prConfig
+  pure case checksGate of
+    PreMergeGateFixRequired reason -> [reason]
+    _ -> []
+
+combineReviewEvidence :: Maybe ReviewEvidence -> [Text] -> CommitSha -> Maybe ReviewEvidence
+combineReviewEvidence maybeEvidence summaries commit =
+  case (maybeEvidence, summaries) of
+    (Just evidence, []) ->
+      Just evidence
+    (Just evidence, summary : rest) ->
+      Just evidence {reviewFindings = evidence.reviewFindings <> (ReviewSummaryFinding summary :| fmap ReviewSummaryFinding rest)}
+    (Nothing, summary : rest) ->
+      Just (reviewEvidenceFromSummaries (summary :| rest) commit)
+    (Nothing, []) ->
+      Nothing
 
 runPrReviewingClean
   :: Monad m
@@ -190,8 +215,9 @@ runPrWaitingForMergeability
   -> m (Either DaemonLoopFailure DaemonLoopTickResult)
 runPrWaitingForMergeability ops executor config events prConfig evidence = do
   gate <- runPreMergeGate executor prConfig evidence
+  effectiveGate <- mergeabilityRetryWithCheckOverride executor prConfig gate
   let observation =
-        case gate of
+        case effectiveGate of
           PreMergeGatePassed ->
             ObservedMergeabilityClean evidence.cleanReviewCommit
           PreMergeGateRetry reason ->
@@ -203,6 +229,21 @@ runPrWaitingForMergeability ops executor config events prConfig evidence = do
           PreMergeGateBlocked reason ->
             ObservedPrReviewBlocked (BlockedReason reason)
   ops.loopObserveWithExecutor executor config events (DaemonPrReviewObservation observation)
+
+mergeabilityRetryWithCheckOverride :: Monad m => ActionExecutor m -> PrConfig -> PreMergeGateResult -> m PreMergeGateResult
+mergeabilityRetryWithCheckOverride executor prConfig gate =
+  case gate of
+    PreMergeGateRetry reason
+      | Text.isPrefixOf "pre-merge merge state is " reason -> do
+          checksGate <- prChecksGate executor prConfig
+          pure case checksGate of
+            PreMergeGatePassed -> gate
+            PreMergeGateRetry checksReason -> PreMergeGateRetry checksReason
+            PreMergeGateRecheck checksReason -> PreMergeGateRecheck checksReason
+            PreMergeGateFixRequired checksReason -> PreMergeGateFixRequired checksReason
+            PreMergeGateBlocked checksReason -> PreMergeGateBlocked checksReason
+    _ ->
+      pure gate
 
 runPrMerging
   :: Monad m
@@ -228,11 +269,11 @@ isChangesRequested :: Maybe Text -> Bool
 isChangesRequested =
   maybe False ((== "CHANGES_REQUESTED") . Text.toUpper . Text.strip)
 
-branchMergeFixEvidence :: CommitSha -> RemotePullRequest -> Maybe ReviewEvidence
-branchMergeFixEvidence commit remote =
+mergeStateFixEvidence :: CommitSha -> RemotePullRequest -> Maybe ReviewEvidence
+mergeStateFixEvidence commit remote =
   case classifyRemotePullRequestMergeState remote.remotePullRequestMergeStateStatus of
     RemotePullRequestMergeStateFixRequired status ->
-      Just (reviewEvidenceFromSummaries (remotePullRequestMergeStateFixMessage "branch merge state" status :| []) commit)
+      Just (reviewEvidenceFromSummaries (remotePullRequestMergeStateFixMessage "merge state" status :| []) commit)
     _ -> Nothing
 
 changesRequestedFinding :: PrConfig -> Text

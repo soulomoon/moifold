@@ -357,7 +357,6 @@ parseGhPrChecks text =
 parseGhPrChecksTable :: Text -> Either Text [GhPullRequestCheck]
 parseGhPrChecksTable text
   | stripped == "" = Right []
-  | "no required checks reported" `Text.isInfixOf` Text.toLower stripped = Right []
   | "no checks reported" `Text.isInfixOf` Text.toLower stripped = Right []
   | otherwise = traverse parseGhPrCheckLine (filter (not . Text.null) (Text.strip <$> Text.lines text))
  where

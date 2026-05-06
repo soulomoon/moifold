@@ -12,7 +12,7 @@ module RuntimeSpec
   , prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
   , prop_runtimeGhPrCommentReviewFindingsUsesPrComment
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
-  , prop_runtimeGhPrChecksUsesRequiredCurrentCli
+  , prop_runtimeGhPrChecksUsesCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
@@ -146,8 +146,8 @@ prop_runtimeGhPrViewUsesStructuredFields repo prNumber =
              , "number,title,headRefName,headRefOid,body,state"
              ]
 
-prop_runtimeGhPrChecksUsesRequiredCurrentCli :: RepoName -> PrNumber -> Bool
-prop_runtimeGhPrChecksUsesRequiredCurrentCli repo prNumber =
+prop_runtimeGhPrChecksUsesCurrentCli :: RepoName -> PrNumber -> Bool
+prop_runtimeGhPrChecksUsesCurrentCli repo prNumber =
   let spec = renderRuntimeCommand (GhPrChecks repo prNumber)
    in spec.command == "gh"
         && spec.args
@@ -156,7 +156,8 @@ prop_runtimeGhPrChecksUsesRequiredCurrentCli repo prNumber =
              , show (unPrNumber prNumber)
              , "--repo"
              , Text.unpack (unRepoName repo)
-             , "--required"
+             , "--json"
+             , "name,state,bucket"
              ]
 
 prop_runtimeGhIssueCreateUsesRepoTitleAndBody :: RepoName -> IssueCreationRequest -> Bool

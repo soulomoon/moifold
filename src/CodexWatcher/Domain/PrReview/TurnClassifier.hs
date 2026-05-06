@@ -294,8 +294,6 @@ buildPriorReviewResult status report =
     PriorFindingsResolved
       | not (null remainingThreads) ->
           Left "remaining_review_threads require prior_findings_status=unresolved"
-      | not (null priorFindings) ->
-          Left "prior_findings_summary requires prior_findings_status=unresolved"
       | otherwise ->
           Right (PriorFeedbackResolved solvedThreads)
     PriorFindingsUnresolved

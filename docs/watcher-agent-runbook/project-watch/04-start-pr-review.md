@@ -49,5 +49,5 @@ Expected lifecycle:
 1. Read unresolved GitHub review threads and PR review decision.
 2. Start a worker turn if actionable findings exist.
 3. Start reviewer turn when no unresolved findings remain.
-4. Recheck mergeability and required checks.
+4. Recheck mergeability and PR checks.
 5. Merge only after a clean reviewer outcome and clean pre-merge gate.

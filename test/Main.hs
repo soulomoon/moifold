@@ -156,7 +156,7 @@ import RuntimeSpec
   , prop_runtimeGhPrCommentReviewFindingsUsesPrComment
   , prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
-  , prop_runtimeGhPrChecksUsesRequiredCurrentCli
+  , prop_runtimeGhPrChecksUsesCurrentCli
   , prop_runtimeGhPrViewUsesStructuredFields
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
@@ -2090,6 +2090,7 @@ prop_turnClassifierPrefersStructuredOutputs =
     && classifyPrReviewWorkerTurn (AppServerTurn (TurnId "worker-failed-incomplete") "failed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"tests still failing\"}")) == Just (ObservedWorkerOutcome (WorkerIncomplete "tests still failing"))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer") "completed" (Just (reviewerStateOutput "not_applicable" "none" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-clean-null-comment") "completed" (Just (reviewerStateOutput "not_applicable" "none" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
+    && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-resolved-prior-summary") "completed" (Just (reviewerStateOutput "resolved" "none" (CommitSha "abc123") reviewerPromptVersion 0 (Just "LGTM") ["resolved prior summary finding"] [] Nothing))) == Just (ObservedReviewerOutcome (ReviewerClean (CleanReviewEvidence (CommitSha "abc123") "LGTM") []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}")) == Just (ObservedReviewerOutcome (ReviewerIncomplete "reviewer state missing required fields: reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, prior_findings_status, new_findings_status, lgtm_comment, prior_findings_summary, new_findings_summary, blocked_reason, solved_threads, remaining_review_threads"))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-new-findings") "completed" (Just (reviewerStateOutput "not_applicable" "found" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] ["left summary finding"] Nothing))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded (reviewEvidenceFromSummaries ("left summary finding" :| []) (CommitSha "abc123")) []))
     && classifyPrReviewReviewerTurn (CommitSha "abc123") (AppServerTurn (TurnId "reviewer-remaining-thread") "completed" (Just (reviewerStateOutputWithRemaining "unresolved" "none" (CommitSha "abc123") reviewerPromptVersion 0 Nothing [] [] Nothing [(ReviewThreadId "thread-1", "still not fixed")]))) == Just (ObservedReviewerOutcome (ReviewerProblemsAdded remainingThreadEvidence []))
@@ -3699,7 +3700,7 @@ observedDaemonTickPreMergeGateMergesWhenClean = do
       results <-
         sequence
           [ assert "pre-merge gate emits mergeability clean event" (observedEvent == Just (PrReviewMergeabilityClean (cleanReviewCommit cleanEvidence)))
-          , assert "pre-merge gate reads required checks" (FakeCommand (GhPrChecks repo prNumber) `elem` calls)
+          , assert "pre-merge gate reads PR checks" (FakeCommand (GhPrChecks repo prNumber) `elem` calls)
           , assert "pre-merge gate merges after passing checks" (any isMerge calls)
           , assert "pre-merge gate reaches merging state" (observedPhase == Just Merging)
           ]
@@ -3729,6 +3730,16 @@ observedDaemonTickPreMergeGateWaitsWhenUnstable = do
                   , "mergeStateStatus" .= ("UNSTABLE" :: Text)
                   ]
               )
+          GhPrChecks {} ->
+            jsonCommandReport
+              ( toJSON
+                  [ object
+                      [ "name" .= ("ci/test" :: Text)
+                      , "state" .= ("SUCCESS" :: Text)
+                      , "bucket" .= ("pass" :: Text)
+                      ]
+                  ]
+              )
           command -> defaultFakeCommand command
       )
       defaultFakeAppServer
@@ -3754,6 +3765,7 @@ observedDaemonTickPreMergeGateWaitsWhenUnstable = do
       results <-
         sequence
           [ assert "pre-merge unstable emits waiting event" (observedEvent == Just (PrReviewMergeabilityWaiting "pre-merge merge state is UNSTABLE"))
+          , assert "pre-merge unstable reads PR checks" (FakeCommand (GhPrChecks repo prNumber) `elem` calls)
           , assert "pre-merge unstable does not merge" (not (any isMerge calls))
           , assert "pre-merge unstable remains non-terminal" (observedPhase == Just WaitingMergeability)
           , assert "pre-merge unstable does not write block-state" (not (any isBlockWrite calls))
@@ -3763,6 +3775,82 @@ observedDaemonTickPreMergeGateWaitsWhenUnstable = do
       putStrLn ("FAIL pre-merge unstable gate: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
  where
+  isMerge = \case
+    FakeCommand GhPrCleanReviewAndMerge {} -> True
+    _ -> False
+  isBlockWrite = \case
+    FakeWriteJson path _ -> path == "/tmp/work/.watcher/block-state.json"
+    _ -> False
+
+observedDaemonTickPreMergeGateQueuesWorkerWhenUnstableChecksFail :: IO Bool
+observedDaemonTickPreMergeGateQueuesWorkerWhenUnstableChecksFail = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumber = PrNumber 6
+      prConfig = PrConfig repo prNumber (BranchName "codex/example")
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      expectedEvidence =
+        reviewEvidenceFromSummaries
+          ("pre-merge PR checks are not successful: Thesis Conformance Gate" :| [])
+          (cleanReviewCommit cleanEvidence)
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          GhPrView {} ->
+            jsonCommandReport
+              ( object
+                  [ "state" .= ("OPEN" :: Text)
+                  , "headRefOid" .= ("abc123" :: Text)
+                  , "mergeStateStatus" .= ("UNSTABLE" :: Text)
+                  ]
+              )
+          GhPrChecks {} ->
+            jsonCommandReport
+              ( toJSON
+                  [ object
+                      [ "name" .= ("Thesis Conformance Gate" :: Text)
+                      , "state" .= ("FAILURE" :: Text)
+                      , "bucket" .= ("fail" :: Text)
+                      ]
+                  ]
+              )
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 118
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")
+        , PrReviewNoUnresolvedFound (cleanReviewCommit cleanEvidence) (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence []
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          observedState = daemonObservedState <$> tick.loopObservedTick
+      results <-
+        sequence
+          [ assert "pre-merge unstable failed checks emits worker-fix event" (observedEvent == Just (PrReviewMergeabilityFixRequired expectedEvidence))
+          , assert "pre-merge unstable failed checks queues worker fix" (maybe False isFixQueued observedState)
+          , assert "pre-merge unstable failed checks reads PR checks" (FakeCommand (GhPrChecks repo prNumber) `elem` calls)
+          , assert "pre-merge unstable failed checks does not merge" (not (any isMerge calls))
+          , assert "pre-merge unstable failed checks does not write block-state" (not (any isBlockWrite calls))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL pre-merge unstable failed checks gate: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isFixQueued = \case
+    SomeWatcherState PrReviewFixQueued {} -> True
+    _ -> False
   isMerge = \case
     FakeCommand GhPrCleanReviewAndMerge {} -> True
     _ -> False
@@ -3963,15 +4051,105 @@ observedDaemonTickChangesRequestedStartsWorker = do
     FakeCommand GhPrView {} -> True
     _ -> False
 
-observedDaemonTickCheckingQueuesBranchConflictBeforeReviewThreads :: IO Bool
-observedDaemonTickCheckingQueuesBranchConflictBeforeReviewThreads = do
+observedDaemonTickCheckingQueuesWorkerWhenChecksFail :: IO Bool
+observedDaemonTickCheckingQueuesWorkerWhenChecksFail = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumber = PrNumber 6
+      branch = BranchName "codex/example"
+      prConfig = PrConfig repo prNumber branch
+      commit = CommitSha "abc123"
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \command ->
+          case command of
+            GitBranchCurrent {} -> (defaultFakeCommand command) {stdout = unBranchName branch}
+            GitRevParseHead {} -> (defaultFakeCommand command) {stdout = unCommitSha commit}
+            GitStatusPorcelain {} -> (defaultFakeCommand command) {stdout = ""}
+            GitLsRemoteBranch {} -> (defaultFakeCommand command) {stdout = unCommitSha commit <> "\trefs/heads/" <> unBranchName branch}
+            GhReviewThreads {} -> jsonCommandReport emptyReviewThreadsJson
+            GhPrChecks {} ->
+              jsonCommandReport
+                ( toJSON
+                    [ object
+                        [ "name" .= ("Thesis Conformance Gate" :: Text)
+                        , "state" .= ("FAILURE" :: Text)
+                        , "bucket" .= ("fail" :: Text)
+                        ]
+                    , object
+                        [ "name" .= ("Build & Test" :: Text)
+                        , "state" .= ("SUCCESS" :: Text)
+                        , "bucket" .= ("pass" :: Text)
+                        ]
+                    ]
+                )
+            GhPrView {} ->
+              jsonCommandReport
+                ( object
+                    [ "state" .= ("OPEN" :: Text)
+                    , "headRefOid" .= unCommitSha commit
+                    , "mergeStateStatus" .= ("CLEAN" :: Text)
+                    , "reviewDecision" .= ("REVIEW_REQUIRED" :: Text)
+                    ]
+                )
+            _ -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig repo "/tmp/work" 121
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events =
+        [PrReviewInitialized prConfig (ThreadId "worker-thread") (ThreadId "reviewer-thread")]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          observedPhase = somePhase . daemonObservedState <$> tick.loopObservedTick
+          turnStartThreadIds =
+            [ lookupValue "threadId" request.requestParams
+            | FakeAppServer request <- calls
+            , request.requestMethod == "turn/start"
+            ]
+          evidenceMatches = \case
+            Just (PrReviewFeedbackFound evidence (TurnId "turn-started")) ->
+              reviewedCommit evidence == commit
+                && reviewEvidenceThreadIds evidence == []
+                && any ("pre-merge PR checks are not successful: Thesis Conformance Gate" `Text.isInfixOf`) (reviewEvidenceSummaries evidence)
+            _ -> False
+      results <-
+        sequence
+          [ assert "checking failed PR checks emits review feedback" (evidenceMatches observedEvent)
+          , assert "checking failed PR checks starts worker" (turnStartThreadIds == [Just (String "worker-thread")])
+          , assert "checking failed PR checks moves to fixing reviews" (observedPhase == Just FixingReviews)
+          , assert "checking failed PR checks reads review threads" (any isGhReviewThreads calls)
+          , assert "checking failed PR checks reads PR checks" (any isGhPrChecks calls)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL checking failed PR checks worker start: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isGhReviewThreads = \case
+    FakeCommand GhReviewThreads {} -> True
+    _ -> False
+  isGhPrChecks = \case
+    FakeCommand GhPrChecks {} -> True
+    _ -> False
+
+observedDaemonTickCheckingQueuesMergeStateFixBeforeReviewThreads :: IO Bool
+observedDaemonTickCheckingQueuesMergeStateFixBeforeReviewThreads = do
   let repo = RepoName "soulomoon/mlf2"
       prNumber = PrNumber 6
       branch = BranchName "codex/example"
       prConfig = PrConfig repo prNumber branch
       commit = CommitSha "abc123"
       expectedFinding =
-        "branch merge state is DIRTY: the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
+        "merge state is DIRTY: the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
   (executor, getCalls) <-
     fakeActionExecutorWith
       ( \command ->
@@ -4021,15 +4199,15 @@ observedDaemonTickCheckingQueuesBranchConflictBeforeReviewThreads = do
             _ -> False
       results <-
         sequence
-          [ assert "checking dirty branch emits branch feedback" (evidenceMatches observedEvent)
-          , assert "checking dirty branch starts worker" (turnStartThreadIds == [Just (String "worker-thread")])
-          , assert "checking dirty branch moves to fixing reviews" (observedPhase == Just FixingReviews)
-          , assert "checking dirty branch reads PR before review threads" (any isGhPrView calls)
-          , assert "checking dirty branch does not read review threads first" (not (any isGhReviewThreads calls))
+          [ assert "checking dirty merge state emits merge-state feedback" (evidenceMatches observedEvent)
+          , assert "checking dirty merge state starts worker" (turnStartThreadIds == [Just (String "worker-thread")])
+          , assert "checking dirty merge state moves to fixing reviews" (observedPhase == Just FixingReviews)
+          , assert "checking dirty merge state reads PR before review threads" (any isGhPrView calls)
+          , assert "checking dirty merge state does not read review threads first" (not (any isGhReviewThreads calls))
           ]
       pure (and results)
     Left failure -> do
-      putStrLn ("FAIL checking dirty branch worker start: " <> Text.unpack (formatDaemonLoopFailure failure))
+      putStrLn ("FAIL checking dirty merge state worker start: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
  where
   isGhPrView = \case
@@ -4039,8 +4217,8 @@ observedDaemonTickCheckingQueuesBranchConflictBeforeReviewThreads = do
     FakeCommand GhReviewThreads {} -> True
     _ -> False
 
-observedDaemonTickVerificationQueuesBranchConflictBeforeReviewer :: IO Bool
-observedDaemonTickVerificationQueuesBranchConflictBeforeReviewer = do
+observedDaemonTickVerificationQueuesMergeStateFixBeforeReviewer :: IO Bool
+observedDaemonTickVerificationQueuesMergeStateFixBeforeReviewer = do
   let repo = RepoName "soulomoon/mlf2"
       prNumber = PrNumber 6
       branch = BranchName "codex/example"
@@ -4048,7 +4226,7 @@ observedDaemonTickVerificationQueuesBranchConflictBeforeReviewer = do
       commit = CommitSha "abc123"
       reviewThreadId = ReviewThreadId "thread-1"
       expectedFinding =
-        "branch merge state is BEHIND: the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
+        "merge state is BEHIND: the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
   (executor, getCalls) <-
     fakeActionExecutorWith
       ( \command ->
@@ -4099,14 +4277,14 @@ observedDaemonTickVerificationQueuesBranchConflictBeforeReviewer = do
             _ -> False
       results <-
         sequence
-          [ assert "verification behind branch emits branch feedback" (evidenceMatches observedEvent)
-          , assert "verification behind branch starts worker" (turnStartThreadIds == [Just (String "worker-thread")])
-          , assert "verification behind branch returns to fixing reviews" (observedPhase == Just FixingReviews)
-          , assert "verification behind branch does not start reviewer" (not (any isReviewerTurn calls))
+          [ assert "verification behind merge state emits merge-state feedback" (evidenceMatches observedEvent)
+          , assert "verification behind merge state starts worker" (turnStartThreadIds == [Just (String "worker-thread")])
+          , assert "verification behind merge state returns to fixing reviews" (observedPhase == Just FixingReviews)
+          , assert "verification behind merge state does not start reviewer" (not (any isReviewerTurn calls))
           ]
       pure (and results)
     Left failure -> do
-      putStrLn ("FAIL verification behind branch worker start: " <> Text.unpack (formatDaemonLoopFailure failure))
+      putStrLn ("FAIL verification behind merge state worker start: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
  where
   isReviewerTurn = \case
@@ -6283,7 +6461,7 @@ main = do
       , quickCheckResult prop_runtimeGitPushDryRunNeverForces
       , quickCheckResult prop_runtimeGitPushNeverForces
       , quickCheckResult prop_runtimeGhPrViewUsesStructuredFields
-      , quickCheckResult prop_runtimeGhPrChecksUsesRequiredCurrentCli
+      , quickCheckResult prop_runtimeGhPrChecksUsesCurrentCli
       , quickCheckResult prop_runtimeGhIssueCreateUsesRepoTitleAndBody
       , quickCheckResult prop_runtimeGhIssueCreateWithParentLinksSubIssue
       , quickCheckResult prop_runtimeGhIssueCloseCommentsAndCloses
@@ -6369,12 +6547,14 @@ main = do
   preMergeHeadChangedOk <- observedDaemonTickPreMergeGateRechecksWhenHeadChanged
   preMergeCleanOk <- observedDaemonTickPreMergeGateMergesWhenClean
   preMergeUnstableOk <- observedDaemonTickPreMergeGateWaitsWhenUnstable
+  preMergeUnstableChecksFailOk <- observedDaemonTickPreMergeGateQueuesWorkerWhenUnstableChecksFail
   preMergeDirtyOk <- observedDaemonTickPreMergeGateQueuesWorkerWhenDirty
   preMergeConflictingOk <- observedDaemonTickPreMergeGateQueuesWorkerWhenConflicting
   preMergeTransientOk <- observedDaemonTickPreMergeGateRetriesTransientGithubReads
   changesRequestedWorkerOk <- observedDaemonTickChangesRequestedStartsWorker
-  checkingBranchConflictOk <- observedDaemonTickCheckingQueuesBranchConflictBeforeReviewThreads
-  verificationBranchConflictOk <- observedDaemonTickVerificationQueuesBranchConflictBeforeReviewer
+  checkingChecksFailOk <- observedDaemonTickCheckingQueuesWorkerWhenChecksFail
+  checkingMergeStateFixOk <- observedDaemonTickCheckingQueuesMergeStateFixBeforeReviewThreads
+  verificationMergeStateFixOk <- observedDaemonTickVerificationQueuesMergeStateFixBeforeReviewer
   automaticPlanningDryRunOk <- automaticDaemonLoopPlanningDryRunStartsSyntheticTurn
   automaticPlanningSnapshotOk <- automaticDaemonLoopPlanningExecuteWritesIssueSnapshotBeforeStart
   automaticPlanningFreshThreadOk <- automaticDaemonLoopPlanningExecuteStartsFreshPlannerThread
@@ -6438,12 +6618,14 @@ main = do
       && preMergeHeadChangedOk
       && preMergeCleanOk
       && preMergeUnstableOk
+      && preMergeUnstableChecksFailOk
       && preMergeDirtyOk
       && preMergeConflictingOk
       && preMergeTransientOk
       && changesRequestedWorkerOk
-      && checkingBranchConflictOk
-      && verificationBranchConflictOk
+      && checkingChecksFailOk
+      && checkingMergeStateFixOk
+      && verificationMergeStateFixOk
       && automaticPlanningDryRunOk
       && automaticPlanningSnapshotOk
       && automaticPlanningFreshThreadOk

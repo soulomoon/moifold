@@ -95,7 +95,8 @@ renderRuntimeCommand (GhPrChecks repo prNumber) =
     , show (unPrNumber prNumber)
     , "--repo"
     , Text.unpack (unRepoName repo)
-    , "--required"
+    , "--json"
+    , "name,state,bucket"
     ]
     Nothing
     ""

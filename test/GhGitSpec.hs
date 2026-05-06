@@ -109,7 +109,7 @@ prop_ghGitParsesPrCreateAndChecks =
         && parseGhPrCreateResult reusedJson == Right (GhPullRequestReused (PrNumber 8))
         && parseGhPrChecks checksJson == Right [GhPullRequestCheck "ci/test" "SUCCESS" (Just "pass")]
         && parseGhPrChecks checksText == Right [GhPullRequestCheck "ci/test" "SUCCESS" Nothing]
-        && parseGhPrChecks "no required checks reported on the 'codex/example' branch\n" == Right []
+        && parseGhPrChecks "no checks reported on the 'codex/example' branch\n" == Right []
 
 prop_ghGitParsesReviewThreadsGraphql :: Bool
 prop_ghGitParsesReviewThreadsGraphql =
