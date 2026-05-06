@@ -13,8 +13,10 @@ module CodexWatcher.Daemon
   , DaemonObservedTickResult (..)
   , PreMergeGateResult (..)
   , DaemonTickResult (..)
+  , ObservedPolicyTick (..)
   , appendWatcherEvent
   , formatDaemonFailure
+  , observeDaemonState
   , replayDaemonEventLog
   , runObservedDaemonTickFromFile
   , runObservedDaemonTickWithEvents
@@ -32,10 +34,7 @@ import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Failure
 import CodexWatcher.GhGit
-import CodexWatcher.Domain.IssueImplement.Watcher
-import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
@@ -44,6 +43,7 @@ import CodexWatcher.Core.Ids (CommitSha (..))
 import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
+import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..), observeDaemonState)
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.List (partition)
@@ -64,12 +64,6 @@ data DaemonFailure
   | DaemonObservationRejected Text
   | DaemonActionFailed PlannedAction CommandReport
   | DaemonActionResultInvalid PlannedAction Text
-  deriving stock (Eq, Show, Generic)
-
-data DaemonObservation
-  = DaemonPrReviewObservation PrReviewObservation
-  | DaemonIssueImplementObservation IssueImplementObservation
-  | DaemonIssuePlanningObservation IssuePlanningObservation
   deriving stock (Eq, Show, Generic)
 
 data DaemonTickResult = DaemonTickResult
@@ -237,12 +231,6 @@ replayEventLogFromEvents events =
     Left failure -> Left (DaemonReplayFailed failure)
     Right replay -> Right replay
 
-data ObservedPolicyTick = ObservedPolicyTick
-  { observedEvent :: WatcherEvent
-  , observedState :: SomeWatcherState
-  , observedEffects :: EffectPlan
-  }
-
 data PreparedObservedCommit = PreparedObservedCommit
   { preparedFinalReplay :: EventReplayResult
   , preparedEvents :: [WatcherEvent]
@@ -250,27 +238,6 @@ data PreparedObservedCommit = PreparedObservedCommit
   , preparedCompiledEffects :: CompiledEffectPlan
   , preparedPostActions :: [PlannedAction]
   }
-
-observeDaemonState :: SomeWatcherState -> DaemonObservation -> Either Text ObservedPolicyTick
-observeDaemonState state = \case
-  DaemonPrReviewObservation observation ->
-    fromPrReviewTick <$> prReviewObserve state observation
-  DaemonIssueImplementObservation observation ->
-    fromIssueImplementTick <$> issueImplementObserve state observation
-  DaemonIssuePlanningObservation observation ->
-    fromIssuePlanningTick <$> issuePlanningObserve state observation
-
-fromPrReviewTick :: PrReviewTick -> ObservedPolicyTick
-fromPrReviewTick tick =
-  ObservedPolicyTick tick.prReviewTickEvent tick.prReviewTickState tick.prReviewTickEffects
-
-fromIssueImplementTick :: IssueImplementTick -> ObservedPolicyTick
-fromIssueImplementTick tick =
-  ObservedPolicyTick tick.issueImplementTickEvent tick.issueImplementTickState tick.issueImplementTickEffects
-
-fromIssuePlanningTick :: IssuePlanningTick -> ObservedPolicyTick
-fromIssuePlanningTick tick =
-  ObservedPolicyTick tick.issuePlanningTickEvent tick.issuePlanningTickState tick.issuePlanningTickEffects
 
 runObservedDaemonDryRun
   :: Monad m

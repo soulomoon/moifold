@@ -6,7 +6,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module CodexWatcher.EventLog.Replay
-  ( replayEventLog
+  ( applyEvent
+  , initializeFromEvent
+  , replayEventLog
   ) where
 
 import CodexWatcher.Effects

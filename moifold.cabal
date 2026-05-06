@@ -113,6 +113,16 @@ library
     CodexWatcher.TurnOutput
     CodexWatcher.WatcherLiveness
     CodexWatcher.WatcherRuntimeStatus
+    CodexWatcher.Workflow.Agent
+    CodexWatcher.Workflow.DSL
+    CodexWatcher.Workflow.DocsMigration
+    CodexWatcher.Workflow.EventLog
+    CodexWatcher.Workflow.Execution
+    CodexWatcher.Workflow.Moifold.PrReview
+    CodexWatcher.Workflow.Moifold.PrReview.Mergeability
+    CodexWatcher.Workflow.Observation
+    CodexWatcher.Workflow.Permission
+    CodexWatcher.Workflow.Types
   other-modules:
     CodexWatcher.AutomaticLoop.IssuePlanningFanout
     CodexWatcher.AutomaticLoop.Output

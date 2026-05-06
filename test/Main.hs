@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Main (main) where
@@ -65,6 +66,15 @@ import CodexWatcher.Domain.IssuePlanning.Types
 import CodexWatcher.Domain.PrReview.Types
 import CodexWatcher.Runtime.Paths
 import CodexWatcher.WatcherRuntimeStatus
+import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
+import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
+import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
+import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
+import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
+import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
+import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
+import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
+import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), legacyObservedPlannedTransition)
 import Control.Exception (try)
 import Control.Monad (when)
 import Data.Aeson
@@ -5849,6 +5859,272 @@ phaseActionValidationAcceptsStateMachineDecisions = do
       Decision _ effects ->
         assert testName (validatePhaseActionPlan (SomeWatcherState state) effects == Right ())
 
+workflowFacadeExtractionTests :: IO Bool
+workflowFacadeExtractionTests = do
+  results <-
+    sequence
+      [ workflowFacadeReplayMatchesEventLog
+      , workflowFacadeInitialApplyMatchesReplay
+      , workflowPermissionFacadeMatchesStateMachine
+      , workflowExecutionFacadeDryRunMatchesExecutor
+      , workflowPrReviewCheckingFacadeMatchesWatcher
+      , workflowPrReviewMergeabilityFacadeMatchesWatcher
+      , workflowAgentRoleWrapsPrReviewWorkerClassifier
+      , workflowPlannedTransitionPreservesObservedEffects
+      , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
+      , workflowDslPrReviewFeedbackMatchesStateMachine
+      , workflowDocsMigrationSpecProvesSecondWorkflow
+      ]
+  pure (and results)
+
+workflowFacadeReplayMatchesEventLog :: IO Bool
+workflowFacadeReplayMatchesEventLog = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      events =
+        [ PrReviewInitialized prConfig workerThread reviewerThread
+        , PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence []
+        ]
+      direct = replayEventLog events
+      specialized = WorkflowEventLog.replayMoifoldWorkflowEvents events
+      generic = WorkflowEventLog.replayWorkflowEventLog @MoifoldSpec events
+  results <-
+    sequence
+      [ assert "workflow replay facade preserves direct replay result" (sameReplay direct specialized)
+      , assert "workflow spec replay facade preserves direct replay result" (sameReplayText direct generic)
+      ]
+  pure (and results)
+
+workflowFacadeInitialApplyMatchesReplay :: IO Bool
+workflowFacadeInitialApplyMatchesReplay = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      firstEvent = PrReviewInitialized prConfig workerThread reviewerThread
+      secondEvent = PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn")
+      direct = replayEventLog [firstEvent, secondEvent]
+      stepped = do
+        (state0, _effects0) <- WorkflowEventLog.initializeMoifoldWorkflow firstEvent
+        (state1, effects1) <- WorkflowEventLog.applyMoifoldWorkflowEvent state0 secondEvent
+        pure (state1, effects1)
+  results <-
+    sequence
+      [ assert "workflow event-log facade initializes and applies to replay state" $
+          case (direct, stepped) of
+            (Right replay, Right (state1, _effects1)) ->
+              someDomain replay.replayState == someDomain state1
+                && somePhase replay.replayState == somePhase state1
+            _ -> False
+      , assert "workflow event-log facade exposes transition effects" $
+          case stepped of
+            Right (_state1, effects1) -> hasEffect StartReviewerTurnTag effects1
+            Left _ -> False
+      ]
+  pure (and results)
+
+workflowPermissionFacadeMatchesStateMachine :: IO Bool
+workflowPermissionFacadeMatchesStateMachine = do
+  let plannerConfig = PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 2) [IssueNumber 12]
+      planningGraph = PlanningGraph [IssueNumber 12] [] []
+      state = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
+      effects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
+      direct = validatePhaseActionPlan state effects
+      facade = WorkflowPermission.validateMoifoldEffectPlan state effects
+  assert "workflow permission facade matches state-machine validation" (direct == facade)
+
+workflowExecutionFacadeDryRunMatchesExecutor :: IO Bool
+workflowExecutionFacadeDryRunMatchesExecutor = do
+  let repo = RepoName "soulomoon/mlf2"
+      config = effectRuntimeConfig repo "/tmp/work" 301
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) (CommitSha "abc123")
+      effects = [SomeEffect (StartWorkerTurn evidence (ThreadId "worker")), SomeEffect SleepUntilNextPoll]
+      direct = dryRunCompiledEffectPlan (compileEffectPlan config effects)
+      facade = WorkflowExecution.dryRunWorkflowEffectPlan config effects
+  assert "workflow execution facade preserves dry-run reports" (direct == facade)
+
+workflowPrReviewCheckingFacadeMatchesWatcher :: IO Bool
+workflowPrReviewCheckingFacadeMatchesWatcher = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      state = SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle (ThreadId "worker")) (ReviewerIdle (ThreadId "reviewer")))
+      reviewThreadId = ReviewThreadId "thread-1"
+      commit = CommitSha "abc123"
+      turnId = TurnId "worker-turn"
+      report = reviewThreadsReport [reviewThreadId]
+      watcher = prReviewObserve state (ObservedReviewThreads report commit turnId)
+      facade = WorkflowPrReview.observePrReviewChecking state (WorkflowPrReview.CheckingObservedReviewThreads report commit turnId)
+  assert "workflow PR-review checking facade matches watcher transition" $
+    case (watcher, facade) of
+      (Right watcherTick, Right observed) ->
+        watcherTick.prReviewTickEvent == observed.observedEvent
+          && somePhase watcherTick.prReviewTickState == somePhase observed.observedState
+          && watcherTick.prReviewTickEffects == observed.observedEffects
+      _ -> False
+
+workflowPrReviewMergeabilityFacadeMatchesWatcher :: IO Bool
+workflowPrReviewMergeabilityFacadeMatchesWatcher = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      fixEvidence = reviewEvidenceFromSummaries ("merge latest base branch" :| []) commit
+      state = SomeWatcherState (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      matches watcherObservation facadeObservation =
+        case (prReviewObserve state watcherObservation, WorkflowPrReviewMergeability.observePrReviewMergeability state facadeObservation) of
+          (Right watcherTick, Right observed) ->
+            watcherTick.prReviewTickEvent == observed.observedEvent
+              && somePhase watcherTick.prReviewTickState == somePhase observed.observedState
+              && watcherTick.prReviewTickEffects == observed.observedEffects
+          _ -> False
+  results <-
+    sequence
+      [ assert "workflow PR-review mergeability clean facade matches watcher" $
+          matches
+            (ObservedMergeabilityClean commit)
+            (WorkflowPrReviewMergeability.MergeabilityObservedClean commit)
+      , assert "workflow PR-review mergeability retry facade matches watcher" $
+          matches
+            (ObservedMergeabilityRetry "pending")
+            (WorkflowPrReviewMergeability.MergeabilityObservedRetry "pending")
+      , assert "workflow PR-review mergeability recheck facade matches watcher" $
+          matches
+            (ObservedMergeabilityRecheck "review changed")
+            (WorkflowPrReviewMergeability.MergeabilityObservedRecheck "review changed")
+      , assert "workflow PR-review mergeability fix-required facade matches watcher" $
+          matches
+            (ObservedMergeabilityFixRequired fixEvidence)
+            (WorkflowPrReviewMergeability.MergeabilityObservedFixRequired fixEvidence)
+      ]
+  pure (and results)
+
+workflowAgentRoleWrapsPrReviewWorkerClassifier :: IO Bool
+workflowAgentRoleWrapsPrReviewWorkerClassifier = do
+  let role =
+        WorkflowAgent.AgentRole
+          { WorkflowAgent.agentRoleName = "pr-review-worker"
+          , WorkflowAgent.renderAgentInput = \input -> input
+          , WorkflowAgent.agentOutputSchema = Nothing
+          , WorkflowAgent.agentClassifyTurn = \appTurn ->
+              case classifyPrReviewWorkerTurn appTurn of
+                Just output -> Right (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentIncomplete output)
+                Nothing -> Left "turn still running"
+          }
+      turn = AppServerTurn (TurnId "worker") "completed" (Just "{\"outcome\":\"incomplete\",\"reason\":\"needs tests\"}")
+  assert "workflow agent role wraps existing classifier without weakening output" $
+    case WorkflowAgent.classifyAgentRoleTurn role turn of
+      Right (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentIncomplete (ObservedWorkerOutcome (WorkerIncomplete "needs tests"))) -> True
+      _ -> False
+
+workflowPlannedTransitionPreservesObservedEffects :: IO Bool
+workflowPlannedTransitionPreservesObservedEffects = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      state = SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle (ThreadId "worker")) (ReviewerIdle (ThreadId "reviewer")))
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) (CommitSha "abc123")
+      observation = DaemonPrReviewObservation (ObservedReviewFeedback evidence (TurnId "worker-turn"))
+  assert "workflow planned-transition facade preserves observed event and effects" $
+    case observeDaemonState state observation of
+      Right observed ->
+        let planned = legacyObservedPlannedTransition observed
+         in planned.plannedEvent == observed.observedEvent
+              && planned.plannedPreCommitEffects == observed.observedEffects
+              && null planned.plannedPostCommitEffects
+      Left _ -> False
+
+workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect :: IO Bool
+workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      state = SomeWatcherState (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle (ThreadId "worker")) (ReviewerIdle (ThreadId "reviewer")))
+      observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+  assert "workflow mergeability planned transition keeps merge effect pre-commit" $
+    case observeDaemonState state observation of
+      Right observed ->
+        let planned = legacyObservedPlannedTransition observed
+         in planned.plannedEvent == PrReviewMergeabilityClean commit
+              && hasEffect MergePullRequestTag planned.plannedPreCommitEffects
+              && null planned.plannedPostCommitEffects
+              && WorkflowPermission.validateMoifoldEffectPlan state planned.plannedPreCommitEffects == Right ()
+      Left _ -> False
+
+workflowDslPrReviewFeedbackMatchesStateMachine :: IO Bool
+workflowDslPrReviewFeedbackMatchesStateMachine = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      turnId = TurnId "worker-turn"
+      state = PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle (ThreadId "reviewer"))
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) (CommitSha "abc123")
+      event = PrReviewFeedbackFound evidence turnId
+      Decision _ effects = step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId))
+      transitionResult =
+        ( WorkflowDSL.advance
+            event
+            (WorkflowDSL.emit effects :: WorkflowDSL.WorkflowM MoifoldSpec 'PrReview 'CheckingReviews ())
+            :: Either Text (WorkflowDSL.Transition MoifoldSpec 'PrReview 'CheckingReviews 'FixingReviews ())
+        )
+  assert "workflow DSL transition preserves PR-review event and effect plan" $
+    case transitionResult of
+      Right transition ->
+        WorkflowDSL.transitionEvent transition == event
+          && WorkflowDSL.transitionEffects transition == effects
+      Left _ -> False
+
+workflowDocsMigrationSpecProvesSecondWorkflow :: IO Bool
+workflowDocsMigrationSpecProvesSecondWorkflow = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        , DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+        , DocsMigration.DocsMigrationValidationPassed "validation passed"
+        , DocsMigration.DocsMigrationWorkflowCompleted "done"
+        ]
+  assert "workflow docs-migration spec replays as second non-PR workflow" $
+    case DocsMigration.replayDocsMigrationEvents events of
+      Right replay ->
+        replay.docsMigrationReplayState == DocsMigration.DocsMigrationComplete "done"
+          && case replay.docsMigrationReplayEffects of
+            firstEffects : _ -> DocsMigration.StartDocsMigrationTurn config `elem` firstEffects
+            [] -> False
+      Left _ -> False
+
+sameReplay :: Either ReplayFailure EventReplayResult -> Either ReplayFailure EventReplayResult -> Bool
+sameReplay (Right left) (Right right) =
+  someDomain left.replayState == someDomain right.replayState
+    && somePhase left.replayState == somePhase right.replayState
+    && left.replayEffects == right.replayEffects
+sameReplay (Left left) (Left right) =
+  left == right
+sameReplay _ _ =
+  False
+
+sameReplayText :: Either ReplayFailure EventReplayResult -> Either Text EventReplayResult -> Bool
+sameReplayText (Right left) (Right right) =
+  someDomain left.replayState == someDomain right.replayState
+    && somePhase left.replayState == somePhase right.replayState
+    && left.replayEffects == right.replayEffects
+sameReplayText (Left _) (Left _) =
+  True
+sameReplayText _ _ =
+  False
+
 observeOnceParsingCoversDomainsAndDefaults :: IO Bool
 observeOnceParsingCoversDomainsAndDefaults = do
   planning <-
@@ -6131,6 +6407,7 @@ main = do
   automaticLoopRetryPolicyOk <- automaticLoopRetryPolicyKeepsTransientFailuresAlive
   phaseActionValidationOk <- phaseActionValidationRejectsInvalidCombinations
   phaseActionDecisionValidationOk <- phaseActionValidationAcceptsStateMachineDecisions
+  workflowFacadeOk <- workflowFacadeExtractionTests
   issuePlanningFanoutActiveOk <- issuePlanningFanoutDiscoversOnlyRunningImplementers
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
@@ -6199,6 +6476,7 @@ main = do
       && automaticLoopRetryPolicyOk
       && phaseActionValidationOk
       && phaseActionDecisionValidationOk
+      && workflowFacadeOk
       && issuePlanningFanoutActiveOk
       && runnerGuardOk
       && runnerGuardRestartOk

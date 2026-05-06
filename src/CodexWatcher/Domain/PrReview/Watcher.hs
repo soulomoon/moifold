@@ -18,22 +18,26 @@ import CodexWatcher.GhGit
 import CodexWatcher.Observation
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId (..), ThreadId, TurnId)
+import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId (..), TurnId)
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
-import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.PrReview.Types
-  ( CleanReviewEvidence (..)
-  , MergeCommit
+  ( MergeCommit
   , ReviewContext (..)
   , ReviewEvidence (..)
   , SomeReviewContext (..)
-  , reviewEvidenceFromThreadCommentRefs
-  , reviewEvidenceFromThreads
   , reviewEvidenceThreadIds
   )
-import Data.List.NonEmpty (NonEmpty (..))
+import CodexWatcher.Workflow.Moifold.PrReview
+  ( PrReviewCheckingObservation (..)
+  , observePrReviewChecking
+  , unresolvedReviewEvidence
+  )
+import CodexWatcher.Workflow.Moifold.PrReview.Mergeability
+  ( PrReviewMergeabilityObservation (..)
+  , observePrReviewMergeability
+  )
 import Data.Text (Text)
 import Data.Text qualified as Text
 
@@ -59,27 +63,10 @@ data PrReviewTick = PrReviewTick
   deriving stock (Show)
 
 prReviewObserve :: SomeWatcherState -> PrReviewObservation -> Either Text PrReviewTick
-prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedReviewThreads report commit turnId) =
-  case unresolvedThreadIds report of
-    Just threadIds ->
-      case state of
-        PrCheckingReviews _config (WorkerIdle workerThread) _reviewer ->
-          let event = PrReviewUnresolvedFound threadIds commit turnId
-              evidence = unresolvedReviewEvidenceOrThreadIds report threadIds commit
-              decision = step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId))
-           in Right (tick event decision)
-    Nothing ->
-      case state of
-        PrCheckingReviews _config _worker (ReviewerIdle reviewerThread) ->
-          let event = PrReviewNoUnresolvedFound commit turnId
-              decision = step state (NoReviewThreadsFound commit (ActiveTurn reviewerThread turnId))
-           in Right (tick event decision)
-prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedReviewFeedback evidence turnId) =
-  Right (reviewFeedbackTick state evidence turnId)
-prReviewObserve (SomeWatcherState state@PrReviewFixQueued {}) (ObservedReviewFeedback evidence turnId) =
-  Right (reviewFeedbackTick state evidence turnId)
-prReviewObserve (SomeWatcherState state@PrVerifyingReviewFix {}) (ObservedReviewFeedback evidence turnId) =
-  Right (reviewFeedbackTick state evidence turnId)
+prReviewObserve state (ObservedReviewThreads report commit turnId) =
+  fromObservedTick <$> observePrReviewChecking state (CheckingObservedReviewThreads report commit turnId)
+prReviewObserve state (ObservedReviewFeedback evidence turnId) =
+  fromObservedTick <$> observePrReviewChecking state (CheckingObservedReviewFeedback evidence turnId)
 prReviewObserve (SomeWatcherState state@PrFixingReviews {}) (ObservedWorkerOutcome outcome) =
   case outcome of
     WorkerCompleted ->
@@ -88,12 +75,8 @@ prReviewObserve (SomeWatcherState state@PrFixingReviews {}) (ObservedWorkerOutco
       Right (tick (PrReviewFixIncomplete reason) (step state ReviewFixIncomplete))
     WorkerBlocked reason ->
       Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
-prReviewObserve (SomeWatcherState state@PrVerifyingReviewFix {}) (ObservedReviewFixVerificationStarted reviewTargetSha turnId) =
-  case state of
-    PrVerifyingReviewFix _config evidence _worker (ReviewerIdle reviewerThread) ->
-      let event = PrReviewFixVerificationStarted evidence reviewTargetSha turnId
-          decision = step state (StartReviewFixVerification reviewTargetSha (ActiveTurn reviewerThread turnId))
-       in Right (tick event decision)
+prReviewObserve state (ObservedReviewFixVerificationStarted reviewTargetSha turnId) =
+  fromObservedTick <$> observePrReviewChecking state (CheckingObservedReviewFixVerificationStarted reviewTargetSha turnId)
 prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedReviewerOutcome outcome) =
   case verifyReviewerOutcome state outcome of
     ReviewerClean evidence resolvedThreadIds ->
@@ -104,19 +87,14 @@ prReviewObserve (SomeWatcherState state@PrReviewingClean {}) (ObservedReviewerOu
       Right (tick (PrReviewReviewIncomplete reason) (step state ReviewerTurnIncomplete))
     ReviewerBlocked reason ->
       Right (tick (WatcherBlocked reason) (step state (MarkBlocked reason)))
-prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityClean commitSha) =
-  case state of
-    PrWaitingForMergeability _config evidence _worker _reviewer
-      | cleanReviewCommit evidence == commitSha ->
-          Right (tick (PrReviewMergeabilityClean commitSha) (step state MergeabilityClean))
-      | otherwise ->
-          Left "mergeability clean commit does not match reviewed commit"
-prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityRetry reason) =
-  Right (tick (PrReviewMergeabilityWaiting reason) (step state (MergeabilityRetryLater reason)))
-prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityRecheck reason) =
-  Right (tick (PrReviewMergeabilityRecheck reason) (step state (MergeabilityRecheckReviews reason)))
-prReviewObserve (SomeWatcherState state@PrWaitingForMergeability {}) (ObservedMergeabilityFixRequired evidence) =
-  Right (tick (PrReviewMergeabilityFixRequired evidence) (step state (MergeabilityFixRequired evidence)))
+prReviewObserve state (ObservedMergeabilityClean commitSha) =
+  fromObservedTick <$> observePrReviewMergeability state (MergeabilityObservedClean commitSha)
+prReviewObserve state (ObservedMergeabilityRetry reason) =
+  fromObservedTick <$> observePrReviewMergeability state (MergeabilityObservedRetry reason)
+prReviewObserve state (ObservedMergeabilityRecheck reason) =
+  fromObservedTick <$> observePrReviewMergeability state (MergeabilityObservedRecheck reason)
+prReviewObserve state (ObservedMergeabilityFixRequired evidence) =
+  fromObservedTick <$> observePrReviewMergeability state (MergeabilityObservedFixRequired evidence)
 prReviewObserve (SomeWatcherState state@PrMerging {}) (ObservedMergeCompleted mergeCommit) =
   Right (tick (PrReviewMergeCompleted mergeCommit) (step state (MergeCompleted mergeCommit)))
 prReviewObserve (SomeWatcherState state@PrCheckingReviews {}) (ObservedPrReviewBlocked reason) =
@@ -145,56 +123,6 @@ fromObservedTick observed =
     , prReviewTickState = observed.observedState
     , prReviewTickEffects = observed.observedEffects
     }
-
-reviewFeedbackTick :: WatcherState 'PrReview 'CheckingReviews -> ReviewEvidence -> TurnId -> PrReviewTick
-reviewFeedbackTick state evidence turnId =
-  case state of
-    PrCheckingReviews _config (WorkerIdle workerThread) _reviewer ->
-      reviewFeedbackTickWithWorker state evidence workerThread turnId
-    PrReviewFixQueued _config _queuedEvidence (WorkerIdle workerThread) _reviewer ->
-      reviewFeedbackTickWithWorker state evidence workerThread turnId
-    PrVerifyingReviewFix _config _oldEvidence (WorkerIdle workerThread) _reviewer ->
-      reviewFeedbackTickWithWorker state evidence workerThread turnId
-
-reviewFeedbackTickWithWorker :: WatcherState 'PrReview 'CheckingReviews -> ReviewEvidence -> ThreadId -> TurnId -> PrReviewTick
-reviewFeedbackTickWithWorker state evidence workerThread turnId =
-  let event = PrReviewFeedbackFound evidence turnId
-      decision = step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId))
-   in tick event decision
-
-unresolvedThreadIds :: ReviewThreadsReport -> Maybe (NonEmpty ReviewThreadId)
-unresolvedThreadIds report =
-  case fmap reviewThreadId report.unresolvedReviewThreads of
-    [] -> Nothing
-    first : rest -> Just (first :| rest)
-
-unresolvedReviewEvidence :: ReviewThreadsReport -> CommitSha -> Maybe ReviewEvidence
-unresolvedReviewEvidence report commit =
-  case [(thread.reviewThreadId, thread.reviewThreadUrl, reviewThreadSummary thread) | thread <- report.unresolvedReviewThreads] of
-    [] -> Nothing
-    first : rest -> Just (reviewEvidenceFromThreadCommentRefs (first :| rest) commit)
-
-unresolvedReviewEvidenceOrThreadIds :: ReviewThreadsReport -> NonEmpty ReviewThreadId -> CommitSha -> ReviewEvidence
-unresolvedReviewEvidenceOrThreadIds report threadIds commit =
-  case unresolvedReviewEvidence report commit of
-    Just evidence -> evidence
-    Nothing -> reviewEvidenceFromThreads threadIds commit
-
-reviewThreadSummary :: ReviewThread -> Text
-reviewThreadSummary thread =
-  Text.strip (Text.intercalate " | " (locationText thread : commentTexts))
- where
-  locationText value =
-    case (value.reviewThreadPath, value.reviewThreadLine, value.reviewThreadStartLine) of
-      (Just path, Just line, _) -> path <> ":" <> Text.pack (show line)
-      (Just path, Nothing, Just startLine) -> path <> ":" <> Text.pack (show startLine)
-      (Just path, Nothing, Nothing) -> path
-      _ -> "unresolved review thread"
-  commentTexts =
-    [ maybe "" (<> ": ") comment.reviewCommentAuthorLogin <> Text.strip comment.reviewCommentBody
-    | comment <- thread.reviewThreadComments
-    , not (Text.null (Text.strip comment.reviewCommentBody))
-    ]
 
 verifyReviewerOutcome :: WatcherState 'PrReview 'ReviewingClean -> ReviewerOutcome -> ReviewerOutcome
 verifyReviewerOutcome (PrReviewingClean _config _commit (SomeReviewContext (VerificationReviewContext evidence)) _worker _reviewer) (ReviewerClean cleanEvidence resolvedThreadIds)
