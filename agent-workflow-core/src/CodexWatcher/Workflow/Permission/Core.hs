@@ -74,7 +74,26 @@ validateWorkflowEffectPlanCore
   -> WorkflowEffectPlan spec
   -> Either (WorkflowPermissionValidationError spec) ()
 validateWorkflowEffectPlanCore state effects =
-  validateWorkflowEffectPlanWithPolicy (workflowSpecPermissionPolicy @spec) state effects
+  case workflowValidateEffects @spec state effects of
+    Right () ->
+      validateWorkflowEffectPlanWithPolicy policy state effects
+    Left _reason ->
+      case policy.workflowPermissionPolicyEffectPlanEffects effects of
+        effect : _ ->
+          Left
+            WorkflowPermissionValidationError
+              { workflowPermissionStateLabel = policy.workflowPermissionPolicyStateLabel state
+              , workflowPermissionEffect = effect
+              , workflowPermissionEffectLabel = policy.workflowPermissionPolicyEffectLabel effect
+              , workflowPermissionReason =
+                  case policy.workflowPermissionPolicyEffectAllowed state effect of
+                    Left effectReason -> effectReason
+                    Right () -> "workflow effect plan is invalid"
+              }
+        [] ->
+          validateWorkflowEffectPlanWithPolicy policy state effects
+ where
+  policy = workflowSpecPermissionPolicy @spec
 
 validateWorkflowEffectPlanWithPolicy
   :: forall spec.

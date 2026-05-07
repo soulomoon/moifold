@@ -6212,6 +6212,8 @@ workflowFacadeExtractionTests = do
       , workflowPlannedTransitionPreservesObservedEffects
       , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
+      , workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions
+      , workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions
       , workflowEventLogFailureAuditClassifiesRetryRecommendation
       , workflowDslPrReviewFeedbackMatchesStateMachine
       , workflowDslTransitionLowersToPlannedTransition
@@ -7421,6 +7423,225 @@ workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect = do
               && WorkflowPermission.validateMoifoldEffectPlan state planned.plannedPreCommitEffects == Right ()
       Left _ -> False
 
+workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions :: IO Bool
+workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      turnRef = WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn")
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      activeState = DocsMigration.DocsMigrationTurnActive config turnRef
+      output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+      expectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      expectedEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      fullEvents = events <> [expectedEvent]
+      directReplay = DocsMigration.replayDocsMigrationEvents fullEvents
+      detailedReplay = WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id fullEvents
+      dryRunResult = DocsMigration.runDocsMigrationObservedDryRun events observation
+      expectedActions =
+        [ DocsMigration.WriteDocsMigrationDraftAction "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidationAction "docs/target.md"
+        ]
+      expectedEffectHistory =
+        [ [DocsMigration.StartDocsMigrationTurn config]
+        , []
+        , expectedEffects
+        ]
+      wrongTargetEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/wrong.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      partialEffects =
+        [DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"]
+  results <-
+    sequence
+      [ assert "workflow docs-migration law observe and plan agree" $
+          case (workflowObserve @DocsMigration.DocsMigrationSpec activeState observation, workflowPlanObservation @DocsMigration.DocsMigrationSpec activeState observation) of
+            (Right observed, Right planned) ->
+              observed.docsMigrationTickEvent == expectedEvent
+                && planned.plannedEvent == observed.docsMigrationTickEvent
+                && observed.docsMigrationTickState == expectedState
+                && planned.plannedPreCommitEffects == []
+                && planned.plannedPostCommitEffects == expectedEffects
+                && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observed.docsMigrationTickEffects
+            _ -> False
+      , assert "workflow docs-migration law apply planned event reaches observed state" $
+          case (workflowObserve @DocsMigration.DocsMigrationSpec activeState observation, workflowPlanObservation @DocsMigration.DocsMigrationSpec activeState observation) of
+            (Right observed, Right planned) ->
+              case workflowApplyEvent @DocsMigration.DocsMigrationSpec activeState planned.plannedEvent of
+                Right (appliedState, appliedEffects) ->
+                  appliedState == observed.docsMigrationTickState
+                    && appliedEffects == planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+                Left _ -> False
+            _ -> False
+      , assert "workflow docs-migration law replay history matches detailed core replay" $
+          case (directReplay, detailedReplay) of
+            (Right direct, Right detailed) ->
+              direct.docsMigrationReplayState == expectedState
+                && detailed.workflowReplaySummaryState == expectedState
+                && direct.docsMigrationReplayEffects == expectedEffectHistory
+                && detailed.workflowReplaySummaryEffects == expectedEffectHistory
+                && lastEffectPlanIs expectedEffects direct.docsMigrationReplayEffects
+                && lastEffectPlanIs expectedEffects detailed.workflowReplaySummaryEffects
+            _ -> False
+      , assert "workflow docs-migration law permission accepts complete draft plan" $
+          workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState expectedEffects == Right ()
+            && isRightUnit (WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState expectedEffects)
+      , assert "workflow docs-migration law permission rejects partial draft plan" $
+          case (workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState partialEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState partialEffects) of
+            (Left directReason, Left coreReason) ->
+              "effect plan" `Text.isInfixOf` directReason
+                && "effect plan" `Text.isInfixOf` coreReason.workflowPermissionReason
+            _ -> False
+      , assert "workflow docs-migration law permission rejects wrong target draft write" $
+          case (workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects) of
+            (Left directReason, Left coreReason) ->
+              "target" `Text.isInfixOf` directReason
+                && coreReason.workflowPermissionEffectLabel == "write-docs-migration-draft"
+                && "target" `Text.isInfixOf` coreReason.workflowPermissionReason
+            _ -> False
+      , assert "workflow docs-migration law dry-run preserves post-commit action reports" $
+          case dryRunResult of
+            Right dryRunTick ->
+              let reportActions = fmap DocsMigration.docsMigrationActionReportAction dryRunTick.docsMigrationDaemonActionReports
+                  compiledActions =
+                    fmap
+                      WorkflowExecution.workflowGenericPlannedAction
+                      (WorkflowExecution.workflowGenericCompiledActions dryRunTick.docsMigrationDaemonCompiledEffects)
+                  (preReports, postReports) =
+                    WorkflowExecution.partitionWorkflowGenericActionReports
+                      dryRunTick.docsMigrationDaemonCompiledEffects
+                      dryRunTick.docsMigrationDaemonActionReports
+               in dryRunTick.docsMigrationDaemonCommittedEvents == []
+                    && all ((== DryRunActions) . DocsMigration.docsMigrationActionReportMode) dryRunTick.docsMigrationDaemonActionReports
+                    && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
+                    && null preReports
+                    && postReports == dryRunTick.docsMigrationDaemonActionReports
+                    && null (WorkflowEventLog.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
+                    && WorkflowEventLog.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit == dryRunTick.docsMigrationDaemonActionReports
+                    && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
+                    && reportActions == expectedActions
+                    && compiledActions == expectedActions
+            Left _ -> False
+      ]
+  pure (and results)
+
+workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions :: IO Bool
+workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumberValue = PrNumber 6
+      prConfig = PrConfig repo prNumberValue (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      events =
+        [ PrReviewInitialized prConfig workerThread reviewerThread
+        , PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence []
+        ]
+      state =
+        SomeWatcherState
+          (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      deniedState =
+        SomeWatcherState
+          (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+      facadeObservation = WorkflowPrReviewMergeability.MergeabilityObservedClean commit
+      expectedEvent = PrReviewMergeabilityClean commit
+      expectedEffects = [SomeEffect (MergePullRequest prNumberValue cleanEvidence)]
+      fullEvents = events <> [expectedEvent]
+      directReplay = replayEventLog fullEvents
+      genericReplay = workflowReplayEvents @MoifoldSpec fullEvents
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 731
+      workflow = WorkflowExecution.compileWorkflowEffectPlanWithMetadata runtimeConfig expectedEffects
+      legacy = compileEffectPlan runtimeConfig expectedEffects
+      dryRunReports = WorkflowExecution.dryRunWorkflowCompiledEffectPlan workflow
+      (preCommitActions, postCommitActions) = WorkflowExecution.partitionWorkflowActions workflow
+      expectedAction = PlannedCommand (GhPrCleanReviewAndMerge repo prNumberValue cleanEvidence runtimeConfig.effectRuntimeMergeMethod)
+      expectedDryRunReports =
+        [ ActionExecutionReport
+            { actionExecutionMode = DryRunActions
+            , actionExecutionAction = expectedAction
+            , actionExecutionResult = DryRunActionResult
+            , actionExecutionOutcome = ActionSucceeded
+            }
+        ]
+      stateMatchesExpected stateValue =
+        case stateValue of
+          SomeWatcherState (PrMerging actualConfig actualEvidence) ->
+            actualConfig == prConfig && actualEvidence == cleanEvidence
+          _ -> False
+  results <-
+    sequence
+      [ assert "workflow PR-review mergeability law observe and plan agree" $
+          case (workflowObserve @MoifoldSpec state observation, workflowPlanObservation @MoifoldSpec state observation) of
+            (Right observed, Right planned) ->
+              observed.observedEvent == expectedEvent
+                && planned.plannedEvent == observed.observedEvent
+                && stateMatchesExpected observed.observedState
+                && planned.plannedPreCommitEffects == expectedEffects
+                && planned.plannedPostCommitEffects == []
+                && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observed.observedEffects
+            _ -> False
+      , assert "workflow PR-review mergeability law apply planned event reaches observed state" $
+          case (workflowObserve @MoifoldSpec state observation, workflowPlanObservation @MoifoldSpec state observation) of
+            (Right observed, Right planned) ->
+              case workflowApplyEvent @MoifoldSpec state planned.plannedEvent of
+                Right (appliedState, appliedEffects) ->
+                  sameWatcherStateShape appliedState observed.observedState
+                    && stateMatchesExpected appliedState
+                    && appliedEffects == planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+                Left _ -> False
+            _ -> False
+      , assert "workflow PR-review mergeability law direct and generic replay match" $
+          case (directReplay, genericReplay) of
+            (Right direct, Right generic) ->
+              sameWatcherStateShape direct.replayState generic.replayState
+                && stateMatchesExpected direct.replayState
+                && direct.replayEffects == generic.replayEffects
+                && lastEffectPlanIs expectedEffects direct.replayEffects
+                && lastEffectPlanIs expectedEffects generic.replayEffects
+            _ -> False
+      , assert "workflow PR-review mergeability law facade observation matches public path" $
+          case (workflowObserve @MoifoldSpec state observation, WorkflowPrReviewMergeability.observePrReviewMergeability state facadeObservation) of
+            (Right publicObserved, Right facadeObserved) ->
+              publicObserved.observedEvent == facadeObserved.observedEvent
+                && sameWatcherStateShape publicObserved.observedState facadeObserved.observedState
+                && publicObserved.observedEffects == facadeObserved.observedEffects
+            _ -> False
+      , assert "workflow PR-review mergeability law permission accepts merge from mergeability state" $
+          validatePhaseActionPlan state expectedEffects == Right ()
+            && WorkflowPermission.validateMoifoldEffectPlan state expectedEffects == Right ()
+            && isRightUnit (WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec state expectedEffects)
+      , assert "workflow PR-review mergeability law permission rejects merge outside mergeability state" $
+          case (validatePhaseActionPlan deniedState expectedEffects, WorkflowPermission.validateMoifoldEffectPlan deniedState expectedEffects, WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec deniedState expectedEffects) of
+            (Left directError, Left facadeError, Left coreError) ->
+              facadeError == directError
+                && coreError.workflowPermissionEffectLabel == "MergePullRequest"
+                && "effect is not allowed" `Text.isInfixOf` coreError.workflowPermissionReason
+            _ -> False
+      , assert "workflow PR-review mergeability law dry-run keeps merge pre-commit" $
+          fmap WorkflowExecution.workflowPlannedAction preCommitActions == legacy.compiledActions
+            && legacy.compiledActions == [expectedAction]
+            && postCommitActions == []
+            && dryRunReports == expectedDryRunReports
+      ]
+  pure (and results)
+
 workflowEventLogFailureAuditClassifiesRetryRecommendation :: IO Bool
 workflowEventLogFailureAuditClassifiesRetryRecommendation = do
   let repo = RepoName "soulomoon/mlf2"
@@ -8127,6 +8348,22 @@ sameReplayText (Left _) (Left _) =
   True
 sameReplayText _ _ =
   False
+
+sameWatcherStateShape :: SomeWatcherState -> SomeWatcherState -> Bool
+sameWatcherStateShape left right =
+  someDomain left == someDomain right
+    && somePhase left == somePhase right
+
+lastEffectPlanIs :: Eq effectPlan => effectPlan -> [effectPlan] -> Bool
+lastEffectPlanIs expected plans =
+  case reverse plans of
+    actual : _ -> actual == expected
+    [] -> False
+
+isRightUnit :: Either error () -> Bool
+isRightUnit = \case
+  Right () -> True
+  Left _ -> False
 
 observeOnceParsingCoversDomainsAndDefaults :: IO Bool
 observeOnceParsingCoversDomainsAndDefaults = do

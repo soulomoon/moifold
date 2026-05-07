@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-001",
+  "roadmap_item_id": "item-002-facade-laws",
+  "decision": "approved",
+  "evidence_summary": "Baseline cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed; focused checks confirmed both facade-law assertions and schema/golden guards are registered, sensitive schema/golden/daemon/dry-run/action-ordering files were not changed, and reusable permission core imports stayed within the workflow-kernel boundary."
+}
