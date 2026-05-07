@@ -6236,58 +6236,82 @@ workflowFacadeExtractionTests = do
 
 workflowSpecModuleKeepsCoreBoundary :: IO Bool
 workflowSpecModuleKeepsCoreBoundary = do
-  source <-
-    Text.pack
-      <$> readFile
-        ( "agent-workflow-core"
-            </> "src"
-            </> "CodexWatcher"
-            </> "Workflow"
-            </> "Spec.hs"
-        )
+  let specPath =
+        "agent-workflow-core"
+          </> "src"
+          </> "CodexWatcher"
+          </> "Workflow"
+          </> "Spec.hs"
+  source <- Text.pack <$> readFile specPath
   let forbiddenImports =
-        [ "CodexWatcher.Effects"
-        , "CodexWatcher.EventLog"
-        , "CodexWatcher.StateMachine"
-        , "CodexWatcher.Workflow.Observation"
-        , "CodexWatcher.Domain."
-        , "CodexWatcher.Core.State"
-        ]
+        sourceImportViolationsIn specPath coreBoundaryForbiddenImportModules source
       keepsCoreDefinitions =
         "data PlannedTransition spec" `Text.isInfixOf` source
           && "class WorkflowSpec spec where" `Text.isInfixOf` source
           && "workflowPlanObservation" `Text.isInfixOf` source
-  assert
-    "workflow spec module has no moifold-specific imports"
-    (keepsCoreDefinitions && not (any (`Text.isInfixOf` source) forbiddenImports))
+  importsOk <-
+    assertNoTextMatches
+      "workflow spec module has no moifold-specific imports"
+      forbiddenImports
+  definitionsOk <-
+    assert
+      "workflow spec module keeps generic core definitions"
+      keepsCoreDefinitions
+  pure (importsOk && definitionsOk)
 
 workflowCoreCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCoreCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
   coreSources <- sourceTextUnder ("agent-workflow-core" </> "src")
+  forbiddenImportViolations <-
+    sourceImportViolationsUnder
+      ("agent-workflow-core" </> "src")
+      coreBoundaryForbiddenImportModules
   let coreSection = cabalComponentSection "library agent-workflow-core" cabalSource
-      forbiddenNeedles =
+      forbiddenPackageNeedles =
         [ "aeson"
         , "directory"
         , "filepath"
+        , "optparse-applicative"
+        , "singletons"
         , "typed-process"
+        , "unix"
         , "websockets"
-        , "CodexWatcher.AppServer"
-        , "CodexWatcher.ActionExecutor"
-        , "CodexWatcher.Domain."
-        , "CodexWatcher.Effects"
-        , "CodexWatcher.EventLog"
-        , "CodexWatcher.Failure"
-        , "CodexWatcher.GhGit"
-        , "CodexWatcher.Runtime.Command"
-        , "CodexWatcher.StateMachine"
+        , "moifold,"
+        , "moifold:agent-workflow-codex"
+        , "moifold:agent-workflow-github"
         ]
       forbiddenConcreteTypes =
-        [ "ActionExecutionReport"
+        [ "SomeWatcherState"
+        , "WatcherState"
+        , "WatcherEvent"
+        , "DaemonObservation"
+        , "ObservedPolicyTick"
+        , "EffectPlan"
+        , "SomeEffect"
+        , "ActionExecutionMode"
+        , "RuntimeInterpreter"
+        , "AppServerTurn"
+        , "AppServerRequest"
+        , "GitHubCommandSpec"
+        , "RepoName"
+        , "PrConfig"
+        , "DaemonOptions"
+        , "DaemonTickResult"
+        , "runDaemonTickWithEvents"
+        , "runObservedDaemonTickWithEvents"
+        , "ActionExecutionReport"
         , "CommandReport"
         , "PlannedAction"
         ]
       coreSourceTokens = sourceIdentifierTokens coreSources
+      forbiddenPackageMatches =
+        filter (`Text.isInfixOf` coreSection) forbiddenPackageNeedles
+      forbiddenConcreteTokenMatches =
+        filter (`elem` coreSourceTokens) forbiddenConcreteTypes
+      coreDependencyPackages = cabalBuildDependsPackages coreSection
+      unapprovedCoreDependencyMatches =
+        filter (`notElem` ["base", "bytestring", "text"]) coreDependencyPackages
       exposesCoreModules =
         "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
@@ -6302,17 +6326,73 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
           && "CodexWatcher.Workflow.DSL" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Transaction.Core" `Text.isInfixOf` coreSection
       dependsOnlyOnCoreDeps =
-        "base >=4.18 && <5" `Text.isInfixOf` coreSection
-          && "bytestring >=0.12 && <0.13" `Text.isInfixOf` coreSection
-          && "text >=2.0 && <3" `Text.isInfixOf` coreSection
-          && not (any (`Text.isInfixOf` coreSection) forbiddenNeedles)
-          && not (any (`Text.isInfixOf` coreSources) forbiddenNeedles)
-          && not (any (`elem` coreSourceTokens) forbiddenConcreteTypes)
+        all (`elem` coreDependencyPackages) ["base", "bytestring", "text"]
+          && null unapprovedCoreDependencyMatches
       moifoldDependsOnCore =
         "moifold:agent-workflow-core" `Text.isInfixOf` cabalSource
-  assert
-    "workflow core sublibrary has no moifold-specific package dependencies"
-    (exposesCoreModules && dependsOnlyOnCoreDeps && moifoldDependsOnCore)
+  packageOk <-
+    assertNoTextMatches
+      "workflow core sublibrary excludes forbidden package dependencies"
+      forbiddenPackageMatches
+  approvedDependencyOk <-
+    assertNoTextMatches
+      "workflow core sublibrary excludes unapproved package dependencies"
+      unapprovedCoreDependencyMatches
+  importOk <-
+    assertNoTextMatches
+      "workflow core source excludes forbidden concrete imports"
+      forbiddenImportViolations
+  tokenOk <-
+    assertNoTextMatches
+      "workflow core source excludes concrete lifecycle action and event tokens"
+      forbiddenConcreteTokenMatches
+  exposedOk <-
+    assert
+      "workflow core sublibrary exposes generic core modules"
+      exposesCoreModules
+  coreDepsOk <-
+    assert
+      "workflow core sublibrary keeps the approved generic dependency set"
+      dependsOnlyOnCoreDeps
+  mainDependsOk <-
+    assert
+      "main moifold library depends on workflow core"
+      moifoldDependsOnCore
+  pure (packageOk && approvedDependencyOk && importOk && tokenOk && exposedOk && coreDepsOk && mainDependsOk)
+
+coreBoundaryForbiddenImportModules :: [Text]
+coreBoundaryForbiddenImportModules =
+  [ "CodexWatcher.Core.State"
+  , "CodexWatcher.Domain."
+  , "CodexWatcher.Effects"
+  , "CodexWatcher.EventLog"
+  , "CodexWatcher.Observation"
+  , "CodexWatcher.StateMachine"
+  , "CodexWatcher.Workflow.Moifold"
+  , "CodexWatcher.Workflow.Observation"
+  , "Data.Aeson"
+  , "Data.Aeson.Key"
+  , "Data.Aeson.KeyMap"
+  , "Data.Aeson.Types"
+  , "CodexWatcher.ActionExecutor"
+  , "CodexWatcher.Runtime"
+  , "CodexWatcher.EffectInterpreter"
+  , "CodexWatcher.Runtime.Command"
+  , "CodexWatcher.Runtime.Interpreter"
+  , "CodexWatcher.GhGit"
+  , "CodexWatcher.Workflow.GitHub"
+  , "CodexWatcher.AppServerClient"
+  , "CodexWatcher.AppServerProtocol"
+  , "CodexWatcher.Workflow.Agent"
+  , "CodexWatcher.Workflow.Agent.Codex"
+  , "CodexWatcher.Workflow.Observation.Agent"
+  , "CodexWatcher.Daemon"
+  , "CodexWatcher.DaemonLoop"
+  , "CodexWatcher.ChildDaemon"
+  , "CodexWatcher.RunnerGuard"
+  , "CodexWatcher.WatcherRuntimeStatus"
+  , "CodexWatcher.Supervisor"
+  ]
 
 workflowCodexCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCodexCabalSublibraryKeepsPackageBoundary = do
@@ -6714,6 +6794,118 @@ cabalComponentSection componentName cabalSource =
         , "test-suite "
         , "benchmark "
         ]
+
+cabalBuildDependsPackages :: Text -> [Text]
+cabalBuildDependsPackages componentSection =
+  filter (not . Text.null)
+    . fmap (Text.takeWhile isCabalDependencyPackageChar . Text.strip)
+    . Text.splitOn ","
+    . Text.intercalate "\n"
+    $ buildDependsLines
+ where
+  buildDependsLines =
+    case dropWhile (not . isBuildDependsField) (Text.lines componentSection) of
+      [] -> []
+      fieldLine : rest ->
+        Text.drop (Text.length "build-depends:") (Text.strip fieldLine)
+          : takeWhile (not . isIndentedCabalField) rest
+
+isBuildDependsField :: Text -> Bool
+isBuildDependsField line =
+  "build-depends:" `Text.isPrefixOf` Text.strip line
+
+isIndentedCabalField :: Text -> Bool
+isIndentedCabalField line =
+  "  " `Text.isPrefixOf` line
+    && not ("    " `Text.isPrefixOf` line)
+    && ":" `Text.isInfixOf` line
+
+isCabalDependencyPackageChar :: Char -> Bool
+isCabalDependencyPackageChar character =
+  isAlphaNum character || character == '-' || character == '_'
+
+assertNoTextMatches :: String -> [Text] -> IO Bool
+assertNoTextMatches assertionName matches = do
+  when (not (null matches)) $
+    mapM_ (putStrLn . ("  " <>) . Text.unpack) matches
+  assert assertionName (null matches)
+
+sourceImportViolationsUnder :: FilePath -> [Text] -> IO [Text]
+sourceImportViolationsUnder root forbiddenModules = do
+  files <- sourceFilesUnder root
+  fmap concat $
+    traverse
+      ( \path -> do
+          source <- Text.pack <$> readFile path
+          pure (sourceImportViolationsIn path forbiddenModules source)
+      )
+      files
+
+sourceImportViolationsIn :: FilePath -> [Text] -> Text -> [Text]
+sourceImportViolationsIn path forbiddenModules source =
+  concatMap lineViolation (zip [(1 :: Int) ..] (Text.lines source))
+ where
+  pathText = Text.pack path
+  lineViolation (lineNumber, line) =
+    case sourceImportedModule line of
+      Nothing -> []
+      Just moduleName ->
+        case filter (`forbiddenModuleMatches` moduleName) forbiddenModules of
+          [] -> []
+          forbiddenModule : _ ->
+            [ pathText
+                <> ":"
+                <> Text.pack (show lineNumber)
+                <> ": "
+                <> moduleName
+                <> " matches "
+                <> forbiddenModule
+            ]
+
+sourceImportedModule :: Text -> Maybe Text
+sourceImportedModule line
+  | Just rest <- Text.stripPrefix "import qualified " stripped =
+      sourceImportedModuleFromRest rest
+  | Just rest <- Text.stripPrefix "import " stripped =
+      sourceImportedModuleFromRest rest
+  | otherwise =
+      Nothing
+ where
+  stripped = Text.strip line
+
+sourceImportedModuleFromRest :: Text -> Maybe Text
+sourceImportedModuleFromRest rest =
+  let moduleName =
+        Text.takeWhile isSourceModuleChar
+          . dropPackageQualifier
+          . Text.strip
+          $ rest
+   in if Text.null moduleName
+        then Nothing
+        else Just moduleName
+
+dropPackageQualifier :: Text -> Text
+dropPackageQualifier rest =
+  case Text.stripPrefix "\"" rest of
+    Just afterOpenQuote ->
+      Text.strip
+        . Text.drop 1
+        . Text.dropWhile (/= '"')
+        $ afterOpenQuote
+    Nothing -> rest
+
+forbiddenModuleMatches :: Text -> Text -> Bool
+forbiddenModuleMatches forbiddenModule moduleName
+  | "." `Text.isSuffixOf` forbiddenModule =
+      moduleName == Text.dropEnd 1 forbiddenModule
+        || forbiddenModule `Text.isPrefixOf` moduleName
+  | otherwise =
+      moduleName == forbiddenModule
+        || (forbiddenModule <> ".") `Text.isPrefixOf` moduleName
+
+isSourceModuleChar :: Char -> Bool
+isSourceModuleChar character =
+  isAlphaNum character || character == '_' || character == '\'' || character == '.'
 
 sourceTextUnder :: FilePath -> IO Text
 sourceTextUnder root = do

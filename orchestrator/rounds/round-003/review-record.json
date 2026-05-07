@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-001",
+  "roadmap_item_id": "item-003-boundary-guards",
+  "decision": "approved",
+  "evidence_summary": "Baseline checks passed; focused no-output guards found no forbidden core imports, tokens, or dependencies; the integrated diff hardens test/Main.hs boundary tests without production, golden, schema, daemon result, dry-run, action-ordering, adapter, or facade representation changes."
+}
