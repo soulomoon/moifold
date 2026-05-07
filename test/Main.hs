@@ -6177,6 +6177,7 @@ workflowFacadeExtractionTests = do
       , workflowFacadeInitialApplyMatchesReplay
       , workflowPermissionFacadeMatchesStateMachine
       , workflowPermissionCoreChecksMatchMoifoldPermission
+      , workflowPermissionPolicyMatchesMoifoldPermission
       , workflowExecutionFacadeDryRunMatchesExecutor
       , workflowPrReviewCheckingFacadeMatchesWatcher
       , workflowPrReviewMergeabilityFacadeMatchesWatcher
@@ -6665,6 +6666,56 @@ workflowPermissionCoreChecksMatchMoifoldPermission = do
           && check.workflowPermissionCheckEffectLabel == directError.phaseActionEffect
           && check.workflowPermissionCheckResult == Left (formatPhaseActionValidationError directError)
       _ -> False
+
+workflowPermissionPolicyMatchesMoifoldPermission :: IO Bool
+workflowPermissionPolicyMatchesMoifoldPermission = do
+  let plannerConfig = PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 2) [IssueNumber 12]
+      planningGraph = PlanningGraph [IssueNumber 12] [] []
+      deniedState = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
+      deniedEffects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
+      allowedState = SomeWatcherState (PlanningReady plannerConfig :: WatcherState 'IssuePlanning 'Initialized)
+      allowedEffects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
+      deniedDirect = validatePhaseActionPlan deniedState deniedEffects
+      deniedPolicy =
+        WorkflowPermission.validateWorkflowEffectPlanWithPolicy
+          WorkflowPermission.moifoldPermissionPolicy
+          deniedState
+          deniedEffects
+      allowedPolicy =
+        WorkflowPermission.validateWorkflowEffectPlanWithPolicy
+          WorkflowPermission.moifoldPermissionPolicy
+          allowedState
+          allowedEffects
+      allowedChecks =
+        WorkflowPermission.workflowEffectPermissionChecksWithPolicy
+          WorkflowPermission.moifoldPermissionPolicy
+          allowedState
+          allowedEffects
+      deniedChecks =
+        WorkflowPermission.workflowEffectPermissionChecksWithPolicy
+          WorkflowPermission.moifoldPermissionPolicy
+          deniedState
+          deniedEffects
+  results <-
+    sequence
+      [ assert "workflow permission policy accepts allowed moifold effects" $
+          case (allowedPolicy, allowedChecks) of
+            (Right (), [check]) ->
+              check.workflowPermissionCheckStateLabel == workflowStateLabel @MoifoldSpec allowedState
+                && check.workflowPermissionCheckEffectLabel == "StartPlannerTurn"
+                && check.workflowPermissionCheckResult == Right ()
+            _ -> False
+      , assert "workflow permission policy rejects denied moifold effects like state machine" $
+          case (deniedDirect, deniedPolicy, deniedChecks) of
+            (Left directError, Left policyError, [check]) ->
+              policyError.workflowPermissionStateLabel == directError.phaseActionState
+                && policyError.workflowPermissionEffectLabel == directError.phaseActionEffect
+                && policyError.workflowPermissionReason == formatPhaseActionValidationError directError
+                && check.workflowPermissionCheckEffectLabel == directError.phaseActionEffect
+                && check.workflowPermissionCheckResult == Left (formatPhaseActionValidationError directError)
+            _ -> False
+      ]
+  pure (and results)
 
 workflowExecutionFacadeDryRunMatchesExecutor :: IO Bool
 workflowExecutionFacadeDryRunMatchesExecutor = do

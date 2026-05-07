@@ -8,10 +8,14 @@
 
 module CodexWatcher.Workflow.Permission.Core
   ( WorkflowEffectPermissionCheck (..)
+  , WorkflowPermissionPolicy (..)
   , WorkflowPermissionValidationError (..)
   , formatWorkflowPermissionValidationError
   , validateWorkflowEffectPlanCore
+  , validateWorkflowEffectPlanWithPolicy
   , workflowEffectPermissionChecks
+  , workflowEffectPermissionChecksWithPolicy
+  , workflowSpecPermissionPolicy
   ) where
 
 import CodexWatcher.Workflow.Spec (WorkflowSpec (..))
@@ -22,6 +26,13 @@ data WorkflowEffectPermissionCheck spec = WorkflowEffectPermissionCheck
   , workflowPermissionCheckEffect :: WorkflowEffect spec
   , workflowPermissionCheckEffectLabel :: Text
   , workflowPermissionCheckResult :: Either Text ()
+  }
+
+data WorkflowPermissionPolicy spec = WorkflowPermissionPolicy
+  { workflowPermissionPolicyStateLabel :: WorkflowState spec -> Text
+  , workflowPermissionPolicyEffectLabel :: WorkflowEffect spec -> Text
+  , workflowPermissionPolicyEffectPlanEffects :: WorkflowEffectPlan spec -> [WorkflowEffect spec]
+  , workflowPermissionPolicyEffectAllowed :: WorkflowState spec -> WorkflowEffect spec -> Either Text ()
   }
 
 data WorkflowPermissionValidationError spec = WorkflowPermissionValidationError
@@ -37,16 +48,25 @@ workflowEffectPermissionChecks
   -> WorkflowEffectPlan spec
   -> [WorkflowEffectPermissionCheck spec]
 workflowEffectPermissionChecks state effects =
+  workflowEffectPermissionChecksWithPolicy (workflowSpecPermissionPolicy @spec) state effects
+
+workflowEffectPermissionChecksWithPolicy
+  :: forall spec.
+     WorkflowPermissionPolicy spec
+  -> WorkflowState spec
+  -> WorkflowEffectPlan spec
+  -> [WorkflowEffectPermissionCheck spec]
+workflowEffectPermissionChecksWithPolicy policy state effects =
   fmap
     ( \effect ->
         WorkflowEffectPermissionCheck
-          { workflowPermissionCheckStateLabel = workflowStateLabel @spec state
+          { workflowPermissionCheckStateLabel = policy.workflowPermissionPolicyStateLabel state
           , workflowPermissionCheckEffect = effect
-          , workflowPermissionCheckEffectLabel = workflowEffectLabel @spec effect
-          , workflowPermissionCheckResult = workflowEffectAllowed @spec state effect
+          , workflowPermissionCheckEffectLabel = policy.workflowPermissionPolicyEffectLabel effect
+          , workflowPermissionCheckResult = policy.workflowPermissionPolicyEffectAllowed state effect
           }
     )
-    (workflowEffectPlanEffects @spec effects)
+    (policy.workflowPermissionPolicyEffectPlanEffects effects)
 
 validateWorkflowEffectPlanCore
   :: forall spec. WorkflowSpec spec
@@ -54,7 +74,16 @@ validateWorkflowEffectPlanCore
   -> WorkflowEffectPlan spec
   -> Either (WorkflowPermissionValidationError spec) ()
 validateWorkflowEffectPlanCore state effects =
-  case filter denied (workflowEffectPermissionChecks @spec state effects) of
+  validateWorkflowEffectPlanWithPolicy (workflowSpecPermissionPolicy @spec) state effects
+
+validateWorkflowEffectPlanWithPolicy
+  :: forall spec.
+     WorkflowPermissionPolicy spec
+  -> WorkflowState spec
+  -> WorkflowEffectPlan spec
+  -> Either (WorkflowPermissionValidationError spec) ()
+validateWorkflowEffectPlanWithPolicy policy state effects =
+  case filter denied (workflowEffectPermissionChecksWithPolicy policy state effects) of
     [] -> Right ()
     check : _ ->
       Left
@@ -72,6 +101,15 @@ validateWorkflowEffectPlanCore state effects =
     case check.workflowPermissionCheckResult of
       Left _ -> True
       Right () -> False
+
+workflowSpecPermissionPolicy :: forall spec. WorkflowSpec spec => WorkflowPermissionPolicy spec
+workflowSpecPermissionPolicy =
+  WorkflowPermissionPolicy
+    { workflowPermissionPolicyStateLabel = workflowStateLabel @spec
+    , workflowPermissionPolicyEffectLabel = workflowEffectLabel @spec
+    , workflowPermissionPolicyEffectPlanEffects = workflowEffectPlanEffects @spec
+    , workflowPermissionPolicyEffectAllowed = workflowEffectAllowed @spec
+    }
 
 formatWorkflowPermissionValidationError :: WorkflowPermissionValidationError spec -> Text
 formatWorkflowPermissionValidationError errorValue =
