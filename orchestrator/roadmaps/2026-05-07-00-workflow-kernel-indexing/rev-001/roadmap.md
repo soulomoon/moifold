@@ -8,13 +8,13 @@
 
 ## Items
 
-1. [pending] Extract generic checked-action failure traversal into core
+1. [done] Extract generic checked-action failure traversal into core
    Item id: item-001-checked-action-failure-core
    Depends on: none
    Parallel safe: no
    Parallel group: none
    Merge after: none
-   Completion notes: Move the reusable action traversal/failure shape from the moifold execution facade into `agent-workflow-core`, keeping concrete `ActionExecutor`, command reports, and classifiers in moifold adapters.
+   Completion notes: Completed in round-001. The reusable checked-action traversal and failure-report shape now live in `agent-workflow-core`; concrete `ActionExecutor`, command reports, hard-failure classification, daemon failure mapping, and facade compatibility remain in moifold adapters.
 
 2. [pending] Add workflow facade law and parity coverage
    Item id: item-002-facade-laws
