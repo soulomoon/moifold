@@ -48,10 +48,10 @@
    Merge after: item-004-indexed-spec-api
    Completion notes: Completed in round-005. Ported DocsMigrationSpec as the first concrete DocsMigration proof over the indexed workflow API with DocsMigration-owned indexed wrappers and index types that delegate to the existing compatibility facade, while preserving the event codec, replay fixture, permission checks, dry-run output, daemon result behavior, audit labels, and effect/action ordering.
 
-6. [pending] Port one PR-review transition slice to the indexed API
+6. [done] Port one PR-review transition slice to the indexed API
    Item id: item-006-indexed-pr-review-slice
    Depends on: item-005-indexed-docs-migration
    Parallel safe: no
    Parallel group: none
    Merge after: item-005-indexed-docs-migration
-   Completion notes: Port a narrow PR-review checking or mergeability transition through the indexed API, proving the approach on real moifold lifecycle state without broad `WatcherEvent` churn.
+   Completion notes: Completed in round-006. Added a sibling indexed PR-review mergeability adapter for the clean mergeability transition, exposed it from `moifold.cabal`, and covered golden-backed event, target-label, next-state, pre/post effect-plan, observed-effect, replay, merge pre-commit ordering, and mismatched-clean-commit parity while keeping the compatibility facade path and event/runtime surfaces unchanged.
