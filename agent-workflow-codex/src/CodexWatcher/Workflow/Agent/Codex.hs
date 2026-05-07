@@ -11,8 +11,8 @@ module CodexWatcher.Workflow.Agent.Codex
   , startAgentTurn
   ) where
 
-import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
-import CodexWatcher.AppServerClient
+import CodexWatcher.AppServerProtocol (AppServerRequest)
+import CodexWatcher.Workflow.Agent.Codex.Client
   ( AppServerClientFailure
   , AppServerTurn
   , latestTurnById
@@ -20,12 +20,12 @@ import CodexWatcher.AppServerClient
   , parseTurnStartTurnId
   , threadSystemError
   )
-import CodexWatcher.AppServerProtocol (AppServerRequest)
-import CodexWatcher.Core.Ids (RequestId)
+import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
 import CodexWatcher.Workflow.Agent.Codex.Protocol
   ( agentThreadReadRequest
   , agentTurnStartRequest
   )
+import CodexWatcher.Workflow.Agent.Ids (RequestId)
 import CodexWatcher.Workflow.Agent.Types
   ( AgentTurnPlan (..)
   , AgentTurnReadResult (..)

@@ -40,7 +40,8 @@ import CodexWatcher.Cli.Command.Observe (parseDaemonObservation)
 import CodexWatcher.Domain.IssuePlanning.Graph.Canonical
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Domain.PrReview.Watcher
-import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..), RuntimeCommandSpec (..))
+import CodexWatcher.Runtime.Command.Render (renderRuntimeCommand)
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease, clearRuntimeLeaseIfOwnedByCurrentProcess)
@@ -73,6 +74,7 @@ import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
+import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
@@ -6096,8 +6098,12 @@ workflowFacadeExtractionTests = do
       , workflowCoreCabalSublibraryKeepsPackageBoundary
       , workflowCodexCabalSublibraryKeepsPackageBoundary
       , workflowGithubCabalSublibraryKeepsPackageBoundary
+      , workflowGithubCommandFacadeMatchesRuntimeRender
+      , workflowEventLogCoreDetailedReplayMatchesMoifold
+      , workflowEventLogCoreFixtureContractValidatesReplay
       , workflowFacadeInitialApplyMatchesReplay
       , workflowPermissionFacadeMatchesStateMachine
+      , workflowPermissionCoreChecksMatchMoifoldPermission
       , workflowExecutionFacadeDryRunMatchesExecutor
       , workflowPrReviewCheckingFacadeMatchesWatcher
       , workflowPrReviewMergeabilityFacadeMatchesWatcher
@@ -6153,6 +6159,18 @@ workflowSpecModuleKeepsCoreBoundary = do
 workflowCoreCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCoreCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  coreSources <-
+    fmap (Text.intercalate "\n")
+      . traverse
+        (fmap Text.pack . readFile)
+      $ [ "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Audit.hs"
+        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "DSL.hs"
+        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "EventLog" </> "Core.hs"
+        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Execution" </> "Core.hs"
+        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Failure.hs"
+        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Permission" </> "Core.hs"
+        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Spec.hs"
+        ]
   let coreSection = cabalComponentSection "library agent-workflow-core" cabalSource
       forbiddenNeedles =
         [ "aeson"
@@ -6169,12 +6187,18 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         , "CodexWatcher.StateMachine"
         ]
       exposesCoreModules =
-        "CodexWatcher.Workflow.Spec" `Text.isInfixOf` coreSection
+        "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.EventLog.Core" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Failure" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Permission.Core" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Spec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.DSL" `Text.isInfixOf` coreSection
       dependsOnlyOnCoreDeps =
         "base >=4.18 && <5" `Text.isInfixOf` coreSection
           && "text >=2.0 && <3" `Text.isInfixOf` coreSection
           && not (any (`Text.isInfixOf` coreSection) forbiddenNeedles)
+          && not (any (`Text.isInfixOf` coreSources) forbiddenNeedles)
       moifoldDependsOnCore =
         "moifold:agent-workflow-core" `Text.isInfixOf` cabalSource
   assert
@@ -6189,9 +6213,14 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
       . traverse
         (fmap Text.pack . readFile)
       $ [ "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "AppServerProtocol.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Client.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Interpreter.hs"
         , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Ids.hs"
         , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Types.hs"
         , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Protocol.hs"
+        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Observation" </> "Agent.hs"
         ]
   let codexSection = cabalComponentSection "library agent-workflow-codex" cabalSource
       forbiddenPackageNeedles =
@@ -6204,33 +6233,40 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
         , "unix"
         , "websockets"
         , "moifold,"
-        , "moifold:agent-workflow-core"
         ]
       forbiddenImportNeedles =
-        [ "CodexWatcher.AppServerClient"
-        , "CodexWatcher.Core.Ids"
-        , "CodexWatcher.Domain."
-        , "CodexWatcher.Effects"
-        , "CodexWatcher.EventLog"
-        , "CodexWatcher.GhGit"
-        , "CodexWatcher.StateMachine"
-        , "CodexWatcher.Workflow.Observation"
-        , "CodexWatcher.Workflow.Types"
+        [ "import CodexWatcher.AppServerClient"
+        , "import CodexWatcher.ActionExecutor"
+        , "import CodexWatcher.Core.Ids"
+        , "import CodexWatcher.Domain."
+        , "import CodexWatcher.Effects"
+        , "import CodexWatcher.EventLog"
+        , "import CodexWatcher.GhGit"
+        , "import CodexWatcher.StateMachine"
+        , "import CodexWatcher.Workflow.Observation"
+        , "import CodexWatcher.Workflow.Types"
         ]
       exposesCodexModules =
         all
           (`Text.isInfixOf` codexSection)
           [ "CodexWatcher.AppServerProtocol"
+          , "CodexWatcher.Workflow.Agent"
+          , "CodexWatcher.Workflow.Agent.Codex"
+          , "CodexWatcher.Workflow.Agent.Codex.Client"
+          , "CodexWatcher.Workflow.Agent.Codex.Interpreter"
           , "CodexWatcher.Workflow.Agent.Codex.Protocol"
           , "CodexWatcher.Workflow.Agent.Ids"
           , "CodexWatcher.Workflow.Agent.Types"
+          , "CodexWatcher.Workflow.Observation.Agent"
           ]
       dependsOnlyOnCodexDeps =
         all
           (`Text.isInfixOf` codexSection)
           [ "aeson >=2.2 && <3"
           , "base >=4.18 && <5"
+          , "bytestring >=0.12 && <0.13"
           , "text >=2.0 && <3"
+          , "moifold:agent-workflow-core"
           ]
           && not (any (`Text.isInfixOf` codexSection) forbiddenPackageNeedles)
       sourceImportsStayInAdapter =
@@ -6245,19 +6281,16 @@ workflowGithubCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowGithubCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
   githubSource <-
-    Text.pack
-      <$> readFile
-        ( "agent-workflow-github"
-            </> "src"
-            </> "CodexWatcher"
-            </> "Workflow"
-            </> "GitHub"
-            </> "Ids.hs"
-        )
+    fmap (Text.intercalate "\n")
+      . traverse
+        (fmap Text.pack . readFile)
+      $ [ "agent-workflow-github" </> "src" </> "CodexWatcher" </> "Workflow" </> "GitHub" </> "Ids.hs"
+        , "agent-workflow-github" </> "src" </> "CodexWatcher" </> "Workflow" </> "GitHub" </> "Command.hs"
+        , "agent-workflow-github" </> "src" </> "CodexWatcher" </> "Workflow" </> "GitHub" </> "Remote.hs"
+        ]
   let githubSection = cabalComponentSection "library agent-workflow-github" cabalSource
       forbiddenPackageNeedles =
-        [ "aeson"
-        , "bytestring"
+        [ "bytestring"
         , "containers"
         , "directory"
         , "filepath"
@@ -6272,22 +6305,31 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
         ]
       forbiddenImportNeedles =
         [ "CodexWatcher.AppServer"
+        , "CodexWatcher.Core."
         , "CodexWatcher.Core.State"
         , "CodexWatcher.Domain."
         , "CodexWatcher.Effects"
         , "CodexWatcher.EventLog"
         , "CodexWatcher.GhGit"
+        , "CodexWatcher.Json"
+        , "CodexWatcher.Runtime"
         , "CodexWatcher.StateMachine"
         , "CodexWatcher.Workflow.Agent"
         , "CodexWatcher.Workflow.Observation"
         , "CodexWatcher.Workflow.Types"
         ]
       exposesGithubModules =
-        "CodexWatcher.Workflow.GitHub.Ids" `Text.isInfixOf` githubSection
+        all
+          (`Text.isInfixOf` githubSection)
+          [ "CodexWatcher.Workflow.GitHub.Command"
+          , "CodexWatcher.Workflow.GitHub.Ids"
+          , "CodexWatcher.Workflow.GitHub.Remote"
+          ]
       dependsOnlyOnGithubDeps =
         all
           (`Text.isInfixOf` githubSection)
-          [ "base >=4.18 && <5"
+          [ "aeson >=2.2 && <3"
+          , "base >=4.18 && <5"
           , "text >=2.0 && <3"
           ]
           && not (any (`Text.isInfixOf` githubSection) forbiddenPackageNeedles)
@@ -6298,6 +6340,89 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
   assert
     "workflow GitHub sublibrary has no moifold state-machine dependencies"
     (exposesGithubModules && dependsOnlyOnGithubDeps && sourceImportsStayInAdapter && moifoldDependsOnGithub)
+
+workflowGithubCommandFacadeMatchesRuntimeRender :: IO Bool
+workflowGithubCommandFacadeMatchesRuntimeRender = do
+  let repo = RepoName "soulomoon/mlf2"
+      issue = IssueNumber 42
+      pr = PrNumber 6
+      branch = BranchName "codex/example"
+      thread = ReviewThreadId "PRRT_test"
+      prConfig = PrConfig repo pr branch
+      checks =
+        [ (renderRuntimeCommand GhAuthStatus, WorkflowGitHubCommand.ghAuthStatusCommand)
+        , (renderRuntimeCommand GhApiUser, WorkflowGitHubCommand.ghApiUserCommand)
+        , (renderRuntimeCommand (GhIssueListOpen repo), WorkflowGitHubCommand.ghIssueListOpenCommand repo)
+        , (renderRuntimeCommand (GhIssueView repo issue ["state", "closed", "url"]), WorkflowGitHubCommand.ghIssueViewCommand repo issue ["state", "closed", "url"])
+        , (renderRuntimeCommand (GhPrListOpen repo), WorkflowGitHubCommand.ghPrListOpenCommand repo)
+        , (renderRuntimeCommand (GhPrListByHead repo branch "all"), WorkflowGitHubCommand.ghPrListByHeadCommand repo branch "all")
+        , (renderRuntimeCommand (GhPrView repo pr ["state", "url"]), WorkflowGitHubCommand.ghPrViewCommand repo pr ["state", "url"])
+        , (renderRuntimeCommand (GhPrChecks repo pr), WorkflowGitHubCommand.ghPrChecksCommand repo pr)
+        , (renderRuntimeCommand (GhReviewThreads prConfig), WorkflowGitHubCommand.ghReviewThreadsCommand repo pr)
+        , (renderRuntimeCommand (GhResolveReviewThread thread), WorkflowGitHubCommand.ghResolveReviewThreadCommand thread)
+        , (renderRuntimeCommand (GhReplyReviewThread thread "still applies"), WorkflowGitHubCommand.ghReplyReviewThreadCommand thread "still applies")
+        , (renderRuntimeCommand (GhPrMerge repo pr "squash"), WorkflowGitHubCommand.ghPrMergeCommand repo pr "squash")
+        , (renderRuntimeCommand (GitBranchCurrent "/tmp/work"), WorkflowGitHubCommand.gitBranchCurrentCommand "/tmp/work")
+        , (renderRuntimeCommand (GitRevParseHead "/tmp/work"), WorkflowGitHubCommand.gitRevParseHeadCommand "/tmp/work")
+        , (renderRuntimeCommand (GitStatusPorcelain "/tmp/work"), WorkflowGitHubCommand.gitStatusPorcelainCommand "/tmp/work")
+        , (renderRuntimeCommand (GitLsRemoteBranch "/tmp/work" branch), WorkflowGitHubCommand.gitLsRemoteBranchCommand "/tmp/work" branch)
+        , (renderRuntimeCommand (GitPushDryRun "/tmp/work" branch), WorkflowGitHubCommand.gitPushDryRunCommand "/tmp/work" branch)
+        , (renderRuntimeCommand (GitPush "/tmp/work" branch), WorkflowGitHubCommand.gitPushCommand "/tmp/work" branch)
+        ]
+  assert
+    "workflow GitHub command facade matches runtime render"
+    (all commandSpecMatches checks)
+
+commandSpecMatches :: (RuntimeCommandSpec, WorkflowGitHubCommand.GitHubCommandSpec) -> Bool
+commandSpecMatches (runtimeSpec, githubSpec) =
+  runtimeSpec.command == githubSpec.githubCommand
+    && runtimeSpec.args == githubSpec.githubCommandArgs
+    && runtimeSpec.cwd == githubSpec.githubCommandCwd
+    && runtimeSpec.stdin == githubSpec.githubCommandStdin
+
+workflowEventLogCoreDetailedReplayMatchesMoifold :: IO Bool
+workflowEventLogCoreDetailedReplayMatchesMoifold = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      events =
+        [ PrReviewInitialized prConfig workerThread reviewerThread
+        , PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence []
+        ]
+      direct = replayEventLog events
+      detailed = WorkflowEventLog.replayWorkflowEventLogDetailed @MoifoldSpec id events
+  assert "workflow event-log core detailed replay matches moifold replay" $
+    case (direct, detailed) of
+      (Right replay, Right summary) ->
+        someDomain replay.replayState == someDomain summary.workflowReplaySummaryState
+          && somePhase replay.replayState == somePhase summary.workflowReplaySummaryState
+          && replay.replayEffects == summary.workflowReplaySummaryEffects
+          && summary.workflowReplaySummaryEventCount == length events
+          && summary.workflowReplaySummaryTerminalEventIndex == Nothing
+      _ -> False
+
+workflowEventLogCoreFixtureContractValidatesReplay :: IO Bool
+workflowEventLogCoreFixtureContractValidatesReplay = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      events =
+        [ PrReviewInitialized prConfig (ThreadId "worker") (ThreadId "reviewer")
+        , PrReviewNoUnresolvedFound (CommitSha "abc123") (TurnId "reviewer-turn")
+        , PrReviewCleanFound (CleanReviewEvidence (CommitSha "abc123") "LGTM") []
+        ]
+      contract =
+        WorkflowEventLog.EventLogFixtureContract
+          { WorkflowEventLog.fixtureExpectedStateLabel = "PrReview/WaitingMergeability"
+          , WorkflowEventLog.fixtureExpectedEventCount = Just 3
+          }
+  assert "workflow event-log core fixture contract validates replay summary" $
+    case WorkflowEventLog.replayWorkflowEventLogDetailed @MoifoldSpec id events of
+      Right summary -> WorkflowEventLog.validateEventLogFixtureContract @MoifoldSpec contract summary == Right ()
+      Left _ -> False
 
 cabalComponentSection :: Text -> Text -> Text
 cabalComponentSection componentName cabalSource =
@@ -6379,6 +6504,25 @@ workflowPermissionFacadeMatchesStateMachine = do
       direct = validatePhaseActionPlan state effects
       facade = WorkflowPermission.validateMoifoldEffectPlan state effects
   assert "workflow permission facade matches state-machine validation" (direct == facade)
+
+workflowPermissionCoreChecksMatchMoifoldPermission :: IO Bool
+workflowPermissionCoreChecksMatchMoifoldPermission = do
+  let plannerConfig = PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 2) [IssueNumber 12]
+      planningGraph = PlanningGraph [IssueNumber 12] [] []
+      state = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
+      effects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
+      direct = validatePhaseActionPlan state effects
+      core = WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec state effects
+      checks = WorkflowPermission.workflowEffectPermissionChecks @MoifoldSpec state effects
+  assert "workflow permission core checks match moifold validation" $
+    case (direct, core, checks) of
+      (Left directError, Left coreError, [check]) ->
+        coreError.workflowPermissionStateLabel == directError.phaseActionState
+          && coreError.workflowPermissionEffectLabel == directError.phaseActionEffect
+          && coreError.workflowPermissionReason == formatPhaseActionValidationError directError
+          && check.workflowPermissionCheckEffectLabel == directError.phaseActionEffect
+          && check.workflowPermissionCheckResult == Left (formatPhaseActionValidationError directError)
+      _ -> False
 
 workflowExecutionFacadeDryRunMatchesExecutor :: IO Bool
 workflowExecutionFacadeDryRunMatchesExecutor = do

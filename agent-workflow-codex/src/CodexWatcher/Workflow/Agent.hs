@@ -8,7 +8,7 @@ module CodexWatcher.Workflow.Agent
   , classifyAgentRoleTurn
   ) where
 
-import CodexWatcher.AppServerClient (AppServerTurn)
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Workflow.Agent.Types
 import Data.Aeson (Value)
 import Data.Text (Text)

@@ -9,12 +9,13 @@ module CodexWatcher.Workflow.Types
   , legacyObservedPlannedTransition
   , moifoldEventLabel
   , moifoldObservationLabel
+  , moifoldEffectLabel
   , moifoldPlannedTransitionFromEffects
   , moifoldStateLabel
   , module CodexWatcher.Workflow.Spec
   ) where
 
-import CodexWatcher.Effects (EffectPlan, SomeEffect)
+import CodexWatcher.Effects (EffectPlan, SomeEffect, SomeEffectAction (..), actionKindText, someEffectAction)
 import CodexWatcher.EventLog.Replay (applyEvent, initializeFromEvent, replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult, ReplayFailure (..), WatcherEvent, eventName)
 import CodexWatcher.Core.State (SomeWatcherState, isTerminalState, someDomain, somePhase)
@@ -50,10 +51,16 @@ instance WorkflowSpec MoifoldSpec where
     case validatePhaseActionPlan state effects of
       Left failure -> Left (formatPhaseActionValidationError failure)
       Right () -> Right ()
+  workflowEffectPlanEffects = id
+  workflowEffectAllowed state effect =
+    case validatePhaseActionPlan state [effect] of
+      Left failure -> Left (formatPhaseActionValidationError failure)
+      Right () -> Right ()
   workflowIsTerminal = isTerminalState
   workflowStateLabel = moifoldStateLabel
   workflowEventLabel = moifoldEventLabel
   workflowObservationLabel = moifoldObservationLabel
+  workflowEffectLabel = moifoldEffectLabel
 
 legacyObservedPlannedTransition :: ObservedPolicyTick -> PlannedTransition MoifoldSpec
 legacyObservedPlannedTransition observed =
@@ -79,6 +86,11 @@ moifoldEventLabel =
 moifoldObservationLabel :: DaemonObservation -> Text
 moifoldObservationLabel =
   Text.pack . show
+
+moifoldEffectLabel :: SomeEffect -> Text
+moifoldEffectLabel effect =
+  case someEffectAction effect of
+    SomeEffectAction action -> actionKindText action
 
 formatReplayFailure :: ReplayFailure -> Text
 formatReplayFailure failure =

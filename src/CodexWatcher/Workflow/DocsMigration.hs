@@ -33,7 +33,14 @@ module CodexWatcher.Workflow.DocsMigration
 import CodexWatcher.AppServerClient (AppServerTurn (..))
 import CodexWatcher.Core.Ids (ThreadId, TurnId)
 import CodexWatcher.Workflow.Agent (AgentOutputClass (..), AgentRole (..), ClassifiedAgentOutput (..), TurnRef (..))
-import CodexWatcher.Workflow.EventLog (WorkflowTickAudit, workflowDryRunAudit, workflowSuccessAudit)
+import CodexWatcher.Workflow.EventLog
+  ( WorkflowReplaySummary (..)
+  , WorkflowTickAudit
+  , formatWorkflowReplayFailure
+  , replayWorkflowEventLogDetailed
+  , workflowDryRunAudit
+  , workflowSuccessAudit
+  )
 import CodexWatcher.Workflow.Execution
   ( ActionExecutionMode (..)
   , EffectCommitOrder (..)
@@ -167,6 +174,8 @@ instance WorkflowSpec DocsMigrationSpec where
   workflowPlanTransition = docsMigrationPlannedTransitionFromEffects
   workflowReplayEvents = replayDocsMigrationEvents
   workflowValidateEffects _state _effects = Right ()
+  workflowEffectPlanEffects = id
+  workflowEffectAllowed _state _effect = Right ()
   workflowIsTerminal = \case
     DocsMigrationComplete {} -> True
     DocsMigrationBlocked {} -> True
@@ -174,6 +183,7 @@ instance WorkflowSpec DocsMigrationSpec where
   workflowStateLabel = docsMigrationStateLabel
   workflowEventLabel = docsMigrationEventLabel
   workflowObservationLabel = docsMigrationObservationLabel
+  workflowEffectLabel = docsMigrationEffectLabel
 
 docsMigrationAgentRole :: AgentRole DocsMigrationConfig DocsMigrationOutput
 docsMigrationAgentRole =
@@ -367,17 +377,16 @@ runDocsMigrationObservedExecute interpreter events observation =
                 )
 
 replayDocsMigrationEvents :: [DocsMigrationEvent] -> Either Text DocsMigrationReplayResult
-replayDocsMigrationEvents [] =
-  Left "docs migration event log is empty"
-replayDocsMigrationEvents (firstEvent : restEvents) = do
-  (initialState, initialEffects) <- initialDocsMigrationEvent firstEvent
-  go initialState [initialEffects] restEvents
- where
-  go state effects [] =
-    Right DocsMigrationReplayResult {docsMigrationReplayState = state, docsMigrationReplayEffects = reverse effects}
-  go state effects (event : rest) = do
-    (state', newEffects) <- applyDocsMigrationEvent state event
-    go state' (newEffects : effects) rest
+replayDocsMigrationEvents events =
+  case replayWorkflowEventLogDetailed @DocsMigrationSpec id events of
+    Left failure ->
+      Left (formatWorkflowReplayFailure failure)
+    Right summary ->
+      Right
+        DocsMigrationReplayResult
+          { docsMigrationReplayState = summary.workflowReplaySummaryState
+          , docsMigrationReplayEffects = summary.workflowReplaySummaryEffects
+          }
 
 initialDocsMigrationEvent :: DocsMigrationEvent -> Either Text (DocsMigrationState, [DocsMigrationEffect])
 initialDocsMigrationEvent = \case
@@ -470,6 +479,13 @@ docsMigrationObservationLabel :: DocsMigrationObservation -> Text
 docsMigrationObservationLabel = \case
   DocsMigrationAgentReturned {} -> "docs-migration-agent-returned"
   DocsMigrationValidationReturned {} -> "docs-migration-validation-returned"
+
+docsMigrationEffectLabel :: DocsMigrationEffect -> Text
+docsMigrationEffectLabel = \case
+  StartDocsMigrationTurn {} -> "start-docs-migration-turn"
+  WriteDocsMigrationDraft {} -> "write-docs-migration-draft"
+  RunDocsMigrationValidation {} -> "run-docs-migration-validation"
+  StopDocsMigrationDaemon -> "stop-docs-migration-daemon"
 
 nonEmpty :: Text -> Text -> Text
 nonEmpty candidate fallback =

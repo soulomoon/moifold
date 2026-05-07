@@ -14,11 +14,11 @@ import CodexWatcher.Core.Ids
   , IssueNumber (..)
   , PrNumber (..)
   , RepoName (..)
-  , ReviewThreadId (..)
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..), ReviewEvidence (..), reviewEvidenceSummaries, reviewEvidenceThreadCommentRefs, reviewEvidenceThreadRefs)
+import CodexWatcher.Workflow.GitHub.Command qualified as GitHubCommand
 import Data.Text (Text)
 import Data.Text qualified as Text
 
@@ -26,28 +26,13 @@ renderRuntimeCommand :: RuntimeCommand -> RuntimeCommandSpec
 renderRuntimeCommand (CommandVersion command') =
   RuntimeCommandSpec command' ["--version"] Nothing ""
 renderRuntimeCommand GhAuthStatus =
-  RuntimeCommandSpec "gh" ["auth", "status"] Nothing ""
+  fromGitHubCommandSpec GitHubCommand.ghAuthStatusCommand
 renderRuntimeCommand GhApiUser =
-  RuntimeCommandSpec "gh" ["api", "user"] Nothing ""
+  fromGitHubCommandSpec GitHubCommand.ghApiUserCommand
 renderRuntimeCommand (GhIssueListOpen repo) =
-  RuntimeCommandSpec
-    "gh"
-    ["issue", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,labels,assignees"]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghIssueListOpenCommand repo)
 renderRuntimeCommand (GhIssueView repo issueNumber fields) =
-  RuntimeCommandSpec
-    "gh"
-    [ "issue"
-    , "view"
-    , show (unIssueNumber issueNumber)
-    , "--repo"
-    , Text.unpack (unRepoName repo)
-    , "--json"
-    , Text.unpack (Text.intercalate "," fields)
-    ]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghIssueViewCommand repo issueNumber fields)
 renderRuntimeCommand (GhIssueCreate repo request) =
   renderGhIssueCreate repo request
 renderRuntimeCommand (GhIssueClose config prNumber') =
@@ -63,60 +48,15 @@ renderRuntimeCommand (GhIssueClose config prNumber') =
     Nothing
     ""
 renderRuntimeCommand (GhPrListOpen repo) =
-  RuntimeCommandSpec
-    "gh"
-    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid,body"]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghPrListOpenCommand repo)
 renderRuntimeCommand (GhPrListByHead repo branch state) =
-  RuntimeCommandSpec
-    "gh"
-    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--head", Text.unpack (unBranchName branch), "--state", Text.unpack state, "--json", "number,title,headRefName,headRefOid,body,state"]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghPrListByHeadCommand repo branch state)
 renderRuntimeCommand (GhPrView repo prNumber fields) =
-  RuntimeCommandSpec
-    "gh"
-    [ "pr"
-    , "view"
-    , show (unPrNumber prNumber)
-    , "--repo"
-    , Text.unpack (unRepoName repo)
-    , "--json"
-    , Text.unpack (Text.intercalate "," fields)
-    ]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghPrViewCommand repo prNumber fields)
 renderRuntimeCommand (GhPrChecks repo prNumber) =
-  RuntimeCommandSpec
-    "gh"
-    [ "pr"
-    , "checks"
-    , show (unPrNumber prNumber)
-    , "--repo"
-    , Text.unpack (unRepoName repo)
-    , "--json"
-    , "name,state,bucket"
-    ]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghPrChecksCommand repo prNumber)
 renderRuntimeCommand (GhReviewThreads config) =
-  let (owner, name) = repoOwnerName (prRepo config)
-   in RuntimeCommandSpec
-        "gh"
-        [ "api"
-        , "graphql"
-        , "-f"
-        , "query=" <> reviewThreadsQuery
-        , "-f"
-        , "owner=" <> Text.unpack owner
-        , "-f"
-        , "name=" <> Text.unpack name
-        , "-F"
-        , "number=" <> show (unPrNumber (prNumber config))
-        ]
-        Nothing
-        ""
+  fromGitHubCommandSpec (GitHubCommand.ghReviewThreadsCommand (prRepo config) (prNumber config))
 renderRuntimeCommand (GhCreatePullRequest workdir config) =
   RuntimeCommandSpec
     "bash"
@@ -154,31 +94,9 @@ renderRuntimeCommand (GhIssueFollowUp config evidence) =
     Nothing
     (issueFollowUpBody config evidence)
 renderRuntimeCommand (GhResolveReviewThread reviewThreadId) =
-  RuntimeCommandSpec
-    "gh"
-    [ "api"
-    , "graphql"
-    , "-f"
-    , "query=mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id,isResolved}}}"
-    , "-f"
-    , "threadId=" <> Text.unpack (unReviewThreadId reviewThreadId)
-    ]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghResolveReviewThreadCommand reviewThreadId)
 renderRuntimeCommand (GhReplyReviewThread reviewThreadId comment) =
-  RuntimeCommandSpec
-    "gh"
-    [ "api"
-    , "graphql"
-    , "-f"
-    , "query=mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}"
-    , "-f"
-    , "threadId=" <> Text.unpack (unReviewThreadId reviewThreadId)
-    , "-f"
-    , "body=" <> Text.unpack comment
-    ]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghReplyReviewThreadCommand reviewThreadId comment)
 renderRuntimeCommand (GhPrCommentReviewFindings config evidence) =
   RuntimeCommandSpec
     "gh"
@@ -193,17 +111,7 @@ renderRuntimeCommand (GhPrCommentReviewFindings config evidence) =
     Nothing
     (reviewFindingsCommentBody evidence)
 renderRuntimeCommand (GhPrMerge repo prNumber mergeMethod) =
-  RuntimeCommandSpec
-    "gh"
-    [ "pr"
-    , "merge"
-    , show (unPrNumber prNumber)
-    , "--repo"
-    , Text.unpack (unRepoName repo)
-    , mergeFlag mergeMethod
-    ]
-    Nothing
-    ""
+  fromGitHubCommandSpec (GitHubCommand.ghPrMergeCommand repo prNumber mergeMethod)
 renderRuntimeCommand (GhPrCleanReviewAndMerge repo prNumber evidence mergeMethod) =
   RuntimeCommandSpec
     "bash"
@@ -212,7 +120,7 @@ renderRuntimeCommand (GhPrCleanReviewAndMerge repo prNumber evidence mergeMethod
     , "codex-watcher-gh-pr-clean-review-and-merge"
     , show (unPrNumber prNumber)
     , Text.unpack (unRepoName repo)
-    , mergeFlag mergeMethod
+    , GitHubCommand.mergeFlag mergeMethod
     ]
     Nothing
     (cleanReviewBody evidence)
@@ -227,23 +135,32 @@ renderRuntimeCommand (CheckNonEmptyFile path) =
     Nothing
     ""
 renderRuntimeCommand (GitBranchCurrent workdir) =
-  RuntimeCommandSpec "git" ["branch", "--show-current"] (Just workdir) ""
+  fromGitHubCommandSpec (GitHubCommand.gitBranchCurrentCommand workdir)
 renderRuntimeCommand (GitRevParseHead workdir) =
-  RuntimeCommandSpec "git" ["rev-parse", "HEAD"] (Just workdir) ""
+  fromGitHubCommandSpec (GitHubCommand.gitRevParseHeadCommand workdir)
 renderRuntimeCommand (GitStatusPorcelain workdir) =
-  RuntimeCommandSpec "git" ["status", "--porcelain"] (Just workdir) ""
+  fromGitHubCommandSpec (GitHubCommand.gitStatusPorcelainCommand workdir)
 renderRuntimeCommand (GitLsRemoteBranch workdir branch) =
-  RuntimeCommandSpec "git" ["ls-remote", "origin", "refs/heads/" <> Text.unpack (unBranchName branch)] (Just workdir) ""
+  fromGitHubCommandSpec (GitHubCommand.gitLsRemoteBranchCommand workdir branch)
 renderRuntimeCommand (GitPushDryRun workdir branch) =
-  RuntimeCommandSpec "git" ["push", "--dry-run", "origin", Text.unpack (unBranchName branch)] (Just workdir) ""
+  fromGitHubCommandSpec (GitHubCommand.gitPushDryRunCommand workdir branch)
 renderRuntimeCommand (GitPush workdir branch) =
-  RuntimeCommandSpec "git" ["push", "origin", Text.unpack (unBranchName branch)] (Just workdir) ""
+  fromGitHubCommandSpec (GitHubCommand.gitPushCommand workdir branch)
 renderRuntimeCommand (KillZero pid) =
   RuntimeCommandSpec "kill" ["-0", Text.unpack pid] Nothing ""
 renderRuntimeCommand (KillTerm pid) =
   RuntimeCommandSpec "kill" ["-TERM", Text.unpack pid] Nothing ""
 renderRuntimeCommand (RawCommand command' args' cwd') =
   RuntimeCommandSpec command' args' cwd' ""
+
+fromGitHubCommandSpec :: GitHubCommand.GitHubCommandSpec -> RuntimeCommandSpec
+fromGitHubCommandSpec spec =
+  RuntimeCommandSpec
+    { command = spec.githubCommand
+    , args = spec.githubCommandArgs
+    , cwd = spec.githubCommandCwd
+    , stdin = spec.githubCommandStdin
+    }
 
 renderGhIssueCreate :: RepoName -> IssueCreationRequest -> RuntimeCommandSpec
 renderGhIssueCreate repo request =
@@ -411,22 +328,6 @@ issueFollowUpBody config evidence =
     , ""
     , "The watcher will re-enter implementation on this branch instead of marking the issue complete."
     ]
-
-repoOwnerName :: RepoName -> (Text, Text)
-repoOwnerName repo =
-  case Text.breakOn "/" (unRepoName repo) of
-    (owner, rest)
-      | Text.null rest -> (owner, "")
-      | otherwise -> (owner, Text.drop 1 rest)
-
-mergeFlag :: Text -> String
-mergeFlag "squash" = "--squash"
-mergeFlag "rebase" = "--rebase"
-mergeFlag _ = "--merge"
-
-reviewThreadsQuery :: String
-reviewThreadsQuery =
-  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id,isResolved,isOutdated,path,line,startLine,comments(first:20){nodes{id,url,body,path,line,author{login}}}}}}}}"
 
 cleanReviewAndMergeScript :: Text
 cleanReviewAndMergeScript =

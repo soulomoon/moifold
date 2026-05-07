@@ -6,12 +6,12 @@ module CodexWatcher.Workflow.Observation.Agent
   , planAgentTurnObservation
   ) where
 
-import CodexWatcher.AppServerClient (AppServerTurn)
 import CodexWatcher.Workflow.Agent
   ( AgentRole
   , ClassifiedAgentOutput (..)
   , classifyAgentRoleTurn
   )
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Workflow.Spec
   ( PlannedTransition
   , WorkflowSpec (..)

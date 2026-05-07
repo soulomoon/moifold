@@ -4,9 +4,14 @@
 
 module CodexWatcher.Workflow.Permission
   ( PhaseActionValidationError (..)
+  , WorkflowEffectPermissionCheck (..)
+  , WorkflowPermissionValidationError (..)
   , formatPhaseActionValidationError
+  , formatWorkflowPermissionValidationError
   , validateMoifoldEffectPlan
+  , validateWorkflowEffectPlanCore
   , validateWorkflowEffectPlan
+  , workflowEffectPermissionChecks
   ) where
 
 import CodexWatcher.Effects (EffectPlan)
@@ -15,6 +20,13 @@ import CodexWatcher.StateMachine
   ( PhaseActionValidationError (..)
   , formatPhaseActionValidationError
   , validatePhaseActionPlan
+  )
+import CodexWatcher.Workflow.Permission.Core
+  ( WorkflowEffectPermissionCheck (..)
+  , WorkflowPermissionValidationError (..)
+  , formatWorkflowPermissionValidationError
+  , validateWorkflowEffectPlanCore
+  , workflowEffectPermissionChecks
   )
 import CodexWatcher.Workflow.Spec (WorkflowSpec (..))
 

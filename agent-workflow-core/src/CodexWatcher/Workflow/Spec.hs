@@ -59,6 +59,15 @@ class WorkflowSpec spec where
     -> WorkflowEffectPlan spec
     -> Either (WorkflowError spec) ()
 
+  workflowEffectPlanEffects
+    :: WorkflowEffectPlan spec
+    -> [WorkflowEffect spec]
+
+  workflowEffectAllowed
+    :: WorkflowState spec
+    -> WorkflowEffect spec
+    -> Either Text ()
+
   workflowIsTerminal
     :: WorkflowState spec
     -> Bool
@@ -73,6 +82,10 @@ class WorkflowSpec spec where
 
   workflowObservationLabel
     :: WorkflowObservation spec
+    -> Text
+
+  workflowEffectLabel
+    :: WorkflowEffect spec
     -> Text
 
 workflowPlanObservation

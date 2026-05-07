@@ -71,25 +71,20 @@ import CodexWatcher.Core.Ids (RequestId)
 import CodexWatcher.Effects (Effect (..), EffectPlan, SomeEffect (..))
 import CodexWatcher.Failure (FailureClassification, classifyExternalFailureText)
 import CodexWatcher.Runtime.Command.Types (CommandReport)
+import CodexWatcher.Workflow.Execution.Core
+  ( EffectCommitOrder (..)
+  , EffectIdempotency (..)
+  , WorkflowCompiledEffectPlanOf (..)
+  , WorkflowEffectMetadata (..)
+  , WorkflowPlannedActionOf (..)
+  , compileWorkflowGenericEffectPlan
+  , dryRunWorkflowGenericCompiledEffectPlan
+  , executeWorkflowGenericActions
+  , executeWorkflowGenericCompiledEffectPlan
+  , partitionWorkflowGenericActionReports
+  , partitionWorkflowGenericActions
+  )
 import Data.List (mapAccumL, partition)
-
-data EffectCommitOrder
-  = PreCommit
-  | PostCommit
-  deriving stock (Eq, Show)
-
-data EffectIdempotency
-  = Idempotent
-  | CheckThenAct
-  | AtMostOnce
-  | DerivedWrite
-  deriving stock (Eq, Show)
-
-data WorkflowEffectMetadata = WorkflowEffectMetadata
-  { workflowEffectCommitOrder :: EffectCommitOrder
-  , workflowEffectIdempotency :: EffectIdempotency
-  }
-  deriving stock (Eq, Show)
 
 data WorkflowPlannedAction = WorkflowPlannedAction
   { workflowPlannedEffect :: SomeEffect
@@ -101,18 +96,6 @@ data WorkflowPlannedAction = WorkflowPlannedAction
 data WorkflowCompiledEffectPlan = WorkflowCompiledEffectPlan
   { workflowCompiledActions :: [WorkflowPlannedAction]
   , workflowCompiledNextRequestId :: RequestId
-  }
-  deriving stock (Eq, Show)
-
-data WorkflowPlannedActionOf effect action = WorkflowPlannedActionOf
-  { workflowGenericPlannedEffect :: effect
-  , workflowGenericPlannedAction :: action
-  , workflowGenericPlannedMetadata :: WorkflowEffectMetadata
-  }
-  deriving stock (Eq, Show)
-
-data WorkflowCompiledEffectPlanOf effect action = WorkflowCompiledEffectPlanOf
-  { workflowGenericCompiledActions :: [WorkflowPlannedActionOf effect action]
   }
   deriving stock (Eq, Show)
 
@@ -184,30 +167,6 @@ compileWorkflowEffectPlanWithMetadata config effects =
         , workflowCompiledNextRequestId = finalRequestId
         }
 
-compileWorkflowGenericEffectPlan
-  :: (effect -> WorkflowEffectMetadata)
-  -> (effect -> [action])
-  -> [effect]
-  -> WorkflowCompiledEffectPlanOf effect action
-compileWorkflowGenericEffectPlan metadataFor compileEffectActions effects =
-  WorkflowCompiledEffectPlanOf
-    { workflowGenericCompiledActions =
-        concatMap
-          ( \effect ->
-              let metadata = metadataFor effect
-               in fmap
-                    ( \action ->
-                        WorkflowPlannedActionOf
-                          { workflowGenericPlannedEffect = effect
-                          , workflowGenericPlannedAction = action
-                          , workflowGenericPlannedMetadata = metadata
-                          }
-                    )
-                    (compileEffectActions effect)
-          )
-          effects
-    }
-
 compileWorkflowEffect :: EffectRuntimeConfig -> RequestId -> SomeEffect -> ([PlannedAction], RequestId)
 compileWorkflowEffect =
   compileEffect
@@ -243,13 +202,6 @@ dryRunWorkflowCompiledEffectPlan :: WorkflowCompiledEffectPlan -> [ActionExecuti
 dryRunWorkflowCompiledEffectPlan =
   dryRunCompiledEffectPlan . workflowCompiledEffectPlanLegacy
 
-dryRunWorkflowGenericCompiledEffectPlan
-  :: (action -> report)
-  -> WorkflowCompiledEffectPlanOf effect action
-  -> [report]
-dryRunWorkflowGenericCompiledEffectPlan dryRunAction =
-  fmap (dryRunAction . workflowGenericPlannedAction) . workflowGenericCompiledActions
-
 executeWorkflowCompiledEffectPlan
   :: Monad m
   => ActionExecutor m
@@ -269,47 +221,14 @@ executeWorkflowEffectPlan
 executeWorkflowEffectPlan executor mode config =
   executeWorkflowCompiledEffectPlan executor mode . compileWorkflowEffectPlanWithMetadata config
 
-executeWorkflowGenericCompiledEffectPlan
-  :: Monad m
-  => (ActionExecutionMode -> action -> m report)
-  -> ActionExecutionMode
-  -> WorkflowCompiledEffectPlanOf effect action
-  -> m [report]
-executeWorkflowGenericCompiledEffectPlan executeAction mode =
-  executeWorkflowGenericActions executeAction mode . workflowGenericCompiledActions
-
-executeWorkflowGenericActions
-  :: Monad m
-  => (ActionExecutionMode -> action -> m report)
-  -> ActionExecutionMode
-  -> [WorkflowPlannedActionOf effect action]
-  -> m [report]
-executeWorkflowGenericActions executeAction mode =
-  traverse (executeAction mode . workflowGenericPlannedAction)
-
 partitionWorkflowActions :: WorkflowCompiledEffectPlan -> ([WorkflowPlannedAction], [WorkflowPlannedAction])
 partitionWorkflowActions =
   partition actionRunsBeforeEventCommit . workflowCompiledActions
-
-partitionWorkflowGenericActions
-  :: WorkflowCompiledEffectPlanOf effect action
-  -> ([WorkflowPlannedActionOf effect action], [WorkflowPlannedActionOf effect action])
-partitionWorkflowGenericActions =
-  partition genericActionRunsBeforeEventCommit . workflowGenericCompiledActions
 
 partitionWorkflowActionReports :: WorkflowCompiledEffectPlan -> [ActionExecutionReport] -> ([ActionExecutionReport], [ActionExecutionReport])
 partitionWorkflowActionReports plan reports =
   let actionReports = zip plan.workflowCompiledActions reports
       (preCommitReports, postCommitReports) = partition (actionRunsBeforeEventCommit . fst) actionReports
-   in (fmap snd preCommitReports, fmap snd postCommitReports)
-
-partitionWorkflowGenericActionReports
-  :: WorkflowCompiledEffectPlanOf effect action
-  -> [report]
-  -> ([report], [report])
-partitionWorkflowGenericActionReports plan reports =
-  let actionReports = zip plan.workflowGenericCompiledActions reports
-      (preCommitReports, postCommitReports) = partition (genericActionRunsBeforeEventCommit . fst) actionReports
    in (fmap snd preCommitReports, fmap snd postCommitReports)
 
 partitionWorkflowEffectPlan :: EffectPlan -> (EffectPlan, EffectPlan)
@@ -323,10 +242,6 @@ effectRunsBeforeEventCommit effect =
 actionRunsBeforeEventCommit :: WorkflowPlannedAction -> Bool
 actionRunsBeforeEventCommit action =
   action.workflowPlannedMetadata.workflowEffectCommitOrder == PreCommit
-
-genericActionRunsBeforeEventCommit :: WorkflowPlannedActionOf effect action -> Bool
-genericActionRunsBeforeEventCommit action =
-  action.workflowGenericPlannedMetadata.workflowEffectCommitOrder == PreCommit
 
 executeWorkflowCheckedActions :: Monad m => ActionExecutor m -> [WorkflowPlannedAction] -> m (Either WorkflowActionFailure [ActionExecutionReport])
 executeWorkflowCheckedActions executor =

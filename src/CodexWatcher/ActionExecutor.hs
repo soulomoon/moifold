@@ -26,6 +26,7 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..), ioRuntimeInterpreter)
+import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
 import Data.Aeson (Value (..), (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -38,10 +39,6 @@ data ActionExecutionMode
   = ExecuteActions
   | DryRunActions
   deriving stock (Eq, Show, Generic)
-
-data AppServerInterpreter m = AppServerInterpreter
-  { appServerSendRequest :: AppServerRequest -> m Value
-  }
 
 data ActionExecutor m = ActionExecutor
   { actionRuntime :: RuntimeInterpreter m

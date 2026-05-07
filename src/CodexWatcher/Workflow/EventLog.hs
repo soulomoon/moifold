@@ -7,13 +7,26 @@
 
 module CodexWatcher.Workflow.EventLog
   ( EventLogFixtureContract (..)
+  , WorkflowReplayFailure (..)
+  , WorkflowReplaySummary (..)
   , WorkflowNextDaemonRecommendation (..)
-  , WorkflowTickAudit (..)
+  , WorkflowTickAudit
   , WorkflowTransitionFailure (..)
   , applyMoifoldWorkflowEvent
   , initializeMoifoldWorkflow
   , replayMoifoldWorkflowEvents
   , replayWorkflowEventLog
+  , replayWorkflowEventLogDetailed
+  , formatWorkflowReplayFailure
+  , validateEventLogFixtureContract
+  , workflowAuditCommittedEventLabel
+  , workflowAuditFailureClassification
+  , workflowAuditFinalStateLabel
+  , workflowAuditNextDaemonRecommendation
+  , workflowAuditObservationLabel
+  , workflowAuditPostCommitReports
+  , workflowAuditPreCommitReports
+  , workflowAuditPriorStateLabel
   , workflowDryRunAudit
   , workflowFailureAudit
   , workflowSuccessAudit
@@ -24,44 +37,38 @@ import CodexWatcher.EventLog.Replay (applyEvent, initializeFromEvent, replayEven
 import CodexWatcher.EventLog.Types (EventReplayResult, ReplayFailure, WatcherEvent)
 import CodexWatcher.Failure (FailureClassification, failureIsRetryable)
 import CodexWatcher.Core.State (SomeWatcherState)
+import CodexWatcher.Workflow.Audit
+  ( WorkflowNextDaemonRecommendation (..)
+  , workflowAuditCommittedEventLabel
+  , workflowAuditFailureClassification
+  , workflowAuditFinalStateLabel
+  , workflowAuditNextDaemonRecommendation
+  , workflowAuditObservationLabel
+  , workflowAuditPostCommitReports
+  , workflowAuditPreCommitReports
+  , workflowAuditPriorStateLabel
+  )
+import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
+import CodexWatcher.Workflow.EventLog.Core
+  ( EventLogFixtureContract (..)
+  , WorkflowReplayFailure (..)
+  , WorkflowReplaySummary (..)
+  , WorkflowTransitionFailure (..)
+  , formatWorkflowReplayFailure
+  , replayWorkflowEventLogDetailed
+  , validateEventLogFixtureContract
+  )
 import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 import Data.Text (Text)
 
-data WorkflowTransitionFailure spec = WorkflowTransitionFailure
-  { workflowTransitionEvent :: WorkflowEvent spec
-  , workflowTransitionError :: WorkflowError spec
-  }
-
-data EventLogFixtureContract spec = EventLogFixtureContract
-  { fixtureExpectedStateLabel :: Text
-  , fixtureExpectedEventCount :: Maybe Int
-  }
-
-data WorkflowNextDaemonRecommendation
-  = WorkflowDaemonContinue
-  | WorkflowDaemonRetry
-  | WorkflowDaemonRepair
-  | WorkflowDaemonStop
-  deriving stock (Eq, Show)
-
-data WorkflowTickAudit spec report = WorkflowTickAudit
-  { workflowAuditPriorStateLabel :: Text
-  , workflowAuditObservationLabel :: Maybe Text
-  , workflowAuditCommittedEventLabel :: Maybe Text
-  , workflowAuditFinalStateLabel :: Maybe Text
-  , workflowAuditPreCommitReports :: [report]
-  , workflowAuditPostCommitReports :: [report]
-  , workflowAuditFailureClassification :: Maybe FailureClassification
-  , workflowAuditNextDaemonRecommendation :: WorkflowNextDaemonRecommendation
-  }
-  deriving stock (Eq, Show)
+type WorkflowTickAudit spec report = WorkflowAudit.WorkflowTickAudit spec FailureClassification report
 
 replayWorkflowEventLog
   :: forall spec. WorkflowSpec spec
   => [WorkflowEvent spec]
   -> Either (WorkflowError spec) (WorkflowReplayResult spec)
 replayWorkflowEventLog =
-  workflowReplayEvents @spec
+  WorkflowAudit.replayWorkflowEventLog @spec
 
 workflowDryRunAudit
   :: forall spec report. WorkflowSpec spec
@@ -72,17 +79,8 @@ workflowDryRunAudit
   -> [report]
   -> [report]
   -> WorkflowTickAudit spec report
-workflowDryRunAudit priorState observation _planned finalState preReports postReports =
-  WorkflowTickAudit
-    { workflowAuditPriorStateLabel = workflowStateLabel @spec priorState
-    , workflowAuditObservationLabel = Just (workflowObservationLabel @spec observation)
-    , workflowAuditCommittedEventLabel = Nothing
-    , workflowAuditFinalStateLabel = Just (workflowStateLabel @spec finalState)
-    , workflowAuditPreCommitReports = preReports
-    , workflowAuditPostCommitReports = postReports
-    , workflowAuditFailureClassification = Nothing
-    , workflowAuditNextDaemonRecommendation = successRecommendation @spec finalState
-    }
+workflowDryRunAudit =
+  WorkflowAudit.workflowDryRunAudit @spec
 
 workflowSuccessAudit
   :: forall spec report. WorkflowSpec spec
@@ -93,17 +91,8 @@ workflowSuccessAudit
   -> [report]
   -> [report]
   -> WorkflowTickAudit spec report
-workflowSuccessAudit priorState observation planned finalState preReports postReports =
-  WorkflowTickAudit
-    { workflowAuditPriorStateLabel = workflowStateLabel @spec priorState
-    , workflowAuditObservationLabel = Just (workflowObservationLabel @spec observation)
-    , workflowAuditCommittedEventLabel = Just (workflowEventLabel @spec planned.plannedEvent)
-    , workflowAuditFinalStateLabel = Just (workflowStateLabel @spec finalState)
-    , workflowAuditPreCommitReports = preReports
-    , workflowAuditPostCommitReports = postReports
-    , workflowAuditFailureClassification = Nothing
-    , workflowAuditNextDaemonRecommendation = successRecommendation @spec finalState
-    }
+workflowSuccessAudit =
+  WorkflowAudit.workflowSuccessAudit @spec
 
 workflowFailureAudit
   :: forall spec report. WorkflowSpec spec
@@ -115,26 +104,8 @@ workflowFailureAudit
   -> [report]
   -> FailureClassification
   -> WorkflowTickAudit spec report
-workflowFailureAudit priorState maybeObservation maybeEvent maybeFinalState preReports postReports classification =
-  WorkflowTickAudit
-    { workflowAuditPriorStateLabel = workflowStateLabel @spec priorState
-    , workflowAuditObservationLabel = workflowObservationLabel @spec <$> maybeObservation
-    , workflowAuditCommittedEventLabel = workflowEventLabel @spec <$> maybeEvent
-    , workflowAuditFinalStateLabel = workflowStateLabel @spec <$> maybeFinalState
-    , workflowAuditPreCommitReports = preReports
-    , workflowAuditPostCommitReports = postReports
-    , workflowAuditFailureClassification = Just classification
-    , workflowAuditNextDaemonRecommendation =
-        if failureIsRetryable classification
-          then WorkflowDaemonRetry
-          else WorkflowDaemonStop
-    }
-
-successRecommendation :: forall spec. WorkflowSpec spec => WorkflowState spec -> WorkflowNextDaemonRecommendation
-successRecommendation state =
-  if workflowIsTerminal @spec state
-    then WorkflowDaemonStop
-    else WorkflowDaemonContinue
+workflowFailureAudit =
+  WorkflowAudit.workflowFailureAudit @spec failureIsRetryable
 
 initializeMoifoldWorkflow :: WatcherEvent -> Either Text (SomeWatcherState, EffectPlan)
 initializeMoifoldWorkflow =
