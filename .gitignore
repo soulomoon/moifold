@@ -10,3 +10,5 @@ result
 .vscode/
 bin/
 output/
+orchestrator/worktrees/*
+!orchestrator/worktrees/.gitkeep
