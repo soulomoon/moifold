@@ -70,6 +70,7 @@ import CodexWatcher.WatcherRuntimeStatus
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as WorkflowAgentCodexProtocol
+import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
@@ -102,7 +103,7 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime, secondsToDiffTime)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removePathForcibly)
 import System.FilePath ((</>))
 import System.Exit (ExitCode (..), exitFailure)
 import System.Posix.Process (getProcessID)
@@ -1552,6 +1553,63 @@ prop_eventLogCanonicalJsonRoundTrips =
   roundTrips event =
     (eitherDecodeStrict' (LazyByteString.toStrict (encode event)) :: Either String WatcherEvent)
       == Right event
+
+workflowEventCodecContractCoversWatcherEvents :: IO Bool
+workflowEventCodecContractCoversWatcherEvents = do
+  results <-
+    traverse
+      ( \event ->
+          assert ("workflow event codec round-trips " <> Text.unpack (eventName event)) $
+            WorkflowCodec.workflowCodecEventTypeLabel watcherEventCodecContract event == WorkflowCodec.WorkflowEventTypeLabel (eventName event)
+              && WorkflowCodec.workflowCodecSchemaVersion watcherEventCodecContract event == WorkflowCodec.WorkflowSchemaVersion 1
+              && WorkflowCodec.validateWorkflowCodecRoundTrip watcherEventCodecContract event == Right ()
+      )
+      canonicalEventExamples
+  pure (and results)
+
+workflowEventCodecToleratesMetadataAndPreservesGoldenTypes :: IO Bool
+workflowEventCodecToleratesMetadataAndPreservesGoldenTypes = do
+  metadataResults <-
+    traverse
+      ( \event ->
+          assert ("workflow event codec tolerates metadata for " <> Text.unpack (eventName event)) $
+            WorkflowCodec.workflowCodecDecode watcherEventCodecContract (withUnknownMetadata (toJSON event)) == Right event
+      )
+      canonicalEventExamples
+  goldenResults <- traverse goldenEventLogTypeFieldsMatchDecodedEvents goldenEventLogFixturePaths
+  pure (and metadataResults && and goldenResults)
+
+withUnknownMetadata :: Value -> Value
+withUnknownMetadata (Object objectValue) =
+  Object
+    ( KeyMap.insert (Key.fromText "emittedAt") (String "2026-05-07T00:00:00Z")
+        ( KeyMap.insert (Key.fromText "schemaVersion") (Number 1)
+            (KeyMap.insert (Key.fromText "unknownMetadata") (String "ignored") objectValue)
+        )
+    )
+withUnknownMetadata value =
+  value
+
+goldenEventLogTypeFieldsMatchDecodedEvents :: FilePath -> IO Bool
+goldenEventLogTypeFieldsMatchDecodedEvents path = do
+  bytes <- LazyByteString.readFile path
+  let lines' = filter (not . Text.null . Text.strip) (Text.lines (Text.Encoding.decodeUtf8 (LazyByteString.toStrict bytes)))
+      decodedLines =
+        traverse
+          ( \lineText -> do
+              value <- eitherDecodeStrict' (Text.Encoding.encodeUtf8 lineText) :: Either String Value
+              event <- eitherDecodeStrict' (Text.Encoding.encodeUtf8 lineText) :: Either String WatcherEvent
+              pure (value, event)
+          )
+          lines'
+      typeMatches (Object objectValue, event) =
+        KeyMap.lookup (Key.fromText "type") objectValue == Just (String (eventName event))
+      typeMatches _ =
+        False
+  assert ("workflow event-log golden type fields unchanged " <> path) $
+    case decodedLines of
+      Right values -> all typeMatches values
+      Left _ -> False
 
 prop_eventLogCanonicalIssuePlanStartName :: TurnId -> Bool
 prop_eventLogCanonicalIssuePlanStartName turnId =
@@ -3128,19 +3186,28 @@ goldenEventLogCase path expectedDomain expectedPhase = do
 goldenEventLogCases :: IO Bool
 goldenEventLogCases = do
   results <-
-    sequence
-      [ goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-merged/events.jsonl" PrReview Complete
-      , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-reviewer-comments/events.jsonl" PrReview CheckingReviews
-      , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-worker-incomplete/events.jsonl" PrReview CheckingReviews
-      , goldenEventLogCase "golden/event-log/pr-review/mlf2-pr6-reviewer-incomplete/events.jsonl" PrReview CheckingReviews
-      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-complete/events.jsonl" IssueImplement Complete
-      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-pr-created/events.jsonl" IssueImplement Implementing
-      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-pr-reused/events.jsonl" IssueImplement Implementing
-      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-incomplete-then-complete/events.jsonl" IssueImplement Complete
-      , goldenEventLogCase "golden/event-log/issue-implement/mlf2-issue42-implementation-blocked/events.jsonl" IssueImplement Blocked
-      , goldenEventLogCase "golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl" IssuePlanning Complete
-      ]
+    traverse
+      (\(path, expectedDomain, expectedPhase) -> goldenEventLogCase path expectedDomain expectedPhase)
+      goldenEventLogFixtures
   pure (and results)
+
+goldenEventLogFixtures :: [(FilePath, Domain, Phase)]
+goldenEventLogFixtures =
+  [ ("golden/event-log/pr-review/mlf2-pr6-merged/events.jsonl", PrReview, Complete)
+  , ("golden/event-log/pr-review/mlf2-pr6-reviewer-comments/events.jsonl", PrReview, CheckingReviews)
+  , ("golden/event-log/pr-review/mlf2-pr6-worker-incomplete/events.jsonl", PrReview, CheckingReviews)
+  , ("golden/event-log/pr-review/mlf2-pr6-reviewer-incomplete/events.jsonl", PrReview, CheckingReviews)
+  , ("golden/event-log/issue-implement/mlf2-issue42-complete/events.jsonl", IssueImplement, Complete)
+  , ("golden/event-log/issue-implement/mlf2-issue42-pr-created/events.jsonl", IssueImplement, Implementing)
+  , ("golden/event-log/issue-implement/mlf2-issue42-pr-reused/events.jsonl", IssueImplement, Implementing)
+  , ("golden/event-log/issue-implement/mlf2-issue42-incomplete-then-complete/events.jsonl", IssueImplement, Complete)
+  , ("golden/event-log/issue-implement/mlf2-issue42-implementation-blocked/events.jsonl", IssueImplement, Blocked)
+  , ("golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl", IssuePlanning, Complete)
+  ]
+
+goldenEventLogFixturePaths :: [FilePath]
+goldenEventLogFixturePaths =
+  fmap (\(path, _domain, _phase) -> path) goldenEventLogFixtures
 
 goldenBootstrapCase :: FilePath -> IO Bool
 goldenBootstrapCase fixture = do
@@ -6098,6 +6165,8 @@ workflowFacadeExtractionTests = do
       , workflowCoreCabalSublibraryKeepsPackageBoundary
       , workflowCodexCabalSublibraryKeepsPackageBoundary
       , workflowGithubCabalSublibraryKeepsPackageBoundary
+      , workflowEventCodecContractCoversWatcherEvents
+      , workflowEventCodecToleratesMetadataAndPreservesGoldenTypes
       , workflowGithubCommandFacadeMatchesRuntimeRender
       , workflowEventLogCoreDetailedReplayMatchesMoifold
       , workflowEventLogCoreFixtureContractValidatesReplay
@@ -6108,6 +6177,7 @@ workflowFacadeExtractionTests = do
       , workflowPrReviewCheckingFacadeMatchesWatcher
       , workflowPrReviewMergeabilityFacadeMatchesWatcher
       , workflowAgentRoleWrapsPrReviewWorkerClassifier
+      , workflowAgentRolesExposeRetryAndSideEffectMetadata
       , workflowAgentCodexStartRequestsMatchCompiledEffects
       , workflowAgentCodexParsesTurnLifecycle
       , workflowPrReviewAgentRolesClassifyOutputs
@@ -6123,6 +6193,7 @@ workflowFacadeExtractionTests = do
       , workflowDocsMigrationAgentRoleClassifiesCompleteOutput
       , workflowDocsMigrationUsesCoreExecutionContracts
       , workflowExecutionMetadataCoversCurrentEffects
+      , workflowExecutionCapabilityMetadataCoversCurrentEffects
       , workflowExecutionMetadataPartitionPreservesLegacyOrdering
       , workflowExecutionMetadataDryRunMatchesLegacy
       , workflowExecutionCheckedActionsStopsOnHardFailure
@@ -6159,18 +6230,7 @@ workflowSpecModuleKeepsCoreBoundary = do
 workflowCoreCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCoreCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
-  coreSources <-
-    fmap (Text.intercalate "\n")
-      . traverse
-        (fmap Text.pack . readFile)
-      $ [ "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Audit.hs"
-        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "DSL.hs"
-        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "EventLog" </> "Core.hs"
-        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Execution" </> "Core.hs"
-        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Failure.hs"
-        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Permission" </> "Core.hs"
-        , "agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Spec.hs"
-        ]
+  coreSources <- sourceTextUnder ("agent-workflow-core" </> "src")
   let coreSection = cabalComponentSection "library agent-workflow-core" cabalSource
       forbiddenNeedles =
         [ "aeson"
@@ -6188,12 +6248,14 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         ]
       exposesCoreModules =
         "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.EventLog.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Failure" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Permission.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Spec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.DSL" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Transaction.Core" `Text.isInfixOf` coreSection
       dependsOnlyOnCoreDeps =
         "base >=4.18 && <5" `Text.isInfixOf` coreSection
           && "text >=2.0 && <3" `Text.isInfixOf` coreSection
@@ -6208,20 +6270,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
 workflowCodexCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCodexCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
-  codexSources <-
-    fmap (Text.intercalate "\n")
-      . traverse
-        (fmap Text.pack . readFile)
-      $ [ "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "AppServerProtocol.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Client.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Interpreter.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Ids.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Types.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Agent" </> "Codex" </> "Protocol.hs"
-        , "agent-workflow-codex" </> "src" </> "CodexWatcher" </> "Workflow" </> "Observation" </> "Agent.hs"
-        ]
+  codexSources <- sourceTextUnder ("agent-workflow-codex" </> "src")
   let codexSection = cabalComponentSection "library agent-workflow-codex" cabalSource
       forbiddenPackageNeedles =
         [ "containers"
@@ -6280,14 +6329,7 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
 workflowGithubCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowGithubCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
-  githubSource <-
-    fmap (Text.intercalate "\n")
-      . traverse
-        (fmap Text.pack . readFile)
-      $ [ "agent-workflow-github" </> "src" </> "CodexWatcher" </> "Workflow" </> "GitHub" </> "Ids.hs"
-        , "agent-workflow-github" </> "src" </> "CodexWatcher" </> "Workflow" </> "GitHub" </> "Command.hs"
-        , "agent-workflow-github" </> "src" </> "CodexWatcher" </> "Workflow" </> "GitHub" </> "Remote.hs"
-        ]
+  githubSource <- sourceTextUnder ("agent-workflow-github" </> "src")
   let githubSection = cabalComponentSection "library agent-workflow-github" cabalSource
       forbiddenPackageNeedles =
         [ "bytestring"
@@ -6442,6 +6484,25 @@ cabalComponentSection componentName cabalSource =
         , "test-suite "
         , "benchmark "
         ]
+
+sourceTextUnder :: FilePath -> IO Text
+sourceTextUnder root = do
+  files <- sourceFilesUnder root
+  Text.intercalate "\n" <$> traverse (fmap Text.pack . readFile) files
+
+sourceFilesUnder :: FilePath -> IO [FilePath]
+sourceFilesUnder root = do
+  entries <- listDirectory root
+  fmap concat $
+    traverse
+      ( \entry -> do
+          let path = root </> entry
+          isDirectory <- doesDirectoryExist path
+          if isDirectory
+            then sourceFilesUnder path
+            else pure [path | ".hs" `Text.isSuffixOf` Text.pack path]
+      )
+      entries
 
 workflowFacadeReplayMatchesEventLog :: IO Bool
 workflowFacadeReplayMatchesEventLog = do
@@ -6598,6 +6659,8 @@ workflowAgentRoleWrapsPrReviewWorkerClassifier = do
           { WorkflowAgent.agentRoleName = "pr-review-worker"
           , WorkflowAgent.renderAgentInput = \input -> input
           , WorkflowAgent.agentOutputSchema = Nothing
+          , WorkflowAgent.agentRetryPolicy = WorkflowAgent.defaultAgentRetryPolicy
+          , WorkflowAgent.agentSideEffectScope = WorkflowAgent.AgentWritesWorktree
           , WorkflowAgent.agentClassifyTurn = \appTurn ->
               case classifyPrReviewWorkerTurn appTurn of
                 Just output -> Right (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentIncomplete output)
@@ -6608,6 +6671,28 @@ workflowAgentRoleWrapsPrReviewWorkerClassifier = do
     case WorkflowAgent.classifyAgentRoleTurn role turn of
       Right (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentIncomplete (ObservedWorkerOutcome (WorkerIncomplete "needs tests"))) -> True
       _ -> False
+
+workflowAgentRolesExposeRetryAndSideEffectMetadata :: IO Bool
+workflowAgentRolesExposeRetryAndSideEffectMetadata = do
+  let workerRole = WorkflowPrReviewAgent.prReviewWorkerAgentRole
+      reviewerRole = WorkflowPrReviewAgent.prReviewReviewerAgentRole (CommitSha "abc123")
+      policy = WorkflowAgent.defaultAgentRetryPolicy
+  results <-
+    sequence
+      [ assert "workflow worker role declares worktree side effects" $
+          workerRole.agentSideEffectScope == WorkflowAgent.AgentWritesWorktree
+      , assert "workflow reviewer role declares read-only side effects" $
+          reviewerRole.agentSideEffectScope == WorkflowAgent.AgentReadOnly
+      , assert "workflow malformed output is retry-classified" $
+          WorkflowAgent.agentOutputRetryReason WorkflowAgent.AgentMalformed == Just WorkflowAgent.RetryMalformedOutput
+            && WorkflowAgent.agentRetryDecision policy WorkflowAgent.RetryMalformedOutput 0 == WorkflowAgent.AgentRetryAllowed WorkflowAgent.RetryMalformedOutput
+      , assert "workflow incomplete output is retry-classified" $
+          WorkflowAgent.agentOutputRetryReason WorkflowAgent.AgentIncomplete == Just WorkflowAgent.RetryIncompleteOutput
+            && WorkflowAgent.agentRetryDecision policy WorkflowAgent.RetryIncompleteOutput policy.agentMaxIncompleteRetries == WorkflowAgent.AgentRetryExhausted WorkflowAgent.RetryIncompleteOutput
+      , assert "workflow blocked output is not automatic retry" $
+          WorkflowAgent.agentOutputRetryReason WorkflowAgent.AgentBlocked == Nothing
+      ]
+  pure (and results)
 
 workflowAgentCodexStartRequestsMatchCompiledEffects :: IO Bool
 workflowAgentCodexStartRequestsMatchCompiledEffects = do
@@ -6701,6 +6786,7 @@ workflowAgentCodexParsesTurnLifecycle = do
         object ["turns" .= [object ["id" .= ("other-turn" :: Text), "status" .= ("running" :: Text)]]]
       malformedValue = object ["turn" .= object ["status" .= ("completed" :: Text)]]
       request = WorkflowAgentCodexProtocol.agentTurnStartRequest (RequestId 440) plan
+      interruptRequest = WorkflowAgentCodexProtocol.agentThreadInterruptRequest (RequestId 442) turnRef
       cached =
         WorkflowAgentCodex.cachedAgentTurnStartInterpreter
           (AppServerInterpreter \_ -> pure (object ["turnId" .= ("uncached" :: Text)]))
@@ -6711,6 +6797,11 @@ workflowAgentCodexParsesTurnLifecycle = do
     WorkflowAgentCodex.readAgentTurn
       (AppServerInterpreter \_ -> pure readValue)
       (RequestId 441)
+      turnRef
+  interruptViaInterpreter <-
+    WorkflowAgentCodex.interruptAgentTurn
+      (AppServerInterpreter \incomingRequest -> if incomingRequest == interruptRequest then pure Null else pure (object ["unexpected" .= True]))
+      (RequestId 442)
       turnRef
   results <-
     sequence
@@ -6730,6 +6821,11 @@ workflowAgentCodexParsesTurnLifecycle = do
           case WorkflowAgentCodex.parseAgentTurnReadResult turnRef missingTurnValue of
             Right readResult -> readResult.agentTurnReadTurn == Nothing
             Left _ -> False
+      , assert "workflow Codex adapter renders typed interrupt request" $
+          interruptRequest == turnInterruptRequest (RequestId 442) (ThreadId "thread-1") (TurnId "turn-1")
+      , assert "workflow Codex adapter parses turn interrupt" $
+          interruptViaInterpreter
+            == Right (WorkflowAgent.AgentTurnInterrupt (ThreadId "thread-1") (TurnId "turn-1"))
       , assert "workflow Codex adapter rejects malformed turn start response" $
           case WorkflowAgentCodex.parseAgentTurnStart plan malformedValue of
             Left _ -> True
@@ -7171,13 +7267,26 @@ workflowExecutionMetadataCoversCurrentEffects :: IO Bool
 workflowExecutionMetadataCoversCurrentEffects = do
   results <-
     traverse
-      ( \(effectLabel, effect, expectedCommitOrder, expectedIdempotency) ->
+      ( \(effectLabel, effect, _expectedCapability, expectedCommitOrder, expectedIdempotency) ->
           let metadata = WorkflowExecution.workflowEffectMetadata effect
            in assert
                 ("workflow execution metadata for " <> Text.unpack effectLabel)
                 ( metadata.workflowEffectCommitOrder == expectedCommitOrder
                     && metadata.workflowEffectIdempotency == expectedIdempotency
                 )
+      )
+      workflowMetadataFixtureEffects
+  pure (and results)
+
+workflowExecutionCapabilityMetadataCoversCurrentEffects :: IO Bool
+workflowExecutionCapabilityMetadataCoversCurrentEffects = do
+  results <-
+    traverse
+      ( \(effectLabel, effect, expectedCapability, _expectedCommitOrder, _expectedIdempotency) ->
+          let metadata = WorkflowExecution.workflowEffectMetadata effect
+           in assert
+                ("workflow capability metadata for " <> Text.unpack effectLabel)
+                (metadata.workflowEffectCapability == expectedCapability)
       )
       workflowMetadataFixtureEffects
   pure (and results)
@@ -7280,7 +7389,7 @@ workflowExecutionCheckedActionsStopsOnHardFailure = do
   pure (and results)
 
 workflowMetadataFixtureEffects
-  :: [(Text, SomeEffect, WorkflowExecution.EffectCommitOrder, WorkflowExecution.EffectIdempotency)]
+  :: [(Text, SomeEffect, WorkflowExecution.WorkflowCapability, WorkflowExecution.EffectCommitOrder, WorkflowExecution.EffectIdempotency)]
 workflowMetadataFixtureEffects =
   let repo = RepoName "soulomoon/mlf2"
       issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
@@ -7296,35 +7405,42 @@ workflowMetadataFixtureEffects =
       blocked = BlockedReason "blocked"
       pre = WorkflowExecution.PreCommit
       post = WorkflowExecution.PostCommit
+      readWorld = WorkflowExecution.ReadWorld
+      startAgent = WorkflowExecution.StartAgent
+      writeLocal = WorkflowExecution.WriteLocal
+      mutateRemote = WorkflowExecution.MutateRemote
+      merge = WorkflowExecution.Merge
+      sleep = WorkflowExecution.Sleep
+      stop = WorkflowExecution.Stop
       idempotent = WorkflowExecution.Idempotent
       checkThenAct = WorkflowExecution.CheckThenAct
       atMostOnce = WorkflowExecution.AtMostOnce
       derivedWrite = WorkflowExecution.DerivedWrite
-   in [ ("ReadOpenIssues", SomeEffect (ReadOpenIssues repo), pre, idempotent)
-      , ("ReadOpenPullRequests", SomeEffect (ReadOpenPullRequests repo), pre, idempotent)
-      , ("ReadReviewThreads", SomeEffect (ReadReviewThreads prConfig), pre, idempotent)
-      , ("StartPlannerTurn", SomeEffect (StartPlannerTurn thread), pre, atMostOnce)
-      , ("StartWorkerTurn", SomeEffect (StartWorkerTurn evidence thread), pre, atMostOnce)
-      , ("StartIssuePlanWorkerTurn", SomeEffect (StartIssuePlanWorkerTurn issueConfig prNumber thread), pre, atMostOnce)
-      , ("StartIssueImplementationWorkerTurn", SomeEffect (StartIssueImplementationWorkerTurn thread), pre, atMostOnce)
-      , ("StartReviewerTurn", SomeEffect (StartReviewerTurn prConfig commit thread), pre, atMostOnce)
-      , ("StartReviewerVerificationTurn", SomeEffect (StartReviewerVerificationTurn prConfig evidence commit thread), pre, atMostOnce)
-      , ("StartIssueFinalReviewTurn", SomeEffect (StartIssueFinalReviewTurn issueConfig prNumber commit thread), pre, atMostOnce)
-      , ("PushBranch", SomeEffect (PushBranch (BranchName "codex/issue-42")), pre, checkThenAct)
-      , ("CreateIssue", SomeEffect (CreateIssue repo issueRequest), pre, atMostOnce)
-      , ("CreatePullRequest", SomeEffect (CreatePullRequest issueConfig), pre, atMostOnce)
-      , ("UpdatePullRequestBody", SomeEffect (UpdatePullRequestBody issueConfig prNumber), pre, checkThenAct)
-      , ("UpdateIssueFollowUp", SomeEffect (UpdateIssueFollowUp issueConfig evidence), pre, atMostOnce)
-      , ("CloseIssue", SomeEffect (CloseIssue issueConfig prNumber), pre, checkThenAct)
-      , ("ResolveReviewThread", SomeEffect (ResolveReviewThread reviewThread), pre, checkThenAct)
-      , ("ReplyReviewThread", SomeEffect (ReplyReviewThread reviewThread "reply"), pre, atMostOnce)
-      , ("PublishReviewFindings", SomeEffect (PublishReviewFindings prConfig evidence), pre, atMostOnce)
-      , ("RecordIssuePlan", SomeEffect (RecordIssuePlan issueConfig prNumber "plan"), pre, derivedWrite)
-      , ("RecordPlanningGraph", SomeEffect (RecordPlanningGraph graph), post, derivedWrite)
-      , ("RecordBlocked", SomeEffect (RecordBlocked blocked), post, derivedWrite)
-      , ("MergePullRequest", SomeEffect (MergePullRequest prNumber cleanEvidence), pre, checkThenAct)
-      , ("StopDaemon", SomeEffect StopDaemon, post, idempotent)
-      , ("SleepUntilNextPoll", SomeEffect SleepUntilNextPoll, post, idempotent)
+   in [ ("ReadOpenIssues", SomeEffect (ReadOpenIssues repo), readWorld, pre, idempotent)
+      , ("ReadOpenPullRequests", SomeEffect (ReadOpenPullRequests repo), readWorld, pre, idempotent)
+      , ("ReadReviewThreads", SomeEffect (ReadReviewThreads prConfig), readWorld, pre, idempotent)
+      , ("StartPlannerTurn", SomeEffect (StartPlannerTurn thread), startAgent, pre, atMostOnce)
+      , ("StartWorkerTurn", SomeEffect (StartWorkerTurn evidence thread), startAgent, pre, atMostOnce)
+      , ("StartIssuePlanWorkerTurn", SomeEffect (StartIssuePlanWorkerTurn issueConfig prNumber thread), startAgent, pre, atMostOnce)
+      , ("StartIssueImplementationWorkerTurn", SomeEffect (StartIssueImplementationWorkerTurn thread), startAgent, pre, atMostOnce)
+      , ("StartReviewerTurn", SomeEffect (StartReviewerTurn prConfig commit thread), startAgent, pre, atMostOnce)
+      , ("StartReviewerVerificationTurn", SomeEffect (StartReviewerVerificationTurn prConfig evidence commit thread), startAgent, pre, atMostOnce)
+      , ("StartIssueFinalReviewTurn", SomeEffect (StartIssueFinalReviewTurn issueConfig prNumber commit thread), startAgent, pre, atMostOnce)
+      , ("PushBranch", SomeEffect (PushBranch (BranchName "codex/issue-42")), mutateRemote, pre, checkThenAct)
+      , ("CreateIssue", SomeEffect (CreateIssue repo issueRequest), mutateRemote, pre, atMostOnce)
+      , ("CreatePullRequest", SomeEffect (CreatePullRequest issueConfig), mutateRemote, pre, atMostOnce)
+      , ("UpdatePullRequestBody", SomeEffect (UpdatePullRequestBody issueConfig prNumber), mutateRemote, pre, checkThenAct)
+      , ("UpdateIssueFollowUp", SomeEffect (UpdateIssueFollowUp issueConfig evidence), mutateRemote, pre, atMostOnce)
+      , ("CloseIssue", SomeEffect (CloseIssue issueConfig prNumber), mutateRemote, pre, checkThenAct)
+      , ("ResolveReviewThread", SomeEffect (ResolveReviewThread reviewThread), mutateRemote, pre, checkThenAct)
+      , ("ReplyReviewThread", SomeEffect (ReplyReviewThread reviewThread "reply"), mutateRemote, pre, atMostOnce)
+      , ("PublishReviewFindings", SomeEffect (PublishReviewFindings prConfig evidence), mutateRemote, pre, atMostOnce)
+      , ("RecordIssuePlan", SomeEffect (RecordIssuePlan issueConfig prNumber "plan"), writeLocal, pre, derivedWrite)
+      , ("RecordPlanningGraph", SomeEffect (RecordPlanningGraph graph), writeLocal, post, derivedWrite)
+      , ("RecordBlocked", SomeEffect (RecordBlocked blocked), writeLocal, post, derivedWrite)
+      , ("MergePullRequest", SomeEffect (MergePullRequest prNumber cleanEvidence), merge, pre, checkThenAct)
+      , ("StopDaemon", SomeEffect StopDaemon, stop, post, idempotent)
+      , ("SleepUntilNextPoll", SomeEffect SleepUntilNextPoll, sleep, post, idempotent)
       ]
 
 sameReplay :: Either ReplayFailure EventReplayResult -> Either ReplayFailure EventReplayResult -> Bool

@@ -46,7 +46,12 @@ import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhas
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..), observeDaemonState)
-import CodexWatcher.Workflow.Types (MoifoldSpec, legacyObservedPlannedTransition)
+import CodexWatcher.Workflow.Transaction.Core
+  ( WorkflowObservedTransactionHooks (..)
+  , WorkflowObservedTransactionResult (..)
+  , runWorkflowObservedExecuteTransaction
+  )
+import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), legacyObservedPlannedTransition)
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.Text (Text)
@@ -237,14 +242,6 @@ replayEventLogFromEvents events =
     Left failure -> Left (DaemonReplayFailed failure)
     Right replay -> Right replay
 
-data PreparedObservedCommit = PreparedObservedCommit
-  { preparedFinalReplay :: EventReplayResult
-  , preparedEvents :: [WatcherEvent]
-  , preparedCompatibilityWrites :: [CompatibilityWrite]
-  , preparedCompiledEffects :: CompiledEffectPlan
-  , preparedPostActions :: [WorkflowPlannedAction]
-  }
-
 runObservedDaemonDryRun
   :: Monad m
   => ActionExecutor m
@@ -293,94 +290,92 @@ runObservedDaemonExecute
   -> DaemonObservation
   -> ObservedPolicyTick
   -> m (Either DaemonFailure DaemonObservedTickResult)
-runObservedDaemonExecute executor options events replay observation observed0 = do
-  let observed = observed0
-  case validatePhaseActionPlan replay.replayState observed.observedEffects of
-    Left errorValue -> pure (Left (DaemonObservationRejected (formatPhaseActionValidationError errorValue)))
-    Right () -> do
-      let workflowEffects = compileWorkflowEffectPlanWithMetadata options.daemonRuntimeConfig observed.observedEffects
-          compiledEffects = workflowCompiledEffectPlanLegacy workflowEffects
-          (preCommitActions, postCommitActions) = partitionWorkflowActions workflowEffects
-          planned = legacyObservedPlannedTransition observed
-      preReportsResult <- executeWorkflowCheckedActions executor preCommitActions
-      case preReportsResult of
-        Left failure -> pure (Left (daemonFailureFromWorkflowActionFailure failure))
-        Right preReports -> do
-          case prepareObservedCommit options events observed compiledEffects postCommitActions preReports of
-            Left failure -> pure (Left failure)
-            Right prepared -> do
-              mapM_
-                ( \event -> do
-                    appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
-                    Log.logWatcher
-                      executor.actionLogger
-                      ( Log.watcherLog
-                          Log.Info
-                          "event_committed"
-                          "watcher event committed"
-                          [ "event" .= Text.pack (show event)
-                          , "eventsPath" .= options.daemonEventLogPath
-                          ]
-                      )
-                )
-                prepared.preparedEvents
-              mapM_
-                ( \write -> do
-                    writeCompatibility executor.actionRuntime write
-                    Log.logWatcher
-                      executor.actionLogger
-                      ( Log.watcherLog
-                          Log.Debug
-                          "compatibility_written"
-                          "compatibility state written"
-                          ["path" .= compatibilityWritePath write]
-                      )
-                )
-                prepared.preparedCompatibilityWrites
-              postReportsResult <- executeWorkflowCheckedActions executor prepared.preparedPostActions
-              pure case postReportsResult of
-                Left failure -> Left (daemonFailureFromWorkflowActionFailure failure)
-                Right postReports ->
-                  let audit =
-                        WorkflowEventLog.workflowSuccessAudit @MoifoldSpec
-                          replay.replayState
-                          observation
-                          planned
-                          prepared.preparedFinalReplay.replayState
-                          preReports
-                          postReports
-                   in Right
-                        DaemonObservedTickResult
-                          { daemonObservedReplayResult = replay
-                          , daemonObservedEvent = observed.observedEvent
-                          , daemonObservedState = prepared.preparedFinalReplay.replayState
-                          , daemonObservedCompatibilityWrites = prepared.preparedCompatibilityWrites
-                          , daemonObservedCompiledEffects = prepared.preparedCompiledEffects
-                          , daemonObservedActionReports = preReports <> postReports
-                          , daemonObservedAudit = audit
-                          }
+runObservedDaemonExecute executor options events _replay observation _observed =
+  fmap (observedTransactionResultToDaemon options)
+    <$> runWorkflowObservedExecuteTransaction @MoifoldSpec (moifoldObservedTransactionHooks executor options) events observation
 
-prepareObservedCommit
+moifoldObservedTransactionHooks
+  :: Monad m
+  => ActionExecutor m
+  -> DaemonOptions
+  -> WorkflowObservedTransactionHooks m MoifoldSpec WorkflowCompiledEffectPlan WorkflowPlannedAction ActionExecutionReport DaemonFailure
+moifoldObservedTransactionHooks executor options =
+  WorkflowObservedTransactionHooks
+    { workflowTransactionMapError = DaemonObservationRejected
+    , workflowTransactionCompileEffects = compileWorkflowEffectPlanWithMetadata options.daemonRuntimeConfig
+    , workflowTransactionPartitionActions = partitionWorkflowActions
+    , workflowTransactionDryRunActions = fmap dryRunWorkflowAction
+    , workflowTransactionExecuteActions = executeMoifoldWorkflowActions executor
+    , workflowTransactionCommitEvent = commitMoifoldObservedEvent executor options
+    , workflowTransactionAfterCommit = writeMoifoldCompatibilityState executor options
+    }
+
+executeMoifoldWorkflowActions :: Monad m => ActionExecutor m -> [WorkflowPlannedAction] -> m (Either DaemonFailure [ActionExecutionReport])
+executeMoifoldWorkflowActions executor actions = do
+  result <- executeWorkflowCheckedActions executor actions
+  pure case result of
+    Left failure -> Left (daemonFailureFromWorkflowActionFailure failure)
+    Right reports -> Right reports
+
+commitMoifoldObservedEvent :: Monad m => ActionExecutor m -> DaemonOptions -> WatcherEvent -> m (Either DaemonFailure ())
+commitMoifoldObservedEvent executor options event = do
+  appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Info
+        "event_committed"
+        "watcher event committed"
+        [ "event" .= Text.pack (show event)
+        , "eventsPath" .= options.daemonEventLogPath
+        ]
+    )
+  pure (Right ())
+
+writeMoifoldCompatibilityState :: Monad m => ActionExecutor m -> DaemonOptions -> SomeWatcherState -> m (Either DaemonFailure ())
+writeMoifoldCompatibilityState executor options finalState = do
+  mapM_
+    ( \write -> do
+        writeCompatibility executor.actionRuntime write
+        Log.logWatcher
+          executor.actionLogger
+          ( Log.watcherLog
+              Log.Debug
+              "compatibility_written"
+              "compatibility state written"
+              ["path" .= compatibilityWritePath write]
+          )
+    )
+    (observedCompatibilityWrites options finalState)
+  pure (Right ())
+
+observedTransactionResultToDaemon
   :: DaemonOptions
-  -> [WatcherEvent]
-  -> ObservedPolicyTick
-  -> CompiledEffectPlan
-  -> [WorkflowPlannedAction]
-  -> [ActionExecutionReport]
-  -> Either DaemonFailure PreparedObservedCommit
-prepareObservedCommit options priorEvents observed compiledEffects postCommitActions _preReports = do
-  let committedEvents = [observed.observedEvent]
-  finalReplay <- replayEventLogFromEvents (priorEvents <> committedEvents)
-  let finalState = finalReplay.replayState
-      compatibilityWrites = compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir) finalState
-  pure
-    PreparedObservedCommit
-      { preparedFinalReplay = finalReplay
-      , preparedEvents = committedEvents
-      , preparedCompatibilityWrites = compatibilityWrites
-      , preparedCompiledEffects = compiledEffects
-      , preparedPostActions = postCommitActions
-      }
+  -> WorkflowObservedTransactionResult MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport FailureClassification
+  -> DaemonObservedTickResult
+observedTransactionResultToDaemon options result =
+  DaemonObservedTickResult
+    { daemonObservedReplayResult = result.workflowTransactionPriorReplay
+    , daemonObservedEvent = result.workflowTransactionPlanned.plannedEvent
+    , daemonObservedState = result.workflowTransactionFinalState
+    , daemonObservedCompatibilityWrites = observedCompatibilityWrites options result.workflowTransactionFinalState
+    , daemonObservedCompiledEffects = workflowCompiledEffectPlanLegacy result.workflowTransactionCompiledEffects
+    , daemonObservedActionReports = result.workflowTransactionPreCommitReports <> result.workflowTransactionPostCommitReports
+    , daemonObservedAudit = result.workflowTransactionAudit
+    }
+
+dryRunWorkflowAction :: WorkflowPlannedAction -> ActionExecutionReport
+dryRunWorkflowAction action =
+  ActionExecutionReport
+    { actionExecutionMode = DryRunActions
+    , actionExecutionAction = action.workflowPlannedAction
+    , actionExecutionResult = DryRunActionResult
+    , actionExecutionOutcome = ActionSucceeded
+    }
+
+observedCompatibilityWrites :: DaemonOptions -> SomeWatcherState -> [CompatibilityWrite]
+observedCompatibilityWrites options =
+  compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir)
 
 daemonFailureFromWorkflowActionFailure :: WorkflowActionFailure -> DaemonFailure
 daemonFailureFromWorkflowActionFailure failure =

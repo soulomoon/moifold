@@ -45,6 +45,10 @@ class WorkflowSpec spec where
     :: WorkflowObservedTick spec
     -> PlannedTransition spec
 
+  workflowObservedState
+    :: WorkflowObservedTick spec
+    -> WorkflowState spec
+
   workflowPlanTransition
     :: WorkflowEvent spec
     -> WorkflowEffectPlan spec
@@ -53,6 +57,10 @@ class WorkflowSpec spec where
   workflowReplayEvents
     :: [WorkflowEvent spec]
     -> Either (WorkflowError spec) (WorkflowReplayResult spec)
+
+  workflowReplayState
+    :: WorkflowReplayResult spec
+    -> WorkflowState spec
 
   workflowValidateEffects
     :: WorkflowState spec

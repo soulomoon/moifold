@@ -3,8 +3,11 @@
 
 module CodexWatcher.Workflow.Agent.Codex
   ( agentThreadReadRequest
+  , agentThreadInterruptRequest
   , agentTurnStartRequest
   , cachedAgentTurnStartInterpreter
+  , interruptAgentTurn
+  , parseAgentTurnInterrupt
   , parseAgentTurnReadResult
   , parseAgentTurnStart
   , readAgentTurn
@@ -23,11 +26,13 @@ import CodexWatcher.Workflow.Agent.Codex.Client
 import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
 import CodexWatcher.Workflow.Agent.Codex.Protocol
   ( agentThreadReadRequest
+  , agentThreadInterruptRequest
   , agentTurnStartRequest
   )
 import CodexWatcher.Workflow.Agent.Ids (RequestId)
 import CodexWatcher.Workflow.Agent.Types
   ( AgentTurnPlan (..)
+  , AgentTurnInterrupt (..)
   , AgentTurnReadResult (..)
   , AgentTurnStart (..)
   , TurnRef (..)
@@ -53,6 +58,14 @@ parseAgentTurnReadResult turnRef value = do
       , agentTurnReadThreadSystemError = threadSystemError value
       }
 
+parseAgentTurnInterrupt :: TurnRef agentRole output -> Value -> Either AppServerClientFailure AgentTurnInterrupt
+parseAgentTurnInterrupt turnRef _value =
+  Right
+    AgentTurnInterrupt
+      { agentTurnInterruptThreadId = turnRef.turnRefThreadId
+      , agentTurnInterruptTurnId = turnRef.turnRefTurnId
+      }
+
 startAgentTurn
   :: Monad m
   => AppServerInterpreter m
@@ -70,6 +83,15 @@ readAgentTurn
   -> m (Either AppServerClientFailure (AgentTurnReadResult AppServerTurn))
 readAgentTurn interpreter requestId turnRef =
   parseAgentTurnReadResult turnRef <$> interpreter.appServerSendRequest (agentThreadReadRequest requestId turnRef)
+
+interruptAgentTurn
+  :: Monad m
+  => AppServerInterpreter m
+  -> RequestId
+  -> TurnRef agentRole output
+  -> m (Either AppServerClientFailure AgentTurnInterrupt)
+interruptAgentTurn interpreter requestId turnRef =
+  parseAgentTurnInterrupt turnRef <$> interpreter.appServerSendRequest (agentThreadInterruptRequest requestId turnRef)
 
 cachedAgentTurnStartInterpreter :: Monad m => AppServerInterpreter m -> AppServerRequest -> Value -> AppServerInterpreter m
 cachedAgentTurnStartInterpreter interpreter expectedRequest response =

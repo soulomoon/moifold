@@ -17,6 +17,7 @@ module CodexWatcher.Workflow.Execution
   , PlannedAction (..)
   , TurnRuntimeConfig (..)
   , WorkflowActionFailure (..)
+  , WorkflowCapability (..)
   , WorkflowCompiledEffectPlan (..)
   , WorkflowCompiledEffectPlanOf (..)
   , WorkflowEffectMetadata (..)
@@ -74,6 +75,7 @@ import CodexWatcher.Runtime.Command.Types (CommandReport)
 import CodexWatcher.Workflow.Execution.Core
   ( EffectCommitOrder (..)
   , EffectIdempotency (..)
+  , WorkflowCapability (..)
   , WorkflowCompiledEffectPlanOf (..)
   , WorkflowEffectMetadata (..)
   , WorkflowPlannedActionOf (..)
@@ -111,40 +113,42 @@ data WorkflowActionFailure = WorkflowActionFailure
 workflowEffectMetadata :: SomeEffect -> WorkflowEffectMetadata
 workflowEffectMetadata (SomeEffect effect) =
   case effect of
-    ReadOpenIssues {} -> preCommit Idempotent
-    ReadOpenPullRequests {} -> preCommit Idempotent
-    ReadReviewThreads {} -> preCommit Idempotent
-    StartPlannerTurn {} -> preCommit AtMostOnce
-    StartWorkerTurn {} -> preCommit AtMostOnce
-    StartIssuePlanWorkerTurn {} -> preCommit AtMostOnce
-    StartIssueImplementationWorkerTurn {} -> preCommit AtMostOnce
-    StartReviewerTurn {} -> preCommit AtMostOnce
-    StartReviewerVerificationTurn {} -> preCommit AtMostOnce
-    StartIssueFinalReviewTurn {} -> preCommit AtMostOnce
-    PushBranch {} -> preCommit CheckThenAct
-    CreateIssue {} -> preCommit AtMostOnce
-    CreatePullRequest {} -> preCommit AtMostOnce
-    UpdatePullRequestBody {} -> preCommit CheckThenAct
-    UpdateIssueFollowUp {} -> preCommit AtMostOnce
-    CloseIssue {} -> preCommit CheckThenAct
-    ResolveReviewThread {} -> preCommit CheckThenAct
-    ReplyReviewThread {} -> preCommit AtMostOnce
-    PublishReviewFindings {} -> preCommit AtMostOnce
-    RecordIssuePlan {} -> preCommit DerivedWrite
-    RecordPlanningGraph {} -> postCommit DerivedWrite
-    RecordBlocked {} -> postCommit DerivedWrite
-    MergePullRequest {} -> preCommit CheckThenAct
-    StopDaemon -> postCommit Idempotent
-    SleepUntilNextPoll -> postCommit Idempotent
+    ReadOpenIssues {} -> preCommit ReadWorld Idempotent
+    ReadOpenPullRequests {} -> preCommit ReadWorld Idempotent
+    ReadReviewThreads {} -> preCommit ReadWorld Idempotent
+    StartPlannerTurn {} -> preCommit StartAgent AtMostOnce
+    StartWorkerTurn {} -> preCommit StartAgent AtMostOnce
+    StartIssuePlanWorkerTurn {} -> preCommit StartAgent AtMostOnce
+    StartIssueImplementationWorkerTurn {} -> preCommit StartAgent AtMostOnce
+    StartReviewerTurn {} -> preCommit StartAgent AtMostOnce
+    StartReviewerVerificationTurn {} -> preCommit StartAgent AtMostOnce
+    StartIssueFinalReviewTurn {} -> preCommit StartAgent AtMostOnce
+    PushBranch {} -> preCommit MutateRemote CheckThenAct
+    CreateIssue {} -> preCommit MutateRemote AtMostOnce
+    CreatePullRequest {} -> preCommit MutateRemote AtMostOnce
+    UpdatePullRequestBody {} -> preCommit MutateRemote CheckThenAct
+    UpdateIssueFollowUp {} -> preCommit MutateRemote AtMostOnce
+    CloseIssue {} -> preCommit MutateRemote CheckThenAct
+    ResolveReviewThread {} -> preCommit MutateRemote CheckThenAct
+    ReplyReviewThread {} -> preCommit MutateRemote AtMostOnce
+    PublishReviewFindings {} -> preCommit MutateRemote AtMostOnce
+    RecordIssuePlan {} -> preCommit WriteLocal DerivedWrite
+    RecordPlanningGraph {} -> postCommit WriteLocal DerivedWrite
+    RecordBlocked {} -> postCommit WriteLocal DerivedWrite
+    MergePullRequest {} -> preCommit Merge CheckThenAct
+    StopDaemon -> postCommit Stop Idempotent
+    SleepUntilNextPoll -> postCommit Sleep Idempotent
  where
-  preCommit idempotency =
+  preCommit capability idempotency =
     WorkflowEffectMetadata
-      { workflowEffectCommitOrder = PreCommit
+      { workflowEffectCapability = capability
+      , workflowEffectCommitOrder = PreCommit
       , workflowEffectIdempotency = idempotency
       }
-  postCommit idempotency =
+  postCommit capability idempotency =
     WorkflowEffectMetadata
-      { workflowEffectCommitOrder = PostCommit
+      { workflowEffectCapability = capability
+      , workflowEffectCommitOrder = PostCommit
       , workflowEffectIdempotency = idempotency
       }
 

@@ -8,6 +8,9 @@ module CodexWatcher.EventLog.Types
   , ReplayFailure (..)
   , EventReplayResult (..)
   , eventName
+  , watcherEventCodecContract
+  , watcherEventMetadataLabels
+  , watcherEventSchemaVersion
   ) where
 
 import CodexWatcher.Effects
@@ -36,9 +39,17 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceSummaries
   , reviewEvidenceThreadIds
   )
-import Data.Aeson (FromJSON (..), Object, ToJSON (..), object, withObject, (.:), (.:?), (.!=), (.=))
+import CodexWatcher.Workflow.Codec
+  ( WorkflowCodecContract (..)
+  , WorkflowDecodeError (..)
+  , WorkflowEventTypeLabel (..)
+  , WorkflowMetadataLabel (..)
+  , WorkflowSchemaVersion (..)
+  )
+import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value (..), object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.Aeson.Key qualified as Key
-import Data.Aeson.Types (Pair, Parser)
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.Types (Pair, Parser, parseEither)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -613,3 +624,48 @@ eventName = \case
   WatcherRecoveredInvalidState {} -> "watcher_recovered_invalid_state"
   WatcherBlocked {} -> "watcher_blocked"
   WatcherStopped {} -> "watcher_stopped"
+
+watcherEventSchemaVersion :: WatcherEvent -> WorkflowSchemaVersion
+watcherEventSchemaVersion _ =
+  WorkflowSchemaVersion 1
+
+watcherEventMetadataLabels :: [WorkflowMetadataLabel]
+watcherEventMetadataLabels =
+  fmap
+    WorkflowMetadataLabel
+    [ "emittedAt"
+    , "workflowId"
+    , "domain"
+    , "phase"
+    , "actor"
+    , "source"
+    , "correlationId"
+    ]
+
+watcherEventCodecContract :: WorkflowCodecContract WatcherEvent Value
+watcherEventCodecContract =
+  WorkflowCodecContract
+    { workflowCodecEventTypeLabel = WorkflowEventTypeLabel . eventName
+    , workflowCodecSchemaVersion = watcherEventSchemaVersion
+    , workflowCodecMetadataLabels = watcherEventMetadataLabels
+    , workflowCodecEncode = toJSON
+    , workflowCodecDecode =
+        \value ->
+          case parseEither parseJSON value of
+            Right event -> Right event
+            Left reason ->
+              Left
+                WorkflowDecodeError
+                  { workflowDecodeErrorTypeLabel = eventTypeLabelFromValue value
+                  , workflowDecodeErrorSchemaVersion = Just (WorkflowSchemaVersion 1)
+                  , workflowDecodeErrorReason = Text.pack reason
+                  }
+    }
+
+eventTypeLabelFromValue :: Value -> Maybe WorkflowEventTypeLabel
+eventTypeLabelFromValue (Object objectValue) =
+  case KeyMap.lookup "type" objectValue of
+    Just (String label) -> Just (WorkflowEventTypeLabel label)
+    _ -> Nothing
+eventTypeLabelFromValue _ =
+  Nothing

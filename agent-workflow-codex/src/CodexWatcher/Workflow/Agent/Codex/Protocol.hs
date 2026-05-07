@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module CodexWatcher.Workflow.Agent.Codex.Protocol
-  ( agentThreadReadRequest
+  ( agentThreadInterruptRequest
+  , agentThreadReadRequest
   , agentTurnStartRequest
   ) where
 
@@ -9,6 +10,7 @@ import CodexWatcher.AppServerProtocol
   ( AppServerRequest
   , TurnStartOptions (..)
   , threadReadRequest
+  , turnInterruptRequest
   , turnStartRequest
   )
 import CodexWatcher.Workflow.Agent.Ids (RequestId)
@@ -36,3 +38,7 @@ agentTurnStartRequest requestId plan =
 agentThreadReadRequest :: RequestId -> TurnRef agentRole output -> AppServerRequest
 agentThreadReadRequest requestId turnRef =
   threadReadRequest requestId turnRef.turnRefThreadId True
+
+agentThreadInterruptRequest :: RequestId -> TurnRef agentRole output -> AppServerRequest
+agentThreadInterruptRequest requestId turnRef =
+  turnInterruptRequest requestId turnRef.turnRefThreadId turnRef.turnRefTurnId

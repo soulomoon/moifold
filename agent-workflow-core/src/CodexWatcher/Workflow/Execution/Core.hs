@@ -3,6 +3,7 @@
 module CodexWatcher.Workflow.Execution.Core
   ( EffectCommitOrder (..)
   , EffectIdempotency (..)
+  , WorkflowCapability (..)
   , WorkflowCompiledEffectPlanOf (..)
   , WorkflowEffectMetadata (..)
   , WorkflowPlannedActionOf (..)
@@ -28,8 +29,19 @@ data EffectIdempotency
   | DerivedWrite
   deriving stock (Eq, Show)
 
+data WorkflowCapability
+  = ReadWorld
+  | StartAgent
+  | WriteLocal
+  | MutateRemote
+  | Merge
+  | Sleep
+  | Stop
+  deriving stock (Eq, Show)
+
 data WorkflowEffectMetadata = WorkflowEffectMetadata
-  { workflowEffectCommitOrder :: EffectCommitOrder
+  { workflowEffectCapability :: WorkflowCapability
+  , workflowEffectCommitOrder :: EffectCommitOrder
   , workflowEffectIdempotency :: EffectIdempotency
   }
   deriving stock (Eq, Show)

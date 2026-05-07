@@ -22,7 +22,9 @@ import CodexWatcher.Core.Ids (CommitSha)
 import CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)
   , AgentRole (..)
+  , AgentSideEffectScope (..)
   , ClassifiedAgentOutput (..)
+  , defaultAgentRetryPolicy
   )
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -33,6 +35,8 @@ prReviewWorkerAgentRole =
     { agentRoleName = "pr-review-worker"
     , renderAgentInput = \input -> input
     , agentOutputSchema = Just prReviewWorkerTurnOutputSchema
+    , agentRetryPolicy = defaultAgentRetryPolicy
+    , agentSideEffectScope = AgentWritesWorktree
     , agentClassifyTurn = classifyPrReviewWorkerAgentTurn
     }
 
@@ -42,6 +46,8 @@ prReviewReviewerAgentRole commit =
     { agentRoleName = "pr-reviewer"
     , renderAgentInput = \input -> input
     , agentOutputSchema = Just reviewerTurnOutputSchema
+    , agentRetryPolicy = defaultAgentRetryPolicy
+    , agentSideEffectScope = AgentReadOnly
     , agentClassifyTurn = classifyPrReviewReviewerAgentTurn commit
     }
 

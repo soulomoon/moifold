@@ -17,7 +17,7 @@ module CodexWatcher.Workflow.Types
 
 import CodexWatcher.Effects (EffectPlan, SomeEffect, SomeEffectAction (..), actionKindText, someEffectAction)
 import CodexWatcher.EventLog.Replay (applyEvent, initializeFromEvent, replayEventLog)
-import CodexWatcher.EventLog.Types (EventReplayResult, ReplayFailure (..), WatcherEvent, eventName)
+import CodexWatcher.EventLog.Types (EventReplayResult (..), ReplayFailure (..), WatcherEvent, eventName)
 import CodexWatcher.Core.State (SomeWatcherState, isTerminalState, someDomain, somePhase)
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
 import CodexWatcher.Workflow.Execution (partitionWorkflowEffectPlan)
@@ -42,11 +42,13 @@ instance WorkflowSpec MoifoldSpec where
   workflowApplyEvent = applyEvent
   workflowObserve = observeDaemonState
   workflowObservedTransition = legacyObservedPlannedTransition
+  workflowObservedState = observedState
   workflowPlanTransition = moifoldPlannedTransitionFromEffects
   workflowReplayEvents events =
     case replayEventLog events of
       Left failure -> Left (formatReplayFailure failure)
       Right result -> Right result
+  workflowReplayState = replayState
   workflowValidateEffects state effects =
     case validatePhaseActionPlan state effects of
       Left failure -> Left (formatPhaseActionValidationError failure)

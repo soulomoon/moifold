@@ -32,29 +32,41 @@ module CodexWatcher.Workflow.DocsMigration
 
 import CodexWatcher.AppServerClient (AppServerTurn (..))
 import CodexWatcher.Core.Ids (ThreadId, TurnId)
-import CodexWatcher.Workflow.Agent (AgentOutputClass (..), AgentRole (..), ClassifiedAgentOutput (..), TurnRef (..))
+import CodexWatcher.Workflow.Agent
+  ( AgentOutputClass (..)
+  , AgentRole (..)
+  , AgentSideEffectScope (..)
+  , ClassifiedAgentOutput (..)
+  , TurnRef (..)
+  , defaultAgentRetryPolicy
+  )
 import CodexWatcher.Workflow.EventLog
   ( WorkflowReplaySummary (..)
   , WorkflowTickAudit
   , formatWorkflowReplayFailure
   , replayWorkflowEventLogDetailed
-  , workflowDryRunAudit
-  , workflowSuccessAudit
   )
 import CodexWatcher.Workflow.Execution
   ( ActionExecutionMode (..)
   , EffectCommitOrder (..)
   , EffectIdempotency (..)
+  , WorkflowCapability (..)
   , WorkflowCompiledEffectPlanOf
   , WorkflowEffectMetadata (..)
+  , WorkflowPlannedActionOf (..)
   , compileWorkflowGenericEffectPlan
   , dryRunWorkflowGenericCompiledEffectPlan
-  , executeWorkflowGenericActions
   , executeWorkflowGenericCompiledEffectPlan
-  , partitionWorkflowGenericActionReports
   , partitionWorkflowGenericActions
   )
+import CodexWatcher.Workflow.Failure (FailureClassification)
 import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
+import CodexWatcher.Workflow.Transaction.Core
+  ( WorkflowObservedTransactionHooks (..)
+  , WorkflowObservedTransactionResult (..)
+  , runWorkflowObservedDryRunTransaction
+  , runWorkflowObservedExecuteTransaction
+  )
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', (.:), (.:?), (.!=), withObject)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -171,8 +183,10 @@ instance WorkflowSpec DocsMigrationSpec where
   workflowApplyEvent = applyDocsMigrationEvent
   workflowObserve = observeDocsMigration
   workflowObservedTransition = docsMigrationObservedTransition
+  workflowObservedState = docsMigrationTickState
   workflowPlanTransition = docsMigrationPlannedTransitionFromEffects
   workflowReplayEvents = replayDocsMigrationEvents
+  workflowReplayState = docsMigrationReplayState
   workflowValidateEffects _state _effects = Right ()
   workflowEffectPlanEffects = id
   workflowEffectAllowed _state _effect = Right ()
@@ -198,6 +212,8 @@ docsMigrationAgentRole =
             , "Goal: " <> config.docsMigrationGoal
             ]
     , agentOutputSchema = Nothing
+    , agentRetryPolicy = defaultAgentRetryPolicy
+    , agentSideEffectScope = AgentReadOnly
     , agentClassifyTurn = classifyDocsMigrationTurn
     }
 
@@ -225,17 +241,18 @@ classifyDocsMigrationTurn turn
 docsMigrationEffectMetadata :: DocsMigrationEffect -> WorkflowEffectMetadata
 docsMigrationEffectMetadata = \case
   StartDocsMigrationTurn {} ->
-    postCommit AtMostOnce
+    postCommit StartAgent AtMostOnce
   WriteDocsMigrationDraft {} ->
-    postCommit DerivedWrite
+    postCommit WriteLocal DerivedWrite
   RunDocsMigrationValidation {} ->
-    postCommit CheckThenAct
+    postCommit ReadWorld CheckThenAct
   StopDocsMigrationDaemon ->
-    postCommit Idempotent
+    postCommit Stop Idempotent
  where
-  postCommit idempotency =
+  postCommit capability idempotency =
     WorkflowEffectMetadata
-      { workflowEffectCommitOrder = PostCommit
+      { workflowEffectCapability = capability
+      , workflowEffectCommitOrder = PostCommit
       , workflowEffectIdempotency = idempotency
       }
 
@@ -301,32 +318,9 @@ runDocsMigrationObservedDryRun
   :: [DocsMigrationEvent]
   -> DocsMigrationObservation
   -> Either Text DocsMigrationDaemonTickResult
-runDocsMigrationObservedDryRun events observation = do
-  priorReplay <- replayDocsMigrationEvents events
-  observed <- observeDocsMigration priorReplay.docsMigrationReplayState observation
-  let planned = docsMigrationObservedTransition observed
-      effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
-      compiled = compileDocsMigrationEffectPlan effects
-      reports = dryRunDocsMigrationCompiledEffectPlan compiled
-      (preReports, postReports) = partitionWorkflowGenericActionReports compiled reports
-      audit =
-        workflowDryRunAudit @DocsMigrationSpec
-          priorReplay.docsMigrationReplayState
-          observation
-          planned
-          observed.docsMigrationTickState
-          preReports
-          postReports
-  Right
-    DocsMigrationDaemonTickResult
-      { docsMigrationDaemonPriorReplay = priorReplay
-      , docsMigrationDaemonEvent = planned.plannedEvent
-      , docsMigrationDaemonState = observed.docsMigrationTickState
-      , docsMigrationDaemonCommittedEvents = []
-      , docsMigrationDaemonCompiledEffects = compiled
-      , docsMigrationDaemonActionReports = reports
-      , docsMigrationDaemonAudit = audit
-      }
+runDocsMigrationObservedDryRun events observation =
+  docsMigrationDaemonTickResult
+    <$> runWorkflowObservedDryRunTransaction @DocsMigrationSpec docsMigrationDryRunTransactionHooks events observation
 
 runDocsMigrationObservedExecute
   :: Monad m
@@ -335,46 +329,67 @@ runDocsMigrationObservedExecute
   -> DocsMigrationObservation
   -> m (Either Text DocsMigrationDaemonTickResult)
 runDocsMigrationObservedExecute interpreter events observation =
-  case replayDocsMigrationEvents events of
-    Left reason ->
-      pure (Left reason)
-    Right priorReplay ->
-      case observeDocsMigration priorReplay.docsMigrationReplayState observation of
-        Left reason ->
-          pure (Left reason)
-        Right observed -> do
-          let planned = docsMigrationObservedTransition observed
-              effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
-              compiled = compileDocsMigrationEffectPlan effects
-              (preActions, postActions) = partitionWorkflowGenericActions compiled
-          preReports <- executeWorkflowGenericActions (executeDocsMigrationAction interpreter) ExecuteActions preActions
-          let committedEvents = [planned.plannedEvent]
-          case replayDocsMigrationEvents (events <> committedEvents) of
-            Left reason ->
-              pure (Left reason)
-            Right finalReplay -> do
-              postReports <- executeWorkflowGenericActions (executeDocsMigrationAction interpreter) ExecuteActions postActions
-              let reports = preReports <> postReports
-                  audit =
-                    workflowSuccessAudit @DocsMigrationSpec
-                      priorReplay.docsMigrationReplayState
-                      observation
-                      planned
-                      finalReplay.docsMigrationReplayState
-                      preReports
-                      postReports
-              pure
-                ( Right
-                    DocsMigrationDaemonTickResult
-                      { docsMigrationDaemonPriorReplay = priorReplay
-                      , docsMigrationDaemonEvent = planned.plannedEvent
-                      , docsMigrationDaemonState = finalReplay.docsMigrationReplayState
-                      , docsMigrationDaemonCommittedEvents = committedEvents
-                      , docsMigrationDaemonCompiledEffects = compiled
-                      , docsMigrationDaemonActionReports = reports
-                      , docsMigrationDaemonAudit = audit
-                      }
-                )
+  fmap docsMigrationDaemonTickResult
+    <$> runWorkflowObservedExecuteTransaction @DocsMigrationSpec (docsMigrationTransactionHooksForInterpreter interpreter) events observation
+
+docsMigrationDryRunTransactionHooks
+  :: WorkflowObservedTransactionHooks
+       (Either Text)
+       DocsMigrationSpec
+       (WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction)
+       (WorkflowPlannedActionOf DocsMigrationEffect DocsMigrationAction)
+       DocsMigrationActionReport
+       Text
+docsMigrationDryRunTransactionHooks =
+  WorkflowObservedTransactionHooks
+    { workflowTransactionMapError = id
+    , workflowTransactionCompileEffects = compileDocsMigrationEffectPlan
+    , workflowTransactionPartitionActions = partitionWorkflowGenericActions
+    , workflowTransactionDryRunActions = fmap (docsMigrationActionReport DryRunActions False . workflowGenericPlannedAction)
+    , workflowTransactionExecuteActions = \_actions -> Left "docs migration dry-run hooks cannot execute actions"
+    , workflowTransactionCommitEvent = \_event -> Left "docs migration dry-run hooks cannot commit events"
+    , workflowTransactionAfterCommit = \_state -> Left "docs migration dry-run hooks cannot run post-commit callbacks"
+    }
+
+docsMigrationTransactionHooksForInterpreter
+  :: Monad m
+  => DocsMigrationInterpreter m
+  -> WorkflowObservedTransactionHooks
+       m
+       DocsMigrationSpec
+       (WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction)
+       (WorkflowPlannedActionOf DocsMigrationEffect DocsMigrationAction)
+       DocsMigrationActionReport
+       Text
+docsMigrationTransactionHooksForInterpreter interpreter =
+  WorkflowObservedTransactionHooks
+    { workflowTransactionMapError = id
+    , workflowTransactionCompileEffects = compileDocsMigrationEffectPlan
+    , workflowTransactionPartitionActions = partitionWorkflowGenericActions
+    , workflowTransactionDryRunActions = fmap (docsMigrationActionReport DryRunActions False . workflowGenericPlannedAction)
+    , workflowTransactionExecuteActions =
+        fmap Right . traverse (executeDocsMigrationAction interpreter ExecuteActions . workflowGenericPlannedAction)
+    , workflowTransactionCommitEvent = \_event -> pure (Right ())
+    , workflowTransactionAfterCommit = \_state -> pure (Right ())
+    }
+
+docsMigrationDaemonTickResult
+  :: WorkflowObservedTransactionResult
+       DocsMigrationSpec
+       (WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction)
+       DocsMigrationActionReport
+       FailureClassification
+  -> DocsMigrationDaemonTickResult
+docsMigrationDaemonTickResult result =
+  DocsMigrationDaemonTickResult
+    { docsMigrationDaemonPriorReplay = result.workflowTransactionPriorReplay
+    , docsMigrationDaemonEvent = result.workflowTransactionPlanned.plannedEvent
+    , docsMigrationDaemonState = result.workflowTransactionFinalState
+    , docsMigrationDaemonCommittedEvents = result.workflowTransactionCommittedEvents
+    , docsMigrationDaemonCompiledEffects = result.workflowTransactionCompiledEffects
+    , docsMigrationDaemonActionReports = result.workflowTransactionPreCommitReports <> result.workflowTransactionPostCommitReports
+    , docsMigrationDaemonAudit = result.workflowTransactionAudit
+    }
 
 replayDocsMigrationEvents :: [DocsMigrationEvent] -> Either Text DocsMigrationReplayResult
 replayDocsMigrationEvents events =
