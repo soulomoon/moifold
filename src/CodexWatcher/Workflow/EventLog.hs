@@ -12,12 +12,15 @@ module CodexWatcher.Workflow.EventLog
   , WorkflowNextDaemonRecommendation (..)
   , WorkflowTickAudit
   , WorkflowTransitionFailure (..)
+  , applyWorkflowEvent
   , applyMoifoldWorkflowEvent
   , initializeMoifoldWorkflow
+  , initializeWorkflowEvent
   , replayMoifoldWorkflowEvents
   , replayWorkflowEventLog
   , replayWorkflowEventLogDetailed
   , formatWorkflowReplayFailure
+  , formatWorkflowTransitionFailure
   , validateEventLogFixtureContract
   , workflowAuditCommittedEventLabel
   , workflowAuditFailureClassification
@@ -33,7 +36,7 @@ module CodexWatcher.Workflow.EventLog
   ) where
 
 import CodexWatcher.Effects (EffectPlan)
-import CodexWatcher.EventLog.Replay (applyEvent, initializeFromEvent, replayEventLog)
+import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult, ReplayFailure, WatcherEvent)
 import CodexWatcher.Failure (FailureClassification, failureIsRetryable)
 import CodexWatcher.Core.State (SomeWatcherState)
@@ -54,10 +57,14 @@ import CodexWatcher.Workflow.EventLog.Core
   , WorkflowReplayFailure (..)
   , WorkflowReplaySummary (..)
   , WorkflowTransitionFailure (..)
+  , applyWorkflowEvent
   , formatWorkflowReplayFailure
+  , formatWorkflowTransitionFailure
+  , initializeWorkflowEvent
   , replayWorkflowEventLogDetailed
   , validateEventLogFixtureContract
   )
+import CodexWatcher.Workflow.Types (MoifoldSpec)
 import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 import Data.Text (Text)
 
@@ -108,12 +115,16 @@ workflowFailureAudit =
   WorkflowAudit.workflowFailureAudit @spec failureIsRetryable
 
 initializeMoifoldWorkflow :: WatcherEvent -> Either Text (SomeWatcherState, EffectPlan)
-initializeMoifoldWorkflow =
-  initializeFromEvent
+initializeMoifoldWorkflow event =
+  case initializeWorkflowEvent @MoifoldSpec id event of
+    Left failure -> Left (formatWorkflowTransitionFailure failure)
+    Right initialized -> Right initialized
 
 applyMoifoldWorkflowEvent :: SomeWatcherState -> WatcherEvent -> Either Text (SomeWatcherState, EffectPlan)
-applyMoifoldWorkflowEvent =
-  applyEvent
+applyMoifoldWorkflowEvent state event =
+  case applyWorkflowEvent @MoifoldSpec id state event of
+    Left failure -> Left (formatWorkflowTransitionFailure failure)
+    Right applied -> Right applied
 
 replayMoifoldWorkflowEvents :: [WatcherEvent] -> Either ReplayFailure EventReplayResult
 replayMoifoldWorkflowEvents =

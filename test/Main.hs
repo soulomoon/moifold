@@ -6172,6 +6172,7 @@ workflowFacadeExtractionTests = do
       , workflowGithubCommandFacadeMatchesRuntimeRender
       , workflowEventLogCoreDetailedReplayMatchesMoifold
       , workflowEventLogCoreFixtureContractValidatesReplay
+      , workflowEventLogCoreTransitionContractsMatchFacades
       , workflowFacadeInitialApplyMatchesReplay
       , workflowPermissionFacadeMatchesStateMachine
       , workflowPermissionCoreChecksMatchMoifoldPermission
@@ -6468,6 +6469,80 @@ workflowEventLogCoreFixtureContractValidatesReplay = do
     case WorkflowEventLog.replayWorkflowEventLogDetailed @MoifoldSpec id events of
       Right summary -> WorkflowEventLog.validateEventLogFixtureContract @MoifoldSpec contract summary == Right ()
       Left _ -> False
+
+workflowEventLogCoreTransitionContractsMatchFacades :: IO Bool
+workflowEventLogCoreTransitionContractsMatchFacades = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      initialized = PrReviewInitialized prConfig (ThreadId "worker") (ThreadId "reviewer")
+      noUnresolved = PrReviewNoUnresolvedFound (CommitSha "abc123") (TurnId "reviewer-turn")
+      moifoldCoreInitial = WorkflowEventLog.initializeWorkflowEvent @MoifoldSpec id initialized
+      moifoldFacadeInitial = WorkflowEventLog.initializeMoifoldWorkflow initialized
+      docsConfig =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      docsInitialized = DocsMigration.DocsMigrationInitialized docsConfig
+      docsTurnStarted = DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+      docsCoreInitial = WorkflowEventLog.initializeWorkflowEvent @DocsMigration.DocsMigrationSpec id docsInitialized
+  results <-
+    sequence
+      [ assert "workflow event-log core initialize matches moifold facade" $
+          case (moifoldCoreInitial, moifoldFacadeInitial) of
+            (Right (coreState, coreEffects), Right (facadeState, facadeEffects)) ->
+              someDomain coreState == someDomain facadeState
+                && somePhase coreState == somePhase facadeState
+                && coreEffects == facadeEffects
+            _ -> False
+      , assert "workflow event-log core apply matches moifold facade" $
+          case (moifoldCoreInitial, moifoldFacadeInitial) of
+            (Right (coreState, _), Right (facadeState, _)) ->
+              case (WorkflowEventLog.applyWorkflowEvent @MoifoldSpec id coreState noUnresolved, WorkflowEventLog.applyMoifoldWorkflowEvent facadeState noUnresolved) of
+                (Right (coreState', coreEffects), Right (facadeState', facadeEffects)) ->
+                  someDomain coreState' == someDomain facadeState'
+                    && somePhase coreState' == somePhase facadeState'
+                    && coreEffects == facadeEffects
+                _ -> False
+            _ -> False
+      , assert "workflow event-log core transition failure records moifold state and event labels" $
+          case moifoldCoreInitial of
+            Right (state, _) ->
+              case WorkflowEventLog.applyWorkflowEvent @MoifoldSpec id state initialized of
+                Left failure ->
+                  WorkflowEventLog.workflowTransitionEventLabel failure == "pr_review_initialized"
+                    && WorkflowEventLog.workflowTransitionPriorStateLabel failure == Just (workflowStateLabel @MoifoldSpec state)
+                    && not (Text.null (WorkflowEventLog.workflowTransitionReason failure))
+                Right _ -> False
+            Left _ -> False
+      , assert "workflow event-log core initializes docs-migration workflow" $
+          case docsCoreInitial of
+            Right (state, effects) ->
+              state == DocsMigration.DocsMigrationReady docsConfig
+                && effects == [DocsMigration.StartDocsMigrationTurn docsConfig]
+            Left _ -> False
+      , assert "workflow event-log core applies docs-migration workflow" $
+          case docsCoreInitial of
+            Right (state, _) ->
+              case WorkflowEventLog.applyWorkflowEvent @DocsMigration.DocsMigrationSpec id state docsTurnStarted of
+                Right (state', effects) ->
+                  state' == DocsMigration.DocsMigrationTurnActive docsConfig (WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn"))
+                    && effects == []
+                Left _ -> False
+            Left _ -> False
+      , assert "workflow event-log core transition failure records docs-migration state and event labels" $
+          case docsCoreInitial of
+            Right (state, _) ->
+              case WorkflowEventLog.applyWorkflowEvent @DocsMigration.DocsMigrationSpec id state (DocsMigration.DocsMigrationValidationPassed "too early") of
+                Left failure ->
+                  WorkflowEventLog.workflowTransitionEventLabel failure == "docs-migration-validation-passed"
+                    && WorkflowEventLog.workflowTransitionPriorStateLabel failure == Just "ready"
+                    && "ready" `Text.isInfixOf` WorkflowEventLog.formatWorkflowTransitionFailure failure
+                Right _ -> False
+            Left _ -> False
+      ]
+  pure (and results)
 
 cabalComponentSection :: Text -> Text -> Text
 cabalComponentSection componentName cabalSource =

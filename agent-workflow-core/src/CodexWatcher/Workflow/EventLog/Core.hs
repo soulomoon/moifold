@@ -12,7 +12,10 @@ module CodexWatcher.Workflow.EventLog.Core
   , WorkflowReplayFailure (..)
   , WorkflowReplaySummary (..)
   , WorkflowTransitionFailure (..)
+  , applyWorkflowEvent
   , formatWorkflowReplayFailure
+  , formatWorkflowTransitionFailure
+  , initializeWorkflowEvent
   , replayWorkflowEventLog
   , replayWorkflowEventLogDetailed
   , validateEventLogFixtureContract
@@ -24,7 +27,10 @@ import Data.Text qualified as Text
 
 data WorkflowTransitionFailure spec = WorkflowTransitionFailure
   { workflowTransitionEvent :: WorkflowEvent spec
+  , workflowTransitionEventLabel :: Text
+  , workflowTransitionPriorStateLabel :: Maybe Text
   , workflowTransitionError :: WorkflowError spec
+  , workflowTransitionReason :: Text
   }
 
 data EventLogFixtureContract spec = EventLogFixtureContract
@@ -54,6 +60,31 @@ replayWorkflowEventLog
 replayWorkflowEventLog =
   workflowReplayEvents @spec
 
+initializeWorkflowEvent
+  :: forall spec. WorkflowSpec spec
+  => (WorkflowError spec -> Text)
+  -> WorkflowEvent spec
+  -> Either (WorkflowTransitionFailure spec) (WorkflowState spec, WorkflowEffectPlan spec)
+initializeWorkflowEvent renderError event =
+  case workflowInitialEvent @spec event of
+    Left reason ->
+      Left (workflowTransitionFailure @spec renderError Nothing event reason)
+    Right initialized ->
+      Right initialized
+
+applyWorkflowEvent
+  :: forall spec. WorkflowSpec spec
+  => (WorkflowError spec -> Text)
+  -> WorkflowState spec
+  -> WorkflowEvent spec
+  -> Either (WorkflowTransitionFailure spec) (WorkflowState spec, WorkflowEffectPlan spec)
+applyWorkflowEvent renderError state event =
+  case workflowApplyEvent @spec state event of
+    Left reason ->
+      Left (workflowTransitionFailure @spec renderError (Just state) event reason)
+    Right applied ->
+      Right applied
+
 replayWorkflowEventLogDetailed
   :: forall spec. WorkflowSpec spec
   => (WorkflowError spec -> Text)
@@ -70,16 +101,9 @@ replayWorkflowEventLogDetailed renderError = \case
         , workflowReplayFailureReason = "event log is empty"
         }
   firstEvent : restEvents ->
-    case workflowInitialEvent @spec firstEvent of
-      Left reason ->
-        Left
-          WorkflowReplayFailure
-            { workflowReplayFailureEventIndex = 1
-            , workflowReplayFailureEvent = Just firstEvent
-            , workflowReplayFailureEventLabel = workflowEventLabel @spec firstEvent
-            , workflowReplayFailurePriorStateLabel = Nothing
-            , workflowReplayFailureReason = renderError reason
-            }
+    case initializeWorkflowEvent @spec renderError firstEvent of
+      Left failure ->
+        Left (replayFailureFromTransition 1 failure)
       Right (initialState, initialEffects) ->
         replayRest
           2
@@ -98,16 +122,9 @@ replayWorkflowEventLogDetailed renderError = \case
           , workflowReplaySummaryTerminalEventIndex = maybeTerminalIndex
           }
     event : rest ->
-      case workflowApplyEvent @spec state event of
-        Left reason ->
-          Left
-            WorkflowReplayFailure
-              { workflowReplayFailureEventIndex = index
-              , workflowReplayFailureEvent = Just event
-              , workflowReplayFailureEventLabel = workflowEventLabel @spec event
-              , workflowReplayFailurePriorStateLabel = Just (workflowStateLabel @spec state)
-              , workflowReplayFailureReason = renderError reason
-              }
+      case applyWorkflowEvent @spec renderError state event of
+        Left failure ->
+          Left (replayFailureFromTransition index failure)
         Right (state', eventEffects) ->
           replayRest
             (index + 1)
@@ -115,6 +132,32 @@ replayWorkflowEventLogDetailed renderError = \case
             (eventEffects : effects)
             (terminalIndex @spec index state' maybeTerminalIndex)
             rest
+
+workflowTransitionFailure
+  :: forall spec. WorkflowSpec spec
+  => (WorkflowError spec -> Text)
+  -> Maybe (WorkflowState spec)
+  -> WorkflowEvent spec
+  -> WorkflowError spec
+  -> WorkflowTransitionFailure spec
+workflowTransitionFailure renderError maybeState event errorValue =
+  WorkflowTransitionFailure
+    { workflowTransitionEvent = event
+    , workflowTransitionEventLabel = workflowEventLabel @spec event
+    , workflowTransitionPriorStateLabel = workflowStateLabel @spec <$> maybeState
+    , workflowTransitionError = errorValue
+    , workflowTransitionReason = renderError errorValue
+    }
+
+replayFailureFromTransition :: Int -> WorkflowTransitionFailure spec -> WorkflowReplayFailure spec
+replayFailureFromTransition index failure =
+  WorkflowReplayFailure
+    { workflowReplayFailureEventIndex = index
+    , workflowReplayFailureEvent = Just failure.workflowTransitionEvent
+    , workflowReplayFailureEventLabel = failure.workflowTransitionEventLabel
+    , workflowReplayFailurePriorStateLabel = failure.workflowTransitionPriorStateLabel
+    , workflowReplayFailureReason = failure.workflowTransitionReason
+    }
 
 terminalIndex :: forall spec. WorkflowSpec spec => Int -> WorkflowState spec -> Maybe Int -> Maybe Int
 terminalIndex index state current =
@@ -158,6 +201,14 @@ formatWorkflowReplayFailure failure =
     <> "): "
     <> maybe "" (\label -> "after " <> label <> ": ") failure.workflowReplayFailurePriorStateLabel
     <> failure.workflowReplayFailureReason
+
+formatWorkflowTransitionFailure :: WorkflowTransitionFailure spec -> Text
+formatWorkflowTransitionFailure failure =
+  "event ("
+    <> failure.workflowTransitionEventLabel
+    <> "): "
+    <> maybe "" (\label -> "after " <> label <> ": ") failure.workflowTransitionPriorStateLabel
+    <> failure.workflowTransitionReason
 
 showText :: Show a => a -> Text
 showText =
