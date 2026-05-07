@@ -7,5 +7,6 @@ cabal.sandbox.config
 *.dyn_o
 result
 .DS_Store
+.vscode/
 bin/
 output/
