@@ -6303,7 +6303,6 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
         , "singletons"
         , "typed-process"
         , "unix"
-        , "websockets"
         , "moifold,"
         ]
       forbiddenImportNeedles =
@@ -6327,6 +6326,7 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
           , "CodexWatcher.Workflow.Agent.Codex.Client"
           , "CodexWatcher.Workflow.Agent.Codex.Interpreter"
           , "CodexWatcher.Workflow.Agent.Codex.Protocol"
+          , "CodexWatcher.Workflow.Agent.Codex.Transport"
           , "CodexWatcher.Workflow.Agent.Ids"
           , "CodexWatcher.Workflow.Agent.Types"
           , "CodexWatcher.Workflow.Observation.Agent"
@@ -6338,6 +6338,7 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
           , "base >=4.18 && <5"
           , "bytestring >=0.12 && <0.13"
           , "text >=2.0 && <3"
+          , "websockets >=0.13 && <0.14"
           , "moifold:agent-workflow-core"
           ]
           && not (any (`Text.isInfixOf` codexSection) forbiddenPackageNeedles)
@@ -6409,6 +6410,7 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
 workflowMoifoldCabalLibraryDoesNotReexportAdapters :: IO Bool
 workflowMoifoldCabalLibraryDoesNotReexportAdapters = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  appServerCompatibilitySource <- Text.pack <$> readFile ("src" </> "CodexWatcher" </> "AppServerClient.hs")
   let mainLibrarySection = cabalComponentSection "library" cabalSource
       adapterModuleNeedles =
         [ "CodexWatcher.AppServerProtocol"
@@ -6429,9 +6431,16 @@ workflowMoifoldCabalLibraryDoesNotReexportAdapters = do
           [ "moifold:agent-workflow-codex"
           , "moifold:agent-workflow-github"
           ]
+      mainLibraryDoesNotOwnAppServerTransport =
+        not ("websockets" `Text.isInfixOf` mainLibrarySection)
+          && "import CodexWatcher.Workflow.Agent.Codex.Transport" `Text.isInfixOf` appServerCompatibilitySource
+          && "import CodexWatcher.Workflow.Agent.Codex.Client" `Text.isInfixOf` appServerCompatibilitySource
+          && not ("Network.WebSockets" `Text.isInfixOf` appServerCompatibilitySource)
+          && not ("data AppServerEndpoint" `Text.isInfixOf` appServerCompatibilitySource)
+          && not ("newtype AppServerConnection" `Text.isInfixOf` appServerCompatibilitySource)
   assert
-    "main moifold library does not reexport workflow adapter modules"
-    (noAdapterReexports && keepsAdapterDependencies)
+    "main moifold library does not reexport workflow adapter modules or own app-server transport"
+    (noAdapterReexports && keepsAdapterDependencies && mainLibraryDoesNotOwnAppServerTransport)
 
 workflowGithubCommandFacadeMatchesRuntimeRender :: IO Bool
 workflowGithubCommandFacadeMatchesRuntimeRender = do

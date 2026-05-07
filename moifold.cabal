@@ -54,6 +54,7 @@ library agent-workflow-codex
     CodexWatcher.Workflow.Agent.Codex.Client
     CodexWatcher.Workflow.Agent.Codex.Interpreter
     CodexWatcher.Workflow.Agent.Codex.Protocol
+    CodexWatcher.Workflow.Agent.Codex.Transport
     CodexWatcher.Workflow.Agent.Ids
     CodexWatcher.Workflow.Agent.Types
     CodexWatcher.Workflow.Observation.Agent
@@ -62,6 +63,7 @@ library agent-workflow-codex
     base >=4.18 && <5,
     bytestring >=0.12 && <0.13,
     text >=2.0 && <3,
+    websockets >=0.13 && <0.14,
     moifold:agent-workflow-core
   default-language: GHC2021
 
@@ -203,7 +205,6 @@ library
     text >=2.0 && <3,
     typed-process >=0.2 && <0.3,
     unix >=2.8 && <2.9,
-    websockets >=0.13 && <0.14,
     moifold:agent-workflow-core,
     moifold:agent-workflow-codex,
     moifold:agent-workflow-github
