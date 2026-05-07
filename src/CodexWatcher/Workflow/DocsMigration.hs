@@ -22,6 +22,7 @@ module CodexWatcher.Workflow.DocsMigration
   , classifyDocsMigrationTurn
   , compileDocsMigrationEffectPlan
   , docsMigrationAgentRole
+  , docsMigrationDaemonCoreTickResult
   , docsMigrationEffectMetadata
   , dryRunDocsMigrationCompiledEffectPlan
   , executeDocsMigrationCompiledEffectPlan
@@ -40,11 +41,14 @@ import CodexWatcher.Workflow.Agent
   , TurnRef (..)
   , defaultAgentRetryPolicy
   )
+import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.EventLog
   ( WorkflowReplaySummary (..)
   , WorkflowTickAudit
   , formatWorkflowReplayFailure
   , replayWorkflowEventLogDetailed
+  , workflowAuditPostCommitReports
+  , workflowAuditPreCommitReports
   )
 import CodexWatcher.Workflow.Execution
   ( ActionExecutionMode (..)
@@ -383,14 +387,38 @@ docsMigrationDaemonTickResult
        FailureClassification
   -> DocsMigrationDaemonTickResult
 docsMigrationDaemonTickResult result =
+  let coreTick = WorkflowDaemon.workflowObservedDaemonTickResult result
+   in
   DocsMigrationDaemonTickResult
-    { docsMigrationDaemonPriorReplay = result.workflowTransactionPriorReplay
-    , docsMigrationDaemonEvent = result.workflowTransactionPlanned.plannedEvent
-    , docsMigrationDaemonState = result.workflowTransactionFinalState
-    , docsMigrationDaemonCommittedEvents = result.workflowTransactionCommittedEvents
-    , docsMigrationDaemonCompiledEffects = result.workflowTransactionCompiledEffects
-    , docsMigrationDaemonActionReports = result.workflowTransactionPreCommitReports <> result.workflowTransactionPostCommitReports
-    , docsMigrationDaemonAudit = result.workflowTransactionAudit
+    { docsMigrationDaemonPriorReplay = coreTick.workflowObservedDaemonPriorReplay
+    , docsMigrationDaemonEvent = coreTick.workflowObservedDaemonEvent
+    , docsMigrationDaemonState = coreTick.workflowObservedDaemonState
+    , docsMigrationDaemonCommittedEvents = coreTick.workflowObservedDaemonCommittedEvents
+    , docsMigrationDaemonCompiledEffects = coreTick.workflowObservedDaemonCompiledEffects
+    , docsMigrationDaemonActionReports = coreTick.workflowObservedDaemonActionReports
+    , docsMigrationDaemonAudit = coreTick.workflowObservedDaemonAudit
+    }
+
+docsMigrationDaemonCoreTickResult
+  :: DocsMigrationDaemonTickResult
+  -> WorkflowDaemon.WorkflowObservedDaemonTickResult
+       DocsMigrationSpec
+       (WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction)
+       DocsMigrationActionReport
+       FailureClassification
+docsMigrationDaemonCoreTickResult tick =
+  WorkflowDaemon.WorkflowObservedDaemonTickResult
+    { WorkflowDaemon.workflowObservedDaemonPriorReplay = tick.docsMigrationDaemonPriorReplay
+    , WorkflowDaemon.workflowObservedDaemonEvent = tick.docsMigrationDaemonEvent
+    , WorkflowDaemon.workflowObservedDaemonState = tick.docsMigrationDaemonState
+    , WorkflowDaemon.workflowObservedDaemonCommittedEvents = tick.docsMigrationDaemonCommittedEvents
+    , WorkflowDaemon.workflowObservedDaemonCompiledEffects = tick.docsMigrationDaemonCompiledEffects
+    , WorkflowDaemon.workflowObservedDaemonPreCommitReports =
+        workflowAuditPreCommitReports tick.docsMigrationDaemonAudit
+    , WorkflowDaemon.workflowObservedDaemonPostCommitReports =
+        workflowAuditPostCommitReports tick.docsMigrationDaemonAudit
+    , WorkflowDaemon.workflowObservedDaemonActionReports = tick.docsMigrationDaemonActionReports
+    , WorkflowDaemon.workflowObservedDaemonAudit = tick.docsMigrationDaemonAudit
     }
 
 replayDocsMigrationEvents :: [DocsMigrationEvent] -> Either Text DocsMigrationReplayResult

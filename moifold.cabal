@@ -31,6 +31,7 @@ library agent-workflow-core
   exposed-modules:
     CodexWatcher.Workflow.Audit
     CodexWatcher.Workflow.Codec
+    CodexWatcher.Workflow.Daemon.Core
     CodexWatcher.Workflow.DSL
     CodexWatcher.Workflow.EventLog.Core
     CodexWatcher.Workflow.Execution.Core

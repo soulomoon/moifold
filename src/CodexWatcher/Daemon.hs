@@ -16,6 +16,8 @@ module CodexWatcher.Daemon
   , DaemonTickResult (..)
   , ObservedPolicyTick (..)
   , appendWatcherEvent
+  , daemonCoreTickResult
+  , daemonObservedCoreTickResult
   , formatDaemonFailure
   , observeDaemonState
   , replayDaemonEventLog
@@ -42,6 +44,7 @@ import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.Ids (CommitSha (..))
 import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
+import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..), observeDaemonState)
@@ -51,7 +54,7 @@ import CodexWatcher.Workflow.Transaction.Core
   , runWorkflowObservedDryRunTransaction
   , runWorkflowObservedExecuteTransaction
   )
-import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..))
+import CodexWatcher.Workflow.Types (MoifoldSpec)
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.Text (Text)
@@ -83,6 +86,7 @@ data DaemonTickResult = DaemonTickResult
 data DaemonObservedTickResult = DaemonObservedTickResult
   { daemonObservedReplayResult :: EventReplayResult
   , daemonObservedEvent :: WatcherEvent
+  , daemonObservedCommittedEvents :: [WatcherEvent]
   , daemonObservedState :: SomeWatcherState
   , daemonObservedCompatibilityWrites :: [CompatibilityWrite]
   , daemonObservedCompiledEffects :: CompiledEffectPlan
@@ -132,6 +136,7 @@ runDaemonTickWithEvents executor runtimeConfig executionMode events nextEffects 
           logDaemonFailure executor "daemon_tick_failed" "daemon tick failed" failure
           pure (Left failure)
         Right actionReports -> do
+          let coreTick = WorkflowDaemon.workflowDaemonTickResult @MoifoldSpec replay compiledEffects actionReports
           Log.logWatcher
             executor.actionLogger
             ( Log.watcherLog
@@ -146,9 +151,9 @@ runDaemonTickWithEvents executor runtimeConfig executionMode events nextEffects 
           pure
             ( Right
                 DaemonTickResult
-                  { daemonReplayResult = replay
-                  , daemonCompiledEffects = compiledEffects
-                  , daemonActionReports = actionReports
+                  { daemonReplayResult = coreTick.workflowDaemonReplayResult
+                  , daemonCompiledEffects = coreTick.workflowDaemonCompiledEffects
+                  , daemonActionReports = coreTick.workflowDaemonActionReports
                   }
             )
 
@@ -330,14 +335,43 @@ observedTransactionResultToDaemon
   -> WorkflowObservedTransactionResult MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport FailureClassification
   -> DaemonObservedTickResult
 observedTransactionResultToDaemon options result =
+  let coreTick = WorkflowDaemon.workflowObservedDaemonTickResult result
+   in
   DaemonObservedTickResult
-    { daemonObservedReplayResult = result.workflowTransactionPriorReplay
-    , daemonObservedEvent = result.workflowTransactionPlanned.plannedEvent
-    , daemonObservedState = result.workflowTransactionFinalState
-    , daemonObservedCompatibilityWrites = observedCompatibilityWrites options result.workflowTransactionFinalState
-    , daemonObservedCompiledEffects = workflowCompiledEffectPlanLegacy result.workflowTransactionCompiledEffects
-    , daemonObservedActionReports = result.workflowTransactionPreCommitReports <> result.workflowTransactionPostCommitReports
-    , daemonObservedAudit = result.workflowTransactionAudit
+    { daemonObservedReplayResult = coreTick.workflowObservedDaemonPriorReplay
+    , daemonObservedEvent = coreTick.workflowObservedDaemonEvent
+    , daemonObservedCommittedEvents = coreTick.workflowObservedDaemonCommittedEvents
+    , daemonObservedState = coreTick.workflowObservedDaemonState
+    , daemonObservedCompatibilityWrites = observedCompatibilityWrites options coreTick.workflowObservedDaemonState
+    , daemonObservedCompiledEffects = workflowCompiledEffectPlanLegacy coreTick.workflowObservedDaemonCompiledEffects
+    , daemonObservedActionReports = coreTick.workflowObservedDaemonActionReports
+    , daemonObservedAudit = coreTick.workflowObservedDaemonAudit
+    }
+
+daemonCoreTickResult :: DaemonTickResult -> WorkflowDaemon.WorkflowDaemonTickResult MoifoldSpec CompiledEffectPlan ActionExecutionReport
+daemonCoreTickResult tick =
+  WorkflowDaemon.WorkflowDaemonTickResult
+    { WorkflowDaemon.workflowDaemonReplayResult = tick.daemonReplayResult
+    , WorkflowDaemon.workflowDaemonCompiledEffects = tick.daemonCompiledEffects
+    , WorkflowDaemon.workflowDaemonActionReports = tick.daemonActionReports
+    }
+
+daemonObservedCoreTickResult
+  :: DaemonObservedTickResult
+  -> WorkflowDaemon.WorkflowObservedDaemonTickResult MoifoldSpec CompiledEffectPlan ActionExecutionReport FailureClassification
+daemonObservedCoreTickResult tick =
+  WorkflowDaemon.WorkflowObservedDaemonTickResult
+    { WorkflowDaemon.workflowObservedDaemonPriorReplay = tick.daemonObservedReplayResult
+    , WorkflowDaemon.workflowObservedDaemonEvent = tick.daemonObservedEvent
+    , WorkflowDaemon.workflowObservedDaemonState = tick.daemonObservedState
+    , WorkflowDaemon.workflowObservedDaemonCommittedEvents = tick.daemonObservedCommittedEvents
+    , WorkflowDaemon.workflowObservedDaemonCompiledEffects = tick.daemonObservedCompiledEffects
+    , WorkflowDaemon.workflowObservedDaemonPreCommitReports =
+        WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit
+    , WorkflowDaemon.workflowObservedDaemonPostCommitReports =
+        WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit
+    , WorkflowDaemon.workflowObservedDaemonActionReports = tick.daemonObservedActionReports
+    , WorkflowDaemon.workflowObservedDaemonAudit = tick.daemonObservedAudit
     }
 
 dryRunWorkflowAction :: WorkflowPlannedAction -> ActionExecutionReport

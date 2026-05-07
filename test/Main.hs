@@ -71,6 +71,7 @@ import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as WorkflowAgentCodexProtocol
 import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
+import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
@@ -6195,6 +6196,7 @@ workflowFacadeExtractionTests = do
       , workflowDocsMigrationSpecProvesSecondWorkflow
       , workflowDocsMigrationAgentRoleClassifiesCompleteOutput
       , workflowDocsMigrationUsesCoreExecutionContracts
+      , workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults
       , workflowTransactionDetailedFailuresRecordCommitBoundary
       , workflowExecutionMetadataCoversCurrentEffects
       , workflowExecutionCapabilityMetadataCoversCurrentEffects
@@ -6253,6 +6255,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
       exposesCoreModules =
         "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Daemon.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.EventLog.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Failure" `Text.isInfixOf` coreSection
@@ -7340,6 +7343,68 @@ workflowDocsMigrationUsesCoreExecutionContracts = do
           && length (WorkflowEventLog.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == 2
           && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
       _ -> False
+
+workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults :: IO Bool
+workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults = do
+  (executor, _getCalls) <- fakeActionExecutor
+  docsCalls <- newIORef []
+  let record call = modifyIORef' docsCalls (<> [call])
+      runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 720
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      moifoldEvents = [IssuePlanningInitialized (PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 8) [])]
+      moifoldObservation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "turn-plan"))
+      docsConfig =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      docsEvents =
+        [ DocsMigration.DocsMigrationInitialized docsConfig
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      docsOutput = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      docsObservation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete docsOutput)
+      docsInterpreter =
+        DocsMigration.DocsMigrationInterpreter
+          { DocsMigration.docsMigrationStartTurn = \_config -> record "start-turn"
+          , DocsMigration.docsMigrationWriteDraft = \path draft -> record ("write:" <> Text.pack path <> ":" <> draft)
+          , DocsMigration.docsMigrationRunValidation = \path -> record ("validate:" <> Text.pack path)
+          , DocsMigration.docsMigrationStopDaemon = record "stop"
+          }
+      docsExpectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+  moifoldResult <- runObservedDaemonTickWithEvents executor options moifoldEvents moifoldObservation
+  docsResult <- DocsMigration.runDocsMigrationObservedExecute docsInterpreter docsEvents docsObservation
+  results <-
+    sequence
+      [ assert "workflow daemon core projects moifold dry-run tick result" $
+          case moifoldResult of
+            Right tick ->
+              let coreTick = daemonObservedCoreTickResult tick
+               in WorkflowDaemon.workflowObservedDaemonEvent coreTick == tick.daemonObservedEvent
+                    && WorkflowDaemon.workflowObservedDaemonCommittedEvents coreTick == []
+                    && WorkflowDaemon.workflowObservedDaemonCommittedEvents coreTick == tick.daemonObservedCommittedEvents
+                    && WorkflowDaemon.workflowObservedDaemonActionReports coreTick == tick.daemonObservedActionReports
+                    && WorkflowEventLog.workflowAuditCommittedEventLabel (WorkflowDaemon.workflowObservedDaemonAudit coreTick) == Nothing
+            Left _ -> False
+      , assert "workflow daemon core projects docs-migration execute tick result" $
+          case docsResult of
+            Right tick ->
+              let coreTick = DocsMigration.docsMigrationDaemonCoreTickResult tick
+               in WorkflowDaemon.workflowObservedDaemonEvent coreTick == docsExpectedEvent
+                    && WorkflowDaemon.workflowObservedDaemonCommittedEvents coreTick == [docsExpectedEvent]
+                    && WorkflowDaemon.workflowObservedDaemonActionReports coreTick == tick.docsMigrationDaemonActionReports
+                    && WorkflowEventLog.workflowAuditCommittedEventLabel (WorkflowDaemon.workflowObservedDaemonAudit coreTick) == Just "docs-migration-draft-produced"
+            Left _ -> False
+      ]
+  pure (and results)
 
 data WorkflowTransactionFailureMode
   = FailPreCommit
