@@ -177,6 +177,7 @@ library
     CodexWatcher.Workflow.Moifold.PrReview
     CodexWatcher.Workflow.Moifold.PrReview.Agent
     CodexWatcher.Workflow.Moifold.PrReview.Mergeability
+    CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
     CodexWatcher.Workflow.Observation
     CodexWatcher.Workflow.Permission
     CodexWatcher.Workflow.Types
