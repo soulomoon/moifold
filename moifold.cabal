@@ -174,15 +174,6 @@ library
     CodexWatcher.Workflow.Observation
     CodexWatcher.Workflow.Permission
     CodexWatcher.Workflow.Types
-  reexported-modules:
-    CodexWatcher.AppServerProtocol,
-    CodexWatcher.Workflow.Agent,
-    CodexWatcher.Workflow.Agent.Codex,
-    CodexWatcher.Workflow.Agent.Codex.Protocol,
-    CodexWatcher.Workflow.Agent.Ids,
-    CodexWatcher.Workflow.Agent.Types,
-    CodexWatcher.Workflow.Observation.Agent,
-    CodexWatcher.Workflow.GitHub.Ids
   other-modules:
     CodexWatcher.AutomaticLoop.IssuePlanningFanout
     CodexWatcher.AutomaticLoop.Output

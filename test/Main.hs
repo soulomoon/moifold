@@ -6178,6 +6178,7 @@ workflowFacadeExtractionTests = do
       , workflowCoreCabalSublibraryKeepsPackageBoundary
       , workflowCodexCabalSublibraryKeepsPackageBoundary
       , workflowGithubCabalSublibraryKeepsPackageBoundary
+      , workflowMoifoldCabalLibraryDoesNotReexportAdapters
       , workflowEventCodecContractCoversWatcherEvents
       , workflowEventCodecToleratesMetadataAndPreservesGoldenTypes
       , workflowGithubCommandFacadeMatchesRuntimeRender
@@ -6404,6 +6405,33 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
   assert
     "workflow GitHub sublibrary has no moifold state-machine dependencies"
     (exposesGithubModules && dependsOnlyOnGithubDeps && sourceImportsStayInAdapter && moifoldDependsOnGithub)
+
+workflowMoifoldCabalLibraryDoesNotReexportAdapters :: IO Bool
+workflowMoifoldCabalLibraryDoesNotReexportAdapters = do
+  cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  let mainLibrarySection = cabalComponentSection "library" cabalSource
+      adapterModuleNeedles =
+        [ "CodexWatcher.AppServerProtocol"
+        , "CodexWatcher.Workflow.Agent"
+        , "CodexWatcher.Workflow.Agent.Codex"
+        , "CodexWatcher.Workflow.Agent.Codex.Protocol"
+        , "CodexWatcher.Workflow.Agent.Ids"
+        , "CodexWatcher.Workflow.Agent.Types"
+        , "CodexWatcher.Workflow.Observation.Agent"
+        , "CodexWatcher.Workflow.GitHub.Ids"
+        ]
+      noAdapterReexports =
+        not ("reexported-modules:" `Text.isInfixOf` mainLibrarySection)
+          && not (any (`Text.isInfixOf` mainLibrarySection) adapterModuleNeedles)
+      keepsAdapterDependencies =
+        all
+          (`Text.isInfixOf` mainLibrarySection)
+          [ "moifold:agent-workflow-codex"
+          , "moifold:agent-workflow-github"
+          ]
+  assert
+    "main moifold library does not reexport workflow adapter modules"
+    (noAdapterReexports && keepsAdapterDependencies)
 
 workflowGithubCommandFacadeMatchesRuntimeRender :: IO Bool
 workflowGithubCommandFacadeMatchesRuntimeRender = do
