@@ -81,6 +81,7 @@ import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrRevie
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
 import CodexWatcher.Workflow.Observation.Agent qualified as WorkflowObservationAgent
 import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
+import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), WorkflowSpec (..), legacyObservedPlannedTransition, moifoldPlannedTransitionFromEffects, workflowPlanObservation)
 import Control.Exception (try)
 import Control.Monad (when)
@@ -6193,6 +6194,7 @@ workflowFacadeExtractionTests = do
       , workflowDocsMigrationSpecProvesSecondWorkflow
       , workflowDocsMigrationAgentRoleClassifiesCompleteOutput
       , workflowDocsMigrationUsesCoreExecutionContracts
+      , workflowTransactionDetailedFailuresRecordCommitBoundary
       , workflowExecutionMetadataCoversCurrentEffects
       , workflowExecutionCapabilityMetadataCoversCurrentEffects
       , workflowExecutionMetadataPartitionPreservesLegacyOrdering
@@ -7263,6 +7265,133 @@ workflowDocsMigrationUsesCoreExecutionContracts = do
           && length (WorkflowEventLog.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == 2
           && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
       _ -> False
+
+data WorkflowTransactionFailureMode
+  = FailPreCommit
+  | FailCommit
+  | FailPostCommitCallback
+  | FailPostCommitAction
+  deriving stock (Eq, Show)
+
+workflowTransactionDetailedFailuresRecordCommitBoundary :: IO Bool
+workflowTransactionDetailedFailuresRecordCommitBoundary = do
+  preCommitFailure <- failureResult FailPreCommit
+  commitFailure <- failureResult FailCommit
+  postCommitCallbackFailure <- failureResult FailPostCommitCallback
+  postCommitActionFailure <- failureResult FailPostCommitAction
+  results <-
+    sequence
+      [ assert "workflow transaction pre-commit failure records no committed event" $
+          case preCommitFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPreCommitActionFailure
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == []
+                && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == []
+                && failureAuditCommittedEvent failure == Just Nothing
+                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonRetry
+            Right _ -> False
+      , assert "workflow transaction commit failure preserves pre-commit reports without committed event" $
+          case commitFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionEventCommitFailure
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == []
+                && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
+                && failureAuditCommittedEvent failure == Just Nothing
+                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonStop
+            Right _ -> False
+      , assert "workflow transaction post-commit callback failure records committed event and final state" $
+          case postCommitCallbackFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPostCommitCallbackFailure
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == [expectedEvent]
+                && WorkflowTransaction.workflowTransactionFailureFinalState failure == Just expectedState
+                && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
+                && failureAuditCommittedEvent failure == Just (Just "docs-migration-draft-produced")
+                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonStop
+            Right _ -> False
+      , assert "workflow transaction post-commit action failure records committed event and prior reports" $
+          case postCommitActionFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPostCommitActionFailure
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == [expectedEvent]
+                && WorkflowTransaction.workflowTransactionFailureFinalState failure == Just expectedState
+                && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
+                && WorkflowTransaction.workflowTransactionFailurePostCommitReports failure == []
+                && failureAuditCommittedEvent failure == Just (Just "docs-migration-draft-produced")
+                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonStop
+            Right _ -> False
+      ]
+  pure (and results)
+ where
+  config =
+    DocsMigration.DocsMigrationConfig
+      { DocsMigration.docsMigrationSource = "docs/source.md"
+      , DocsMigration.docsMigrationTarget = "docs/target.md"
+      , DocsMigration.docsMigrationGoal = "migrate framework notes"
+      }
+  events =
+    [ DocsMigration.DocsMigrationInitialized config
+    , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+    ]
+  output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+  observation =
+    DocsMigration.DocsMigrationAgentReturned
+      (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+  expectedEvent =
+    DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+  expectedState =
+    DocsMigration.DocsMigrationDraftReady config "draft markdown"
+
+  failureResult mode =
+    WorkflowTransaction.runWorkflowObservedExecuteTransactionDetailed
+      @DocsMigration.DocsMigrationSpec
+      (docsMigrationFailureHooks mode)
+      events
+      observation
+
+  failureAuditCommittedEvent failure =
+    WorkflowEventLog.workflowAuditCommittedEventLabel
+      <$> WorkflowTransaction.workflowTransactionFailureAudit failure
+
+  failureAuditRecommendation failure =
+    WorkflowEventLog.workflowAuditNextDaemonRecommendation
+      <$> WorkflowTransaction.workflowTransactionFailureAudit failure
+
+docsMigrationFailureHooks
+  :: WorkflowTransactionFailureMode
+  -> WorkflowTransaction.WorkflowObservedTransactionHooks
+       IO
+       DocsMigration.DocsMigrationSpec
+       ()
+       Text
+       Text
+       Text
+docsMigrationFailureHooks mode =
+  WorkflowTransaction.WorkflowObservedTransactionHooks
+    { WorkflowTransaction.workflowTransactionMapError = id
+    , WorkflowTransaction.workflowTransactionCompileEffects = const ()
+    , WorkflowTransaction.workflowTransactionPartitionActions = const (["pre-action"], ["post-action"])
+    , WorkflowTransaction.workflowTransactionDryRunActions = id
+    , WorkflowTransaction.workflowTransactionExecuteActions = \actions ->
+        pure $
+          if mode == FailPreCommit && actions == ["pre-action"]
+            then Left "pre failed"
+            else
+              if mode == FailPostCommitAction && actions == ["post-action"]
+                then Left "post failed"
+                else Right actions
+    , WorkflowTransaction.workflowTransactionCommitEvent = \_event ->
+        pure $
+          if mode == FailCommit
+            then Left "commit failed"
+            else Right ()
+    , WorkflowTransaction.workflowTransactionAfterCommit = \_state ->
+        pure $
+          if mode == FailPostCommitCallback
+            then Left "after commit failed"
+            else Right ()
+    , WorkflowTransaction.workflowTransactionFailureIsRetryable = (== "pre failed")
+    }
 
 workflowExecutionMetadataCoversCurrentEffects :: IO Bool
 workflowExecutionMetadataCoversCurrentEffects = do

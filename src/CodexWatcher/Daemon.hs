@@ -283,6 +283,7 @@ moifoldObservedTransactionHooks executor options =
     , workflowTransactionExecuteActions = executeMoifoldWorkflowActions executor
     , workflowTransactionCommitEvent = commitMoifoldObservedEvent executor options
     , workflowTransactionAfterCommit = writeMoifoldCompatibilityState executor options
+    , workflowTransactionFailureIsRetryable = const False
     }
 
 executeMoifoldWorkflowActions :: Monad m => ActionExecutor m -> [WorkflowPlannedAction] -> m (Either DaemonFailure [ActionExecutionReport])

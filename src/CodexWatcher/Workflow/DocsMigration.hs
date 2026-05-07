@@ -349,6 +349,7 @@ docsMigrationDryRunTransactionHooks =
     , workflowTransactionExecuteActions = \_actions -> Left "docs migration dry-run hooks cannot execute actions"
     , workflowTransactionCommitEvent = \_event -> Left "docs migration dry-run hooks cannot commit events"
     , workflowTransactionAfterCommit = \_state -> Left "docs migration dry-run hooks cannot run post-commit callbacks"
+    , workflowTransactionFailureIsRetryable = const False
     }
 
 docsMigrationTransactionHooksForInterpreter
@@ -371,6 +372,7 @@ docsMigrationTransactionHooksForInterpreter interpreter =
         fmap Right . traverse (executeDocsMigrationAction interpreter ExecuteActions . workflowGenericPlannedAction)
     , workflowTransactionCommitEvent = \_event -> pure (Right ())
     , workflowTransactionAfterCommit = \_state -> pure (Right ())
+    , workflowTransactionFailureIsRetryable = const False
     }
 
 docsMigrationDaemonTickResult
