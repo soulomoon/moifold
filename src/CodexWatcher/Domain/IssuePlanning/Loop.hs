@@ -12,7 +12,6 @@ module CodexWatcher.Domain.IssuePlanning.Loop
 
 import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerClient
-import CodexWatcher.AppServerProtocol
 import CodexWatcher.Daemon (DaemonObservation (..), DaemonOptions (..))
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
@@ -37,6 +36,8 @@ import CodexWatcher.Domain.IssuePlanning.Types
   , PlannerConfig (..)
   , PlanningGraph (..)
   )
+import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
+import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import Control.Monad (filterM)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
@@ -156,10 +157,15 @@ startPlannerThread
 startPlannerThread executor config = do
   let runtimeConfig = config.loopDaemonOptions.daemonRuntimeConfig
       requestId = runtimeConfig.effectRuntimeNextRequestId
-      request =
-        threadStartRequest
-          requestId
-          (defaultThreadStartOptions (runtimeCwdPath runtimeConfig.effectRuntimePlannerTurn.turnRuntimeCwd) runtimeConfig.effectRuntimePlannerThreadInstructions)
+      threadOptions =
+        defaultThreadStartOptions
+          (runtimeCwdPath runtimeConfig.effectRuntimePlannerTurn.turnRuntimeCwd)
+          runtimeConfig.effectRuntimePlannerThreadInstructions
+      threadPlan =
+        WorkflowAgentCodex.agentThreadPlanFromThreadStartOptions
+          WorkflowAgent.plannerAgentRoleId
+          threadOptions
+      request = WorkflowAgentCodex.agentThreadStartRequest requestId threadPlan
       nextConfig = withRuntimeNextRequestId (nextRequestId requestId) config
   report <- executePlannedAction executor config.loopDaemonOptions.daemonExecutionMode (PlannedAppServerRequest request)
   case config.loopDaemonOptions.daemonExecutionMode of
@@ -168,9 +174,9 @@ startPlannerThread executor config = do
     ExecuteActions ->
       case report.actionExecutionResult of
         AppServerActionResult response ->
-          case parseThreadStartThreadId response of
+          case WorkflowAgentCodex.parseAgentThreadStart threadPlan response of
             Left failure -> pure (Left (DaemonLoopAppServerFailure failure))
-            Right threadId -> pure (Right (threadId, nextConfig, [report]))
+            Right started -> pure (Right (WorkflowAgent.agentThreadStartThreadId started, nextConfig, [report]))
         _ ->
           pure (Left (DaemonLoopUnexpectedStartPlan ("planner thread start returned unexpected action result: " <> Text.pack (show report.actionExecutionResult))))
 

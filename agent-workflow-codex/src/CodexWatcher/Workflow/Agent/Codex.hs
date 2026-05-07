@@ -4,6 +4,7 @@
 module CodexWatcher.Workflow.Agent.Codex
   ( agentThreadReadRequest
   , agentThreadInterruptRequest
+  , agentThreadPlanFromThreadStartOptions
   , agentThreadStartRequest
   , agentTurnStartRequest
   , cachedAgentTurnStartInterpreter
@@ -31,6 +32,7 @@ import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
 import CodexWatcher.Workflow.Agent.Codex.Protocol
   ( agentThreadReadRequest
   , agentThreadInterruptRequest
+  , agentThreadPlanFromThreadStartOptions
   , agentThreadStartRequest
   , agentTurnStartRequest
   )

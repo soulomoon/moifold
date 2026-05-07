@@ -19,7 +19,6 @@ module CodexWatcher.Domain.IssueImplement.Loop
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient (startThreadWithInterpreter)
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation (..), DaemonOptions (..))
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
@@ -36,11 +35,13 @@ import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath, runtimeWorkdirPath)
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, nextIssueAttemptBranch, validatePhaseActionPlan)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
-import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), ThreadId (..))
+import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RequestId, ThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
+import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
+import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import Data.Aeson (Result (..), Value (..), fromJSON)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -550,13 +551,15 @@ ensureIssueWorkerThread ops executor config events issueConfig =
               (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir)
               issueConfig
       started <-
-        startThreadWithInterpreter
-          executor.actionAppServer
+        startThreadViaCodexAdapter
+          executor
+          WorkflowAgent.issueImplementationWorkerAgentRoleId
           requestId
-          (defaultThreadStartOptions (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir) instructions)
+          (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
+          instructions
       case started of
         Left failure ->
-          pure (Left (DaemonLoopAppServerFailure failure))
+          pure (Left failure)
         Right workerThread ->
           ops.loopObserveWithExecutor
             executor
@@ -592,13 +595,15 @@ ensureIssueReviewerThread ops executor config events _replay issueConfig prNumbe
               prConfig
               "reviewer"
       started <-
-        startThreadWithInterpreter
-          executor.actionAppServer
+        startThreadViaCodexAdapter
+          executor
+          WorkflowAgent.finalReviewerAgentRoleId
           requestId
-          (defaultThreadStartOptions (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir) instructions)
+          (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
+          instructions
       case started of
         Left failure ->
-          pure (Left (DaemonLoopAppServerFailure failure))
+          pure (Left failure)
         Right reviewerThread ->
           ops.loopObserveWithExecutor
             executor
@@ -609,6 +614,24 @@ ensureIssueReviewerThread ops executor config events _replay issueConfig prNumbe
 issuePrConfig :: IssueConfig -> PrNumber -> PrConfig
 issuePrConfig issueConfig pr =
   PrConfig issueConfig.issueRepo pr issueConfig.issueBranch
+
+startThreadViaCodexAdapter
+  :: Monad m
+  => ActionExecutor m
+  -> WorkflowAgent.AgentRoleId
+  -> RequestId
+  -> FilePath
+  -> Text
+  -> m (Either DaemonLoopFailure ThreadId)
+startThreadViaCodexAdapter executor roleId requestId cwd developerInstructions = do
+  let threadPlan =
+        WorkflowAgentCodex.agentThreadPlanFromThreadStartOptions
+          roleId
+          (defaultThreadStartOptions cwd developerInstructions)
+  result <- WorkflowAgentCodex.startAgentThread executor.actionAppServer requestId threadPlan
+  pure case result of
+    Left failure -> Left (DaemonLoopAppServerFailure failure)
+    Right started -> Right (WorkflowAgent.agentThreadStartThreadId started)
 
 runIssueEffectPlan
   :: Monad m

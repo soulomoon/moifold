@@ -11,6 +11,7 @@ module CodexWatcher.Daemon
   ( DaemonFailure (..)
   , DaemonObservation (..)
   , DaemonOptions (..)
+  , DaemonObservedTransactionFailure (..)
   , DaemonObservedTickResult (..)
   , PreMergeGateResult (..)
   , DaemonTickResult (..)
@@ -46,13 +47,17 @@ import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.Execution
+import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..), observeDaemonState)
+import CodexWatcher.Workflow.Spec (PlannedTransition (..))
 import CodexWatcher.Workflow.Transaction.Core
   ( WorkflowObservedTransactionHooks (..)
+  , WorkflowObservedTransactionFailure (..)
   , WorkflowObservedTransactionResult (..)
+  , WorkflowTransactionFailureStage (..)
   , runWorkflowObservedDryRunTransaction
-  , runWorkflowObservedExecuteTransaction
+  , runWorkflowObservedExecuteTransactionDetailed
   )
 import CodexWatcher.Workflow.Types (MoifoldSpec)
 import Data.Aeson (toJSON)
@@ -74,6 +79,19 @@ data DaemonFailure
   | DaemonObservationRejected Text
   | DaemonActionFailed PlannedAction CommandReport
   | DaemonActionResultInvalid PlannedAction Text
+  | DaemonObservedTransactionFailed DaemonObservedTransactionFailure
+  deriving stock (Eq, Show, Generic)
+
+data DaemonObservedTransactionFailure = DaemonObservedTransactionFailure
+  { daemonObservedTransactionFailureStage :: WorkflowTransactionFailureStage
+  , daemonObservedTransactionFailureReason :: DaemonFailure
+  , daemonObservedTransactionFailurePlannedEvent :: Maybe WatcherEvent
+  , daemonObservedTransactionFailureCommittedEvents :: [WatcherEvent]
+  , daemonObservedTransactionFailureCompiledEffects :: Maybe WorkflowCompiledEffectPlan
+  , daemonObservedTransactionFailurePreCommitReports :: [ActionExecutionReport]
+  , daemonObservedTransactionFailurePostCommitReports :: [ActionExecutionReport]
+  , daemonObservedTransactionFailureAudit :: Maybe (WorkflowAudit.WorkflowTickAudit MoifoldSpec DaemonFailure ActionExecutionReport)
+  }
   deriving stock (Eq, Show, Generic)
 
 data DaemonTickResult = DaemonTickResult
@@ -240,6 +258,28 @@ formatDaemonFailure = \case
     "action failed before event commit: " <> Text.pack (show action) <> ": " <> commandText report
   DaemonActionResultInvalid action message ->
     "action returned invalid result before event commit: " <> Text.pack (show action) <> ": " <> message
+  DaemonObservedTransactionFailed failure ->
+    formatDaemonObservedTransactionFailure failure
+
+formatDaemonObservedTransactionFailure :: DaemonObservedTransactionFailure -> Text
+formatDaemonObservedTransactionFailure failure =
+  "observed transaction failed during "
+    <> Text.pack (show failure.daemonObservedTransactionFailureStage)
+    <> ": "
+    <> formatDaemonFailure failure.daemonObservedTransactionFailureReason
+    <> "; committed events: "
+    <> Text.pack (show (length failure.daemonObservedTransactionFailureCommittedEvents))
+    <> maybe "" formatAudit failure.daemonObservedTransactionFailureAudit
+ where
+  formatAudit audit =
+    "; audit prior="
+      <> WorkflowAudit.workflowAuditPriorStateLabel audit
+      <> ", committed="
+      <> maybe "<none>" id (WorkflowAudit.workflowAuditCommittedEventLabel audit)
+      <> ", final="
+      <> maybe "<none>" id (WorkflowAudit.workflowAuditFinalStateLabel audit)
+      <> ", recommendation="
+      <> Text.pack (show (WorkflowAudit.workflowAuditNextDaemonRecommendation audit))
 
 replayEventLogFromEvents :: [WatcherEvent] -> Either DaemonFailure EventReplayResult
 replayEventLogFromEvents events =
@@ -270,9 +310,15 @@ runObservedDaemonExecute
   -> DaemonObservation
   -> ObservedPolicyTick
   -> m (Either DaemonFailure DaemonObservedTickResult)
-runObservedDaemonExecute executor options events _replay observation _observed =
-  fmap (observedTransactionResultToDaemon options)
-    <$> runWorkflowObservedExecuteTransaction @MoifoldSpec (moifoldObservedTransactionHooks executor options) events observation
+runObservedDaemonExecute executor options events _replay observation _observed = do
+  result <-
+    runWorkflowObservedExecuteTransactionDetailed @MoifoldSpec
+      (moifoldObservedTransactionHooks executor options)
+      events
+      observation
+  pure case result of
+    Left failure -> Left (daemonFailureFromObservedTransactionFailure failure)
+    Right success -> Right (observedDetailedTransactionResultToDaemon options observation success)
 
 moifoldObservedTransactionHooks
   :: Monad m
@@ -335,6 +381,32 @@ observedTransactionResultToDaemon
   -> WorkflowObservedTransactionResult MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport FailureClassification
   -> DaemonObservedTickResult
 observedTransactionResultToDaemon options result =
+  observedTransactionResultToDaemonWithAudit options result result.workflowTransactionAudit
+
+observedDetailedTransactionResultToDaemon
+  :: DaemonOptions
+  -> DaemonObservation
+  -> WorkflowObservedTransactionResult MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport DaemonFailure
+  -> DaemonObservedTickResult
+observedDetailedTransactionResultToDaemon options observation result =
+  observedTransactionResultToDaemonWithAudit
+    options
+    result
+    ( WorkflowEventLog.workflowSuccessAudit @MoifoldSpec
+        result.workflowTransactionPriorReplay.replayState
+        observation
+        result.workflowTransactionPlanned
+        result.workflowTransactionFinalState
+        result.workflowTransactionPreCommitReports
+        result.workflowTransactionPostCommitReports
+    )
+
+observedTransactionResultToDaemonWithAudit
+  :: DaemonOptions
+  -> WorkflowObservedTransactionResult MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport failure
+  -> WorkflowEventLog.WorkflowTickAudit MoifoldSpec ActionExecutionReport
+  -> DaemonObservedTickResult
+observedTransactionResultToDaemonWithAudit options result audit =
   let coreTick = WorkflowDaemon.workflowObservedDaemonTickResult result
    in
   DaemonObservedTickResult
@@ -345,7 +417,7 @@ observedTransactionResultToDaemon options result =
     , daemonObservedCompatibilityWrites = observedCompatibilityWrites options coreTick.workflowObservedDaemonState
     , daemonObservedCompiledEffects = workflowCompiledEffectPlanLegacy coreTick.workflowObservedDaemonCompiledEffects
     , daemonObservedActionReports = coreTick.workflowObservedDaemonActionReports
-    , daemonObservedAudit = coreTick.workflowObservedDaemonAudit
+    , daemonObservedAudit = audit
     }
 
 daemonCoreTickResult :: DaemonTickResult -> WorkflowDaemon.WorkflowDaemonTickResult MoifoldSpec CompiledEffectPlan ActionExecutionReport
@@ -396,6 +468,22 @@ daemonFailureFromWorkflowActionFailure failure =
       DaemonActionResultInvalid
         failure.workflowFailedAction.workflowPlannedAction
         failure.workflowFailureClassification.failureReason
+
+daemonFailureFromObservedTransactionFailure
+  :: WorkflowObservedTransactionFailure MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport DaemonFailure
+  -> DaemonFailure
+daemonFailureFromObservedTransactionFailure failure =
+  DaemonObservedTransactionFailed
+    DaemonObservedTransactionFailure
+      { daemonObservedTransactionFailureStage = failure.workflowTransactionFailureStage
+      , daemonObservedTransactionFailureReason = failure.workflowTransactionFailureReason
+      , daemonObservedTransactionFailurePlannedEvent = plannedEvent <$> failure.workflowTransactionFailurePlanned
+      , daemonObservedTransactionFailureCommittedEvents = failure.workflowTransactionFailureCommittedEvents
+      , daemonObservedTransactionFailureCompiledEffects = failure.workflowTransactionFailureCompiledEffects
+      , daemonObservedTransactionFailurePreCommitReports = failure.workflowTransactionFailurePreCommitReports
+      , daemonObservedTransactionFailurePostCommitReports = failure.workflowTransactionFailurePostCommitReports
+      , daemonObservedTransactionFailureAudit = failure.workflowTransactionFailureAudit
+      }
 
 data PreMergeGateResult
   = PreMergeGatePassed

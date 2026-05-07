@@ -24,6 +24,9 @@ module CodexWatcher.Workflow.DocsMigration
   , docsMigrationAgentRole
   , docsMigrationDaemonCoreTickResult
   , docsMigrationEffectMetadata
+  , docsMigrationEventCodecContract
+  , docsMigrationEventLogFixture
+  , docsMigrationEventLogFixtureContract
   , dryRunDocsMigrationCompiledEffectPlan
   , executeDocsMigrationCompiledEffectPlan
   , runDocsMigrationObservedDryRun
@@ -32,7 +35,7 @@ module CodexWatcher.Workflow.DocsMigration
   ) where
 
 import CodexWatcher.AppServerClient (AppServerTurn (..))
-import CodexWatcher.Core.Ids (ThreadId, TurnId)
+import CodexWatcher.Core.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)
   , AgentRole (..)
@@ -41,9 +44,17 @@ import CodexWatcher.Workflow.Agent
   , TurnRef (..)
   , defaultAgentRetryPolicy
   )
+import CodexWatcher.Workflow.Codec
+  ( WorkflowCodecContract (..)
+  , WorkflowDecodeError (..)
+  , WorkflowEventTypeLabel (..)
+  , WorkflowMetadataLabel (..)
+  , WorkflowSchemaVersion (..)
+  )
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.EventLog
-  ( WorkflowReplaySummary (..)
+  ( EventLogFixtureContract (..)
+  , WorkflowReplaySummary (..)
   , WorkflowTickAudit
   , formatWorkflowReplayFailure
   , replayWorkflowEventLogDetailed
@@ -71,7 +82,10 @@ import CodexWatcher.Workflow.Transaction.Core
   , runWorkflowObservedDryRunTransaction
   , runWorkflowObservedExecuteTransaction
   )
-import Data.Aeson (FromJSON (..), eitherDecodeStrict', (.:), (.:?), (.!=), withObject)
+import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', object, (.:), (.:?), (.=), (.!=), withObject)
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.Types (Pair, Parser, parseEither)
+import Data.List qualified as List
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -191,9 +205,9 @@ instance WorkflowSpec DocsMigrationSpec where
   workflowPlanTransition = docsMigrationPlannedTransitionFromEffects
   workflowReplayEvents = replayDocsMigrationEvents
   workflowReplayState = docsMigrationReplayState
-  workflowValidateEffects _state _effects = Right ()
+  workflowValidateEffects = validateDocsMigrationEffectPlan
   workflowEffectPlanEffects = id
-  workflowEffectAllowed _state _effect = Right ()
+  workflowEffectAllowed = docsMigrationEffectAllowed
   workflowIsTerminal = \case
     DocsMigrationComplete {} -> True
     DocsMigrationBlocked {} -> True
@@ -259,6 +273,206 @@ docsMigrationEffectMetadata = \case
       , workflowEffectCommitOrder = PostCommit
       , workflowEffectIdempotency = idempotency
       }
+
+docsMigrationEventCodecContract :: WorkflowCodecContract DocsMigrationEvent Value
+docsMigrationEventCodecContract =
+  WorkflowCodecContract
+    { workflowCodecEventTypeLabel = WorkflowEventTypeLabel . docsMigrationEventLabel
+    , workflowCodecSchemaVersion = const (WorkflowSchemaVersion 1)
+    , workflowCodecMetadataLabels =
+        fmap
+          WorkflowMetadataLabel
+          [ "workflowId"
+          , "actor"
+          , "source"
+          , "correlationId"
+          ]
+    , workflowCodecEncode = encodeDocsMigrationEvent
+    , workflowCodecEncodedEventTypeLabel = docsMigrationEventTypeLabelFromValue
+    , workflowCodecDecode =
+        \value ->
+          case parseEither parseDocsMigrationEvent value of
+            Right event -> Right event
+            Left reason ->
+              Left
+                WorkflowDecodeError
+                  { workflowDecodeErrorTypeLabel = docsMigrationEventTypeLabelFromValue value
+                  , workflowDecodeErrorSchemaVersion = docsMigrationSchemaVersionFromValue value
+                  , workflowDecodeErrorReason = Text.pack reason
+                  }
+    }
+
+docsMigrationEventLogFixture :: [DocsMigrationEvent]
+docsMigrationEventLogFixture =
+  [ DocsMigrationInitialized docsMigrationFixtureConfig
+  , DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+  , DocsMigrationDraftProduced "draft markdown" "draft ready"
+  , DocsMigrationValidationPassed "validation passed"
+  , DocsMigrationWorkflowCompleted "done"
+  ]
+
+docsMigrationEventLogFixtureContract :: EventLogFixtureContract DocsMigrationSpec
+docsMigrationEventLogFixtureContract =
+  EventLogFixtureContract
+    { fixtureExpectedStateLabel = "complete"
+    , fixtureExpectedEventCount = Just (length docsMigrationEventLogFixture)
+    }
+
+docsMigrationFixtureConfig :: DocsMigrationConfig
+docsMigrationFixtureConfig =
+  DocsMigrationConfig
+    { docsMigrationSource = "docs/source.md"
+    , docsMigrationTarget = "docs/target.md"
+    , docsMigrationGoal = "migrate framework notes"
+    }
+
+encodeDocsMigrationEvent :: DocsMigrationEvent -> Value
+encodeDocsMigrationEvent event =
+  object (baseFields <> eventFields)
+ where
+  baseFields =
+    [ "type" .= docsMigrationEventLabel event
+    , "schemaVersion" .= (1 :: Int)
+    ]
+  eventFields :: [Pair]
+  eventFields =
+    case event of
+      DocsMigrationInitialized config ->
+        [ "source" .= config.docsMigrationSource
+        , "target" .= config.docsMigrationTarget
+        , "goal" .= config.docsMigrationGoal
+        ]
+      DocsMigrationTurnStarted threadId turnId ->
+        [ "threadId" .= unThreadId threadId
+        , "turnId" .= unTurnId turnId
+        ]
+      DocsMigrationDraftProduced draft summary ->
+        [ "draft" .= draft
+        , "summary" .= summary
+        ]
+      DocsMigrationValidationPassed summary ->
+        ["summary" .= summary]
+      DocsMigrationWorkflowBlocked reason ->
+        ["reason" .= reason]
+      DocsMigrationWorkflowCompleted summary ->
+        ["summary" .= summary]
+
+parseDocsMigrationEvent :: Value -> Parser DocsMigrationEvent
+parseDocsMigrationEvent =
+  withObject "DocsMigrationEvent" $ \objectValue -> do
+    schemaVersion <- objectValue .:? "schemaVersion" .!= (1 :: Int)
+    if schemaVersion /= 1
+      then fail ("unsupported docs migration schema version " <> show schemaVersion)
+      else do
+        eventType <- objectValue .: "type"
+        case eventType of
+          "docs-migration-initialized" ->
+            DocsMigrationInitialized
+              <$> ( DocsMigrationConfig
+                      <$> objectValue .: "source"
+                      <*> objectValue .: "target"
+                      <*> objectValue .: "goal"
+                  )
+          "docs-migration-turn-started" ->
+            DocsMigrationTurnStarted
+              <$> (ThreadId <$> objectValue .: "threadId")
+              <*> (TurnId <$> objectValue .: "turnId")
+          "docs-migration-draft-produced" ->
+            DocsMigrationDraftProduced
+              <$> objectValue .: "draft"
+              <*> objectValue .: "summary"
+          "docs-migration-validation-passed" ->
+            DocsMigrationValidationPassed <$> objectValue .: "summary"
+          "docs-migration-blocked" ->
+            DocsMigrationWorkflowBlocked <$> objectValue .: "reason"
+          "docs-migration-completed" ->
+            DocsMigrationWorkflowCompleted <$> objectValue .: "summary"
+          other ->
+            fail ("unknown docs migration event type " <> Text.unpack other)
+
+docsMigrationEventTypeLabelFromValue :: Value -> Maybe WorkflowEventTypeLabel
+docsMigrationEventTypeLabelFromValue (Object objectValue) =
+  case KeyMap.lookup "type" objectValue of
+    Just (String label) -> Just (WorkflowEventTypeLabel label)
+    _ -> Nothing
+docsMigrationEventTypeLabelFromValue _ =
+  Nothing
+
+docsMigrationSchemaVersionFromValue :: Value -> Maybe WorkflowSchemaVersion
+docsMigrationSchemaVersionFromValue value =
+  case parseEither (withObject "DocsMigrationEvent" (.: "schemaVersion")) value of
+    Right version -> Just (WorkflowSchemaVersion version)
+    Left _reason -> Nothing
+
+validateDocsMigrationEffectPlan :: DocsMigrationState -> [DocsMigrationEffect] -> Either Text ()
+validateDocsMigrationEffectPlan _state [] =
+  Right ()
+validateDocsMigrationEffectPlan state effects =
+  case (state, effects) of
+    (DocsMigrationReady expectedConfig, [StartDocsMigrationTurn actualConfig])
+      | actualConfig == expectedConfig -> Right ()
+      | otherwise -> Left "docs migration can only start the configured migration turn"
+    (DocsMigrationTurnActive config _turn, [WriteDocsMigrationDraft writePath draft, RunDocsMigrationValidation validationPath])
+      | Text.null draft -> Left "docs migration draft write requires a non-empty draft"
+      | writePath /= config.docsMigrationTarget -> Left "docs migration draft write must target the configured target path"
+      | validationPath /= config.docsMigrationTarget -> Left "docs migration validation must read the configured target path"
+      | otherwise -> Right ()
+    (_state, [StopDocsMigrationDaemon])
+      | docsMigrationCanStop state -> Right ()
+    _ ->
+      case traverse (docsMigrationEffectAllowed state) effects of
+        Left reason -> Left reason
+        Right _ ->
+          Left
+            ( "docs migration effect plan "
+                <> Text.pack (show (fmap docsMigrationEffectLabel effects))
+                <> " is not allowed in "
+                <> docsMigrationStateLabel state
+            )
+
+docsMigrationEffectAllowed :: DocsMigrationState -> DocsMigrationEffect -> Either Text ()
+docsMigrationEffectAllowed state effect =
+  case effect of
+    StartDocsMigrationTurn actualConfig ->
+      case state of
+        DocsMigrationReady expectedConfig
+          | actualConfig == expectedConfig -> Right ()
+          | otherwise -> Left "docs migration can only start the configured migration turn"
+        _ -> Left ("start-docs-migration-turn is not allowed in " <> docsMigrationStateLabel state)
+    WriteDocsMigrationDraft path draft ->
+      case state of
+        DocsMigrationTurnActive config _turn
+          | Text.null draft -> Left "docs migration draft write requires a non-empty draft"
+          | path == config.docsMigrationTarget -> Right ()
+          | otherwise -> Left "docs migration draft write must target the configured target path"
+        _ -> Left ("write-docs-migration-draft is not allowed in " <> docsMigrationStateLabel state)
+    RunDocsMigrationValidation path ->
+      case state of
+        DocsMigrationTurnActive config _turn
+          | path == config.docsMigrationTarget -> Right ()
+          | otherwise -> Left "docs migration validation must read the configured target path"
+        _ -> Left ("run-docs-migration-validation is not allowed in " <> docsMigrationStateLabel state)
+    StopDocsMigrationDaemon
+      | docsMigrationCanStop state -> Right ()
+      | otherwise -> Left ("stop-docs-migration-daemon is not allowed in " <> docsMigrationStateLabel state)
+
+docsMigrationCanStop :: DocsMigrationState -> Bool
+docsMigrationCanStop = \case
+  DocsMigrationReady {} -> True
+  DocsMigrationTurnActive {} -> True
+  DocsMigrationDraftReady {} -> True
+  DocsMigrationValidated {} -> True
+  DocsMigrationComplete {} -> False
+  DocsMigrationBlocked {} -> False
+
+docsMigrationCanBlock :: DocsMigrationState -> Bool
+docsMigrationCanBlock = \case
+  DocsMigrationReady {} -> True
+  DocsMigrationTurnActive {} -> True
+  DocsMigrationDraftReady {} -> True
+  DocsMigrationValidated {} -> True
+  DocsMigrationComplete {} -> False
+  DocsMigrationBlocked {} -> False
 
 compileDocsMigrationEffectPlan :: [DocsMigrationEffect] -> WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
 compileDocsMigrationEffectPlan =
@@ -454,7 +668,8 @@ applyDocsMigrationEvent (DocsMigrationDraftReady config _draft) (DocsMigrationVa
   Right (DocsMigrationValidated config summary, [StopDocsMigrationDaemon])
 applyDocsMigrationEvent (DocsMigrationValidated _config summary) (DocsMigrationWorkflowCompleted doneSummary) =
   Right (DocsMigrationComplete (nonEmpty doneSummary summary), [])
-applyDocsMigrationEvent _state (DocsMigrationWorkflowBlocked reason) =
+applyDocsMigrationEvent state (DocsMigrationWorkflowBlocked reason)
+  | docsMigrationCanBlock state =
   Right (DocsMigrationBlocked reason, [StopDocsMigrationDaemon])
 applyDocsMigrationEvent state event =
   Left ("docs migration event " <> docsMigrationEventLabel event <> " is invalid in " <> docsMigrationStateLabel state)
@@ -496,10 +711,15 @@ docsMigrationObservedTransition tick =
 
 docsMigrationPlannedTransitionFromEffects :: DocsMigrationEvent -> [DocsMigrationEffect] -> PlannedTransition DocsMigrationSpec
 docsMigrationPlannedTransitionFromEffects event effects =
+  let (preCommitEffects, postCommitEffects) =
+        List.partition
+          ((== PreCommit) . workflowEffectCommitOrder . docsMigrationEffectMetadata)
+          effects
+   in
   PlannedTransition
     { plannedEvent = event
-    , plannedPreCommitEffects = effects
-    , plannedPostCommitEffects = []
+    , plannedPreCommitEffects = preCommitEffects
+    , plannedPostCommitEffects = postCommitEffects
     }
 
 docsMigrationStateLabel :: DocsMigrationState -> Text

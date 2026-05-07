@@ -9,7 +9,7 @@ module CodexWatcher.AutomaticLoop.StartupThreads
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..), ActionExecutor (..))
-import CodexWatcher.AppServerClient (formatAppServerClientFailure, startThreadWithInterpreter)
+import CodexWatcher.AppServerClient (formatAppServerClientFailure)
 import CodexWatcher.Cli.Types (LoopCli (..))
 import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonOptions (..), appendWatcherEvent)
@@ -28,6 +28,8 @@ import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.PrReview.Types (PrConfig)
+import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
+import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import Data.Text qualified as Text
 import System.Exit (die)
 
@@ -68,7 +70,7 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
       Just issueConfig -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
             instructions = issueImplementerThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir issueConfig
-        threadId <- startFreshThread executor requestId cli.loopCliWorkdir instructions
+        threadId <- startFreshThread executor WorkflowAgent.issueImplementationWorkerAgentRoleId requestId cli.loopCliWorkdir instructions
         appendStartupThreadRefresh (IssueWorkerThreadRefreshed threadId)
         pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
@@ -78,13 +80,13 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
         pure loopConfig
       Just (RefreshPrReviewIdleThreads prConfig) -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
-        workerThread <- startFreshThread executor requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
-        reviewerThread <- startFreshThread executor (nextRequestId requestId) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        workerThread <- startFreshThread executor WorkflowAgent.prReviewWorkerAgentRoleId requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
+        reviewerThread <- startFreshThread executor WorkflowAgent.reviewerAgentRoleId (nextRequestId requestId) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
         appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
         pure (withNextRequestId (nextRequestId (nextRequestId requestId)) loopConfig)
       Just (RefreshPrReviewReviewerForActiveWorker prConfig workerThread) -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
-        reviewerThread <- startFreshThread executor requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        reviewerThread <- startFreshThread executor WorkflowAgent.reviewerAgentRoleId requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
         appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
         pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
@@ -94,16 +96,20 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
     replay <- either (die . formatReplayFailure) pure (replayEventLog (events <> [event]))
     mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir replay.replayState)
 
-startFreshThread :: ActionExecutor IO -> RequestId -> FilePath -> Text.Text -> IO ThreadId
-startFreshThread executor requestId cwd developerInstructions = do
+startFreshThread :: ActionExecutor IO -> WorkflowAgent.AgentRoleId -> RequestId -> FilePath -> Text.Text -> IO ThreadId
+startFreshThread executor roleId requestId cwd developerInstructions = do
+  let threadPlan =
+        WorkflowAgentCodex.agentThreadPlanFromThreadStartOptions
+          roleId
+          (defaultThreadStartOptions cwd developerInstructions)
   result <-
-    startThreadWithInterpreter
+    WorkflowAgentCodex.startAgentThread
       executor.actionAppServer
       requestId
-      (defaultThreadStartOptions cwd developerInstructions)
+      threadPlan
   case result of
     Left failure -> die (Text.unpack (formatAppServerClientFailure failure))
-    Right threadId -> pure threadId
+    Right started -> pure (WorkflowAgent.agentThreadStartThreadId started)
 
 withNextRequestId :: RequestId -> DaemonLoopConfig -> DaemonLoopConfig
 withNextRequestId requestId loopConfig =

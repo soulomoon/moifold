@@ -3704,7 +3704,17 @@ observedDaemonTickExecuteCommandFailureDoesNotAppendEvent = do
   calls <- getCalls
   results <-
     sequence
-      [ assert "observed execute fails failed command before event commit" (case result of Left DaemonActionFailed {} -> True; _ -> False)
+      [ assert "observed execute reports detailed pre-commit transaction failure" $
+          case result of
+            Left (DaemonObservedTransactionFailed failure) ->
+              failure.daemonObservedTransactionFailureStage == WorkflowTransaction.WorkflowTransactionPreCommitActionFailure
+                && case failure.daemonObservedTransactionFailureReason of
+                  DaemonActionFailed {} -> True
+                  _ -> False
+                && failure.daemonObservedTransactionFailureCommittedEvents == []
+                && failure.daemonObservedTransactionFailurePreCommitReports == []
+                && (WorkflowEventLog.workflowAuditCommittedEventLabel <$> failure.daemonObservedTransactionFailureAudit) == Just Nothing
+            _ -> False
       , assert "observed execute does not append event after command failure" (not (any isAppend calls))
       , assert "observed execute attempted issue creation" (FakeCommand (GhIssueCreate repo issueRequest) `elem` calls)
       ]
@@ -6196,6 +6206,9 @@ workflowFacadeExtractionTests = do
       , workflowDslPrReviewFeedbackMatchesStateMachine
       , workflowDslTransitionLowersToPlannedTransition
       , workflowDocsMigrationSpecProvesSecondWorkflow
+      , workflowDocsMigrationPermissionAndPartitionContracts
+      , workflowDocsMigrationEventCodecFixtureContract
+      , workflowDocsMigrationFixtureFailureReportsThroughCore
       , workflowDocsMigrationAgentRoleClassifiesCompleteOutput
       , workflowDocsMigrationUsesCoreExecutionContracts
       , workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults
@@ -7371,6 +7384,107 @@ workflowDocsMigrationSpecProvesSecondWorkflow = do
             firstEffects : _ -> DocsMigration.StartDocsMigrationTurn config `elem` firstEffects
             [] -> False
       Left _ -> False
+
+workflowDocsMigrationPermissionAndPartitionContracts :: IO Bool
+workflowDocsMigrationPermissionAndPartitionContracts = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      readyState = DocsMigration.DocsMigrationReady config
+      activeState =
+        DocsMigration.DocsMigrationTurnActive
+          config
+          (WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn"))
+      event = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      effects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      planned = workflowPlanTransition @DocsMigration.DocsMigrationSpec event effects
+      compiled = DocsMigration.compileDocsMigrationEffectPlan (planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects)
+      (preActions, postActions) = WorkflowExecution.partitionWorkflowGenericActions compiled
+  results <-
+    sequence
+      [ assert "workflow docs-migration validates its initial start effect" $
+          workflowValidateEffects @DocsMigration.DocsMigrationSpec readyState [DocsMigration.StartDocsMigrationTurn config] == Right ()
+      , assert "workflow docs-migration validates active draft effects" $
+          workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState effects == Right ()
+      , assert "workflow docs-migration rejects writes before the agent turn is active" $
+          case workflowEffectAllowed @DocsMigration.DocsMigrationSpec readyState (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft") of
+            Left reason -> "ready" `Text.isInfixOf` reason
+            Right () -> False
+      , assert "workflow docs-migration rejects partial draft effect plans" $
+          case workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState [DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft"] of
+            Left reason -> "effect plan" `Text.isInfixOf` reason
+            Right () -> False
+      , assert "workflow docs-migration planned transition follows post-commit metadata" $
+          null planned.plannedPreCommitEffects
+            && planned.plannedPostCommitEffects == effects
+            && null preActions
+            && length postActions == 2
+      ]
+  pure (and results)
+
+workflowDocsMigrationEventCodecFixtureContract :: IO Bool
+workflowDocsMigrationEventCodecFixtureContract = do
+  let contract = DocsMigration.docsMigrationEventCodecContract
+      fixture = DocsMigration.docsMigrationEventLogFixture
+      encoded = fmap (WorkflowCodec.workflowCodecEncode contract) fixture
+      decoded = traverse (WorkflowCodec.workflowCodecDecode contract) encoded
+      codecRoundTripOk event =
+        WorkflowCodec.validateWorkflowCodecRoundTrip contract event == Right ()
+          && WorkflowCodec.validateWorkflowCodecEncodedTypeLabel contract event == Right ()
+  assert "workflow docs-migration event codec validates fixture replay contract" $
+    all codecRoundTripOk fixture
+      && case decoded of
+        Right decodedEvents ->
+          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id decodedEvents of
+            Right summary ->
+              WorkflowEventLog.validateEventLogFixtureContract
+                @DocsMigration.DocsMigrationSpec
+                DocsMigration.docsMigrationEventLogFixtureContract
+                summary
+                == Right ()
+            Left _failure -> False
+        Left _failure -> False
+
+workflowDocsMigrationFixtureFailureReportsThroughCore :: IO Bool
+workflowDocsMigrationFixtureFailureReportsThroughCore = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      badEvents =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationValidationPassed "too early"
+        ]
+      terminalEvents =
+        DocsMigration.docsMigrationEventLogFixture
+          <> [DocsMigration.DocsMigrationWorkflowBlocked "blocked after terminal"]
+  results <-
+    sequence
+      [ assert "workflow docs-migration fixture failures report through core replay" $
+          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id badEvents of
+            Left failure ->
+              WorkflowEventLog.workflowReplayFailureEventIndex failure == 2
+                && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-validation-passed"
+                && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "ready"
+                && "ready" `Text.isInfixOf` WorkflowEventLog.workflowReplayFailureReason failure
+            Right _summary -> False
+      , assert "workflow docs-migration terminal states reject blocked transitions" $
+          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id terminalEvents of
+            Left failure ->
+              WorkflowEventLog.workflowReplayFailureEventIndex failure == length terminalEvents
+                && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-blocked"
+                && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "complete"
+            Right _summary -> False
+      ]
+  pure (and results)
 
 workflowDocsMigrationAgentRoleClassifiesCompleteOutput :: IO Bool
 workflowDocsMigrationAgentRoleClassifiesCompleteOutput = do

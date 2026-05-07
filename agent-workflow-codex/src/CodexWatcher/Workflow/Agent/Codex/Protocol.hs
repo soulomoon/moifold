@@ -2,6 +2,7 @@
 
 module CodexWatcher.Workflow.Agent.Codex.Protocol
   ( agentThreadInterruptRequest
+  , agentThreadPlanFromThreadStartOptions
   , agentThreadReadRequest
   , agentThreadStartRequest
   , agentTurnStartRequest
@@ -18,10 +19,22 @@ import CodexWatcher.AppServerProtocol
   )
 import CodexWatcher.Workflow.Agent.Ids (RequestId)
 import CodexWatcher.Workflow.Agent.Types
-  ( AgentThreadPlan (..)
+  ( AgentRoleId
+  , AgentThreadPlan (..)
   , AgentTurnPlan (..)
   , TurnRef (..)
   )
+
+agentThreadPlanFromThreadStartOptions :: AgentRoleId -> ThreadStartOptions -> AgentThreadPlan
+agentThreadPlanFromThreadStartOptions roleId options =
+  AgentThreadPlan
+    { agentThreadPlanRoleId = roleId
+    , agentThreadPlanCwd = options.threadCwd
+    , agentThreadPlanApprovalPolicy = options.threadApprovalPolicy
+    , agentThreadPlanSandbox = options.threadSandbox
+    , agentThreadPlanModel = options.threadModel
+    , agentThreadPlanDeveloperInstructions = options.threadDeveloperInstructions
+    }
 
 agentThreadStartRequest :: RequestId -> AgentThreadPlan -> AppServerRequest
 agentThreadStartRequest requestId plan =

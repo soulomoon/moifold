@@ -30,10 +30,11 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.File (readJsonValue)
 import CodexWatcher.Runtime.Json (commandJsonValue)
 import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
-import CodexWatcher.Core.Ids (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.State (someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
+import CodexWatcher.Workflow.GitHub.Remote (RemotePullRequest (..), parseGhPrView, parseGitBranch, parseGitSha, parseLsRemoteBranch, remotePullRequestIsMerged)
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad (filterM)
@@ -307,8 +308,8 @@ checkWorkdir config =
         case (isGit, config.branch) of
           (True, Just branchName) -> runRuntimeCommand (GitLsRemoteBranch path' (BranchName branchName))
           _ -> pure (skippedCommand "missing branch or git checkout")
-      let headSha' = emptyToNothing headReport.stdout
-          remoteSha = parseRemoteSha remoteReport.stdout
+      let headSha' = unCommitSha <$> parseGitSha headReport.stdout
+          remoteSha = unCommitSha <$> parseLsRemoteBranch remoteReport.stdout
       pure
         WorkdirReport
           { skipped = False
@@ -316,7 +317,7 @@ checkWorkdir config =
           , path = Just path'
           , exists
           , isGitCheckout = isGit
-          , currentBranch = emptyToNothing branchReport.stdout
+          , currentBranch = unBranchName <$> parseGitBranch branchReport.stdout
           , headSha = headSha'
           , remoteHeadSha = remoteSha
           , localDiffersFromRemote = isJust headSha' && isJust remoteSha && headSha' /= remoteSha
@@ -347,7 +348,10 @@ checkRemotePr SPrReview config =
         else do
           pure case commandJsonValue report of
             Left error' -> RemotePrReport {skipped = False, ok = False, errorMessage = Just error', raw = Null, merged = False}
-            Right value -> RemotePrReport {skipped = False, ok = True, errorMessage = Nothing, raw = value, merged = remotePrMerged value}
+            Right value ->
+              case parseGhPrView report.stdout of
+                Left error' -> RemotePrReport {skipped = False, ok = False, errorMessage = Just error', raw = value, merged = False}
+                Right remote -> RemotePrReport {skipped = False, ok = True, errorMessage = Nothing, raw = value, merged = healthcheckRemotePrMerged remote}
     _ -> pure (skippedRemotePr "missing repoFullName or prNumber")
 checkRemotePr _ _ =
   pure (skippedRemotePr "not a PR watcher")
@@ -527,19 +531,10 @@ skippedAppServerThread reason' maybeThreadId =
     , latestTurnStatus = Nothing
     }
 
-remotePrMerged :: Value -> Bool
-remotePrMerged (Object object') =
-  KeyMap.lookup "state" object' == Just (String "MERGED")
-    || case KeyMap.lookup "mergedAt" object' of
-      Just (String text) -> not (Text.null text)
-      _ -> False
-remotePrMerged _ = False
-
-parseRemoteSha :: Text -> Maybe Text
-parseRemoteSha text =
-  case Text.words text of
-    sha : _ -> Just sha
-    [] -> Nothing
+healthcheckRemotePrMerged :: RemotePullRequest -> Bool
+healthcheckRemotePrMerged remote =
+  remotePullRequestIsMerged remote
+    || maybe False (not . Text.null) remote.remotePullRequestMergedAt
 
 lastMaybe :: [a] -> Maybe a
 lastMaybe [] = Nothing
