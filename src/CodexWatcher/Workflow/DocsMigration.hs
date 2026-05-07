@@ -12,6 +12,20 @@ module CodexWatcher.Workflow.DocsMigration
   , DocsMigrationDaemonTickResult (..)
   , DocsMigrationEffect (..)
   , DocsMigrationEvent (..)
+  , DocsMigrationIndexedBlocked
+  , DocsMigrationIndexedComplete
+  , DocsMigrationIndexedDraftReady
+  , DocsMigrationIndexedEffect (..)
+  , DocsMigrationIndexedEffectPlan (..)
+  , DocsMigrationIndexedEvent (..)
+  , DocsMigrationIndexedObservation (..)
+  , DocsMigrationIndexedObservedTick (..)
+  , DocsMigrationIndexedReady
+  , DocsMigrationIndexedReplayResult (..)
+  , DocsMigrationIndexedState (..)
+  , DocsMigrationIndexedTurnActive
+  , DocsMigrationIndexedUninitialized
+  , DocsMigrationIndexedValidated
   , DocsMigrationInterpreter (..)
   , DocsMigrationObservation (..)
   , DocsMigrationOutput (..)
@@ -76,6 +90,7 @@ import CodexWatcher.Workflow.Execution
   , partitionWorkflowGenericActions
   )
 import CodexWatcher.Workflow.Failure (FailureClassification)
+import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 import CodexWatcher.Workflow.Transaction.Core
   ( WorkflowObservedTransactionHooks (..)
@@ -92,6 +107,69 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 
 data DocsMigrationSpec
+
+data DocsMigrationIndexedWorkflow
+
+data DocsMigrationIndexedUninitialized
+
+data DocsMigrationIndexedReady
+
+data DocsMigrationIndexedTurnActive
+
+data DocsMigrationIndexedDraftReady
+
+data DocsMigrationIndexedValidated
+
+data DocsMigrationIndexedComplete
+
+data DocsMigrationIndexedBlocked
+
+newtype DocsMigrationIndexedState state =
+  DocsMigrationIndexedState
+    { docsMigrationIndexedStateValue :: DocsMigrationState
+    }
+  deriving stock (Eq, Show)
+
+data DocsMigrationIndexedEvent source target = DocsMigrationIndexedEvent
+  { docsMigrationIndexedEventSourceLabel :: Text
+  , docsMigrationIndexedEventTargetLabel :: Text
+  , docsMigrationIndexedEventValue :: DocsMigrationEvent
+  }
+  deriving stock (Eq, Show)
+
+data DocsMigrationIndexedObservation source target = DocsMigrationIndexedObservation
+  { docsMigrationIndexedObservationSourceLabel :: Text
+  , docsMigrationIndexedObservationTargetLabel :: Text
+  , docsMigrationIndexedObservationValue :: DocsMigrationObservation
+  }
+  deriving stock (Eq, Show)
+
+data DocsMigrationIndexedObservedTick source target = DocsMigrationIndexedObservedTick
+  { docsMigrationIndexedObservedTickSourceLabel :: Text
+  , docsMigrationIndexedObservedTickTargetLabel :: Text
+  , docsMigrationIndexedObservedTickValue :: DocsMigrationTick
+  }
+  deriving stock (Eq, Show)
+
+newtype DocsMigrationIndexedEffect source target =
+  DocsMigrationIndexedEffect
+    { docsMigrationIndexedEffectValue :: DocsMigrationEffect
+    }
+  deriving stock (Eq, Show)
+
+newtype DocsMigrationIndexedEffectPlan source target =
+  DocsMigrationIndexedEffectPlan
+    { docsMigrationIndexedEffectPlanValues :: [DocsMigrationEffect]
+    }
+  deriving stock (Eq, Show)
+
+newtype DocsMigrationIndexedReplayResult state =
+  DocsMigrationIndexedReplayResult
+    { docsMigrationIndexedReplayValue :: DocsMigrationReplayResult
+    }
+  deriving stock (Eq, Show)
+
+type instance IndexedWorkflow.WorkflowIndex DocsMigrationSpec = DocsMigrationIndexedWorkflow
 
 data DocsMigrationConfig = DocsMigrationConfig
   { docsMigrationSource :: FilePath
@@ -217,6 +295,114 @@ instance WorkflowSpec DocsMigrationSpec where
   workflowEventLabel = docsMigrationEventLabel
   workflowObservationLabel = docsMigrationObservationLabel
   workflowEffectLabel = docsMigrationEffectLabel
+
+instance IndexedWorkflow.IndexedWorkflowSpec DocsMigrationSpec where
+  type IndexedWorkflowState DocsMigrationSpec state = DocsMigrationIndexedState state
+  type IndexedWorkflowEvent DocsMigrationSpec source target = DocsMigrationIndexedEvent source target
+  type IndexedWorkflowObservation DocsMigrationSpec source target = DocsMigrationIndexedObservation source target
+  type IndexedWorkflowObservedTick DocsMigrationSpec source target = DocsMigrationIndexedObservedTick source target
+  type IndexedWorkflowEffect DocsMigrationSpec source target = DocsMigrationIndexedEffect source target
+  type IndexedWorkflowEffectPlan DocsMigrationSpec source target = DocsMigrationIndexedEffectPlan source target
+  type IndexedWorkflowReplayResult DocsMigrationSpec state = DocsMigrationIndexedReplayResult state
+  type IndexedWorkflowError DocsMigrationSpec = Text
+
+  indexedWorkflowInitialEvent (DocsMigrationIndexedEvent _sourceLabel _targetLabel event) =
+    case workflowInitialEvent @DocsMigrationSpec event of
+      Right (state, effects) -> Right (DocsMigrationIndexedState state, DocsMigrationIndexedEffectPlan effects)
+      Left failure -> Left failure
+  indexedWorkflowApplyEvent (DocsMigrationIndexedState state) (DocsMigrationIndexedEvent _sourceLabel _targetLabel event) =
+    case workflowApplyEvent @DocsMigrationSpec state event of
+      Right (nextState, effects) -> Right (DocsMigrationIndexedState nextState, DocsMigrationIndexedEffectPlan effects)
+      Left failure -> Left failure
+  indexedWorkflowObserve (DocsMigrationIndexedState state) (DocsMigrationIndexedObservation sourceLabel targetLabel observation) =
+    case workflowObserve @DocsMigrationSpec state observation of
+      Right observed -> Right (DocsMigrationIndexedObservedTick sourceLabel targetLabel observed)
+      Left failure -> Left failure
+  indexedWorkflowObservedTransition (DocsMigrationIndexedObservedTick sourceLabel targetLabel observed) =
+    docsMigrationIndexedPlannedTransitionFromCompatibility
+      sourceLabel
+      targetLabel
+      (docsMigrationObservedTransition observed)
+  indexedWorkflowObservedState (DocsMigrationIndexedObservedTick _sourceLabel _targetLabel observed) =
+    DocsMigrationIndexedState observed.docsMigrationTickState
+  indexedWorkflowPlanTransition (DocsMigrationIndexedEvent sourceLabel targetLabel event) (DocsMigrationIndexedEffectPlan effects) =
+    docsMigrationIndexedPlannedTransitionFromCompatibility
+      sourceLabel
+      targetLabel
+      (docsMigrationPlannedTransitionFromEffects event effects)
+  indexedWorkflowReplayEvents events =
+    case replayDocsMigrationEvents (docsMigrationIndexedSomeEvent <$> events) of
+      Right replay -> Right (docsMigrationIndexedSomeReplayResult replay)
+      Left failure -> Left failure
+  indexedWorkflowReplayState (DocsMigrationIndexedReplayResult replay) =
+    DocsMigrationIndexedState replay.docsMigrationReplayState
+  indexedWorkflowValidateEffects (DocsMigrationIndexedState state) (DocsMigrationIndexedEffectPlan effects) =
+    workflowValidateEffects @DocsMigrationSpec state effects
+  indexedWorkflowEffectPlanEffects (DocsMigrationIndexedEffectPlan effects) =
+    DocsMigrationIndexedEffect <$> effects
+  indexedWorkflowEffectAllowed (DocsMigrationIndexedState state) (DocsMigrationIndexedEffect effect) =
+    workflowEffectAllowed @DocsMigrationSpec state effect
+  indexedWorkflowIsTerminal (DocsMigrationIndexedState state) =
+    workflowIsTerminal @DocsMigrationSpec state
+  indexedWorkflowStateLabel (DocsMigrationIndexedState state) =
+    workflowStateLabel @DocsMigrationSpec state
+  indexedWorkflowEventLabel (DocsMigrationIndexedEvent _sourceLabel _targetLabel event) =
+    workflowEventLabel @DocsMigrationSpec event
+  indexedWorkflowEventSourceLabel (DocsMigrationIndexedEvent sourceLabel _targetLabel _event) =
+    sourceLabel
+  indexedWorkflowEventTargetLabel (DocsMigrationIndexedEvent _sourceLabel targetLabel _event) =
+    targetLabel
+  indexedWorkflowObservationLabel (DocsMigrationIndexedObservation _sourceLabel _targetLabel observation) =
+    workflowObservationLabel @DocsMigrationSpec observation
+  indexedWorkflowObservationSourceLabel (DocsMigrationIndexedObservation sourceLabel _targetLabel _observation) =
+    sourceLabel
+  indexedWorkflowObservationTargetLabel (DocsMigrationIndexedObservation _sourceLabel targetLabel _observation) =
+    targetLabel
+  indexedWorkflowEffectLabel (DocsMigrationIndexedEffect effect) =
+    workflowEffectLabel @DocsMigrationSpec effect
+
+docsMigrationIndexedPlannedTransitionFromCompatibility
+  :: Text
+  -> Text
+  -> PlannedTransition DocsMigrationSpec
+  -> IndexedWorkflow.IndexedPlannedTransition DocsMigrationSpec source target
+docsMigrationIndexedPlannedTransitionFromCompatibility sourceLabel targetLabel planned =
+  IndexedWorkflow.IndexedPlannedTransition
+    { IndexedWorkflow.indexedPlannedEvent =
+        DocsMigrationIndexedEvent sourceLabel targetLabel planned.plannedEvent
+    , IndexedWorkflow.indexedPlannedPreCommitEffects =
+        DocsMigrationIndexedEffectPlan planned.plannedPreCommitEffects
+    , IndexedWorkflow.indexedPlannedPostCommitEffects =
+        DocsMigrationIndexedEffectPlan planned.plannedPostCommitEffects
+    }
+
+docsMigrationIndexedSomeEvent :: IndexedWorkflow.SomeIndexedWorkflowEvent DocsMigrationSpec -> DocsMigrationEvent
+docsMigrationIndexedSomeEvent (IndexedWorkflow.SomeIndexedWorkflowEvent (DocsMigrationIndexedEvent _sourceLabel _targetLabel event)) =
+  event
+
+docsMigrationIndexedSomeReplayResult
+  :: DocsMigrationReplayResult
+  -> IndexedWorkflow.SomeIndexedWorkflowReplayResult DocsMigrationSpec
+docsMigrationIndexedSomeReplayResult replay =
+  case replay.docsMigrationReplayState of
+    DocsMigrationReady {} ->
+      IndexedWorkflow.SomeIndexedWorkflowReplayResult
+        (DocsMigrationIndexedReplayResult replay :: DocsMigrationIndexedReplayResult DocsMigrationIndexedReady)
+    DocsMigrationTurnActive {} ->
+      IndexedWorkflow.SomeIndexedWorkflowReplayResult
+        (DocsMigrationIndexedReplayResult replay :: DocsMigrationIndexedReplayResult DocsMigrationIndexedTurnActive)
+    DocsMigrationDraftReady {} ->
+      IndexedWorkflow.SomeIndexedWorkflowReplayResult
+        (DocsMigrationIndexedReplayResult replay :: DocsMigrationIndexedReplayResult DocsMigrationIndexedDraftReady)
+    DocsMigrationValidated {} ->
+      IndexedWorkflow.SomeIndexedWorkflowReplayResult
+        (DocsMigrationIndexedReplayResult replay :: DocsMigrationIndexedReplayResult DocsMigrationIndexedValidated)
+    DocsMigrationComplete {} ->
+      IndexedWorkflow.SomeIndexedWorkflowReplayResult
+        (DocsMigrationIndexedReplayResult replay :: DocsMigrationIndexedReplayResult DocsMigrationIndexedComplete)
+    DocsMigrationBlocked {} ->
+      IndexedWorkflow.SomeIndexedWorkflowReplayResult
+        (DocsMigrationIndexedReplayResult replay :: DocsMigrationIndexedReplayResult DocsMigrationIndexedBlocked)
 
 docsMigrationAgentRole :: AgentRole DocsMigrationConfig DocsMigrationOutput
 docsMigrationAgentRole =

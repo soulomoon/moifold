@@ -6218,6 +6218,10 @@ workflowFacadeExtractionTests = do
       , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
       , workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions
+      , workflowDocsMigrationIndexedSpecMatchesCompatibilityForDraft
+      , workflowDocsMigrationIndexedSpecMatchesCompatibilityForValidationAndBlocked
+      , workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec
+      , workflowDocsMigrationIndexedDryRunAndDaemonParity
       , workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions
       , workflowEventLogFailureAuditClassifiesRetryRecommendation
       , workflowDslPrReviewFeedbackMatchesStateMachine
@@ -7818,6 +7822,33 @@ prReviewIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult P
 prReviewIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewIndexedReplayResult replay)) =
   replay
 
+docsMigrationIndexedTransitionEvent
+  :: IndexedWorkflow.IndexedPlannedTransition DocsMigration.DocsMigrationSpec source target
+  -> DocsMigration.DocsMigrationEvent
+docsMigrationIndexedTransitionEvent transition =
+  case IndexedWorkflow.indexedPlannedEvent transition of
+    DocsMigration.DocsMigrationIndexedEvent _sourceLabel _targetLabel event -> event
+
+docsMigrationIndexedTransitionPreCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition DocsMigration.DocsMigrationSpec source target
+  -> [DocsMigration.DocsMigrationEffect]
+docsMigrationIndexedTransitionPreCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPreCommitEffects transition of
+    DocsMigration.DocsMigrationIndexedEffectPlan effects -> effects
+
+docsMigrationIndexedTransitionPostCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition DocsMigration.DocsMigrationSpec source target
+  -> [DocsMigration.DocsMigrationEffect]
+docsMigrationIndexedTransitionPostCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPostCommitEffects transition of
+    DocsMigration.DocsMigrationIndexedEffectPlan effects -> effects
+
+docsMigrationIndexedReplayResult
+  :: IndexedWorkflow.SomeIndexedWorkflowReplayResult DocsMigration.DocsMigrationSpec
+  -> DocsMigration.DocsMigrationReplayResult
+docsMigrationIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (DocsMigration.DocsMigrationIndexedReplayResult replay)) =
+  replay
+
 workflowIndexedSpecExistentialsPreserveLabels :: IO Bool
 workflowIndexedSpecExistentialsPreserveLabels = do
   let state =
@@ -8149,6 +8180,341 @@ workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions = 
             Left _ -> False
       ]
   pure (and results)
+
+workflowDocsMigrationIndexedSpecMatchesCompatibilityForDraft :: IO Bool
+workflowDocsMigrationIndexedSpecMatchesCompatibilityForDraft = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      turnRef = WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn")
+      activeState = DocsMigration.DocsMigrationTurnActive config turnRef
+      output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+      expectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      expectedEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      indexedState =
+        DocsMigration.DocsMigrationIndexedState activeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedTurnActive
+      indexedObservation =
+        DocsMigration.DocsMigrationIndexedObservation "turn-active" "draft-ready" observation
+          :: DocsMigration.DocsMigrationIndexedObservation DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      indexedEvents =
+        [ IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( DocsMigration.DocsMigrationIndexedEvent "uninitialized" "ready" (DocsMigration.DocsMigrationInitialized config)
+                :: DocsMigration.DocsMigrationIndexedEvent DocsMigration.DocsMigrationIndexedUninitialized DocsMigration.DocsMigrationIndexedReady
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( DocsMigration.DocsMigrationIndexedEvent "ready" "turn-active" (DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn"))
+                :: DocsMigration.DocsMigrationIndexedEvent DocsMigration.DocsMigrationIndexedReady DocsMigration.DocsMigrationIndexedTurnActive
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( DocsMigration.DocsMigrationIndexedEvent "turn-active" "draft-ready" expectedEvent
+                :: DocsMigration.DocsMigrationIndexedEvent DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+            )
+        ]
+      expectedEffectHistory =
+        [ [DocsMigration.StartDocsMigrationTurn config]
+        , []
+        , expectedEffects
+        ]
+  assert "indexed docs-migration draft adapter matches compatibility facade" $
+    case
+      ( workflowObserve @DocsMigration.DocsMigrationSpec activeState observation
+      , workflowPlanObservation @DocsMigration.DocsMigrationSpec activeState observation
+      , IndexedWorkflow.indexedWorkflowObserve @DocsMigration.DocsMigrationSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @DocsMigration.DocsMigrationSpec indexedState indexedObservation
+      , DocsMigration.replayDocsMigrationEvents (events <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @DocsMigration.DocsMigrationSpec indexedEvents
+      )
+      of
+      (Right compatibilityObserved, Right compatibilityPlan, Right indexedObserved, Right indexedPlan, Right compatibilityReplay, Right indexedReplay) ->
+        let DocsMigration.DocsMigrationIndexedState indexedNextState =
+              IndexedWorkflow.indexedWorkflowObservedState @DocsMigration.DocsMigrationSpec indexedObserved
+            indexedReplayValue = docsMigrationIndexedReplayResult indexedReplay
+            wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+         in compatibilityObserved.docsMigrationTickEvent == expectedEvent
+              && compatibilityObserved.docsMigrationTickState == expectedState
+              && compatibilityPlan.plannedEvent == expectedEvent
+              && compatibilityPlan.plannedPreCommitEffects == []
+              && compatibilityPlan.plannedPostCommitEffects == expectedEffects
+              && docsMigrationIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+              && indexedNextState == expectedState
+              && docsMigrationIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+              && docsMigrationIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+              && IndexedWorkflow.someIndexedWorkflowTransitionEventLabel @DocsMigration.DocsMigrationSpec wrappedTransition == "docs-migration-draft-produced"
+              && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @DocsMigration.DocsMigrationSpec wrappedTransition == "turn-active"
+              && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @DocsMigration.DocsMigrationSpec wrappedTransition == "draft-ready"
+              && IndexedWorkflow.someIndexedWorkflowTransitionPreCommitEffectLabels @DocsMigration.DocsMigrationSpec wrappedTransition == []
+              && IndexedWorkflow.someIndexedWorkflowTransitionPostCommitEffectLabels @DocsMigration.DocsMigrationSpec wrappedTransition == ["write-docs-migration-draft", "run-docs-migration-validation"]
+              && compatibilityReplay.docsMigrationReplayState == expectedState
+              && indexedReplayValue.docsMigrationReplayState == compatibilityReplay.docsMigrationReplayState
+              && indexedReplayValue.docsMigrationReplayEffects == expectedEffectHistory
+              && indexedReplayValue.docsMigrationReplayEffects == compatibilityReplay.docsMigrationReplayEffects
+      _ -> False
+
+workflowDocsMigrationIndexedSpecMatchesCompatibilityForValidationAndBlocked :: IO Bool
+workflowDocsMigrationIndexedSpecMatchesCompatibilityForValidationAndBlocked = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      turnRef = WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn")
+      activeState = DocsMigration.DocsMigrationTurnActive config turnRef
+      draftState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      validationObservation = DocsMigration.DocsMigrationValidationReturned True "validation passed"
+      blockedObservation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentBlocked (DocsMigration.DocsMigrationOutput "" "agent blocked"))
+      validationIndexedState =
+        DocsMigration.DocsMigrationIndexedState draftState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedDraftReady
+      validationIndexedObservation =
+        DocsMigration.DocsMigrationIndexedObservation "draft-ready" "validated" validationObservation
+          :: DocsMigration.DocsMigrationIndexedObservation DocsMigration.DocsMigrationIndexedDraftReady DocsMigration.DocsMigrationIndexedValidated
+      blockedIndexedState =
+        DocsMigration.DocsMigrationIndexedState activeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedTurnActive
+      blockedIndexedObservation =
+        DocsMigration.DocsMigrationIndexedObservation "turn-active" "blocked" blockedObservation
+          :: DocsMigration.DocsMigrationIndexedObservation DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedBlocked
+  assert "indexed docs-migration validation and blocked adapters preserve stop effects and labels" $
+    case
+      ( workflowPlanObservation @DocsMigration.DocsMigrationSpec draftState validationObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @DocsMigration.DocsMigrationSpec validationIndexedState validationIndexedObservation
+      , workflowObserve @DocsMigration.DocsMigrationSpec draftState validationObservation
+      , IndexedWorkflow.indexedWorkflowObserve @DocsMigration.DocsMigrationSpec validationIndexedState validationIndexedObservation
+      , workflowPlanObservation @DocsMigration.DocsMigrationSpec activeState blockedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @DocsMigration.DocsMigrationSpec blockedIndexedState blockedIndexedObservation
+      , workflowObserve @DocsMigration.DocsMigrationSpec activeState blockedObservation
+      , IndexedWorkflow.indexedWorkflowObserve @DocsMigration.DocsMigrationSpec blockedIndexedState blockedIndexedObservation
+      )
+      of
+      (Right validationPlan, Right indexedValidationPlan, Right validationObserved, Right indexedValidationObserved, Right blockedPlan, Right indexedBlockedPlan, Right blockedObserved, Right indexedBlockedObserved) ->
+        let DocsMigration.DocsMigrationIndexedState indexedValidationState =
+              IndexedWorkflow.indexedWorkflowObservedState @DocsMigration.DocsMigrationSpec indexedValidationObserved
+            DocsMigration.DocsMigrationIndexedState indexedBlockedState =
+              IndexedWorkflow.indexedWorkflowObservedState @DocsMigration.DocsMigrationSpec indexedBlockedObserved
+            validationWrapped = IndexedWorkflow.SomeIndexedPlannedTransition indexedValidationPlan
+            blockedWrapped = IndexedWorkflow.SomeIndexedPlannedTransition indexedBlockedPlan
+         in validationObserved.docsMigrationTickState == DocsMigration.DocsMigrationValidated config "validation passed"
+              && indexedValidationState == validationObserved.docsMigrationTickState
+              && docsMigrationIndexedTransitionEvent indexedValidationPlan == validationPlan.plannedEvent
+              && docsMigrationIndexedTransitionPostCommitEffects indexedValidationPlan == [DocsMigration.StopDocsMigrationDaemon]
+              && docsMigrationIndexedTransitionPostCommitEffects indexedValidationPlan == validationPlan.plannedPostCommitEffects
+              && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @DocsMigration.DocsMigrationSpec validationWrapped == "draft-ready"
+              && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @DocsMigration.DocsMigrationSpec validationWrapped == "validated"
+              && IndexedWorkflow.someIndexedWorkflowTransitionPostCommitEffectLabels @DocsMigration.DocsMigrationSpec validationWrapped == ["stop-docs-migration-daemon"]
+              && not (IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec (DocsMigration.DocsMigrationIndexedState indexedValidationState :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedValidated))
+              && blockedObserved.docsMigrationTickState == DocsMigration.DocsMigrationBlocked "agent blocked"
+              && indexedBlockedState == blockedObserved.docsMigrationTickState
+              && docsMigrationIndexedTransitionEvent indexedBlockedPlan == blockedPlan.plannedEvent
+              && docsMigrationIndexedTransitionPostCommitEffects indexedBlockedPlan == [DocsMigration.StopDocsMigrationDaemon]
+              && docsMigrationIndexedTransitionPostCommitEffects indexedBlockedPlan == blockedPlan.plannedPostCommitEffects
+              && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @DocsMigration.DocsMigrationSpec blockedWrapped == "turn-active"
+              && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @DocsMigration.DocsMigrationSpec blockedWrapped == "blocked"
+              && IndexedWorkflow.someIndexedWorkflowTransitionPostCommitEffectLabels @DocsMigration.DocsMigrationSpec blockedWrapped == ["stop-docs-migration-daemon"]
+              && IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec (DocsMigration.DocsMigrationIndexedState indexedBlockedState :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedBlocked)
+      _ -> False
+
+workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec :: IO Bool
+workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      readyState = DocsMigration.DocsMigrationReady config
+      activeState =
+        DocsMigration.DocsMigrationTurnActive
+          config
+          (WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn"))
+      readyIndexedState =
+        DocsMigration.DocsMigrationIndexedState readyState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedReady
+      activeIndexedState =
+        DocsMigration.DocsMigrationIndexedState activeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedTurnActive
+      allowedEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      partialEffects =
+        [DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"]
+      wrongTargetEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/wrong.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      allowedPlan =
+        DocsMigration.DocsMigrationIndexedEffectPlan allowedEffects
+          :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      partialPlan =
+        DocsMigration.DocsMigrationIndexedEffectPlan partialEffects
+          :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      wrongTargetPlan =
+        DocsMigration.DocsMigrationIndexedEffectPlan wrongTargetEffects
+          :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      disallowedStatePlan =
+        DocsMigration.DocsMigrationIndexedEffectPlan allowedEffects
+          :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedReady DocsMigration.DocsMigrationIndexedDraftReady
+      disallowedStateEffect =
+        DocsMigration.DocsMigrationIndexedEffect (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
+          :: DocsMigration.DocsMigrationIndexedEffect DocsMigration.DocsMigrationIndexedReady DocsMigration.DocsMigrationIndexedDraftReady
+      contract = DocsMigration.docsMigrationEventCodecContract
+      fixture = DocsMigration.docsMigrationEventLogFixture
+      encoded = fmap (WorkflowCodec.workflowCodecEncode contract) fixture
+      decoded = traverse (WorkflowCodec.workflowCodecDecode contract) encoded
+      codecRoundTripOk event =
+        WorkflowCodec.validateWorkflowCodecRoundTrip contract event == Right ()
+          && WorkflowCodec.validateWorkflowCodecEncodedTypeLabel contract event == Right ()
+      indexedAllowedValidation =
+        IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec activeIndexedState allowedPlan
+      indexedPartialValidation =
+        IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec activeIndexedState partialPlan
+      indexedWrongTargetValidation =
+        IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec activeIndexedState wrongTargetPlan
+      indexedDisallowedValidation =
+        IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec readyIndexedState disallowedStatePlan
+      indexedDisallowedEffect =
+        IndexedWorkflow.indexedWorkflowEffectAllowed @DocsMigration.DocsMigrationSpec readyIndexedState disallowedStateEffect
+  results <-
+    sequence
+      [ assert "indexed docs-migration permissions accept allowed draft plan" $
+          indexedAllowedValidation == workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState allowedEffects
+            && indexedAllowedValidation == Right ()
+            && isRightUnit (WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState allowedEffects)
+      , assert "indexed docs-migration permissions reject partial draft plan like compatibility" $
+          case (indexedPartialValidation, workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState partialEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState partialEffects) of
+            (Left indexedReason, Left compatibilityReason, Left coreReason) ->
+              indexedReason == compatibilityReason
+                && "effect plan" `Text.isInfixOf` indexedReason
+                && "effect plan" `Text.isInfixOf` coreReason.workflowPermissionReason
+            _ -> False
+      , assert "indexed docs-migration permissions reject wrong target plan like compatibility" $
+          case (indexedWrongTargetValidation, workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects) of
+            (Left indexedReason, Left compatibilityReason, Left coreReason) ->
+              indexedReason == compatibilityReason
+                && "target" `Text.isInfixOf` indexedReason
+                && coreReason.workflowPermissionEffectLabel == "write-docs-migration-draft"
+            _ -> False
+      , assert "indexed docs-migration permissions reject disallowed state like compatibility" $
+          indexedDisallowedValidation == workflowValidateEffects @DocsMigration.DocsMigrationSpec readyState allowedEffects
+            && indexedDisallowedEffect == workflowEffectAllowed @DocsMigration.DocsMigrationSpec readyState (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
+            && case WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec readyState allowedEffects of
+              Left coreReason -> "ready" `Text.isInfixOf` coreReason.workflowPermissionReason
+              Right () -> False
+      , assert "indexed docs-migration keeps fixture codec contract unchanged" $
+          all codecRoundTripOk fixture
+            && case decoded of
+              Right decodedEvents ->
+                case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id decodedEvents of
+                  Right summary ->
+                    WorkflowEventLog.validateEventLogFixtureContract
+                      @DocsMigration.DocsMigrationSpec
+                      DocsMigration.docsMigrationEventLogFixtureContract
+                      summary
+                      == Right ()
+                  Left _failure -> False
+              Left _failure -> False
+      ]
+  pure (and results)
+
+workflowDocsMigrationIndexedDryRunAndDaemonParity :: IO Bool
+workflowDocsMigrationIndexedDryRunAndDaemonParity = do
+  calls <- newIORef []
+  let record call = modifyIORef' calls (<> [call])
+      config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      activeState =
+        DocsMigration.DocsMigrationTurnActive
+          config
+          (WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn"))
+      output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+      interpreter =
+        DocsMigration.DocsMigrationInterpreter
+          { DocsMigration.docsMigrationStartTurn = \_config -> record "start-turn"
+          , DocsMigration.docsMigrationWriteDraft = \path draft -> record ("write:" <> Text.pack path <> ":" <> draft)
+          , DocsMigration.docsMigrationRunValidation = \path -> record ("validate:" <> Text.pack path)
+          , DocsMigration.docsMigrationStopDaemon = record "stop"
+          }
+      expectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      expectedEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      expectedActions =
+        [ DocsMigration.WriteDocsMigrationDraftAction "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidationAction "docs/target.md"
+        ]
+      indexedState =
+        DocsMigration.DocsMigrationIndexedState activeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedTurnActive
+      indexedObservation =
+        DocsMigration.DocsMigrationIndexedObservation "turn-active" "draft-ready" observation
+          :: DocsMigration.DocsMigrationIndexedObservation DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      compiledActions tick =
+        fmap
+          WorkflowExecution.workflowGenericPlannedAction
+          (WorkflowExecution.workflowGenericCompiledActions tick.docsMigrationDaemonCompiledEffects)
+      reportActions =
+        fmap DocsMigration.docsMigrationActionReportAction . DocsMigration.docsMigrationDaemonActionReports
+  executeResult <- DocsMigration.runDocsMigrationObservedExecute interpreter events observation
+  executedCalls <- readIORef calls
+  let dryRunResult = DocsMigration.runDocsMigrationObservedDryRun events observation
+      indexedPlan = IndexedWorkflow.indexedWorkflowPlanObservation @DocsMigration.DocsMigrationSpec indexedState indexedObservation
+  assert "indexed docs-migration dry-run and daemon helpers preserve compatibility output" $
+    case (dryRunResult, executeResult, indexedPlan) of
+      (Right dryRunTick, Right executeTick, Right indexedPlanned) ->
+        DocsMigration.docsMigrationDaemonEvent dryRunTick == expectedEvent
+          && DocsMigration.docsMigrationDaemonState dryRunTick == expectedState
+          && DocsMigration.docsMigrationDaemonCommittedEvents dryRunTick == []
+          && compiledActions dryRunTick == expectedActions
+          && reportActions dryRunTick == expectedActions
+          && all ((== DryRunActions) . DocsMigration.docsMigrationActionReportMode) dryRunTick.docsMigrationDaemonActionReports
+          && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
+          && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
+          && DocsMigration.docsMigrationDaemonEvent executeTick == expectedEvent
+          && DocsMigration.docsMigrationDaemonState executeTick == expectedState
+          && DocsMigration.docsMigrationDaemonCommittedEvents executeTick == [expectedEvent]
+          && compiledActions executeTick == expectedActions
+          && reportActions executeTick == expectedActions
+          && all ((== ExecuteActions) . DocsMigration.docsMigrationActionReportMode) executeTick.docsMigrationDaemonActionReports
+          && all DocsMigration.docsMigrationActionReportExecuted executeTick.docsMigrationDaemonActionReports
+          && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
+          && executedCalls == ["write:docs/target.md:draft markdown", "validate:docs/target.md"]
+          && reportActions executeTick == reportActions dryRunTick
+          && docsMigrationIndexedTransitionEvent indexedPlanned == expectedEvent
+          && docsMigrationIndexedTransitionPreCommitEffects indexedPlanned == []
+          && docsMigrationIndexedTransitionPostCommitEffects indexedPlanned == expectedEffects
+          && IndexedWorkflow.indexedWorkflowPlannedTransitionPostCommitEffectLabels @DocsMigration.DocsMigrationSpec indexedPlanned == ["write-docs-migration-draft", "run-docs-migration-validation"]
+      _ -> False
 
 workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions :: IO Bool
 workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions = do
