@@ -4,15 +4,18 @@ module CodexWatcher.Workflow.Execution.Core
   ( EffectCommitOrder (..)
   , EffectIdempotency (..)
   , WorkflowCapability (..)
+  , WorkflowCheckedActionFailureOf (..)
   , WorkflowCompiledEffectPlanOf (..)
   , WorkflowEffectMetadata (..)
   , WorkflowPlannedActionOf (..)
   , compileWorkflowGenericEffectPlan
   , dryRunWorkflowGenericCompiledEffectPlan
+  , executeWorkflowCheckedActionsOf
   , executeWorkflowGenericActions
   , executeWorkflowGenericCompiledEffectPlan
   , partitionWorkflowGenericActionReports
   , partitionWorkflowGenericActions
+  , workflowCheckedActionFailureReports
   ) where
 
 import Data.List (partition)
@@ -55,6 +58,14 @@ data WorkflowPlannedActionOf effect action = WorkflowPlannedActionOf
 
 data WorkflowCompiledEffectPlanOf effect action = WorkflowCompiledEffectPlanOf
   { workflowGenericCompiledActions :: [WorkflowPlannedActionOf effect action]
+  }
+  deriving stock (Eq, Show)
+
+data WorkflowCheckedActionFailureOf action report reason = WorkflowCheckedActionFailureOf
+  { workflowCheckedActionFailedAction :: action
+  , workflowCheckedActionFailedReport :: report
+  , workflowCheckedActionFailurePriorReports :: [report]
+  , workflowCheckedActionFailureReason :: reason
   }
   deriving stock (Eq, Show)
 
@@ -106,6 +117,37 @@ executeWorkflowGenericActions
   -> m [report]
 executeWorkflowGenericActions executeAction mode =
   traverse (executeAction mode . workflowGenericPlannedAction)
+
+executeWorkflowCheckedActionsOf
+  :: Monad m
+  => (action -> m report)
+  -> (action -> report -> Maybe reason)
+  -> [action]
+  -> m (Either (WorkflowCheckedActionFailureOf action report reason) [report])
+executeWorkflowCheckedActionsOf runAction classifyFailure =
+  go []
+ where
+  go priorReports [] =
+    pure (Right (reverse priorReports))
+  go priorReports (action : rest) = do
+    report <- runAction action
+    case classifyFailure action report of
+      Just reason ->
+        pure
+          ( Left
+              WorkflowCheckedActionFailureOf
+                { workflowCheckedActionFailedAction = action
+                , workflowCheckedActionFailedReport = report
+                , workflowCheckedActionFailurePriorReports = reverse priorReports
+                , workflowCheckedActionFailureReason = reason
+                }
+          )
+      Nothing ->
+        go (report : priorReports) rest
+
+workflowCheckedActionFailureReports :: WorkflowCheckedActionFailureOf action report reason -> [report]
+workflowCheckedActionFailureReports failure =
+  workflowCheckedActionFailurePriorReports failure <> [workflowCheckedActionFailedReport failure]
 
 partitionWorkflowGenericActions
   :: WorkflowCompiledEffectPlanOf effect action

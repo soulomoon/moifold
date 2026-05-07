@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-001",
+  "roadmap_item_id": "item-001-checked-action-failure-core",
+  "decision": "approved",
+  "evidence_summary": "Baseline checks passed; focused rg and source inspections show the generic core checked-action traversal, moifold facade compatibility path, daemon failure mapping, package-boundary guard, and focused regression tests are present."
+}

@@ -76,15 +76,18 @@ import CodexWatcher.Workflow.Execution.Core
   ( EffectCommitOrder (..)
   , EffectIdempotency (..)
   , WorkflowCapability (..)
+  , WorkflowCheckedActionFailureOf (..)
   , WorkflowCompiledEffectPlanOf (..)
   , WorkflowEffectMetadata (..)
   , WorkflowPlannedActionOf (..)
   , compileWorkflowGenericEffectPlan
   , dryRunWorkflowGenericCompiledEffectPlan
+  , executeWorkflowCheckedActionsOf
   , executeWorkflowGenericActions
   , executeWorkflowGenericCompiledEffectPlan
   , partitionWorkflowGenericActionReports
   , partitionWorkflowGenericActions
+  , workflowCheckedActionFailureReports
   )
 import Data.List (mapAccumL, partition)
 
@@ -107,6 +110,12 @@ data WorkflowActionFailure = WorkflowActionFailure
   , workflowFailurePriorReports :: [ActionExecutionReport]
   , workflowFailureClassification :: FailureClassification
   , workflowFailureCommandReport :: Maybe CommandReport
+  }
+  deriving stock (Eq, Show)
+
+data WorkflowActionFailureReason = WorkflowActionFailureReason
+  { workflowActionFailureReasonClassification :: FailureClassification
+  , workflowActionFailureReasonCommandReport :: Maybe CommandReport
   }
   deriving stock (Eq, Show)
 
@@ -249,26 +258,32 @@ actionRunsBeforeEventCommit action =
 
 executeWorkflowCheckedActions :: Monad m => ActionExecutor m -> [WorkflowPlannedAction] -> m (Either WorkflowActionFailure [ActionExecutionReport])
 executeWorkflowCheckedActions executor =
-  go []
+  fmap (either (Left . workflowActionFailureFromCheckedFailure) Right)
+    . executeWorkflowCheckedActionsOf
+      (executePlannedAction executor ExecuteActions . workflowPlannedAction)
+      workflowActionFailureReason
  where
-  go reports [] = pure (Right (reverse reports))
-  go reports (action : rest) = do
-    report <- executePlannedAction executor ExecuteActions action.workflowPlannedAction
-    case workflowActionFailure action report of
-      Just failure -> pure (Left (failure {workflowFailurePriorReports = reverse reports}))
-      Nothing -> go (report : reports) rest
+  workflowActionFailureFromCheckedFailure
+    :: WorkflowCheckedActionFailureOf WorkflowPlannedAction ActionExecutionReport WorkflowActionFailureReason
+    -> WorkflowActionFailure
+  workflowActionFailureFromCheckedFailure failure =
+    let reason = failure.workflowCheckedActionFailureReason
+     in WorkflowActionFailure
+          { workflowFailedAction = failure.workflowCheckedActionFailedAction
+          , workflowFailedReport = failure.workflowCheckedActionFailedReport
+          , workflowFailurePriorReports = failure.workflowCheckedActionFailurePriorReports
+          , workflowFailureClassification = reason.workflowActionFailureReasonClassification
+          , workflowFailureCommandReport = reason.workflowActionFailureReasonCommandReport
+          }
 
-workflowActionFailure :: WorkflowPlannedAction -> ActionExecutionReport -> Maybe WorkflowActionFailure
-workflowActionFailure action report =
+workflowActionFailureReason :: WorkflowPlannedAction -> ActionExecutionReport -> Maybe WorkflowActionFailureReason
+workflowActionFailureReason _action report =
   case report.actionExecutionOutcome of
     ActionHardFailed hardFailure ->
       Just
-        WorkflowActionFailure
-          { workflowFailedAction = action
-          , workflowFailedReport = report
-          , workflowFailurePriorReports = []
-          , workflowFailureClassification = hardFailureClassification hardFailure
-          , workflowFailureCommandReport = commandReportFromExecution report
+        WorkflowActionFailureReason
+          { workflowActionFailureReasonClassification = hardFailureClassification hardFailure
+          , workflowActionFailureReasonCommandReport = commandReportFromExecution report
           }
     _ ->
       Nothing
@@ -279,7 +294,13 @@ hardFailureClassification = \case
 
 workflowActionFailureReports :: WorkflowActionFailure -> [ActionExecutionReport]
 workflowActionFailureReports failure =
-  failure.workflowFailurePriorReports <> [failure.workflowFailedReport]
+  workflowCheckedActionFailureReports
+    WorkflowCheckedActionFailureOf
+      { workflowCheckedActionFailedAction = failure.workflowFailedAction
+      , workflowCheckedActionFailedReport = failure.workflowFailedReport
+      , workflowCheckedActionFailurePriorReports = failure.workflowFailurePriorReports
+      , workflowCheckedActionFailureReason = ()
+      }
 
 commandReportFromExecution :: ActionExecutionReport -> Maybe CommandReport
 commandReportFromExecution report =

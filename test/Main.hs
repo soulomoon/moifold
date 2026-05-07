@@ -78,6 +78,7 @@ import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
+import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
 import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
@@ -99,6 +100,7 @@ import Data.Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.Char (isAlphaNum)
 import Data.Foldable qualified as Foldable
 import Data.IORef
 import Data.List.NonEmpty (NonEmpty (..))
@@ -6225,6 +6227,7 @@ workflowFacadeExtractionTests = do
       , workflowExecutionCapabilityMetadataCoversCurrentEffects
       , workflowExecutionMetadataPartitionPreservesLegacyOrdering
       , workflowExecutionMetadataDryRunMatchesLegacy
+      , workflowExecutionCoreCheckedActionsStopsOnFirstFailure
       , workflowExecutionCheckedActionsStopsOnHardFailure
       ]
   pure (and results)
@@ -6268,12 +6271,21 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         , "typed-process"
         , "websockets"
         , "CodexWatcher.AppServer"
+        , "CodexWatcher.ActionExecutor"
         , "CodexWatcher.Domain."
         , "CodexWatcher.Effects"
         , "CodexWatcher.EventLog"
+        , "CodexWatcher.Failure"
         , "CodexWatcher.GhGit"
+        , "CodexWatcher.Runtime.Command"
         , "CodexWatcher.StateMachine"
         ]
+      forbiddenConcreteTypes =
+        [ "ActionExecutionReport"
+        , "CommandReport"
+        , "PlannedAction"
+        ]
+      coreSourceTokens = sourceIdentifierTokens coreSources
       exposesCoreModules =
         "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
@@ -6293,6 +6305,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
           && "text >=2.0 && <3" `Text.isInfixOf` coreSection
           && not (any (`Text.isInfixOf` coreSection) forbiddenNeedles)
           && not (any (`Text.isInfixOf` coreSources) forbiddenNeedles)
+          && not (any (`elem` coreSourceTokens) forbiddenConcreteTypes)
       moifoldDependsOnCore =
         "moifold:agent-workflow-core" `Text.isInfixOf` cabalSource
   assert
@@ -6704,6 +6717,13 @@ sourceTextUnder :: FilePath -> IO Text
 sourceTextUnder root = do
   files <- sourceFilesUnder root
   Text.intercalate "\n" <$> traverse (fmap Text.pack . readFile) files
+
+sourceIdentifierTokens :: Text -> [Text]
+sourceIdentifierTokens =
+  filter (not . Text.null) . Text.split (not . isSourceIdentifierChar)
+ where
+  isSourceIdentifierChar character =
+    isAlphaNum character || character == '_' || character == '\''
 
 sourceFilesUnder :: FilePath -> IO [FilePath]
 sourceFilesUnder root = do
@@ -7955,6 +7975,44 @@ workflowExecutionMetadataDryRunMatchesLegacy = do
       ]
   pure (and results)
 
+workflowExecutionCoreCheckedActionsStopsOnFirstFailure :: IO Bool
+workflowExecutionCoreCheckedActionsStopsOnFirstFailure = do
+  executedRef <- newIORef []
+  let actions = [1, 2, 3, 4] :: [Int]
+      runAction action = do
+        modifyIORef' executedRef (<> [action])
+        pure ("report-" <> show action)
+      classifyFailure action report =
+        if action == 3
+          then Just ("failed-" <> report)
+          else Nothing
+  failedResult <- WorkflowExecutionCore.executeWorkflowCheckedActionsOf runAction classifyFailure actions
+  executed <- readIORef executedRef
+  successResult <-
+    WorkflowExecutionCore.executeWorkflowCheckedActionsOf
+      (\action -> pure ("ok-" <> show (action :: Int)))
+      (\_ _ -> Nothing :: Maybe ())
+      ([1, 2, 3] :: [Int])
+  results <-
+    sequence
+      [ assert "workflow core checked execution runs left-to-right through first failure" $
+          executed == [1, 2, 3]
+      , assert "workflow core checked execution captures first failure and prior reports" $
+          case failedResult of
+            Left failure ->
+              failure.workflowCheckedActionFailedAction == 3
+                && failure.workflowCheckedActionFailedReport == "report-3"
+                && failure.workflowCheckedActionFailurePriorReports == ["report-1", "report-2"]
+                && failure.workflowCheckedActionFailureReason == "failed-report-3"
+                && WorkflowExecutionCore.workflowCheckedActionFailureReports failure == ["report-1", "report-2", "report-3"]
+            Right _ -> False
+      , assert "workflow core checked execution returns ordered reports on success" $
+          case successResult of
+            Right reports -> reports == ["ok-1", "ok-2", "ok-3"]
+            Left _ -> False
+      ]
+  pure (and results)
+
 workflowExecutionCheckedActionsStopsOnHardFailure :: IO Bool
 workflowExecutionCheckedActionsStopsOnHardFailure = do
   (executor, getCalls) <-
@@ -7981,7 +8039,13 @@ workflowExecutionCheckedActionsStopsOnHardFailure = do
       , assert "workflow checked execution returns classified failure" $
           case result of
             Left failure ->
-              failure.workflowFailureClassification.failureClass == PolicyViolation
+              ( case failure.workflowFailedAction.workflowPlannedAction of
+                  PlannedCommand GitPush {} -> True
+                  _ -> False
+              )
+                && failure.workflowFailureClassification.failureClass == PolicyViolation
+                && null failure.workflowFailurePriorReports
+                && WorkflowExecution.workflowActionFailureReports failure == [failure.workflowFailedReport]
                 && case failure.workflowFailureCommandReport of
                   Just report -> not report.ok
                   Nothing -> False
