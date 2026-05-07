@@ -649,6 +649,7 @@ watcherEventCodecContract =
     , workflowCodecSchemaVersion = watcherEventSchemaVersion
     , workflowCodecMetadataLabels = watcherEventMetadataLabels
     , workflowCodecEncode = toJSON
+    , workflowCodecEncodedEventTypeLabel = eventTypeLabelFromValue
     , workflowCodecDecode =
         \value ->
           case parseEither parseJSON value of

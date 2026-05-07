@@ -5,11 +5,13 @@
 module CodexWatcher.Workflow.Codec
   ( WorkflowCodecContract (..)
   , WorkflowCodecRoundTripFailure (..)
+  , WorkflowCodecTypeLabelFailure (..)
   , WorkflowDecodeError (..)
   , WorkflowEventTypeLabel (..)
   , WorkflowMetadataLabel (..)
   , WorkflowSchemaVersion (..)
   , formatWorkflowDecodeError
+  , validateWorkflowCodecEncodedTypeLabel
   , validateWorkflowCodecRoundTrip
   ) where
 
@@ -43,6 +45,7 @@ data WorkflowCodecContract event encoded = WorkflowCodecContract
   , workflowCodecSchemaVersion :: event -> WorkflowSchemaVersion
   , workflowCodecMetadataLabels :: [WorkflowMetadataLabel]
   , workflowCodecEncode :: event -> encoded
+  , workflowCodecEncodedEventTypeLabel :: encoded -> Maybe WorkflowEventTypeLabel
   , workflowCodecDecode :: encoded -> Either WorkflowDecodeError event
   }
 
@@ -50,6 +53,14 @@ data WorkflowCodecRoundTripFailure event encoded = WorkflowCodecRoundTripFailure
   { workflowRoundTripOriginalEvent :: event
   , workflowRoundTripEncodedValue :: encoded
   , workflowRoundTripFailure :: Either WorkflowDecodeError event
+  }
+  deriving stock (Eq, Show)
+
+data WorkflowCodecTypeLabelFailure event encoded = WorkflowCodecTypeLabelFailure
+  { workflowTypeLabelOriginalEvent :: event
+  , workflowTypeLabelEncodedValue :: encoded
+  , workflowTypeLabelExpected :: WorkflowEventTypeLabel
+  , workflowTypeLabelActual :: Maybe WorkflowEventTypeLabel
   }
   deriving stock (Eq, Show)
 
@@ -76,6 +87,33 @@ validateWorkflowCodecRoundTrip contract event =
               { workflowRoundTripOriginalEvent = event
               , workflowRoundTripEncodedValue = encoded
               , workflowRoundTripFailure = Left errorValue
+              }
+
+validateWorkflowCodecEncodedTypeLabel
+  :: WorkflowCodecContract event encoded
+  -> event
+  -> Either (WorkflowCodecTypeLabelFailure event encoded) ()
+validateWorkflowCodecEncodedTypeLabel contract event =
+  let encoded = workflowCodecEncode contract event
+      expected = workflowCodecEventTypeLabel contract event
+   in case workflowCodecEncodedEventTypeLabel contract encoded of
+        Just actual
+          | actual == expected -> Right ()
+          | otherwise ->
+              Left
+                WorkflowCodecTypeLabelFailure
+                  { workflowTypeLabelOriginalEvent = event
+                  , workflowTypeLabelEncodedValue = encoded
+                  , workflowTypeLabelExpected = expected
+                  , workflowTypeLabelActual = Just actual
+                  }
+        Nothing ->
+          Left
+            WorkflowCodecTypeLabelFailure
+              { workflowTypeLabelOriginalEvent = event
+              , workflowTypeLabelEncodedValue = encoded
+              , workflowTypeLabelExpected = expected
+              , workflowTypeLabelActual = Nothing
               }
 
 formatWorkflowDecodeError :: WorkflowDecodeError -> Text

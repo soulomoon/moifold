@@ -42,16 +42,16 @@ import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.Ids (CommitSha (..))
 import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
-import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..), observeDaemonState)
 import CodexWatcher.Workflow.Transaction.Core
   ( WorkflowObservedTransactionHooks (..)
   , WorkflowObservedTransactionResult (..)
+  , runWorkflowObservedDryRunTransaction
   , runWorkflowObservedExecuteTransaction
   )
-import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), legacyObservedPlannedTransition)
+import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..))
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.Text (Text)
@@ -204,7 +204,7 @@ runObservedDaemonTickWithEvents executor options events observation =
           pure (Left (DaemonObservationRejected reason))
         Right observed -> do
           case options.daemonExecutionMode of
-            DryRunActions -> runObservedDaemonDryRun executor options replay observation observed
+            DryRunActions -> runObservedDaemonDryRun executor options events replay observation observed
             ExecuteActions -> runObservedDaemonExecute executor options events replay observation observed
 
 replayDaemonEventLog :: FilePath -> IO (Either DaemonFailure EventReplayResult)
@@ -246,40 +246,15 @@ runObservedDaemonDryRun
   :: Monad m
   => ActionExecutor m
   -> DaemonOptions
+  -> [WatcherEvent]
   -> EventReplayResult
   -> DaemonObservation
   -> ObservedPolicyTick
   -> m (Either DaemonFailure DaemonObservedTickResult)
-runObservedDaemonDryRun executor options replay observation observed =
-  case validatePhaseActionPlan replay.replayState observed.observedEffects of
-    Left errorValue -> pure (Left (DaemonObservationRejected (formatPhaseActionValidationError errorValue)))
-    Right () -> do
-      let compatibilityWrites = compatibilityStateWrites (runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir) observed.observedState
-          workflowEffects = compileWorkflowEffectPlanWithMetadata options.daemonRuntimeConfig observed.observedEffects
-          compiledEffects = workflowCompiledEffectPlanLegacy workflowEffects
-          planned = legacyObservedPlannedTransition observed
-      actionReports <- executeWorkflowCompiledEffectPlan executor DryRunActions workflowEffects
-      let (preReports, postReports) = partitionWorkflowActionReports workflowEffects actionReports
-          audit =
-            WorkflowEventLog.workflowDryRunAudit @MoifoldSpec
-              replay.replayState
-              observation
-              planned
-              observed.observedState
-              preReports
-              postReports
-      pure
-        ( Right
-            DaemonObservedTickResult
-              { daemonObservedReplayResult = replay
-              , daemonObservedEvent = observed.observedEvent
-              , daemonObservedState = observed.observedState
-              , daemonObservedCompatibilityWrites = compatibilityWrites
-              , daemonObservedCompiledEffects = compiledEffects
-              , daemonObservedActionReports = actionReports
-              , daemonObservedAudit = audit
-              }
-        )
+runObservedDaemonDryRun executor options events _replay observation _observed =
+  pure $
+    observedTransactionResultToDaemon options
+      <$> runWorkflowObservedDryRunTransaction @MoifoldSpec (moifoldObservedTransactionHooks executor options) events observation
 
 runObservedDaemonExecute
   :: Monad m

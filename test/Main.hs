@@ -1562,6 +1562,7 @@ workflowEventCodecContractCoversWatcherEvents = do
           assert ("workflow event codec round-trips " <> Text.unpack (eventName event)) $
             WorkflowCodec.workflowCodecEventTypeLabel watcherEventCodecContract event == WorkflowCodec.WorkflowEventTypeLabel (eventName event)
               && WorkflowCodec.workflowCodecSchemaVersion watcherEventCodecContract event == WorkflowCodec.WorkflowSchemaVersion 1
+              && WorkflowCodec.validateWorkflowCodecEncodedTypeLabel watcherEventCodecContract event == Right ()
               && WorkflowCodec.validateWorkflowCodecRoundTrip watcherEventCodecContract event == Right ()
       )
       canonicalEventExamples
