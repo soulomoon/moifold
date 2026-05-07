@@ -17,6 +17,7 @@ module CodexWatcher.Workflow.Transaction.Core
   ) where
 
 import CodexWatcher.Workflow.Audit (WorkflowTickAudit, workflowDryRunAudit, workflowFailureAudit, workflowSuccessAudit)
+import CodexWatcher.Workflow.EventLog.Commit.Core (WorkflowEventCommitter, commitWorkflowEvent)
 import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 
 data WorkflowObservedTransactionHooks m spec compiled action report failure = WorkflowObservedTransactionHooks
@@ -25,7 +26,7 @@ data WorkflowObservedTransactionHooks m spec compiled action report failure = Wo
   , workflowTransactionPartitionActions :: compiled -> ([action], [action])
   , workflowTransactionDryRunActions :: [action] -> [report]
   , workflowTransactionExecuteActions :: [action] -> m (Either failure [report])
-  , workflowTransactionCommitEvent :: WorkflowEvent spec -> m (Either failure ())
+  , workflowTransactionCommitEvent :: WorkflowEventCommitter m (WorkflowEvent spec) failure
   , workflowTransactionAfterCommit :: WorkflowState spec -> m (Either failure ())
   , workflowTransactionFailureIsRetryable :: failure -> Bool
   }
@@ -120,7 +121,7 @@ runWorkflowObservedExecuteTransaction hooks events observation =
       case preReportsResult of
         Left failure -> pure (Left failure)
         Right preReports -> do
-          commitResult <- hooks.workflowTransactionCommitEvent planned.plannedEvent
+          commitResult <- commitWorkflowEvent hooks.workflowTransactionCommitEvent planned.plannedEvent
           case commitResult of
             Left failure -> pure (Left failure)
             Right () -> do
@@ -198,7 +199,7 @@ runWorkflowObservedExecuteTransactionDetailed hooks events observation =
                 []
                 []
         Right preReports -> do
-          commitResult <- hooks.workflowTransactionCommitEvent planned.plannedEvent
+          commitResult <- commitWorkflowEvent hooks.workflowTransactionCommitEvent planned.plannedEvent
           case commitResult of
             Left failure ->
               pure $

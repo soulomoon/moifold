@@ -33,6 +33,7 @@ library agent-workflow-core
     CodexWatcher.Workflow.Codec
     CodexWatcher.Workflow.Daemon.Core
     CodexWatcher.Workflow.DSL
+    CodexWatcher.Workflow.EventLog.Commit.Core
     CodexWatcher.Workflow.EventLog.Core
     CodexWatcher.Workflow.EventLog.File.Core
     CodexWatcher.Workflow.Execution.Core

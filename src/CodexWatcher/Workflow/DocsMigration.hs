@@ -61,6 +61,7 @@ import CodexWatcher.Workflow.EventLog
   , workflowAuditPostCommitReports
   , workflowAuditPreCommitReports
   )
+import CodexWatcher.Workflow.EventLog.Commit.Core (WorkflowEventCommitter (..))
 import CodexWatcher.Workflow.Execution
   ( ActionExecutionMode (..)
   , EffectCommitOrder (..)
@@ -565,7 +566,8 @@ docsMigrationDryRunTransactionHooks =
     , workflowTransactionPartitionActions = partitionWorkflowGenericActions
     , workflowTransactionDryRunActions = fmap (docsMigrationActionReport DryRunActions False . workflowGenericPlannedAction)
     , workflowTransactionExecuteActions = \_actions -> Left "docs migration dry-run hooks cannot execute actions"
-    , workflowTransactionCommitEvent = \_event -> Left "docs migration dry-run hooks cannot commit events"
+    , workflowTransactionCommitEvent =
+        WorkflowEventCommitter (\_event -> Left "docs migration dry-run hooks cannot commit events")
     , workflowTransactionAfterCommit = \_state -> Left "docs migration dry-run hooks cannot run post-commit callbacks"
     , workflowTransactionFailureIsRetryable = const False
     }
@@ -588,7 +590,7 @@ docsMigrationTransactionHooksForInterpreter interpreter =
     , workflowTransactionDryRunActions = fmap (docsMigrationActionReport DryRunActions False . workflowGenericPlannedAction)
     , workflowTransactionExecuteActions =
         fmap Right . traverse (executeDocsMigrationAction interpreter ExecuteActions . workflowGenericPlannedAction)
-    , workflowTransactionCommitEvent = \_event -> pure (Right ())
+    , workflowTransactionCommitEvent = WorkflowEventCommitter (\_event -> pure (Right ()))
     , workflowTransactionAfterCommit = \_state -> pure (Right ())
     , workflowTransactionFailureIsRetryable = const False
     }

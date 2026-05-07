@@ -49,6 +49,10 @@ import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
+import CodexWatcher.Workflow.EventLog.Commit.Core
+  ( WorkflowEventCommitter (..)
+  , appendEncodedWorkflowEvent
+  )
 import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..), observeDaemonState)
 import CodexWatcher.Workflow.Spec (PlannedTransition (..))
 import CodexWatcher.Workflow.Transaction.Core
@@ -239,7 +243,7 @@ replayDaemonEventLog path = do
 
 appendWatcherEvent :: RuntimeInterpreter m -> FilePath -> WatcherEvent -> m ()
 appendWatcherEvent interpreter path event =
-  interpreter.runtimeAppendJsonLine path (toJSON event)
+  appendEncodedWorkflowEvent toJSON (interpreter.runtimeAppendJsonLine path) event
 
 formatDaemonFailure :: DaemonFailure -> Text
 formatDaemonFailure = \case
@@ -344,20 +348,21 @@ executeMoifoldWorkflowActions executor actions = do
     Left failure -> Left (daemonFailureFromWorkflowActionFailure failure)
     Right reports -> Right reports
 
-commitMoifoldObservedEvent :: Monad m => ActionExecutor m -> DaemonOptions -> WatcherEvent -> m (Either DaemonFailure ())
-commitMoifoldObservedEvent executor options event = do
-  appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
-  Log.logWatcher
-    executor.actionLogger
-    ( Log.watcherLog
-        Log.Info
-        "event_committed"
-        "watcher event committed"
-        [ "event" .= Text.pack (show event)
-        , "eventsPath" .= options.daemonEventLogPath
-        ]
-    )
-  pure (Right ())
+commitMoifoldObservedEvent :: Monad m => ActionExecutor m -> DaemonOptions -> WorkflowEventCommitter m WatcherEvent DaemonFailure
+commitMoifoldObservedEvent executor options =
+  WorkflowEventCommitter \event -> do
+    appendWatcherEvent executor.actionRuntime options.daemonEventLogPath event
+    Log.logWatcher
+      executor.actionLogger
+      ( Log.watcherLog
+          Log.Info
+          "event_committed"
+          "watcher event committed"
+          [ "event" .= Text.pack (show event)
+          , "eventsPath" .= options.daemonEventLogPath
+          ]
+      )
+    pure (Right ())
 
 writeMoifoldCompatibilityState :: Monad m => ActionExecutor m -> DaemonOptions -> SomeWatcherState -> m (Either DaemonFailure ())
 writeMoifoldCompatibilityState executor options finalState = do

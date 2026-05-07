@@ -75,6 +75,7 @@ import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
+import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
@@ -6182,6 +6183,7 @@ workflowFacadeExtractionTests = do
       , workflowMoifoldCabalLibraryDoesNotReexportAdapters
       , workflowEventCodecContractCoversWatcherEvents
       , workflowEventCodecToleratesMetadataAndPreservesGoldenTypes
+      , workflowEventLogCommitCoreEncodesAndAppendsBeforeSuccess
       , workflowEventLogFileCoreNumberingIgnoresBlankLines
       , workflowEventLogFileCoreDecodeFailureReportsSourceLine
       , workflowEventLogFileWrapperDecodesExistingFixtures
@@ -6276,6 +6278,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Daemon.Core" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.EventLog.Commit.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.EventLog.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.EventLog.File.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
@@ -6486,6 +6489,24 @@ commandSpecMatches (runtimeSpec, githubSpec) =
     && runtimeSpec.args == githubSpec.githubCommandArgs
     && runtimeSpec.cwd == githubSpec.githubCommandCwd
     && runtimeSpec.stdin == githubSpec.githubCommandStdin
+
+workflowEventLogCommitCoreEncodesAndAppendsBeforeSuccess :: IO Bool
+workflowEventLogCommitCoreEncodesAndAppendsBeforeSuccess = do
+  calls <- newIORef []
+  let record call = modifyIORef' calls (<> [call])
+      encodeEvent event = do
+        record ("encode:" <> event)
+        pure ("encoded:" <> event)
+      appendEncoded encoded =
+        record ("append:" <> encoded)
+      committer :: WorkflowEventLogCommit.WorkflowEventCommitter IO Text Text
+      committer =
+        WorkflowEventLogCommit.workflowEncodedEventCommitter encodeEvent appendEncoded
+  result <- WorkflowEventLogCommit.commitWorkflowEvent committer "event"
+  recorded <- readIORef calls
+  assert "workflow event-log commit core encodes once and appends before success" $
+    result == Right ()
+      && recorded == ["encode:event", "append:encoded:event"]
 
 workflowEventLogFileCoreNumberingIgnoresBlankLines :: IO Bool
 workflowEventLogFileCoreNumberingIgnoresBlankLines =
@@ -7829,11 +7850,12 @@ docsMigrationFailureHooks mode =
               if mode == FailPostCommitAction && actions == ["post-action"]
                 then Left "post failed"
                 else Right actions
-    , WorkflowTransaction.workflowTransactionCommitEvent = \_event ->
-        pure $
-          if mode == FailCommit
-            then Left "commit failed"
-            else Right ()
+    , WorkflowTransaction.workflowTransactionCommitEvent =
+        WorkflowEventLogCommit.WorkflowEventCommitter \_event ->
+          pure $
+            if mode == FailCommit
+              then Left "commit failed"
+              else Right ()
     , WorkflowTransaction.workflowTransactionAfterCommit = \_state ->
         pure $
           if mode == FailPostCommitCallback
