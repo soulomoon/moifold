@@ -32,13 +32,13 @@
    Merge after: item-002-facade-laws
    Completion notes: Completed in round-003. Strengthened `agent-workflow-core` boundary tests now recursively reject accidental imports of moifold lifecycle types, Aeson codecs, runtime interpreters, GitHub adapters, Codex app-server modules, daemon policy/runtime modules, forbidden concrete lifecycle/action/event tokens, and disallowed core package dependencies while preserving generic core exposure assertions and production behavior.
 
-4. [pending] Introduce the parallel indexed WorkflowSpec API
+4. [done] Introduce the parallel indexed WorkflowSpec API
    Item id: item-004-indexed-spec-api
    Depends on: item-003-boundary-guards
    Parallel safe: no
    Parallel group: none
    Merge after: item-003-boundary-guards
-   Completion notes: Add an indexed spec module beside the compatibility facade, with indexed state/event/observation/effect types and existential wrappers, without rewriting `WatcherEvent` or `SomeWatcherState` wholesale.
+   Completion notes: Completed in round-004. Added `CodexWatcher.Workflow.Indexed.Spec` as a parallel indexed workflow contract in `agent-workflow-core`, exposed it from the Cabal package, and covered indexed state/event/observation/effect-plan/replay types, typed planned transitions, existential wrappers, package-boundary isolation, and PR-review mergeability parity while leaving the compatibility facade, event schema, daemon paths, dry-run/action ordering, and golden fixtures unchanged.
 
 5. [pending] Port DocsMigration as the first indexed workflow proof
    Item id: item-005-indexed-docs-migration
