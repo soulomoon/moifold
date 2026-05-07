@@ -9,6 +9,8 @@ module CodexWatcher.Workflow.Agent.Types
   , AgentRetryPolicy (..)
   , AgentRetryReason (..)
   , AgentSideEffectScope (..)
+  , AgentThreadPlan (..)
+  , AgentThreadStart (..)
   , AgentTurnInterrupt (..)
   , AgentTurnPlan (..)
   , AgentTurnReadFailure (..)
@@ -41,6 +43,22 @@ newtype AgentRoleId = AgentRoleId
   { unAgentRoleId :: Text
   }
   deriving stock (Eq, Ord, Show)
+
+data AgentThreadPlan = AgentThreadPlan
+  { agentThreadPlanRoleId :: AgentRoleId
+  , agentThreadPlanCwd :: FilePath
+  , agentThreadPlanApprovalPolicy :: Text
+  , agentThreadPlanSandbox :: Text
+  , agentThreadPlanModel :: Text
+  , agentThreadPlanDeveloperInstructions :: Text
+  }
+  deriving stock (Eq, Show)
+
+data AgentThreadStart = AgentThreadStart
+  { agentThreadStartRoleId :: AgentRoleId
+  , agentThreadStartThreadId :: ThreadId
+  }
+  deriving stock (Eq, Show)
 
 data AgentTurnPlan = AgentTurnPlan
   { agentTurnPlanRoleId :: AgentRoleId

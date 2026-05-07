@@ -4,13 +4,16 @@
 module CodexWatcher.Workflow.Agent.Codex
   ( agentThreadReadRequest
   , agentThreadInterruptRequest
+  , agentThreadStartRequest
   , agentTurnStartRequest
   , cachedAgentTurnStartInterpreter
   , interruptAgentTurn
+  , parseAgentThreadStart
   , parseAgentTurnInterrupt
   , parseAgentTurnReadResult
   , parseAgentTurnStart
   , readAgentTurn
+  , startAgentThread
   , startAgentTurn
   ) where
 
@@ -20,6 +23,7 @@ import CodexWatcher.Workflow.Agent.Codex.Client
   , AppServerTurn
   , latestTurnById
   , parseThreadReadTurns
+  , parseThreadStartThreadId
   , parseTurnStartTurnId
   , threadSystemError
   )
@@ -27,17 +31,29 @@ import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
 import CodexWatcher.Workflow.Agent.Codex.Protocol
   ( agentThreadReadRequest
   , agentThreadInterruptRequest
+  , agentThreadStartRequest
   , agentTurnStartRequest
   )
 import CodexWatcher.Workflow.Agent.Ids (RequestId)
 import CodexWatcher.Workflow.Agent.Types
   ( AgentTurnPlan (..)
+  , AgentThreadPlan (..)
+  , AgentThreadStart (..)
   , AgentTurnInterrupt (..)
   , AgentTurnReadResult (..)
   , AgentTurnStart (..)
   , TurnRef (..)
   )
 import Data.Aeson (Value)
+
+parseAgentThreadStart :: AgentThreadPlan -> Value -> Either AppServerClientFailure AgentThreadStart
+parseAgentThreadStart plan value = do
+  threadId <- parseThreadStartThreadId value
+  pure
+    AgentThreadStart
+      { agentThreadStartRoleId = plan.agentThreadPlanRoleId
+      , agentThreadStartThreadId = threadId
+      }
 
 parseAgentTurnStart :: AgentTurnPlan -> Value -> Either AppServerClientFailure AgentTurnStart
 parseAgentTurnStart plan value = do
@@ -74,6 +90,15 @@ startAgentTurn
   -> m (Either AppServerClientFailure AgentTurnStart)
 startAgentTurn interpreter requestId plan =
   parseAgentTurnStart plan <$> interpreter.appServerSendRequest (agentTurnStartRequest requestId plan)
+
+startAgentThread
+  :: Monad m
+  => AppServerInterpreter m
+  -> RequestId
+  -> AgentThreadPlan
+  -> m (Either AppServerClientFailure AgentThreadStart)
+startAgentThread interpreter requestId plan =
+  parseAgentThreadStart plan <$> interpreter.appServerSendRequest (agentThreadStartRequest requestId plan)
 
 readAgentTurn
   :: Monad m

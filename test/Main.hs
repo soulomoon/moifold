@@ -6184,6 +6184,7 @@ workflowFacadeExtractionTests = do
       , workflowAgentRoleWrapsPrReviewWorkerClassifier
       , workflowAgentRolesExposeRetryAndSideEffectMetadata
       , workflowAgentCodexStartRequestsMatchCompiledEffects
+      , workflowAgentCodexStartsThreadsThroughTypedAdapter
       , workflowAgentCodexParsesTurnLifecycle
       , workflowPrReviewAgentRolesClassifyOutputs
       , workflowAgentObservationKernelMatchesPrReviewClassifiers
@@ -6878,6 +6879,51 @@ workflowAgentCodexStartRequestsMatchCompiledEffects = do
               _ -> False
       )
       cases
+  pure (and results)
+
+workflowAgentCodexStartsThreadsThroughTypedAdapter :: IO Bool
+workflowAgentCodexStartsThreadsThroughTypedAdapter = do
+  let plan =
+        WorkflowAgent.AgentThreadPlan
+          { WorkflowAgent.agentThreadPlanRoleId = WorkflowAgent.plannerAgentRoleId
+          , WorkflowAgent.agentThreadPlanCwd = "/tmp/work"
+          , WorkflowAgent.agentThreadPlanApprovalPolicy = "never"
+          , WorkflowAgent.agentThreadPlanSandbox = "danger-full-access"
+          , WorkflowAgent.agentThreadPlanModel = "gpt-5.2"
+          , WorkflowAgent.agentThreadPlanDeveloperInstructions = "plan docs migration"
+          }
+      requestId = RequestId 443
+      response = object ["threadId" .= ("thread-1" :: Text)]
+      expectedRequest =
+        threadStartRequest
+          requestId
+          ThreadStartOptions
+            { threadCwd = "/tmp/work"
+            , threadApprovalPolicy = "never"
+            , threadSandbox = "danger-full-access"
+            , threadModel = "gpt-5.2"
+            , threadDeveloperInstructions = "plan docs migration"
+            }
+      request = WorkflowAgentCodexProtocol.agentThreadStartRequest requestId plan
+  started <-
+    WorkflowAgentCodex.startAgentThread
+      ( AppServerInterpreter \incomingRequest ->
+          if incomingRequest == expectedRequest
+            then pure response
+            else pure (object ["unexpected" .= True])
+      )
+      requestId
+      plan
+  results <-
+    sequence
+      [ assert "workflow Codex adapter renders typed thread start request" $
+          request == expectedRequest
+      , assert "workflow Codex adapter parses thread start" $
+          WorkflowAgentCodex.parseAgentThreadStart plan response
+            == Right (WorkflowAgent.AgentThreadStart WorkflowAgent.plannerAgentRoleId (ThreadId "thread-1"))
+      , assert "workflow Codex adapter starts thread with interpreter" $
+          started == Right (WorkflowAgent.AgentThreadStart WorkflowAgent.plannerAgentRoleId (ThreadId "thread-1"))
+      ]
   pure (and results)
 
 workflowAgentCodexParsesTurnLifecycle :: IO Bool
