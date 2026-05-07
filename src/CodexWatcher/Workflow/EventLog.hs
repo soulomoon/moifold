@@ -61,6 +61,7 @@ import CodexWatcher.Workflow.EventLog.Core
   , formatWorkflowReplayFailure
   , formatWorkflowTransitionFailure
   , initializeWorkflowEvent
+  , replayWorkflowEventLog
   , replayWorkflowEventLogDetailed
   , validateEventLogFixtureContract
   )
@@ -69,13 +70,6 @@ import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 import Data.Text (Text)
 
 type WorkflowTickAudit spec report = WorkflowAudit.WorkflowTickAudit spec FailureClassification report
-
-replayWorkflowEventLog
-  :: forall spec. WorkflowSpec spec
-  => [WorkflowEvent spec]
-  -> Either (WorkflowError spec) (WorkflowReplayResult spec)
-replayWorkflowEventLog =
-  WorkflowAudit.replayWorkflowEventLog @spec
 
 workflowDryRunAudit
   :: forall spec report. WorkflowSpec spec

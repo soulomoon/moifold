@@ -75,6 +75,7 @@ import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
+import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
@@ -6181,6 +6182,10 @@ workflowFacadeExtractionTests = do
       , workflowMoifoldCabalLibraryDoesNotReexportAdapters
       , workflowEventCodecContractCoversWatcherEvents
       , workflowEventCodecToleratesMetadataAndPreservesGoldenTypes
+      , workflowEventLogFileCoreNumberingIgnoresBlankLines
+      , workflowEventLogFileCoreDecodeFailureReportsSourceLine
+      , workflowEventLogFileWrapperDecodesExistingFixtures
+      , workflowEventLogFileWrapperFormatsMalformedErrors
       , workflowGithubCommandFacadeMatchesRuntimeRender
       , workflowEventLogCoreDetailedReplayMatchesMoifold
       , workflowEventLogCoreFixtureContractValidatesReplay
@@ -6256,7 +6261,6 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
   let coreSection = cabalComponentSection "library agent-workflow-core" cabalSource
       forbiddenNeedles =
         [ "aeson"
-        , "bytestring"
         , "directory"
         , "filepath"
         , "typed-process"
@@ -6273,6 +6277,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
           && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Daemon.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.EventLog.Core" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.EventLog.File.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Failure" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Permission.Core" `Text.isInfixOf` coreSection
@@ -6281,6 +6286,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
           && "CodexWatcher.Workflow.Transaction.Core" `Text.isInfixOf` coreSection
       dependsOnlyOnCoreDeps =
         "base >=4.18 && <5" `Text.isInfixOf` coreSection
+          && "bytestring >=0.12 && <0.13" `Text.isInfixOf` coreSection
           && "text >=2.0 && <3" `Text.isInfixOf` coreSection
           && not (any (`Text.isInfixOf` coreSection) forbiddenNeedles)
           && not (any (`Text.isInfixOf` coreSources) forbiddenNeedles)
@@ -6480,6 +6486,61 @@ commandSpecMatches (runtimeSpec, githubSpec) =
     && runtimeSpec.args == githubSpec.githubCommandArgs
     && runtimeSpec.cwd == githubSpec.githubCommandCwd
     && runtimeSpec.stdin == githubSpec.githubCommandStdin
+
+workflowEventLogFileCoreNumberingIgnoresBlankLines :: IO Bool
+workflowEventLogFileCoreNumberingIgnoresBlankLines =
+  let input = Text.Encoding.encodeUtf8 "\nfirst\n  \n\t\r\nsecond\n"
+      expected = [(2, "first"), (5, "second")]
+   in assert
+        "workflow event-log file core ignores blank lines and preserves source line numbers"
+        (WorkflowEventLogFileCore.numberedNonBlankWorkflowEventLogLines input == expected)
+
+workflowEventLogFileCoreDecodeFailureReportsSourceLine :: IO Bool
+workflowEventLogFileCoreDecodeFailureReportsSourceLine =
+  let input = Text.Encoding.encodeUtf8 "ok\n  \nbad\n"
+      decodeLine line =
+        let lineText = Text.Encoding.decodeUtf8 line
+         in if lineText == "bad"
+              then Left "bad token"
+              else Right lineText
+      decoded = WorkflowEventLogFileCore.decodeWorkflowEventLogLines decodeLine input
+   in assert "workflow event-log file core decode failure reports original source line" $
+        case decoded of
+          Left failure ->
+            WorkflowEventLogFileCore.workflowEventLogLineDecodeErrorLineNumber failure == 3
+              && WorkflowEventLogFileCore.workflowEventLogLineDecodeErrorReason failure == "bad token"
+              && WorkflowEventLogFileCore.formatWorkflowEventLogLineDecodeError failure == "line 3: bad token"
+          Right _ -> False
+
+workflowEventLogFileWrapperDecodesExistingFixtures :: IO Bool
+workflowEventLogFileWrapperDecodesExistingFixtures = do
+  results <-
+    traverse
+      ( \path -> do
+          loaded <- loadEventLogFile path
+          assert ("workflow event-log file wrapper decodes existing fixture " <> path) $
+            case loaded of
+              Right events -> not (null events)
+              Left _ -> False
+      )
+      goldenEventLogFixturePaths
+  pure (and results)
+
+workflowEventLogFileWrapperFormatsMalformedErrors :: IO Bool
+workflowEventLogFileWrapperFormatsMalformedErrors = do
+  let stateDir = "/tmp/moifold-event-log-file-wrapper"
+      eventsPath = stateDir </> "events.jsonl"
+      badLine = "not-json"
+  stateDirExists <- doesDirectoryExist stateDir
+  when stateDirExists (removePathForcibly stateDir)
+  createDirectoryIfMissing True stateDir
+  writeFile eventsPath "\n  \nnot-json\n"
+  loaded <- loadEventLogFile eventsPath
+  let expected =
+        case eitherDecodeStrict' (Text.Encoding.encodeUtf8 badLine) :: Either String WatcherEvent of
+          Left rawError -> Left ("line 3: " <> rawError)
+          Right _ -> Left "unexpected valid malformed event-log line"
+  assert "workflow event-log file wrapper preserves malformed line error formatting" (loaded == expected)
 
 workflowEventLogCoreDetailedReplayMatchesMoifold :: IO Bool
 workflowEventLogCoreDetailedReplayMatchesMoifold = do

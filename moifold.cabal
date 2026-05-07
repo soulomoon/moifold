@@ -34,6 +34,7 @@ library agent-workflow-core
     CodexWatcher.Workflow.Daemon.Core
     CodexWatcher.Workflow.DSL
     CodexWatcher.Workflow.EventLog.Core
+    CodexWatcher.Workflow.EventLog.File.Core
     CodexWatcher.Workflow.Execution.Core
     CodexWatcher.Workflow.Failure
     CodexWatcher.Workflow.Permission.Core
@@ -41,6 +42,7 @@ library agent-workflow-core
     CodexWatcher.Workflow.Transaction.Core
   build-depends:
     base >=4.18 && <5,
+    bytestring >=0.12 && <0.13,
     text >=2.0 && <3
   default-language: GHC2021
 
