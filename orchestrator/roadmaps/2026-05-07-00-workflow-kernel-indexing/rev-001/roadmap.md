@@ -16,13 +16,13 @@
    Merge after: none
    Completion notes: Completed in round-001. The reusable checked-action traversal and failure-report shape now live in `agent-workflow-core`; concrete `ActionExecutor`, command reports, hard-failure classification, daemon failure mapping, and facade compatibility remain in moifold adapters.
 
-2. [pending] Add workflow facade law and parity coverage
+2. [done] Add workflow facade law and parity coverage
    Item id: item-002-facade-laws
    Depends on: item-001-checked-action-failure-core
    Parallel safe: no
    Parallel group: none
    Merge after: item-001-checked-action-failure-core
-   Completion notes: Prove observation-to-event consistency, replay parity, effect-history stability, and permission soundness for DocsMigration and one PR-review slice before changing the facade representation.
+   Completion notes: Completed in round-002. Added DocsMigration and PR-review mergeability facade-law coverage for observe/plan agreement, apply and replay parity, effect-history stability, permission acceptance/rejection, and dry-run/action ordering. The round preserved event schema, golden fixture, daemon result, dry-run, runtime command, action-ordering, facade representation, and indexed API surfaces while making the narrow permission-core fix needed for spec-level effect-plan validation.
 
 3. [pending] Harden package boundary guards for the indexed rewrite
    Item id: item-003-boundary-guards
