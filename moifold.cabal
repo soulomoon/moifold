@@ -38,6 +38,7 @@ library agent-workflow-core
     CodexWatcher.Workflow.EventLog.File.Core
     CodexWatcher.Workflow.Execution.Core
     CodexWatcher.Workflow.Failure
+    CodexWatcher.Workflow.Indexed.Spec
     CodexWatcher.Workflow.Permission.Core
     CodexWatcher.Workflow.Spec
     CodexWatcher.Workflow.Transaction.Core

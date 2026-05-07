@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-001",
+  "roadmap_item_id": "item-004-indexed-spec-api",
+  "decision": "approved",
+  "evidence_summary": "Baseline checks passed: cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check. Focused checks confirmed agent-workflow-core exposes the generic indexed spec module, the API has indexed class, transition, and existential wrappers, test assertions cover boundary, existential labels, typed transition boundaries, and PR-review mergeability parity, and no event schema, golden, daemon, dry-run, action-ordering, or compatibility facade files changed."
+}

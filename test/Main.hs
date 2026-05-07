@@ -7,6 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Main (main) where
@@ -80,6 +81,7 @@ import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFil
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
 import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
+import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
@@ -6179,6 +6181,7 @@ workflowFacadeExtractionTests = do
     sequence
       [ workflowFacadeReplayMatchesEventLog
       , workflowSpecModuleKeepsCoreBoundary
+      , workflowIndexedSpecModuleKeepsCoreBoundary
       , workflowCoreCabalSublibraryKeepsPackageBoundary
       , workflowCodexCabalSublibraryKeepsPackageBoundary
       , workflowGithubCabalSublibraryKeepsPackageBoundary
@@ -6209,6 +6212,8 @@ workflowFacadeExtractionTests = do
       , workflowPrReviewAgentRolesClassifyOutputs
       , workflowAgentObservationKernelMatchesPrReviewClassifiers
       , workflowPlanObservationLawHoldsForPrReviewAgentObservation
+      , workflowIndexedSpecExistentialsPreserveLabels
+      , workflowIndexedSpecCompatibilityParityForMergeability
       , workflowPlannedTransitionPreservesObservedEffects
       , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
@@ -6256,6 +6261,38 @@ workflowSpecModuleKeepsCoreBoundary = do
   definitionsOk <-
     assert
       "workflow spec module keeps generic core definitions"
+      keepsCoreDefinitions
+  pure (importsOk && definitionsOk)
+
+workflowIndexedSpecModuleKeepsCoreBoundary :: IO Bool
+workflowIndexedSpecModuleKeepsCoreBoundary = do
+  let specPath =
+        "agent-workflow-core"
+          </> "src"
+          </> "CodexWatcher"
+          </> "Workflow"
+          </> "Indexed"
+          </> "Spec.hs"
+  source <- Text.pack <$> readFile specPath
+  let forbiddenImports =
+        sourceImportViolationsIn specPath coreBoundaryForbiddenImportModules source
+      keepsCoreDefinitions =
+        "type family WorkflowIndex spec :: Type" `Text.isInfixOf` source
+          && "class IndexedWorkflowSpec spec where" `Text.isInfixOf` source
+          && "data IndexedPlannedTransition" `Text.isInfixOf` source
+          && "SomeIndexedWorkflowState" `Text.isInfixOf` source
+          && "SomeIndexedWorkflowEvent" `Text.isInfixOf` source
+          && "SomeIndexedWorkflowObservation" `Text.isInfixOf` source
+          && "SomeIndexedWorkflowEffectPlan" `Text.isInfixOf` source
+          && "SomeIndexedPlannedTransition" `Text.isInfixOf` source
+          && "indexedWorkflowPlanObservation" `Text.isInfixOf` source
+  importsOk <-
+    assertNoTextMatches
+      "indexed workflow spec module has no moifold-specific imports"
+      forbiddenImports
+  definitionsOk <-
+    assert
+      "indexed workflow spec module exposes indexed class, transitions, and existentials"
       keepsCoreDefinitions
   pure (importsOk && definitionsOk)
 
@@ -6321,6 +6358,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
           && "CodexWatcher.Workflow.EventLog.File.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Failure" `Text.isInfixOf` coreSection
+          && "CodexWatcher.Workflow.Indexed.Spec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Permission.Core" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.Spec" `Text.isInfixOf` coreSection
           && "CodexWatcher.Workflow.DSL" `Text.isInfixOf` coreSection
@@ -7539,6 +7577,387 @@ agentObservationPlanMatches state role toObservation turn expectedObservation =
     legacyObservedPlannedTransition <$> observeDaemonState state expectedObservation
   newPlan =
     WorkflowObservationAgent.planAgentTurnObservation @MoifoldSpec state role toObservation turn
+
+data IndexedTestPoint
+
+data IndexedTestQueued
+
+data IndexedTestDone
+
+data IndexedTestSpec
+
+data IndexedTestState state where
+  IndexedTestQueuedState :: IndexedTestState IndexedTestQueued
+  IndexedTestDoneState :: IndexedTestState IndexedTestDone
+
+data IndexedTestEvent source target where
+  IndexedTestCompleteEvent :: IndexedTestEvent IndexedTestQueued IndexedTestDone
+
+data IndexedTestObservation source target where
+  IndexedTestCompleteObservation :: IndexedTestObservation IndexedTestQueued IndexedTestDone
+
+data IndexedTestEffect source target =
+  IndexedTestEffect Text
+
+newtype IndexedTestPlan source target =
+  IndexedTestPlan [IndexedTestEffect source target]
+
+data IndexedTestTick source target =
+  IndexedTestTick
+    (IndexedTestEvent source target)
+    (IndexedTestState target)
+    (IndexedTestPlan source target)
+
+newtype IndexedTestReplayResult state =
+  IndexedTestReplayResult (IndexedTestState state)
+
+type instance IndexedWorkflow.WorkflowIndex IndexedTestSpec = IndexedTestPoint
+
+instance IndexedWorkflow.IndexedWorkflowSpec IndexedTestSpec where
+  type IndexedWorkflowState IndexedTestSpec state = IndexedTestState state
+  type IndexedWorkflowEvent IndexedTestSpec source target = IndexedTestEvent source target
+  type IndexedWorkflowObservation IndexedTestSpec source target = IndexedTestObservation source target
+  type IndexedWorkflowObservedTick IndexedTestSpec source target = IndexedTestTick source target
+  type IndexedWorkflowEffect IndexedTestSpec source target = IndexedTestEffect source target
+  type IndexedWorkflowEffectPlan IndexedTestSpec source target = IndexedTestPlan source target
+  type IndexedWorkflowReplayResult IndexedTestSpec state = IndexedTestReplayResult state
+  type IndexedWorkflowError IndexedTestSpec = Text
+
+  indexedWorkflowInitialEvent IndexedTestCompleteEvent =
+    Right (IndexedTestDoneState, IndexedTestPlan [IndexedTestEffect "pre-indexed-effect"])
+  indexedWorkflowApplyEvent _state IndexedTestCompleteEvent =
+    Right (IndexedTestDoneState, IndexedTestPlan [IndexedTestEffect "pre-indexed-effect"])
+  indexedWorkflowObserve _state IndexedTestCompleteObservation =
+    Right (IndexedTestTick IndexedTestCompleteEvent IndexedTestDoneState (IndexedTestPlan [IndexedTestEffect "pre-indexed-effect"]))
+  indexedWorkflowObservedTransition (IndexedTestTick event _state effects) =
+    IndexedWorkflow.indexedWorkflowPlanTransition @IndexedTestSpec event effects
+  indexedWorkflowObservedState (IndexedTestTick _event state _effects) =
+    state
+  indexedWorkflowPlanTransition event effects =
+    IndexedWorkflow.IndexedPlannedTransition
+      { IndexedWorkflow.indexedPlannedEvent = event
+      , IndexedWorkflow.indexedPlannedPreCommitEffects = effects
+      , IndexedWorkflow.indexedPlannedPostCommitEffects = IndexedTestPlan [IndexedTestEffect "post-indexed-effect"]
+      }
+  indexedWorkflowReplayEvents [IndexedWorkflow.SomeIndexedWorkflowEvent IndexedTestCompleteEvent] =
+    Right (IndexedWorkflow.SomeIndexedWorkflowReplayResult (IndexedTestReplayResult IndexedTestDoneState))
+  indexedWorkflowReplayEvents _events =
+    Left "unexpected indexed test replay events"
+  indexedWorkflowReplayState (IndexedTestReplayResult state) =
+    state
+  indexedWorkflowValidateEffects _state _effects =
+    Right ()
+  indexedWorkflowEffectPlanEffects (IndexedTestPlan effects) =
+    effects
+  indexedWorkflowEffectAllowed _state _effect =
+    Right ()
+  indexedWorkflowIsTerminal IndexedTestQueuedState =
+    False
+  indexedWorkflowIsTerminal IndexedTestDoneState =
+    True
+  indexedWorkflowStateLabel IndexedTestQueuedState =
+    "queued"
+  indexedWorkflowStateLabel IndexedTestDoneState =
+    "done"
+  indexedWorkflowEventLabel IndexedTestCompleteEvent =
+    "complete"
+  indexedWorkflowEventSourceLabel IndexedTestCompleteEvent =
+    "queued"
+  indexedWorkflowEventTargetLabel IndexedTestCompleteEvent =
+    "done"
+  indexedWorkflowObservationLabel IndexedTestCompleteObservation =
+    "complete-observation"
+  indexedWorkflowObservationSourceLabel IndexedTestCompleteObservation =
+    "queued"
+  indexedWorkflowObservationTargetLabel IndexedTestCompleteObservation =
+    "done"
+  indexedWorkflowEffectLabel (IndexedTestEffect effectText) =
+    effectText
+
+data PrReviewIndexedPoint
+
+data PrReviewIndexedUninitialized
+
+data PrReviewIndexedCheckingReviews
+
+data PrReviewIndexedWaitingForMergeability
+
+data PrReviewIndexedMerging
+
+data PrReviewMergeabilityIndexedSpec
+
+newtype PrReviewIndexedState state =
+  PrReviewIndexedState SomeWatcherState
+
+data PrReviewIndexedEvent source target =
+  PrReviewIndexedEvent Text Text WatcherEvent
+
+data PrReviewIndexedObservation source target =
+  PrReviewIndexedObservation Text Text DaemonObservation
+
+newtype PrReviewIndexedEffect source target =
+  PrReviewIndexedEffect SomeEffect
+
+newtype PrReviewIndexedEffectPlan source target =
+  PrReviewIndexedEffectPlan EffectPlan
+
+data PrReviewIndexedTick source target =
+  PrReviewIndexedTick Text Text ObservedPolicyTick
+
+newtype PrReviewIndexedReplayResult state =
+  PrReviewIndexedReplayResult EventReplayResult
+
+type instance IndexedWorkflow.WorkflowIndex PrReviewMergeabilityIndexedSpec = PrReviewIndexedPoint
+
+instance IndexedWorkflow.IndexedWorkflowSpec PrReviewMergeabilityIndexedSpec where
+  type IndexedWorkflowState PrReviewMergeabilityIndexedSpec state = PrReviewIndexedState state
+  type IndexedWorkflowEvent PrReviewMergeabilityIndexedSpec source target = PrReviewIndexedEvent source target
+  type IndexedWorkflowObservation PrReviewMergeabilityIndexedSpec source target = PrReviewIndexedObservation source target
+  type IndexedWorkflowObservedTick PrReviewMergeabilityIndexedSpec source target = PrReviewIndexedTick source target
+  type IndexedWorkflowEffect PrReviewMergeabilityIndexedSpec source target = PrReviewIndexedEffect source target
+  type IndexedWorkflowEffectPlan PrReviewMergeabilityIndexedSpec source target = PrReviewIndexedEffectPlan source target
+  type IndexedWorkflowReplayResult PrReviewMergeabilityIndexedSpec state = PrReviewIndexedReplayResult state
+  type IndexedWorkflowError PrReviewMergeabilityIndexedSpec = Text
+
+  indexedWorkflowInitialEvent (PrReviewIndexedEvent _sourceLabel _targetLabel event) =
+    case workflowInitialEvent @MoifoldSpec event of
+      Right (state, effects) -> Right (PrReviewIndexedState state, PrReviewIndexedEffectPlan effects)
+      Left failure -> Left failure
+  indexedWorkflowApplyEvent (PrReviewIndexedState state) (PrReviewIndexedEvent _sourceLabel _targetLabel event) =
+    case workflowApplyEvent @MoifoldSpec state event of
+      Right (nextState, effects) -> Right (PrReviewIndexedState nextState, PrReviewIndexedEffectPlan effects)
+      Left failure -> Left failure
+  indexedWorkflowObserve (PrReviewIndexedState state) (PrReviewIndexedObservation sourceLabel targetLabel observation) =
+    case workflowObserve @MoifoldSpec state observation of
+      Right observed -> Right (PrReviewIndexedTick sourceLabel targetLabel observed)
+      Left failure -> Left failure
+  indexedWorkflowObservedTransition (PrReviewIndexedTick sourceLabel targetLabel observed) =
+    prReviewIndexedPlannedTransitionFromCompatibility
+      sourceLabel
+      targetLabel
+      (legacyObservedPlannedTransition observed)
+  indexedWorkflowObservedState (PrReviewIndexedTick _sourceLabel _targetLabel observed) =
+    PrReviewIndexedState observed.observedState
+  indexedWorkflowPlanTransition (PrReviewIndexedEvent sourceLabel targetLabel event) (PrReviewIndexedEffectPlan effects) =
+    prReviewIndexedPlannedTransitionFromCompatibility
+      sourceLabel
+      targetLabel
+      (moifoldPlannedTransitionFromEffects event effects)
+  indexedWorkflowReplayEvents events =
+    case workflowReplayEvents @MoifoldSpec (prReviewIndexedSomeEvent <$> events) of
+      Right replay -> Right (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewIndexedReplayResult replay))
+      Left failure -> Left failure
+  indexedWorkflowReplayState (PrReviewIndexedReplayResult replay) =
+    PrReviewIndexedState replay.replayState
+  indexedWorkflowValidateEffects (PrReviewIndexedState state) (PrReviewIndexedEffectPlan effects) =
+    workflowValidateEffects @MoifoldSpec state effects
+  indexedWorkflowEffectPlanEffects (PrReviewIndexedEffectPlan effects) =
+    PrReviewIndexedEffect <$> effects
+  indexedWorkflowEffectAllowed (PrReviewIndexedState state) (PrReviewIndexedEffect effect) =
+    workflowEffectAllowed @MoifoldSpec state effect
+  indexedWorkflowIsTerminal (PrReviewIndexedState state) =
+    workflowIsTerminal @MoifoldSpec state
+  indexedWorkflowStateLabel (PrReviewIndexedState state) =
+    workflowStateLabel @MoifoldSpec state
+  indexedWorkflowEventLabel (PrReviewIndexedEvent _sourceLabel _targetLabel event) =
+    workflowEventLabel @MoifoldSpec event
+  indexedWorkflowEventSourceLabel (PrReviewIndexedEvent sourceLabel _targetLabel _event) =
+    sourceLabel
+  indexedWorkflowEventTargetLabel (PrReviewIndexedEvent _sourceLabel targetLabel _event) =
+    targetLabel
+  indexedWorkflowObservationLabel (PrReviewIndexedObservation _sourceLabel _targetLabel observation) =
+    workflowObservationLabel @MoifoldSpec observation
+  indexedWorkflowObservationSourceLabel (PrReviewIndexedObservation sourceLabel _targetLabel _observation) =
+    sourceLabel
+  indexedWorkflowObservationTargetLabel (PrReviewIndexedObservation _sourceLabel targetLabel _observation) =
+    targetLabel
+  indexedWorkflowEffectLabel (PrReviewIndexedEffect effect) =
+    workflowEffectLabel @MoifoldSpec effect
+
+prReviewIndexedPlannedTransitionFromCompatibility
+  :: Text
+  -> Text
+  -> PlannedTransition MoifoldSpec
+  -> IndexedWorkflow.IndexedPlannedTransition PrReviewMergeabilityIndexedSpec source target
+prReviewIndexedPlannedTransitionFromCompatibility sourceLabel targetLabel planned =
+  IndexedWorkflow.IndexedPlannedTransition
+    { IndexedWorkflow.indexedPlannedEvent =
+        PrReviewIndexedEvent sourceLabel targetLabel planned.plannedEvent
+    , IndexedWorkflow.indexedPlannedPreCommitEffects =
+        PrReviewIndexedEffectPlan planned.plannedPreCommitEffects
+    , IndexedWorkflow.indexedPlannedPostCommitEffects =
+        PrReviewIndexedEffectPlan planned.plannedPostCommitEffects
+    }
+
+prReviewIndexedSomeEvent :: IndexedWorkflow.SomeIndexedWorkflowEvent PrReviewMergeabilityIndexedSpec -> WatcherEvent
+prReviewIndexedSomeEvent (IndexedWorkflow.SomeIndexedWorkflowEvent (PrReviewIndexedEvent _sourceLabel _targetLabel event)) =
+  event
+
+prReviewIndexedTransitionEvent
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewMergeabilityIndexedSpec source target
+  -> WatcherEvent
+prReviewIndexedTransitionEvent transition =
+  case IndexedWorkflow.indexedPlannedEvent transition of
+    PrReviewIndexedEvent _sourceLabel _targetLabel event -> event
+
+prReviewIndexedTransitionPreCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewMergeabilityIndexedSpec source target
+  -> EffectPlan
+prReviewIndexedTransitionPreCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPreCommitEffects transition of
+    PrReviewIndexedEffectPlan effects -> effects
+
+prReviewIndexedTransitionPostCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewMergeabilityIndexedSpec source target
+  -> EffectPlan
+prReviewIndexedTransitionPostCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPostCommitEffects transition of
+    PrReviewIndexedEffectPlan effects -> effects
+
+prReviewIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult PrReviewMergeabilityIndexedSpec -> EventReplayResult
+prReviewIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewIndexedReplayResult replay)) =
+  replay
+
+workflowIndexedSpecExistentialsPreserveLabels :: IO Bool
+workflowIndexedSpecExistentialsPreserveLabels = do
+  let state =
+        IndexedWorkflow.SomeIndexedWorkflowState
+          (IndexedTestQueuedState :: IndexedTestState IndexedTestQueued)
+      event =
+        IndexedWorkflow.SomeIndexedWorkflowEvent
+          (IndexedTestCompleteEvent :: IndexedTestEvent IndexedTestQueued IndexedTestDone)
+      observation =
+        IndexedWorkflow.SomeIndexedWorkflowObservation
+          (IndexedTestCompleteObservation :: IndexedTestObservation IndexedTestQueued IndexedTestDone)
+      effect =
+        IndexedWorkflow.SomeIndexedWorkflowEffect
+          (IndexedTestEffect "pre-indexed-effect" :: IndexedTestEffect IndexedTestQueued IndexedTestDone)
+      plan =
+        IndexedWorkflow.SomeIndexedWorkflowEffectPlan
+          (IndexedTestPlan [IndexedTestEffect "pre-indexed-effect"] :: IndexedTestPlan IndexedTestQueued IndexedTestDone)
+      transition =
+        IndexedWorkflow.indexedWorkflowPlanTransition
+          @IndexedTestSpec
+          IndexedTestCompleteEvent
+          (IndexedTestPlan [IndexedTestEffect "pre-indexed-effect"])
+      wrappedTransition =
+        IndexedWorkflow.SomeIndexedPlannedTransition transition
+      observedTick =
+        IndexedWorkflow.SomeIndexedWorkflowObservedTick
+          (IndexedTestTick IndexedTestCompleteEvent IndexedTestDoneState (IndexedTestPlan [IndexedTestEffect "pre-indexed-effect"]))
+      replayResult =
+        IndexedWorkflow.SomeIndexedWorkflowReplayResult
+          (IndexedTestReplayResult IndexedTestDoneState)
+      plannedObservation =
+        IndexedWorkflow.indexedWorkflowPlanObservation
+          @IndexedTestSpec
+          IndexedTestQueuedState
+          IndexedTestCompleteObservation
+  assert "indexed workflow existentials preserve labels and typed transition boundaries" $
+    IndexedWorkflow.someIndexedWorkflowStateLabel @IndexedTestSpec state == "queued"
+      && IndexedWorkflow.someIndexedWorkflowEventLabel @IndexedTestSpec event == "complete"
+      && IndexedWorkflow.someIndexedWorkflowEventSourceLabel @IndexedTestSpec event == "queued"
+      && IndexedWorkflow.someIndexedWorkflowEventTargetLabel @IndexedTestSpec event == "done"
+      && IndexedWorkflow.someIndexedWorkflowObservationLabel @IndexedTestSpec observation == "complete-observation"
+      && IndexedWorkflow.someIndexedWorkflowObservationSourceLabel @IndexedTestSpec observation == "queued"
+      && IndexedWorkflow.someIndexedWorkflowObservationTargetLabel @IndexedTestSpec observation == "done"
+      && IndexedWorkflow.someIndexedWorkflowEffectLabel @IndexedTestSpec effect == "pre-indexed-effect"
+      && IndexedWorkflow.someIndexedWorkflowEffectPlanEffectLabels @IndexedTestSpec plan == ["pre-indexed-effect"]
+      && IndexedWorkflow.someIndexedWorkflowTransitionEventLabel @IndexedTestSpec wrappedTransition == "complete"
+      && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @IndexedTestSpec wrappedTransition == "queued"
+      && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @IndexedTestSpec wrappedTransition == "done"
+      && IndexedWorkflow.someIndexedWorkflowTransitionPreCommitEffectLabels @IndexedTestSpec wrappedTransition == ["pre-indexed-effect"]
+      && IndexedWorkflow.someIndexedWorkflowTransitionPostCommitEffectLabels @IndexedTestSpec wrappedTransition == ["post-indexed-effect"]
+      && IndexedWorkflow.someIndexedWorkflowObservedTickStateLabel @IndexedTestSpec observedTick == "done"
+      && IndexedWorkflow.someIndexedWorkflowObservedTickTransitionLabel @IndexedTestSpec observedTick == "complete"
+      && IndexedWorkflow.someIndexedWorkflowReplayStateLabel @IndexedTestSpec replayResult == "done"
+      && case plannedObservation of
+        Right planned ->
+          IndexedWorkflow.indexedWorkflowPlannedTransitionEventLabel @IndexedTestSpec planned == "complete"
+            && IndexedWorkflow.indexedWorkflowPlannedTransitionSourceLabel @IndexedTestSpec planned == "queued"
+            && IndexedWorkflow.indexedWorkflowPlannedTransitionTargetLabel @IndexedTestSpec planned == "done"
+        Left _failure -> False
+
+workflowIndexedSpecCompatibilityParityForMergeability :: IO Bool
+workflowIndexedSpecCompatibilityParityForMergeability = do
+  let repo = RepoName "soulomoon/mlf2"
+      prNumberValue = PrNumber 6
+      prConfig = PrConfig repo prNumberValue (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      events =
+        [ PrReviewInitialized prConfig workerThread reviewerThread
+        , PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn")
+        , PrReviewCleanFound cleanEvidence []
+        ]
+      state =
+        SomeWatcherState
+          (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+      expectedEvent = PrReviewMergeabilityClean commit
+      expectedEffects = [SomeEffect (MergePullRequest prNumberValue cleanEvidence)]
+      indexedState =
+        PrReviewIndexedState state
+          :: PrReviewIndexedState PrReviewIndexedWaitingForMergeability
+      indexedObservation =
+        PrReviewIndexedObservation
+          "PrReview/WaitingForMergeability"
+          "PrReview/Merging"
+          observation
+          :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedMerging
+      indexedEvents =
+        [ IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewIndexedEvent "PrReview/Uninitialized" "PrReview/CheckingReviews" (PrReviewInitialized prConfig workerThread reviewerThread)
+                :: PrReviewIndexedEvent PrReviewIndexedUninitialized PrReviewIndexedCheckingReviews
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewIndexedEvent "PrReview/CheckingReviews" "PrReview/CheckingReviews" (PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn"))
+                :: PrReviewIndexedEvent PrReviewIndexedCheckingReviews PrReviewIndexedCheckingReviews
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewIndexedEvent "PrReview/CheckingReviews" "PrReview/WaitingForMergeability" (PrReviewCleanFound cleanEvidence [])
+                :: PrReviewIndexedEvent PrReviewIndexedCheckingReviews PrReviewIndexedWaitingForMergeability
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewIndexedEvent "PrReview/WaitingForMergeability" "PrReview/Merging" expectedEvent
+                :: PrReviewIndexedEvent PrReviewIndexedWaitingForMergeability PrReviewIndexedMerging
+            )
+        ]
+      directReplay = workflowReplayEvents @MoifoldSpec (events <> [expectedEvent])
+      indexedReplay = IndexedWorkflow.indexedWorkflowReplayEvents @PrReviewMergeabilityIndexedSpec indexedEvents
+  assert "indexed workflow PR-review mergeability adapter matches compatibility facade" $
+    case
+      ( workflowObserve @MoifoldSpec state observation
+      , workflowPlanObservation @MoifoldSpec state observation
+      , IndexedWorkflow.indexedWorkflowObserve @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+      , directReplay
+      , indexedReplay
+      )
+      of
+      (Right compatibilityObserved, Right compatibilityPlan, Right indexedObserved, Right indexedPlan, Right compatibilityReplay, Right indexedReplayResult) ->
+        let PrReviewIndexedState indexedNextState =
+              IndexedWorkflow.indexedWorkflowObservedState @PrReviewMergeabilityIndexedSpec indexedObserved
+            indexedReplayResultValue = prReviewIndexedReplayResult indexedReplayResult
+            wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+         in compatibilityObserved.observedEvent == expectedEvent
+              && prReviewIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+              && prReviewIndexedTransitionEvent indexedPlan == expectedEvent
+              && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @PrReviewMergeabilityIndexedSpec wrappedTransition == "PrReview/WaitingForMergeability"
+              && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @PrReviewMergeabilityIndexedSpec wrappedTransition == "PrReview/Merging"
+              && workflowStateLabel @MoifoldSpec compatibilityObserved.observedState == workflowStateLabel @MoifoldSpec indexedNextState
+              && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+              && prReviewIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+              && prReviewIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+              && compatibilityPlan.plannedPreCommitEffects == expectedEffects
+              && compatibilityPlan.plannedPostCommitEffects == []
+              && compatibilityObserved.observedEffects == expectedEffects
+              && sameWatcherStateShape compatibilityReplay.replayState indexedReplayResultValue.replayState
+              && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
+              && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
+      _ -> False
 
 workflowPlannedTransitionPreservesObservedEffects :: IO Bool
 workflowPlannedTransitionPreservesObservedEffects = do
