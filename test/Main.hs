@@ -113,6 +113,22 @@ import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
   , PrReviewMergeabilityIndexedSpec
   )
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
+import CodexWatcher.Workflow.Moifold.PrReview.Reviewer.Indexed
+  ( PrReviewReviewerIndexedBlocked
+  , PrReviewReviewerIndexedCheckingReviews
+  , PrReviewReviewerIndexedEffect (..)
+  , PrReviewReviewerIndexedEffectPlan (..)
+  , PrReviewReviewerIndexedEvent (..)
+  , PrReviewReviewerIndexedFixingReviews
+  , PrReviewReviewerIndexedObservation (..)
+  , PrReviewReviewerIndexedReplayResult (..)
+  , PrReviewReviewerIndexedReviewingClean
+  , PrReviewReviewerIndexedSpec
+  , PrReviewReviewerIndexedState (..)
+  , PrReviewReviewerIndexedUninitialized
+  , PrReviewReviewerIndexedVerifyingReviewFix
+  , PrReviewReviewerIndexedWaitingMergeability
+  )
 import CodexWatcher.Workflow.Moifold.PrReview.Worker.Indexed
   ( PrReviewWorkerIndexedBlocked
   , PrReviewWorkerIndexedCheckingReviews
@@ -6262,6 +6278,9 @@ workflowFacadeExtractionTests = do
       , workflowPrReviewWorkerIndexedSpecMatchesCompatibilityForOutcomes
       , workflowPrReviewWorkerIndexedSpecMatchesClassifierBackedOutcomes
       , workflowPrReviewWorkerIndexedSpecRejectsInvalidObservationLikeFacade
+      , workflowPrReviewReviewerIndexedSpecMatchesCompatibilityForOutcomes
+      , workflowPrReviewReviewerIndexedSpecMatchesClassifierBackedOutcomes
+      , workflowPrReviewReviewerIndexedSpecRejectsInvalidObservationLikeFacade
       , workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForCleanFromGoldenLifecycle
       , workflowPrReviewMergeabilityIndexedSpecPreservesMergeEffectOrdering
       , workflowPrReviewMergeabilityIndexedSpecRejectsMismatchedCleanCommitLikeFacade
@@ -7804,6 +7823,31 @@ prReviewWorkerIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayRe
 prReviewWorkerIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewWorkerIndexedReplayResult replay)) =
   replay
 
+prReviewReviewerIndexedTransitionEvent
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewReviewerIndexedSpec source target
+  -> WatcherEvent
+prReviewReviewerIndexedTransitionEvent transition =
+  case IndexedWorkflow.indexedPlannedEvent transition of
+    PrReviewReviewerIndexedEvent _sourceLabel _targetLabel event -> event
+
+prReviewReviewerIndexedTransitionPreCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewReviewerIndexedSpec source target
+  -> EffectPlan
+prReviewReviewerIndexedTransitionPreCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPreCommitEffects transition of
+    PrReviewReviewerIndexedEffectPlan effects -> effects
+
+prReviewReviewerIndexedTransitionPostCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewReviewerIndexedSpec source target
+  -> EffectPlan
+prReviewReviewerIndexedTransitionPostCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPostCommitEffects transition of
+    PrReviewReviewerIndexedEffectPlan effects -> effects
+
+prReviewReviewerIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult PrReviewReviewerIndexedSpec -> EventReplayResult
+prReviewReviewerIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewReviewerIndexedReplayResult replay)) =
+  replay
+
 docsMigrationIndexedTransitionEvent
   :: IndexedWorkflow.IndexedPlannedTransition DocsMigration.DocsMigrationSpec source target
   -> DocsMigration.DocsMigrationEvent
@@ -8818,6 +8862,529 @@ blockedPostCommitPlan planned =
     && hasEffect StopDaemonTag planned.plannedPostCommitEffects
     && lacksEffect RecordBlockedTag planned.plannedPreCommitEffects
     && lacksEffect StopDaemonTag planned.plannedPreCommitEffects
+
+data PrReviewReviewerIndexedFixture = PrReviewReviewerIndexedFixture
+  { prReviewReviewerIndexedPrefix :: [WatcherEvent]
+  , prReviewReviewerIndexedTypedPrefix :: [IndexedWorkflow.SomeIndexedWorkflowEvent PrReviewReviewerIndexedSpec]
+  , prReviewReviewerIndexedStateValue :: SomeWatcherState
+  }
+
+prReviewReviewerNormalFixture :: PrReviewReviewerIndexedFixture
+prReviewReviewerNormalFixture =
+  PrReviewReviewerIndexedFixture
+    { prReviewReviewerIndexedPrefix = [initialized, noUnresolved]
+    , prReviewReviewerIndexedTypedPrefix =
+        [ IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewReviewerIndexedEvent "PrReview/Uninitialized" "PrReview/CheckingReviews" initialized
+                :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedUninitialized PrReviewReviewerIndexedCheckingReviews
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewReviewerIndexedEvent "PrReview/CheckingReviews" "PrReview/ReviewingClean" noUnresolved
+                :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedCheckingReviews PrReviewReviewerIndexedReviewingClean
+            )
+        ]
+    , prReviewReviewerIndexedStateValue =
+        SomeWatcherState
+          ( PrReviewingClean
+              prConfig
+              commit
+              normalReviewContext
+              (WorkerIdle workerThread)
+              (ReviewerActive (ActiveTurn reviewerThread reviewerTurn))
+          )
+    }
+ where
+  repo = RepoName "soulomoon/mlf2"
+  prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+  workerThread = ThreadId "worker"
+  reviewerThread = ThreadId "reviewer"
+  commit = CommitSha "abc123"
+  reviewerTurn = TurnId "reviewer-turn"
+  initialized = PrReviewInitialized prConfig workerThread reviewerThread
+  noUnresolved = PrReviewNoUnresolvedFound commit reviewerTurn
+
+prReviewReviewerVerificationFixture :: PrReviewReviewerIndexedFixture
+prReviewReviewerVerificationFixture =
+  PrReviewReviewerIndexedFixture
+    { prReviewReviewerIndexedPrefix = [initialized, unresolved, fixCompleted, verificationStarted]
+    , prReviewReviewerIndexedTypedPrefix =
+        [ IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewReviewerIndexedEvent "PrReview/Uninitialized" "PrReview/CheckingReviews" initialized
+                :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedUninitialized PrReviewReviewerIndexedCheckingReviews
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewReviewerIndexedEvent "PrReview/CheckingReviews" "PrReview/FixingReviews" unresolved
+                :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedCheckingReviews PrReviewReviewerIndexedFixingReviews
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewReviewerIndexedEvent "PrReview/FixingReviews" "PrReview/VerifyingReviewFix" fixCompleted
+                :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedFixingReviews PrReviewReviewerIndexedVerifyingReviewFix
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewReviewerIndexedEvent "PrReview/VerifyingReviewFix" "PrReview/ReviewingClean" verificationStarted
+                :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedVerifyingReviewFix PrReviewReviewerIndexedReviewingClean
+            )
+        ]
+    , prReviewReviewerIndexedStateValue =
+        SomeWatcherState
+          ( PrReviewingClean
+              prConfig
+              reviewTarget
+              (verificationReviewContext evidence)
+              (WorkerIdle workerThread)
+              (ReviewerActive (ActiveTurn reviewerThread reviewerTurn))
+          )
+    }
+ where
+  repo = RepoName "soulomoon/mlf2"
+  prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+  workerThread = ThreadId "worker"
+  reviewerThread = ThreadId "reviewer"
+  reviewedCommit = CommitSha "abc123"
+  reviewTarget = CommitSha "def456"
+  workerTurn = TurnId "worker-turn"
+  reviewerTurn = TurnId "reviewer-turn"
+  reviewThreadId = ReviewThreadId "thread-fixed"
+  evidence = reviewEvidenceFromThreads (reviewThreadId :| []) reviewedCommit
+  initialized = PrReviewInitialized prConfig workerThread reviewerThread
+  unresolved = PrReviewUnresolvedFound (reviewThreadId :| []) reviewedCommit workerTurn
+  fixCompleted = PrReviewFixCompleted
+  verificationStarted = PrReviewFixVerificationStarted evidence reviewTarget reviewerTurn
+
+workflowPrReviewReviewerIndexedSpecMatchesCompatibilityForOutcomes :: IO Bool
+workflowPrReviewReviewerIndexedSpecMatchesCompatibilityForOutcomes = do
+  let normalFixture = prReviewReviewerNormalFixture
+      verificationFixture = prReviewReviewerVerificationFixture
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      verificationCleanEvidence = CleanReviewEvidence (CommitSha "def456") "LGTM"
+      fixedThread = ReviewThreadId "thread-fixed"
+      remainingThread = ReviewThreadId "thread-remaining"
+      missingThreadReason =
+        "clean verification did not mark fixed prior review threads as resolved: thread-fixed"
+      problemEvidence =
+        ReviewEvidence
+          ( ReviewThreadCommentFinding remainingThread Nothing "still applies"
+              :| [ReviewSummaryFinding "new summary finding"]
+          )
+          (CommitSha "def456")
+      incompleteReason = "reviewer needs another pass"
+      blockedReason = BlockedReason "reviewer blocked on missing logs"
+  results <-
+    sequence
+      [ prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer normal clean matches compatibility"
+          normalFixture
+          (ObservedReviewerOutcome (ReviewerClean cleanEvidence []))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/WaitingMergeability"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerClean cleanEvidence [])))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedWaitingMergeability
+          )
+          "PrReview/WaitingMergeability"
+          (PrReviewCleanFound cleanEvidence [])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/WaitingMergeability" (PrReviewCleanFound cleanEvidence [])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedWaitingMergeability
+          )
+          sleepPostCommitPlan
+      , prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer verification clean matches compatibility"
+          verificationFixture
+          (ObservedReviewerOutcome (ReviewerClean verificationCleanEvidence [fixedThread]))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/CheckingReviews"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerClean verificationCleanEvidence [fixedThread])))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          "PrReview/CheckingReviews"
+          (PrReviewCleanFound verificationCleanEvidence [fixedThread])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewCleanFound verificationCleanEvidence [fixedThread])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ResolveReviewThreadTag, ReadReviewThreadsTag])
+      , prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer verification clean missing fixed thread normalizes incomplete"
+          verificationFixture
+          (ObservedReviewerOutcome (ReviewerClean verificationCleanEvidence []))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/VerifyingReviewFix"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerClean verificationCleanEvidence [])))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedVerifyingReviewFix
+          )
+          "PrReview/VerifyingReviewFix"
+          (PrReviewReviewIncomplete missingThreadReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/VerifyingReviewFix" (PrReviewReviewIncomplete missingThreadReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedVerifyingReviewFix
+          )
+          sleepPostCommitPlan
+      , prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer problems preserve resolve reply publish sleep order"
+          verificationFixture
+          (ObservedReviewerOutcome (ReviewerProblemsAdded problemEvidence [fixedThread]))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/CheckingReviews"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerProblemsAdded problemEvidence [fixedThread])))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          "PrReview/CheckingReviews"
+          (PrReviewProblemsAdded problemEvidence [fixedThread])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewProblemsAdded problemEvidence [fixedThread])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ResolveReviewThreadTag, ReplyReviewThreadTag, PublishReviewFindingsTag, SleepUntilNextPollTag])
+      , prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer normal incomplete rechecks reviews"
+          normalFixture
+          (ObservedReviewerOutcome (ReviewerIncomplete incompleteReason))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/CheckingReviews"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerIncomplete incompleteReason)))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          "PrReview/CheckingReviews"
+          (PrReviewReviewIncomplete incompleteReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewReviewIncomplete incompleteReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ReadReviewThreadsTag])
+      , prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer verification incomplete sleeps for verification retry"
+          verificationFixture
+          (ObservedReviewerOutcome (ReviewerIncomplete incompleteReason))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/VerifyingReviewFix"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerIncomplete incompleteReason)))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedVerifyingReviewFix
+          )
+          "PrReview/VerifyingReviewFix"
+          (PrReviewReviewIncomplete incompleteReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/VerifyingReviewFix" (PrReviewReviewIncomplete incompleteReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedVerifyingReviewFix
+          )
+          sleepPostCommitPlan
+      , prReviewReviewerIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review reviewer blocked stops after commit"
+          normalFixture
+          (ObservedReviewerOutcome (ReviewerBlocked blockedReason))
+          ( PrReviewReviewerIndexedObservation
+              "PrReview/ReviewingClean"
+              "PrReview/Blocked"
+              (DaemonPrReviewObservation (ObservedReviewerOutcome (ReviewerBlocked blockedReason)))
+              :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedBlocked
+          )
+          "PrReview/Blocked"
+          (WatcherBlocked blockedReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/Blocked" (WatcherBlocked blockedReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedBlocked
+          )
+          blockedPostCommitPlan
+      ]
+  pure (and results)
+
+workflowPrReviewReviewerIndexedSpecMatchesClassifierBackedOutcomes :: IO Bool
+workflowPrReviewReviewerIndexedSpecMatchesClassifierBackedOutcomes = do
+  let normalFixture = prReviewReviewerNormalFixture
+      verificationFixture = prReviewReviewerVerificationFixture
+      commit = CommitSha "abc123"
+      verificationCommit = CommitSha "def456"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      verificationCleanEvidence = CleanReviewEvidence verificationCommit "LGTM"
+      fixedThread = ReviewThreadId "thread-fixed"
+      remainingThread = ReviewThreadId "thread-1"
+      remainingEvidence = reviewEvidenceFromThreadComments ((remainingThread, "still not fixed") :| []) commit
+      combinedEvidence =
+        ReviewEvidence
+          ( ReviewThreadCommentFinding remainingThread Nothing "still not fixed"
+              :| [ReviewSummaryFinding "new summary finding"]
+          )
+          verificationCommit
+      missingFieldsReason =
+        "reviewer state missing required fields: reviewed_commit_sha, reviewer_prompt_version, added_review_comment_count, prior_findings_status, new_findings_status, lgtm_comment, prior_findings_summary, new_findings_summary, blocked_reason, solved_threads, remaining_review_threads"
+      mismatchReason = "reviewer inspected def456, expected abc123"
+      solvedThreadReason = "solved_threads require prior_findings_status=resolved or unresolved"
+      missingOutputReason = BlockedReason "reviewer turn completed without output"
+  results <-
+    sequence
+      [ prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer structured clean classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-clean") "completed" (Just (reviewerStateOutput "not_applicable" "none" commit reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing)))
+          WorkflowAgent.AgentClean
+          (ObservedReviewerOutcome (ReviewerClean cleanEvidence []))
+          "PrReview/WaitingMergeability"
+          (PrReviewCleanFound cleanEvidence [])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/WaitingMergeability" (PrReviewCleanFound cleanEvidence [])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedWaitingMergeability
+          )
+          sleepPostCommitPlan
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer verification clean classifier backs indexed planning"
+          verificationFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole verificationCommit)
+          (AppServerTurn (TurnId "reviewer-clean-solved") "completed" (Just (reviewerStateOutputWithSolvedAndRemaining "resolved" "none" verificationCommit reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing [(fixedThread, "fixed")] [])))
+          WorkflowAgent.AgentClean
+          (ObservedReviewerOutcome (ReviewerClean verificationCleanEvidence [fixedThread]))
+          "PrReview/CheckingReviews"
+          (PrReviewCleanFound verificationCleanEvidence [fixedThread])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewCleanFound verificationCleanEvidence [fixedThread])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ResolveReviewThreadTag, ReadReviewThreadsTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer new findings classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-new-findings") "completed" (Just (reviewerStateOutput "not_applicable" "found" commit reviewerPromptVersion 0 Nothing [] ["left summary finding"] Nothing)))
+          WorkflowAgent.AgentProblems
+          (ObservedReviewerOutcome (ReviewerProblemsAdded (reviewEvidenceFromSummaries ("left summary finding" :| []) commit) []))
+          "PrReview/CheckingReviews"
+          (PrReviewProblemsAdded (reviewEvidenceFromSummaries ("left summary finding" :| []) commit) [])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewProblemsAdded (reviewEvidenceFromSummaries ("left summary finding" :| []) commit) [])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [PublishReviewFindingsTag, SleepUntilNextPollTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer remaining-thread classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-remaining-thread") "completed" (Just (reviewerStateOutputWithRemaining "unresolved" "none" commit reviewerPromptVersion 0 Nothing [] [] Nothing [(remainingThread, "still not fixed")])))
+          WorkflowAgent.AgentProblems
+          (ObservedReviewerOutcome (ReviewerProblemsAdded remainingEvidence []))
+          "PrReview/CheckingReviews"
+          (PrReviewProblemsAdded remainingEvidence [])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewProblemsAdded remainingEvidence [])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ReplyReviewThreadTag, SleepUntilNextPollTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer prior and new findings classifier backs indexed planning"
+          verificationFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole verificationCommit)
+          (AppServerTurn (TurnId "reviewer-prior-and-new-findings") "completed" (Just (reviewerStateOutputWithSolvedAndRemaining "unresolved" "found" verificationCommit reviewerPromptVersion 0 Nothing [] ["new summary finding"] Nothing [(fixedThread, "fixed")] [(remainingThread, "still not fixed")])))
+          WorkflowAgent.AgentProblems
+          (ObservedReviewerOutcome (ReviewerProblemsAdded combinedEvidence [fixedThread]))
+          "PrReview/CheckingReviews"
+          (PrReviewProblemsAdded combinedEvidence [fixedThread])
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewProblemsAdded combinedEvidence [fixedThread])
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ResolveReviewThreadTag, ReplyReviewThreadTag, PublishReviewFindingsTag, SleepUntilNextPollTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer missing-state malformed classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-missing-state") "completed" (Just "{\"result\":\"clean\",\"comment\":\"schema LGTM\"}"))
+          WorkflowAgent.AgentMalformed
+          (ObservedReviewerOutcome (ReviewerIncomplete missingFieldsReason))
+          "PrReview/CheckingReviews"
+          (PrReviewReviewIncomplete missingFieldsReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewReviewIncomplete missingFieldsReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ReadReviewThreadsTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer commit mismatch classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-sha-mismatch") "completed" (Just (reviewerStateOutput "not_applicable" "none" verificationCommit reviewerPromptVersion 0 (Just "LGTM") [] [] Nothing)))
+          WorkflowAgent.AgentIncomplete
+          (ObservedReviewerOutcome (ReviewerIncomplete mismatchReason))
+          "PrReview/CheckingReviews"
+          (PrReviewReviewIncomplete mismatchReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewReviewIncomplete mismatchReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ReadReviewThreadsTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer invalid solved-thread classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-not-applicable-solved-thread") "completed" (Just (reviewerStateOutputWithSolvedAndRemaining "not_applicable" "none" commit reviewerPromptVersion 0 Nothing [] [] Nothing [(fixedThread, "fixed")] [])))
+          WorkflowAgent.AgentIncomplete
+          (ObservedReviewerOutcome (ReviewerIncomplete solvedThreadReason))
+          "PrReview/CheckingReviews"
+          (PrReviewReviewIncomplete solvedThreadReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/CheckingReviews" (PrReviewReviewIncomplete solvedThreadReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedCheckingReviews
+          )
+          (effectTagPlan [ReadReviewThreadsTag])
+      , prReviewReviewerIndexedClassifierCase
+          "indexed workflow PR-review reviewer missing output classifier backs indexed planning"
+          normalFixture
+          (WorkflowPrReviewAgent.prReviewReviewerAgentRole commit)
+          (AppServerTurn (TurnId "reviewer-missing-output") "completed" Nothing)
+          WorkflowAgent.AgentBlocked
+          (ObservedReviewerOutcome (ReviewerBlocked missingOutputReason))
+          "PrReview/Blocked"
+          (WatcherBlocked missingOutputReason)
+          ( PrReviewReviewerIndexedEvent "PrReview/ReviewingClean" "PrReview/Blocked" (WatcherBlocked missingOutputReason)
+              :: PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean PrReviewReviewerIndexedBlocked
+          )
+          blockedPostCommitPlan
+      ]
+  pure (and results)
+
+workflowPrReviewReviewerIndexedSpecRejectsInvalidObservationLikeFacade :: IO Bool
+workflowPrReviewReviewerIndexedSpecRejectsInvalidObservationLikeFacade = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      cleanEvidence = CleanReviewEvidence (CommitSha "abc123") "LGTM"
+      state = SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      facadeObservation = ObservedReviewerOutcome (ReviewerClean cleanEvidence [])
+      daemonObservation = DaemonPrReviewObservation facadeObservation
+      indexedState =
+        PrReviewReviewerIndexedState state
+          :: PrReviewReviewerIndexedState PrReviewReviewerIndexedCheckingReviews
+      indexedObservation =
+        PrReviewReviewerIndexedObservation "PrReview/CheckingReviews" "PrReview/WaitingMergeability" daemonObservation
+          :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedCheckingReviews PrReviewReviewerIndexedWaitingMergeability
+  assert "indexed workflow PR-review reviewer rejects invalid observation like facade" $
+    case
+      ( prReviewObserve state facadeObservation
+      , workflowObserve @MoifoldSpec state daemonObservation
+      , workflowPlanObservation @MoifoldSpec state daemonObservation
+      , IndexedWorkflow.indexedWorkflowObserve @PrReviewReviewerIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewReviewerIndexedSpec indexedState indexedObservation
+      )
+      of
+      (Left facadeFailure, Left compatibilityFailure, Left compatibilityPlanFailure, Left indexedFailure, Left indexedPlanFailure) ->
+        compatibilityFailure == facadeFailure
+          && compatibilityPlanFailure == facadeFailure
+          && indexedFailure == facadeFailure
+          && indexedPlanFailure == facadeFailure
+      _ -> False
+
+prReviewReviewerIndexedClassifierCase
+  :: forall (target :: Type).
+     String
+  -> PrReviewReviewerIndexedFixture
+  -> WorkflowAgent.AgentRole Text PrReviewObservation
+  -> AppServerTurn
+  -> WorkflowAgent.AgentOutputClass
+  -> PrReviewObservation
+  -> Text
+  -> WatcherEvent
+  -> PrReviewReviewerIndexedEvent PrReviewReviewerIndexedReviewingClean target
+  -> (PlannedTransition MoifoldSpec -> Bool)
+  -> IO Bool
+prReviewReviewerIndexedClassifierCase title fixture role turn expectedClass expectedObservation expectedTargetLabel expectedEvent indexedEvent planCheck =
+  case WorkflowAgent.classifyAgentRoleTurn role turn of
+    Right classified
+      | classified.classifiedOutputClass == expectedClass
+          && classified.classifiedOutputPayload == expectedObservation ->
+          prReviewReviewerIndexedSpecMatchesCompatibility
+            title
+            fixture
+            expectedObservation
+            ( PrReviewReviewerIndexedObservation
+                "PrReview/ReviewingClean"
+                expectedTargetLabel
+                (DaemonPrReviewObservation expectedObservation)
+                :: PrReviewReviewerIndexedObservation PrReviewReviewerIndexedReviewingClean target
+            )
+            expectedTargetLabel
+            expectedEvent
+            indexedEvent
+            planCheck
+    _ ->
+      assert title False
+
+prReviewReviewerIndexedSpecMatchesCompatibility
+  :: forall (source :: Type) (target :: Type).
+     String
+  -> PrReviewReviewerIndexedFixture
+  -> PrReviewObservation
+  -> PrReviewReviewerIndexedObservation source target
+  -> Text
+  -> WatcherEvent
+  -> PrReviewReviewerIndexedEvent source target
+  -> (PlannedTransition MoifoldSpec -> Bool)
+  -> IO Bool
+prReviewReviewerIndexedSpecMatchesCompatibility title fixture facadeObservation indexedObservation expectedTargetLabel expectedEvent indexedEvent planCheck =
+  assert title $
+    case
+      ( prReviewObserve state facadeObservation
+      , workflowObserve @MoifoldSpec state observation
+      , workflowPlanObservation @MoifoldSpec state observation
+      , IndexedWorkflow.indexedWorkflowObserve @PrReviewReviewerIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewReviewerIndexedSpec indexedState indexedObservation
+      , workflowApplyEvent @MoifoldSpec state expectedEvent
+      , IndexedWorkflow.indexedWorkflowApplyEvent @PrReviewReviewerIndexedSpec indexedState indexedEvent
+      , workflowReplayEvents @MoifoldSpec (fixture.prReviewReviewerIndexedPrefix <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @PrReviewReviewerIndexedSpec
+          (fixture.prReviewReviewerIndexedTypedPrefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
+      )
+      of
+      ( Right facadeObserved
+        , Right compatibilityObserved
+        , Right compatibilityPlan
+        , Right indexedObserved
+        , Right indexedPlan
+        , Right (appliedState, appliedEffects)
+        , Right (PrReviewReviewerIndexedState indexedAppliedState, PrReviewReviewerIndexedEffectPlan indexedAppliedEffects)
+        , Right compatibilityReplay
+        , Right indexedReplay
+        ) ->
+          let PrReviewReviewerIndexedState indexedNextState =
+                IndexedWorkflow.indexedWorkflowObservedState @PrReviewReviewerIndexedSpec indexedObserved
+              indexedReplayResultValue = prReviewReviewerIndexedReplayResult indexedReplay
+              wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+              fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
+              indexedFullPlan =
+                PrReviewReviewerIndexedEffectPlan fullCompatibilityPlan
+                  :: PrReviewReviewerIndexedEffectPlan source target
+           in facadeObserved.prReviewTickEvent == compatibilityObserved.observedEvent
+                && facadeObserved.prReviewTickEffects == compatibilityObserved.observedEffects
+                && sameWatcherStateShape facadeObserved.prReviewTickState compatibilityObserved.observedState
+                && compatibilityObserved.observedEvent == expectedEvent
+                && prReviewReviewerIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+                && prReviewReviewerIndexedTransitionEvent indexedPlan == expectedEvent
+                && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @PrReviewReviewerIndexedSpec wrappedTransition == workflowStateLabel @MoifoldSpec state
+                && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @PrReviewReviewerIndexedSpec wrappedTransition == expectedTargetLabel
+                && workflowStateLabel @MoifoldSpec indexedNextState == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+                && sameWatcherStateShape compatibilityObserved.observedState appliedState
+                && sameWatcherStateShape appliedState indexedAppliedState
+                && prReviewReviewerIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+                && prReviewReviewerIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+                && fullCompatibilityPlan == compatibilityObserved.observedEffects
+                && appliedEffects == fullCompatibilityPlan
+                && indexedAppliedEffects == fullCompatibilityPlan
+                && planCheck compatibilityPlan
+                && IndexedWorkflow.indexedWorkflowPlannedTransitionPreCommitEffectLabels @PrReviewReviewerIndexedSpec indexedPlan
+                  == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPreCommitEffects
+                && IndexedWorkflow.indexedWorkflowPlannedTransitionPostCommitEffectLabels @PrReviewReviewerIndexedSpec indexedPlan
+                  == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPostCommitEffects
+                && workflowValidateEffects @MoifoldSpec state fullCompatibilityPlan
+                  == IndexedWorkflow.indexedWorkflowValidateEffects @PrReviewReviewerIndexedSpec indexedState indexedFullPlan
+                && all
+                  ( \effect ->
+                      workflowEffectAllowed @MoifoldSpec state effect
+                        == IndexedWorkflow.indexedWorkflowEffectAllowed @PrReviewReviewerIndexedSpec indexedState (PrReviewReviewerIndexedEffect effect)
+                  )
+                  fullCompatibilityPlan
+                && sameWatcherStateShape compatibilityReplay.replayState indexedReplayResultValue.replayState
+                && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
+                && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
+      _ -> False
+ where
+  state = fixture.prReviewReviewerIndexedStateValue
+  indexedState =
+    PrReviewReviewerIndexedState state
+      :: PrReviewReviewerIndexedState source
+  observation = DaemonPrReviewObservation facadeObservation
+
+effectTagPlan :: [EffectTag] -> PlannedTransition MoifoldSpec -> Bool
+effectTagPlan expectedTags planned =
+  fmap effectTag (planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects) == expectedTags
 
 workflowPlannedTransitionPreservesObservedEffects :: IO Bool
 workflowPlannedTransitionPreservesObservedEffects = do

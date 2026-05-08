@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-002",
+  "roadmap_item_id": "item-009-indexed-pr-review-reviewer-outcomes",
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check all passed. Reviewer indexed adapter delegates to MoifoldSpec and focused tests cover clean, verification clean, missing-thread fallback, problems, incomplete, blocked, classifier-backed outputs, invalid observations, replay/apply/effect/permission parity, and preservation of golden/daemon/dry-run/action-ordering surfaces."
+}
