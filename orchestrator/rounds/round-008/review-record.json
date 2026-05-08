@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-002",
+  "roadmap_item_id": "item-008-indexed-pr-review-worker-outcomes",
+  "decision": "approved",
+  "evidence_summary": "Baseline checks passed: cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check. Focused tests cover WorkerCompleted, WorkerIncomplete, WorkerBlocked, classifier-backed AgentOutputClass preservation, invalid observation parity, replay/effect/validation/permission parity, and unchanged golden/event/daemon/dry-run/action-ordering surfaces by test output and diff inspection."
+}
