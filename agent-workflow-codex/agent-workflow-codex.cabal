@@ -1,0 +1,62 @@
+cabal-version: 3.8
+name:          agent-workflow-codex
+version:       0.1.0.0
+synopsis:      Codex app-server protocol and typed agent adapter
+description:
+  Reusable Codex app-server protocol, client parsing, transport, typed agent
+  plans, interpreter bridge, and agent observation helpers. Concrete moifold
+  lifecycle routing, prompt policy, compatibility facades, event schemas,
+  filesystem ownership, healthcheck, repair, package upload, and source
+  distribution decisions remain outside this reusable package candidate.
+license:       MIT
+author:        soulomoon
+maintainer:    soulomoon
+category:      Development
+build-type:    Simple
+
+source-repository head
+  type:     git
+  location: https://github.com/soulomoon/moifold.git
+
+flag development-werror
+  description: Enable -Werror for local development builds.
+  manual:      True
+  default:     False
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wpartial-fields
+    -Wredundant-constraints
+
+  if flag(development-werror)
+    ghc-options:
+      -Werror
+
+library
+  import:           warnings
+  hs-source-dirs:   src
+  exposed-modules:
+    CodexWatcher.AppServerProtocol
+    CodexWatcher.Workflow.Agent
+    CodexWatcher.Workflow.Agent.Codex
+    CodexWatcher.Workflow.Agent.Codex.Client
+    CodexWatcher.Workflow.Agent.Codex.Interpreter
+    CodexWatcher.Workflow.Agent.Codex.Protocol
+    CodexWatcher.Workflow.Agent.Codex.Transport
+    CodexWatcher.Workflow.Agent.Ids
+    CodexWatcher.Workflow.Agent.Types
+    CodexWatcher.Workflow.Observation.Agent
+  build-depends:
+    aeson >=2.2 && <3,
+    agent-workflow-core >=0.1 && <0.2,
+    base >=4.18 && <5,
+    bytestring >=0.12 && <0.13,
+    text >=2.0 && <3,
+    websockets >=0.13 && <0.14
+  default-language: GHC2021

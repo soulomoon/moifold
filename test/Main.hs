@@ -7629,12 +7629,14 @@ coreBoundaryForbiddenImportModules =
 workflowCodexCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCodexCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  standaloneCabalSource <- Text.pack <$> readFile ("agent-workflow-codex" </> "agent-workflow-codex.cabal")
   codexSources <- sourceTextUnder ("agent-workflow-codex" </> "src")
   forbiddenImportViolations <-
     sourceImportViolationsUnder
       ("agent-workflow-codex" </> "src")
       codexBoundaryForbiddenImportModules
   let codexSection = cabalComponentSection "library agent-workflow-codex" cabalSource
+      standaloneCodexSection = cabalComponentSection "library" standaloneCabalSource
       forbiddenPackageNeedles =
         [ "containers"
         , "directory"
@@ -7644,6 +7646,17 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
         , "typed-process"
         , "unix"
         , "moifold,"
+        ]
+      standaloneForbiddenPackageNeedles =
+        [ "containers"
+        , "directory"
+        , "filepath"
+        , "optparse-applicative"
+        , "singletons"
+        , "typed-process"
+        , "unix"
+        , "moifold,"
+        , "moifold:"
         ]
       forbiddenSourceNeedles =
         [ "CodexWatcher.AppServerClient"
@@ -7676,40 +7689,60 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
       codexSourceTokens = sourceIdentifierTokens codexSources
       forbiddenPackageMatches =
         filter (`Text.isInfixOf` codexSection) forbiddenPackageNeedles
+      standaloneForbiddenPackageMatches =
+        filter (`Text.isInfixOf` standaloneCodexSection) standaloneForbiddenPackageNeedles
       forbiddenSourceMatches =
         filter (`Text.isInfixOf` codexSources) forbiddenSourceNeedles
       forbiddenConcreteTypeMatches =
         filter (`elem` codexSourceTokens) forbiddenConcreteTypes
       codexDependencyPackages = cabalBuildDependsPackages codexSection
+      standaloneCodexDependencyPackages = cabalBuildDependsPackages standaloneCodexSection
       unapprovedCodexDependencyMatches =
         filter (`notElem` ["aeson", "base", "bytestring", "text", "websockets", "moifold:agent-workflow-core"]) codexDependencyPackages
+      unapprovedStandaloneCodexDependencyMatches =
+        filter (`notElem` ["aeson", "agent-workflow-core", "base", "bytestring", "text", "websockets"]) standaloneCodexDependencyPackages
       exposesCodexModules =
-        all
-          (`Text.isInfixOf` codexSection)
-          [ "CodexWatcher.AppServerProtocol"
-          , "CodexWatcher.Workflow.Agent"
-          , "CodexWatcher.Workflow.Agent.Codex"
-          , "CodexWatcher.Workflow.Agent.Codex.Client"
-          , "CodexWatcher.Workflow.Agent.Codex.Interpreter"
-          , "CodexWatcher.Workflow.Agent.Codex.Protocol"
-          , "CodexWatcher.Workflow.Agent.Codex.Transport"
-          , "CodexWatcher.Workflow.Agent.Ids"
-          , "CodexWatcher.Workflow.Agent.Types"
-          , "CodexWatcher.Workflow.Observation.Agent"
-          ]
+        codexSectionExposesAdapterModules codexSection
+      standaloneExposesCodexModules =
+        codexSectionExposesAdapterModules standaloneCodexSection
       dependsOnlyOnCodexDeps =
         all (`elem` codexDependencyPackages) ["aeson", "base", "bytestring", "text", "websockets", "moifold:agent-workflow-core"]
           && null unapprovedCodexDependencyMatches
+      standaloneDependsOnlyOnCodexDeps =
+        all (`elem` standaloneCodexDependencyPackages) ["aeson", "agent-workflow-core", "base", "bytestring", "text", "websockets"]
+          && null unapprovedStandaloneCodexDependencyMatches
       moifoldDependsOnCodex =
         "moifold:agent-workflow-codex" `Text.isInfixOf` cabalSource
+      standaloneMetadataMatchesPolicy =
+        all
+          (`Text.isInfixOf` standaloneCabalSource)
+          [ "name:          agent-workflow-codex"
+          , "version:       0.1.0.0"
+          , "license:       MIT"
+          , "author:        soulomoon"
+          , "maintainer:    soulomoon"
+          , "category:      Development"
+          , "build-type:    Simple"
+          , "location: https://github.com/soulomoon/moifold.git"
+          , "hs-source-dirs:   src"
+          , "agent-workflow-core >=0.1 && <0.2"
+          ]
   packageOk <-
     assertNoTextMatches
       "workflow Codex sublibrary excludes forbidden package dependencies"
       forbiddenPackageMatches
+  standalonePackageOk <-
+    assertNoTextMatches
+      "standalone workflow Codex package excludes forbidden package dependencies"
+      standaloneForbiddenPackageMatches
   approvedDependencyOk <-
     assertNoTextMatches
       "workflow Codex sublibrary excludes unapproved package dependencies"
       unapprovedCodexDependencyMatches
+  standaloneApprovedDependencyOk <-
+    assertNoTextMatches
+      "standalone workflow Codex package excludes unapproved package dependencies"
+      unapprovedStandaloneCodexDependencyMatches
   importOk <-
     assertNoTextMatches
       "workflow Codex source excludes moifold lifecycle imports"
@@ -7726,15 +7759,57 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
     assert
       "workflow Codex sublibrary exposes adapter API modules"
       exposesCodexModules
+  standaloneExposedOk <-
+    assert
+      "standalone workflow Codex package exposes adapter API modules"
+      standaloneExposesCodexModules
   codexDepsOk <-
     assert
       "workflow Codex sublibrary keeps the approved adapter dependency set"
       dependsOnlyOnCodexDeps
+  standaloneCodexDepsOk <-
+    assert
+      "standalone workflow Codex package keeps the approved adapter dependency set"
+      standaloneDependsOnlyOnCodexDeps
   mainDependsOk <-
     assert
       "main moifold library depends on workflow Codex adapter"
       moifoldDependsOnCodex
-  pure (packageOk && approvedDependencyOk && importOk && sourceOk && concreteTypeOk && exposedOk && codexDepsOk && mainDependsOk)
+  standaloneMetadataOk <-
+    assert
+      "standalone workflow Codex package records approved metadata and source layout"
+      standaloneMetadataMatchesPolicy
+  pure
+    ( packageOk
+        && standalonePackageOk
+        && approvedDependencyOk
+        && standaloneApprovedDependencyOk
+        && importOk
+        && sourceOk
+        && concreteTypeOk
+        && exposedOk
+        && standaloneExposedOk
+        && codexDepsOk
+        && standaloneCodexDepsOk
+        && mainDependsOk
+        && standaloneMetadataOk
+    )
+
+codexSectionExposesAdapterModules :: Text -> Bool
+codexSectionExposesAdapterModules section =
+  all
+    (`Text.isInfixOf` section)
+    [ "CodexWatcher.AppServerProtocol"
+    , "CodexWatcher.Workflow.Agent"
+    , "CodexWatcher.Workflow.Agent.Codex"
+    , "CodexWatcher.Workflow.Agent.Codex.Client"
+    , "CodexWatcher.Workflow.Agent.Codex.Interpreter"
+    , "CodexWatcher.Workflow.Agent.Codex.Protocol"
+    , "CodexWatcher.Workflow.Agent.Codex.Transport"
+    , "CodexWatcher.Workflow.Agent.Ids"
+    , "CodexWatcher.Workflow.Agent.Types"
+    , "CodexWatcher.Workflow.Observation.Agent"
+    ]
 
 codexBoundaryForbiddenImportModules :: [Text]
 codexBoundaryForbiddenImportModules =

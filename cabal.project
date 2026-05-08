@@ -1,5 +1,6 @@
 packages:
   .
   agent-workflow-core
+  agent-workflow-codex
 
 with-compiler: ghc-9.12.2
