@@ -75,7 +75,7 @@ compatibility files, event schemas, and lifecycle ownership.
 
 ## Milestones
 
-### 1. [in-progress] Define Package Identity And Release Contract
+### 1. [complete] Define Package Identity And Release Contract
 
 Milestone id: `milestone-001-package-identity-release-contract`
 Depends on: none
@@ -97,8 +97,14 @@ release-gate limits. Round 037 completed the release metadata policy in
 `bad28e9`, recording package metadata requirements, package-specific wording
 constraints, changelog and release-note gates, metadata truth rules, and
 descriptor-time checks without changing descriptors, source layout, artifacts,
-upload state, or publication approval. Milestone 001 remains in progress until
-the compatibility/deprecation policy direction is complete.
+upload state, or publication approval. Round 038 completed the compatibility
+and deprecation policy in `2574fa3`, recording preferred-import guidance,
+compatibility facade status, deprecation-readiness gates, removal gates, and
+release-note constraints without changing wrappers, compatibility files, event
+schemas, package descriptors, source layout, generated artifacts, upload state,
+or publication approval. Milestone 001 is complete because directions 001, 002,
+and 003 now satisfy the package identity, metadata, changelog/release-note,
+compatibility/deprecation, and explicit upload authorization completion signal.
 
 Candidate directions:
 
@@ -129,6 +135,7 @@ Candidate directions:
   package descriptors.
 
 - Direction id: `direction-003-compatibility-and-deprecation-policy`
+  Status: complete via round 038, merged as `2574fa3`.
   Summary: define preferred imports, compatibility facade status, deprecation
   readiness, and removal gates for moifold wrappers.
   Why it matters now: external packages need compatibility promises before
