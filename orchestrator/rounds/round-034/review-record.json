@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-005-extraction-readiness",
+  "direction_id": "direction-010-api-freeze-and-docs",
+  "extracted_item_id": "item-034-api-freeze-docs",
+  "roadmap_item_id": "item-034-api-freeze-docs",
+  "decision": "approved",
+  "evidence_summary": "Docs-only diff passed whitespace and scope review; docs match exposed framework module surfaces and preserve moifold-owned lifecycle, runtime, healthcheck, repair, compatibility, and publication policy boundaries."
+}

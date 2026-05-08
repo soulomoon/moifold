@@ -1,8 +1,9 @@
 # Agentic Workflow Framework
 
-Status: design draft.
+Status: implemented internal contract, with migration background.
 
-This directory captures the plan for abstracting an agent workflow framework out of moifold.
+This directory captures the implemented internal workflow-framework contract
+inside moifold and the remaining migration background for extracting it safely.
 
 The framework thesis is:
 
@@ -10,7 +11,19 @@ The framework thesis is:
 Agent work should be written as a typed protocol, not as prompts plus shell scripts.
 ```
 
-The current moifold implementation proves the shape with GitHub issue planning, issue implementation, PR review fixing, merge readiness, durable event logs, dry-run execution, and recovery. The extracted framework should keep those correctness properties while letting other agent workflows define their own domains, observations, events, effects, and interpreters.
+The current moifold implementation now exposes the reusable framework shape as
+internal sublibraries:
+
+- `agent-workflow-core`: typed workflow kernel, replay, effect plans,
+  permissions, transactions, audit, and daemon projections.
+- `agent-workflow-codex`: Codex app-server protocol, typed agent adapters,
+  transport, and agent observation helpers.
+- `agent-workflow-github`: typed GitHub ids, remote parsers/classifiers, and
+  pure command specs.
+
+Moifold remains the concrete product that owns issue planning, issue
+implementation, PR review, merge readiness, compatibility files, daemon
+ownership, healthcheck, repair, prompts, and runtime policy.
 
 ## Big picture
 
@@ -29,11 +42,27 @@ Agents may produce incomplete, blocked, or incorrect output. The workflow bounda
 
 ## Documents
 
-- [extraction-plan.md](extraction-plan.md): package boundaries, migration phases, acceptance criteria, and risks.
-- [workflow-spec.md](workflow-spec.md): contract every concrete workflow must implement.
-- [event-log-and-transactions.md](event-log-and-transactions.md): replay, event schema, commit ordering, idempotency, and failure semantics.
-- [agent-turn-contract.md](agent-turn-contract.md): agent roles, inputs, output classification, retry behavior, and observation boundaries.
-- [monad-dsl.md](monad-dsl.md): Haskell-shaped DSL sketch for authoring workflows without giving workflow code direct IO authority.
+Implemented contract:
+
+- [implemented-api-freeze.md](implemented-api-freeze.md): frozen internal API
+  surface for `agent-workflow-core`, `agent-workflow-codex`, and
+  `agent-workflow-github`, plus the moifold-owned policy boundary.
+- [workflow-spec.md](workflow-spec.md): current `WorkflowSpec`,
+  `IndexedWorkflowSpec`, existentials, bridges, laws, and deferred richer
+  design ideas.
+- [event-log-and-transactions.md](event-log-and-transactions.md): current codec,
+  replay, commit, execution metadata, transaction, audit, and daemon projection
+  contracts.
+- [agent-turn-contract.md](agent-turn-contract.md): current typed agent plans,
+  Codex app-server protocol/client/interpreter/transport boundary, retries, and
+  agent observation helpers.
+- [monad-dsl.md](monad-dsl.md): implemented pure `WorkflowM` and `Transition`
+  authoring layer.
+
+Migration background:
+
+- [extraction-plan.md](extraction-plan.md): earlier package-boundary plan,
+  migration phases, acceptance criteria, risks, and historical design context.
 
 ## Design constraints
 
@@ -42,33 +71,37 @@ Agents may produce incomplete, blocked, or incorrect output. The workflow bounda
 - Treat agent output as an observation that must be classified before it becomes accepted workflow state.
 - Make effects first-class data so dry-run can render intended mutation.
 - Check effects against domain and phase permissions before execution.
-- Keep runtime IO behind interpreters.
+- Keep runtime IO behind interpreters and transport adapters.
 - Avoid abstracting so far that moifold-specific GitHub assumptions become hidden framework assumptions.
 
 ## Non-goals
 
+- Do not treat the internal sublibrary split as package publication.
 - Do not build a generic prompt runner.
 - Do not expose `liftIO` in the workflow DSL.
 - Do not replace typed states with configurable YAML.
 - Do not hide GitHub, Codex, or filesystem behavior behind vague "tool" blobs.
-- Do not split packages until a second workflow has forced the boundary.
+- Do not move moifold issue/PR lifecycle, healthcheck, repair, runtime
+  ownership, or compatibility-file policy into reusable framework packages.
 
-## Target shape
+## Implemented Layering
 
-The eventual layering should be:
+The implemented internal layering is:
 
 ```text
 agent-workflow-core
-  typed workflow kernel, event replay, effect plans, permissions, daemon loop contracts
+  typed workflow kernel, event replay, effect plans, permissions, transactions, audit, daemon projections
 
 agent-workflow-codex
-  Codex app-server thread/turn protocol, structured output classification, turn lifecycle helpers
+  Codex app-server thread/turn protocol, structured output classification, turn lifecycle helpers, websocket transport
 
 agent-workflow-github
-  GitHub/git command adapters and typed GitHub effects
+  typed GitHub ids, remote parsers/classifiers, pure GitHub/git command specs
 
 moifold
-  issue planning, issue implementation, PR review, merge readiness, runbooks
+  issue planning, issue implementation, PR review, merge readiness, compatibility files, daemon/runtime ownership, healthcheck, repair, runbooks
 ```
 
-The first extraction should be internal module extraction inside this repository. External package splitting should come later, after the internal API is exercised by at least one workflow outside the existing issue/PR lifecycle.
+The current freeze is about that implemented internal API. External package
+publication, Cabal cleanup for publication, and compatibility facade removal are
+separate decisions.

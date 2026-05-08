@@ -1,246 +1,251 @@
 # Event Log and Transactions
 
-Status: design draft.
+Status: implemented internal API contract.
 
 ## Purpose
 
-The event log is the workflow source of truth. Runtime snapshots, compatibility files, local plans, branch state, PR bodies, and app-server turns are external or derived state.
+The event log is workflow truth. Runtime snapshots, compatibility files, local
+plans, branch state, PR bodies, healthcheck output, repair state, and
+app-server turns are external or derived state unless a concrete workflow
+commits them as event payload.
 
-The framework must make event commit behavior explicit enough that an operator can answer:
+The reusable framework contract answers:
 
-- What fact was accepted?
-- What effects were attempted before the fact was committed?
-- What effects were attempted after the fact was committed?
-- Can this daemon tick be retried safely?
-- If recovery is needed, which event is the first invalid fact?
+- what event type and schema were encoded;
+- how replay initialized and applied events;
+- which transition failed, at which event index, and after which prior state;
+- which effects are pre-commit or post-commit;
+- whether an effect is idempotent, check-then-act, at-most-once, or a derived
+  write;
+- which transaction stage failed;
+- which audit and daemon projection an operator can inspect.
 
-## Event log format
+Concrete JSON schemas, old-log compatibility, fixture contents, filesystem
+writes, process execution, healthcheck, repair, daemon leases, and compatibility
+file names remain moifold-owned.
 
-Each workflow instance owns one append-only `events.jsonl` file.
+## Codec Contract
 
-Each line is one JSON object with:
+`CodexWatcher.Workflow.Codec` freezes a generic codec contract over an event
+type and an encoded representation:
 
-- `type`: stable event name.
-- `schemaVersion`: event schema version.
-- workflow-specific payload fields.
-- optional metadata that replay may ignore.
+- `WorkflowEventTypeLabel` is the stable event type label;
+- `WorkflowSchemaVersion` is the event schema version label;
+- `WorkflowMetadataLabel` names metadata fields a codec recognizes;
+- `WorkflowDecodeError` records optional type label, optional schema version,
+  and a reason;
+- `WorkflowCodecContract` supplies event type labels, schema versions, metadata
+  labels, encode, encoded-type-label extraction, and decode;
+- `validateWorkflowCodecRoundTrip` checks encode/decode equality for a value;
+- `validateWorkflowCodecEncodedTypeLabel` checks that encoded data carries the
+  expected type label;
+- `formatWorkflowDecodeError` renders a stable diagnostic.
 
-Recommended metadata:
+This generic contract deliberately does not depend on Aeson. A concrete
+workflow may use Aeson for its event JSON, but the reusable package only
+requires a typed encoded value and decode/encode hooks.
 
-- `emittedAt`: wall-clock time.
-- `workflowId`: stable workflow instance id.
-- `domain`: rendered domain label.
-- `phase`: rendered source phase when known.
-- `actor`: daemon, agent role, human, repair tool, or test.
-- `source`: command, app-server turn, GitHub read, repair, or manual import.
-- `correlationId`: id tying runtime reads and effects to the committed event.
+## Event Log Lines
 
-Replay must ignore unknown metadata fields, but it must not ignore unknown event `type` values.
+`CodexWatcher.Workflow.EventLog.File.Core` freezes generic line handling:
 
-## Initialization
+- blank lines are ignored by `numberedNonBlankWorkflowEventLogLines`;
+- a caller-provided line decoder is used by `decodeWorkflowEventLogLines`;
+- `WorkflowEventLogLineDecodeError` records the original line number and
+  reason;
+- `formatWorkflowEventLogLineDecodeError` renders line-addressable failures.
 
-The first event initializes exactly one workflow instance.
-
-Rules:
-
-- Empty logs are invalid unless the caller is explicitly creating a new workflow.
-- A second initialization event is invalid.
-- Initialization events must contain all data needed to reconstruct the first typed state.
-- A workflow may define multiple initialization event types, but only one may appear in a log.
+Opening files, choosing `events.jsonl`, preserving old fixture paths, and
+repairing bad logs are concrete workflow or moifold responsibilities.
 
 ## Replay
 
-Replay is pure:
+`CodexWatcher.Workflow.EventLog.Core` freezes pure replay helpers around
+`WorkflowSpec`:
 
-```text
-[Event] -> Either ReplayFailure ReplayResult
-```
+- `initializeWorkflowEvent` calls `workflowInitialEvent`;
+- `applyWorkflowEvent` calls `workflowApplyEvent`;
+- `replayWorkflowEventLog` delegates to `workflowReplayEvents`;
+- `replayWorkflowEventLogDetailed` reports an empty log, initialization
+  failure, transition failure, final state, per-event effect plans, event
+  count, and the first terminal event index;
+- `WorkflowTransitionFailure` records the failed event, event label, prior
+  state label, spec error, and rendered reason;
+- `WorkflowReplayFailure` records event index, optional event, event label,
+  prior state label, and reason;
+- `WorkflowReplaySummary` records final state, effect-plan history, event
+  count, and optional terminal event index;
+- `EventLogFixtureContract` validates expected final state label and optional
+  event count.
 
-Replay result should include:
+Replay is pure. It does not read files, write compatibility snapshots, execute
+actions, call GitHub, or inspect app-server state.
 
-- final typed state.
-- effect plan history, if needed for diagnostics.
-- event count.
-- first terminal event, if any.
-- warnings for compatibility or deprecated events.
+## Commit Boundary
 
-Replay failure should include:
-
-- event index.
-- event type.
-- parse or transition reason.
-- prior state label when available.
-
-## Schema evolution
-
-Event schemas must be versioned deliberately.
-
-Allowed compatible changes:
-
-- Add optional metadata fields.
-- Add optional payload fields with deterministic defaults.
-- Rename only by accepting both old and new fields during a transition window.
-- Add new event types if old replays are unaffected.
-
-Breaking changes require:
-
-- A new schema version.
-- A migration or repair command.
-- Golden fixtures for old and new logs.
-- A documented reason.
-
-The framework should prefer preserving old event meanings over rewriting history.
-
-## Transaction model
-
-One daemon tick has this shape:
-
-```text
-load events
--> replay current state
--> collect observation
--> classify observation into planned transition
--> validate effects
--> run pre-commit effects
--> append event
--> replay final state
--> write derived compatibility state
--> run post-commit effects
--> report
-```
-
-The planned transition should expose:
+`CodexWatcher.Workflow.EventLog.Commit.Core` freezes the event commit
+abstraction:
 
 ```haskell
-data PlannedTransition spec =
-  PlannedTransition
-    { transitionEvent :: SomeEvent spec
-    , transitionPreCommitEffects :: EffectPlan spec
-    , transitionPostCommitEffects :: EffectPlan spec
-    }
+newtype WorkflowEventCommitter m event failure =
+  WorkflowEventCommitter
+    { runWorkflowEventCommitter :: event -> m (Either failure ()) }
 ```
 
-## Pre-commit effects
+`commitWorkflowEvent` runs the committer. `appendEncodedWorkflowEvent` encodes
+once and appends the encoded value through a caller-supplied append function.
+`workflowEncodedEventCommitter` combines an effectful encoder and append action
+into a committer.
 
-Pre-commit effects run before the event is appended.
+The core abstraction owns commit sequencing. The concrete append target, file
+locking, backup policy, and compatibility event-log format remain outside the
+framework package.
 
-Use pre-commit effects when the event claims that an external mutation already happened or when failed mutation means the fact should not be accepted.
+## Execution Metadata
 
-Examples:
+`CodexWatcher.Workflow.Execution.Core` freezes generic effect metadata and
+action traversal:
 
-- Create a PR before recording `PullRequestCreated`.
-- Start an app-server turn before recording `TurnStarted`.
-- Push a branch before recording `BranchAdvanced`.
+- `WorkflowCapability`: `ReadWorld`, `StartAgent`, `WriteLocal`,
+  `MutateRemote`, `Merge`, `Sleep`, and `Stop`;
+- `EffectCommitOrder`: `PreCommit` or `PostCommit`;
+- `EffectIdempotency`: `Idempotent`, `CheckThenAct`, `AtMostOnce`, or
+  `DerivedWrite`;
+- `WorkflowEffectMetadata`: capability, commit order, and idempotency;
+- `WorkflowPlannedActionOf`: original effect, compiled action, and metadata;
+- `WorkflowCompiledEffectPlanOf`: compiled actions;
+- `WorkflowCheckedActionFailureOf`: the failed action, failed report, prior
+  reports, and classified reason.
 
-If a pre-commit effect fails, the event is not committed. The daemon can retry the same observation or report a runtime failure.
+The reusable traversal helpers compile effects to actions, dry-run compiled
+plans, execute compiled plans, execute checked actions until the first failure,
+partition actions by commit order, and partition reports using the same action
+ordering. Concrete effects, command text, and IO interpreters remain adapter or
+moifold responsibilities.
 
-## Post-commit effects
+## Permission Validation
 
-Post-commit effects run after the event is appended and final state is replayed.
+`CodexWatcher.Workflow.Permission.Core` freezes reusable permission checks:
 
-Use post-commit effects when the event is the durable truth and the effect is a consequence that may be retried.
+- `WorkflowPermissionPolicy` contains state labels, effect labels, effect-plan
+  extraction, and per-effect permission checks;
+- `workflowSpecPermissionPolicy` derives that policy from a `WorkflowSpec`;
+- `workflowEffectPermissionChecks` and
+  `workflowEffectPermissionChecksWithPolicy` produce per-effect check records;
+- `validateWorkflowEffectPlanCore` and
+  `validateWorkflowEffectPlanWithPolicy` return the first denial;
+- `WorkflowPermissionValidationError` and
+  `formatWorkflowPermissionValidationError` make denials operator-readable.
 
-Examples:
+Permission validation happens after a plan is produced and before transaction
+execution. The DSL does not provide arbitrary IO authority, and it does not
+replace spec-level permission validation.
 
-- Write compatibility snapshots.
-- Sleep until the next poll.
-- Stop the daemon.
-- Write local diagnostic state.
+## Transaction Model
 
-If a post-commit effect fails, the event remains committed. Recovery should replay the log and decide whether the missing derived effect can be retried.
+`CodexWatcher.Workflow.Transaction.Core` freezes the observed transaction
+contract. `WorkflowObservedTransactionHooks` supplies:
 
-## Idempotency
+- spec-error mapping into a transaction failure type;
+- effect compilation;
+- action partitioning into pre-commit and post-commit actions;
+- dry-run rendering;
+- action execution;
+- event commit;
+- after-commit callback;
+- retryability classification.
 
-Every effect must declare an idempotency expectation:
+The observed dry-run path is:
 
-- `Idempotent`: safe to repeat.
-- `CheckThenAct`: safe if the interpreter checks current external state first.
-- `AtMostOnce`: should not be repeated after unknown success.
-- `DerivedWrite`: can be regenerated from replay.
+```text
+replay prior events
+-> observe current state
+-> validate combined pre/post effects
+-> compile effects
+-> partition actions
+-> dry-run pre actions
+-> dry-run post actions
+-> build audit
+```
 
-The default for remote mutation should be `CheckThenAct` or `AtMostOnce`, not `Idempotent`.
+The observed execute path is:
 
-## Failure classification
+```text
+replay prior events
+-> observe current state
+-> validate combined pre/post effects
+-> compile effects
+-> execute pre-commit actions
+-> commit one event
+-> replay events plus committed event
+-> run after-commit callback
+-> execute post-commit actions
+-> build audit
+```
 
-Runtime failures should be classified independently of workflow policy:
+`runWorkflowPreparedDryRunTransaction` and
+`runWorkflowPreparedExecuteTransactionDetailed` allow callers that already have
+a replay result and planned transition to use the same validation and execution
+boundary.
 
-- `TransientFailure`: retry may succeed.
-- `PermanentFailure`: retry without changes is not useful.
-- `PolicyViolation`: the workflow attempted a forbidden effect.
-- `ExternalStateMismatch`: external state contradicts workflow state.
-- `InterpreterBug`: adapter returned malformed data or violated its contract.
+## Failure Stages
 
-Workflow code may convert some external-state mismatches into blocked state. Runtime code should not silently do that without a typed event.
+Detailed execute transactions classify failure by `WorkflowTransactionFailureStage`:
 
-## Derived state
+- `WorkflowTransactionPrepareFailure`;
+- `WorkflowTransactionPreCommitActionFailure`;
+- `WorkflowTransactionEventCommitFailure`;
+- `WorkflowTransactionPostCommitReplayFailure`;
+- `WorkflowTransactionPostCommitCallbackFailure`;
+- `WorkflowTransactionPostCommitActionFailure`.
 
-Compatibility snapshots and generated files should be treated as derived state unless the workflow explicitly commits them as event payload.
+`WorkflowObservedTransactionFailure` records the stage, reason, optional prior
+replay, optional plan, optional final state, committed events, optional compiled
+effects, pre/post reports, and optional audit. This is the framework-owned
+diagnostic boundary; concrete workflows decide whether a failure becomes a
+blocked event, an operator error, or a retry.
 
-Rules:
+## Audit and Daemon Projections
 
-- Derived state can be regenerated from event replay.
-- Derived writes should normally be post-commit effects.
-- Missing derived files should cause repair or regeneration, not semantic drift.
-- If an artifact is part of the durable protocol, store the relevant content or hash in the event.
+`CodexWatcher.Workflow.Audit` freezes operator-facing `WorkflowTickAudit`
+values:
 
-## Repair
+- prior state label;
+- optional observation label;
+- optional committed event label;
+- optional final state label;
+- pre/post reports;
+- optional failure classification;
+- next daemon recommendation: continue, retry, repair, or stop.
 
-Repair is a workflow action, not arbitrary log editing.
+Dry-run audits have no committed event. Success audits include the committed
+event and stop when the final state is terminal. Failure audits classify retry
+or stop from caller-provided failure retryability.
 
-Repair tools should:
+`CodexWatcher.Workflow.Daemon.Core` freezes generic daemon projections from
+transaction results and failures. `WorkflowObservedDaemonTickResult` records
+replay, compiled effects, action reports, committed events, final state,
+pre/post reports, and audit; the failure projection records the failure stage
+and related transaction evidence. This module does not own concrete daemon
+loops, PID files, leases, process supervision, app-server startup, sleep policy,
+or repair behavior.
 
-- Load and parse the original event log.
-- Identify the first invalid event.
-- Propose an explicit repair plan.
-- Preserve the original log or write a backup.
-- Insert repair marker events when history is changed.
-- Re-run replay after repair.
+## Moifold-Owned Event Policy
 
-Repair should not erase evidence of a bad event unless the operator explicitly requests destructive cleanup.
+The reusable framework does not own these concrete event-log and runtime
+decisions:
 
-## Concurrency and ownership
+- moifold `WatcherEvent` constructors and JSON `type` fields;
+- Aeson object shapes and golden replay fixture contents;
+- schema migration policy and old-log repair commands;
+- `events.jsonl` path selection, file append locking, and backups;
+- compatibility writes such as `issue-state.json`, `daemon-state.json`,
+  `planning-state.json`, PR URL files, block state, repair state, and runtime
+  owner files;
+- concrete command execution, process failure interpretation, healthcheck, and
+  repair;
+- issue/PR lifecycle choices such as when to merge, close, publish a review, or
+  fan out child workflows.
 
-Each workflow instance should have one active owner in execute mode.
-
-The framework should specify:
-
-- Lease acquisition.
-- Lease renewal.
-- Stale lease detection.
-- PID/process validation where available.
-- Active turn marker cleanup.
-- Parent/child workflow ownership.
-
-Two execute daemons must not append to the same event log concurrently. Dry-run may inspect the same log concurrently because it does not mutate state.
-
-## Parent and child workflows
-
-Fanout and handoff should be represented as typed effects and events.
-
-Parent rules:
-
-- Parent state records which children are expected or active.
-- Parent effects create child workflow state directories and initialization events.
-- Parent fanout respects max parallel limits.
-- Parent must not infer child completion from missing process state alone.
-
-Child rules:
-
-- Child initialization records parent reference when applicable.
-- Child terminal events are observed by the parent through explicit observation.
-- Child state directories are stable and unique.
-
-## Audit output
-
-Every tick should produce an audit report containing:
-
-- prior state label.
-- observation label.
-- committed event, if any.
-- final state label.
-- pre-commit effect reports.
-- post-commit effect reports.
-- failure classification, if any.
-- next daemon recommendation.
-
-This report is separate from event truth. It is for operators and tests.
+Those decisions can use the framework contracts, but they are not part of the
+reusable API freeze.

@@ -8,6 +8,9 @@ The runtime is intentionally split into a pure correctness core and a small effe
 State -> Event -> Decision -> EffectPlan -> Interpreter
 ```
 
+The reusable internal framework API for this split is frozen in
+[agentic-workflow-framework/implemented-api-freeze.md](agentic-workflow-framework/implemented-api-freeze.md).
+
 ## Model
 
 ### State

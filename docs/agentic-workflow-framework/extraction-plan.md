@@ -1,6 +1,12 @@
 # Extraction Plan
 
-Status: design draft.
+Status: historical migration background.
+
+The implemented internal API freeze now lives in
+[implemented-api-freeze.md](implemented-api-freeze.md). This file preserves the
+earlier extraction plan and design rationale; future-tense package-splitting
+language below should be read as historical context unless the API-freeze page
+or current source modules confirm it as implemented contract.
 
 ## Thesis
 

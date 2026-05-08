@@ -1,239 +1,289 @@
 # Workflow Spec
 
-Status: design draft.
+Status: implemented internal API contract, with explicit design direction.
 
 ## Purpose
 
-A workflow spec is the contract between a concrete agent workflow and the reusable framework kernel.
+A workflow spec is the boundary between a concrete workflow and the reusable
+framework kernel. The framework owns pure replay, observation planning,
+effect-plan validation, labels, transaction execution, and interpreter
+boundaries. A concrete workflow owns its states, events, observations, effects,
+errors, replay result, lifecycle policy, codecs, prompts, compatibility files,
+and runtime decisions.
 
-The framework owns replay, validation, dry-run, daemon execution, and interpreter boundaries. A concrete workflow owns its own domain model: states, phases, events, observations, effects, codecs, and policy.
-
-The key rule:
+The rule remains:
 
 ```text
 Generic framework code should not know moifold issue, PR, branch, review-thread, or merge semantics.
 ```
 
-## Required concepts
+## Current Unindexed Contract
 
-Every workflow spec must define:
-
-- `Domain`: the top-level workflow family, such as planning, implementation, review, release, or incident response.
-- `Phase`: the lifecycle position within a domain.
-- `State domain phase`: typed state for a domain at a phase.
-- `Event domain from to`: accepted durable fact that advances replay from one phase to another.
-- `Observation domain`: classified external fact that may become an event.
-- `Effect capability`: intended mutation or runtime action.
-- `Capability`: permission category used to validate effects.
-- `Terminal`: blocked, complete, stopped, or another workflow-specific terminal shape.
-- `Codec`: event JSON encoding and decoding.
-- `Label`: human-readable names for state, event, observation, effect, domain, and phase.
-
-The spec may define richer indexed types than this list, but these concepts must remain visible in the public contract.
-
-## Core class sketch
+`CodexWatcher.Workflow.Spec` exposes the current `WorkflowSpec` class and
+`PlannedTransition` value:
 
 ```haskell
+data PlannedTransition spec = PlannedTransition
+  { plannedEvent :: WorkflowEvent spec
+  , plannedPreCommitEffects :: WorkflowEffectPlan spec
+  , plannedPostCommitEffects :: WorkflowEffectPlan spec
+  }
+
 class WorkflowSpec spec where
-  data Domain spec
-  data Phase spec
-  data State spec :: Domain spec -> Phase spec -> Type
-  data Event spec :: Domain spec -> Phase spec -> Phase spec -> Type
-  data Observation spec :: Domain spec -> Type
-  data Effect spec :: Capability spec -> Type
-  data Capability spec
-
-  data WorkflowConfig spec
-  data WorkflowError spec
-
-  initialEvent
-    :: SomeEvent spec
-    -> Either (WorkflowError spec) (SomeState spec, EffectPlan spec)
-
-  applyEvent
-    :: SomeState spec
-    -> SomeEvent spec
-    -> Either (WorkflowError spec) (SomeState spec, EffectPlan spec)
-
-  observe
-    :: SomeState spec
-    -> SomeObservation spec
-    -> Either (WorkflowError spec) (ObservedTick spec)
-
-  effectAllowed
-    :: SomeState spec
-    -> SomeEffect spec
-    -> Bool
-
-  isTerminal
-    :: SomeState spec
-    -> Bool
+  type WorkflowState spec
+  type WorkflowEvent spec
+  type WorkflowObservation spec
+  type WorkflowObservedTick spec
+  type WorkflowEffect spec
+  type WorkflowEffectPlan spec
+  type WorkflowReplayResult spec
+  type WorkflowError spec
 ```
 
-The final implementation may split this into smaller classes. The important part is the shape: the spec provides pure workflow semantics; the framework runs those semantics.
+The associated types are intentionally broad. A spec can use closed ADTs,
+GADTs, indexed wrappers, or compatibility views internally, but the framework
+only depends on this contract.
 
-## Existential wrappers
+The current methods group into five responsibilities:
 
-The framework needs existential wrappers for mixed-phase event logs and daemon dispatch:
+- replay: `workflowInitialEvent`, `workflowApplyEvent`,
+  `workflowReplayEvents`, and `workflowReplayState`;
+- observations and decisions: `workflowObserve`,
+  `workflowObservedTransition`, `workflowObservedState`,
+  `workflowPlanTransition`, and `workflowPlanObservation`;
+- effect validation: `workflowValidateEffects`,
+  `workflowEffectPlanEffects`, and `workflowEffectAllowed`;
+- lifecycle closure: `workflowIsTerminal`;
+- diagnostics: `workflowStateLabel`, `workflowEventLabel`,
+  `workflowObservationLabel`, and `workflowEffectLabel`.
 
-```haskell
-data SomeState spec where
-  SomeState
-    :: KnownDomain spec domain
-    => KnownPhase spec phase
-    => State spec domain phase
-    -> SomeState spec
+`workflowPlanObservation` is a framework helper, not a separate policy hook. It
+uses the spec's pure observation function and extracts the resulting planned
+transition.
 
-data SomeEvent spec where
-  SomeEvent
-    :: Event spec domain from to
-    -> SomeEvent spec
+## Transition Semantics
 
-data SomeObservation spec where
-  SomeObservation
-    :: Observation spec domain
-    -> SomeObservation spec
+The framework treats a planned transition as accepted protocol intent:
 
-data SomeEffect spec where
-  SomeEffect
-    :: Effect spec capability
-    -> SomeEffect spec
+```text
+current state + observation -> planned event + pre-commit effects + post-commit effects
 ```
 
-The wrappers are not an excuse to erase type information everywhere. Domain code should stay indexed where practical, and only cross existential boundaries at replay, serialization, CLI, and daemon dispatch.
+The planned event is the durable fact to append. Pre-commit effects are actions
+that must succeed before the event is accepted. Post-commit effects are
+consequences of accepted event truth and may be retried or regenerated from
+replay depending on their metadata.
 
-## State rules
+A spec should keep this division deterministic. Runtime reads may become
+observations, and runtime writes may be effects, but spec code should not call
+GitHub, git, the filesystem, or the app-server directly.
+
+## Current Indexed Contract
+
+`CodexWatcher.Workflow.Indexed.Spec` exposes the indexed compatibility surface.
+It does not replace the unindexed contract; it provides stronger phase/source
+and target markers for adapters that can carry them.
+
+The current indexed class provides associated types for:
+
+- `IndexedWorkflowState spec state`;
+- `IndexedWorkflowEvent spec source target`;
+- `IndexedWorkflowObservation spec source target`;
+- `IndexedWorkflowObservedTick spec source target`;
+- `IndexedWorkflowEffect spec source target`;
+- `IndexedWorkflowEffectPlan spec source target`;
+- `IndexedWorkflowReplayResult spec state`;
+- `IndexedWorkflowError spec`.
+
+It mirrors the unindexed responsibilities with indexed initial/apply/observe,
+transition projection, replay, effect validation, permission checks, terminal
+checks, and source/target labels.
+
+Mixed event logs and daemon dispatch use existential wrappers:
+
+- `SomeIndexedWorkflowState`
+- `SomeIndexedWorkflowEvent`
+- `SomeIndexedWorkflowObservation`
+- `SomeIndexedWorkflowEffect`
+- `SomeIndexedWorkflowEffectPlan`
+- `SomeIndexedPlannedTransition`
+- `SomeIndexedWorkflowObservedTick`
+- `SomeIndexedWorkflowReplayResult`
+
+The helper functions that unwrap these existentials and read their labels are
+part of the current contract. They keep source/target labels available at
+replay, diagnostics, and daemon boundaries without requiring every caller to be
+fully indexed.
+
+## Bridge Surface
+
+`WorkflowSpecIndexedBridge` adapts an unindexed `WorkflowSpec` to an
+`IndexedWorkflowSpec`. The bridge owns wrap/unwrap functions for state, event,
+observation, observed tick, effect, effect plan, and replay result. It also
+owns source and target label projection for events, observations, and observed
+ticks.
+
+The exported bridge helpers delegate the indexed operations through the
+unindexed spec:
+
+- initial event;
+- event application;
+- observation planning;
+- observed transition/state projection;
+- planned transition construction;
+- event replay and replay-state projection;
+- effect validation and effect extraction;
+- permission checks;
+- terminal checks;
+- labels.
+
+This bridge is the implemented compatibility path for existing moifold indexed
+adapters and the second workflow proof. Richer domain/phase public APIs are
+future design unless they are expressed through these exported indexed types and
+bridge helpers.
+
+## State Rules
+
+Concrete workflow state remains spec-owned.
 
 State definitions should satisfy:
 
-- A state constructor belongs to exactly one domain and one phase.
-- Runtime handles in state should be explicit, not buried in JSON blobs.
-- Active agent turns should be represented as typed handles.
-- Terminal states should preserve enough evidence to explain why the workflow stopped.
-- State should not duplicate derived facts that can be replayed from events unless compatibility or performance requires it.
+- a state value identifies exactly one concrete lifecycle position;
+- active agent turns are represented by explicit typed handles;
+- terminal states preserve evidence for why the workflow stopped;
+- runtime handles and compatibility facts are explicit, not hidden in untyped
+  blobs;
+- replay-derived facts are not duplicated unless compatibility or performance
+  requires it.
 
-## Event rules
+`WorkflowState` values may be existential or indexed internally. Framework
+helpers only require labels, terminal checks, replay-state projection, and
+permission validation through the spec.
+
+## Event Rules
 
 Events are durable accepted facts. They are not arbitrary snapshots.
 
 Every event must answer:
 
-- What external or internal fact was accepted?
-- Which state shape can accept it?
-- Which next state does it produce?
-- Which effects should be planned after it?
-- Is it safe to replay deterministically?
+- what fact was accepted;
+- which prior state can accept it;
+- which next state it produces through replay;
+- which effects are planned by replay/application;
+- whether replay is deterministic.
 
-An event should not contain raw agent output unless the raw output is itself part of the durable protocol. Prefer normalized fields such as `status`, `reason`, `planMarkdown`, `reviewEvidence`, or `resolvedThreadIds`.
+Concrete event JSON, event `type` strings, schema versions, old-log migration,
+and golden fixtures are owned by moifold or by another concrete workflow. The
+core package provides generic codec and replay contracts; it does not own the
+current moifold `WatcherEvent` schema.
 
-## Observation rules
+## Observation Rules
 
-Observations are facts gathered from the outside world or from agent turns before they become workflow truth.
+Observations are external or runtime facts before they become event truth.
 
-Examples:
+Examples include:
 
-- A turn completed with structured output.
-- A PR has unresolved review threads.
-- A release checklist file exists.
-- A command reported a transient failure.
-- A human requested stop.
+- a classified agent turn;
+- remote PR metadata;
+- review-thread data;
+- a command failure report;
+- a human stop or repair request.
 
 Observation handling must be pure:
 
 ```text
-current state + observation -> rejected OR event + next state + effect plan
+current state + observation -> rejected OR planned transition
 ```
 
-Observation code should not call GitHub, git, the filesystem, or the app-server directly. Those reads happen in adapters and become observations.
+Adapters read the world and build observations. Specs decide whether those
+observations are acceptable and which event/effect plan follows.
 
-## Effect rules
+## Effect Rules
 
 Effects describe intended runtime behavior. They do not perform it.
 
-Every effect should declare:
+Every effect plan should be inspectable before interpretation and should expose
+enough information for:
 
-- Capability.
-- Rendered dry-run form.
-- Interpreter adapter.
-- Commit ordering: pre-event, event-commit, or post-event.
-- Idempotency expectation.
-- Failure classification.
+- permission checking;
+- dry-run rendering;
+- pre/post commit ordering;
+- idempotency or retry policy;
+- failure classification;
+- adapter interpretation.
 
-Effects should be specific enough to preserve safety. Prefer `CreatePullRequest issueConfig` over `RunShell "gh pr create ..."`.
+The generic core currently supplies reusable effect metadata and traversal
+helpers in `CodexWatcher.Workflow.Execution.Core`. Concrete effect values remain
+spec-owned.
 
-## Capability rules
+## Capability Rules
 
-Capabilities are the permission vocabulary for effects.
+The implemented generic capability vocabulary is:
 
-A starting core set:
+- `ReadWorld`
+- `StartAgent`
+- `WriteLocal`
+- `MutateRemote`
+- `Merge`
+- `Sleep`
+- `Stop`
 
-- `ReadWorld`: inspect external state.
-- `StartAgent`: start or resume an agent turn.
-- `WriteLocal`: write local workflow artifacts.
-- `MutateRemote`: mutate GitHub, issue trackers, or other remote systems.
-- `Merge`: perform irreversible integration actions.
-- `Sleep`: wait for the next daemon tick.
-- `Stop`: stop a daemon or mark terminal lifecycle.
+Permission is checked through `workflowValidateEffects`,
+`workflowEffectPlanEffects`, `workflowEffectAllowed`, and the reusable helpers
+in `CodexWatcher.Workflow.Permission.Core`. The DSL does not enforce permission
+by itself.
 
-The framework should allow per-spec capability extension, but common validation and rendering should work for the shared set.
+## Terminal Semantics
 
-## Terminal semantics
+Every spec must define terminal closure with `workflowIsTerminal`.
 
-Every spec must define terminal states and the events that can occur after terminal state.
+Default expectation:
 
-Default rule:
+- complete states do not accept normal domain events;
+- blocked states require explicit retry, repair, stop, or another modeled
+  recovery path;
+- stopped states reject normal domain events;
+- post-terminal repair is an explicit protocol, not silent event acceptance.
 
-- After `Complete`, no more domain events are accepted.
-- After `Blocked`, only explicit stop or repair events are accepted.
-- After `Stopped`, no more domain events are accepted.
+The framework uses terminal checks for replay summaries, audit
+recommendations, daemon projections, and test laws.
 
-If a workflow needs post-terminal repair, it should model that as a specific repair protocol rather than silently accepting normal events.
+## Implemented Laws
 
-## Codec contract
+The current framework contract is designed around these laws:
 
-Event codecs must support:
+### Replay Determinism
 
-- Stable `type` field.
-- Versioned event schema.
-- Unknown metadata fields.
-- Precise parse errors.
-- Round-trip tests for every event constructor.
-- Golden replay fixtures for representative logs.
+Replaying the same event list yields the same final state and planned effect
+history.
 
-State codecs are optional for the core workflow model. Event replay should be enough to reconstruct workflow state. Compatibility snapshots can exist outside the core.
+### Observation Consistency
 
-## Laws
+If `workflowObserve state observation` accepts an observation and emits an
+event, replaying that event from the same state reaches the same next state and
+effect plan.
 
-A workflow spec should satisfy these laws:
+### Permission Soundness
 
-### Replay determinism
+Every effect emitted by replay or observation planning must pass the spec's
+effect validation and per-effect permission checks for the state that emitted
+it.
 
-Replaying the same event list yields the same final state and planned effect history.
+### Dry-Run Safety
 
-### Observation consistency
+Dry-run execution renders intended action reports without mutating event logs,
+local artifacts, remote systems, app-server state, daemon ownership, or
+compatibility files.
 
-If `observe state observation` accepts an observation and emits `event`, then replaying `event` from `state` reaches the same next state and effect plan.
+### Terminal Closure
 
-### Permission soundness
+Terminal states reject normal domain events unless a concrete repair or stop
+protocol explicitly permits a transition.
 
-Every effect emitted by `applyEvent` or `observe` must pass `effectAllowed` for the state that emitted it.
+## Deferred Design Direction
 
-### Dry-run safety
-
-Dry-run execution must not mutate event logs, local artifacts, remote systems, app-server state, or daemon ownership.
-
-### Terminal closure
-
-Terminal states reject normal domain events.
-
-## Test obligations
-
-Each workflow spec should provide:
-
-- Event JSON round-trip tests.
-- Replay golden tests.
-- Invalid transition tests.
-- Observation classification tests.
-- Effect permission tests.
-- Dry-run safety tests.
-- Terminal-state tests.
+The earlier docs described domain and phase associated data families directly
+on `WorkflowSpec`. That remains a useful direction for stronger public APIs,
+but it is not the current frozen contract. The implemented contract is the
+associated-type surface in `CodexWatcher.Workflow.Spec`, plus the indexed
+compatibility bridge in `CodexWatcher.Workflow.Indexed.Spec`.
