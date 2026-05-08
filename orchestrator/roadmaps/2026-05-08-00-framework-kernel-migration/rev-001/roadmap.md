@@ -135,7 +135,7 @@ Candidate directions:
   behavior.
   Extraction notes: keep the first round focused on assertions and helper APIs.
 
-### 2. [pending] Stabilize the Workflow DSL As Pure Planning Syntax
+### 2. [complete] Stabilize the Workflow DSL As Pure Planning Syntax
 
 Milestone id: `milestone-002-workflow-dsl-stabilization`
 Depends on: `milestone-001-workflow-spec-contract`
@@ -151,9 +151,15 @@ Progress: round 028 completed the DSL core ergonomics and law slice in
 `f3b2280`, adding a pure `failWorkflow` constructor plus focused
 `watcher-core-test` coverage for `WorkflowM` effect ordering, failure
 short-circuiting, phase-changing `advance`, and planned pre/post commit
-projection parity for both moifold and DocsMigration specs. No real
-DocsMigration or moifold transitions were ported yet, so the milestone remains
-pending on direction 005.
+projection parity for both moifold and DocsMigration specs. At that point, no
+real DocsMigration or moifold transitions were ported yet, so the milestone
+remained pending on direction 005. Round 029 completed the transition-port
+proof in `15cd4e5`, routing the DocsMigration draft-produced transition and the
+moifold issue-planning turn-completed projection through pure DSL helpers with
+parity coverage for event, state, effect partitioning, replay, permissions,
+action ordering, phase validation, and dry-run reporting. With directions 004
+and 005 complete, the milestone completion signal is satisfied for the current
+DSL authoring surface.
 
 Candidate directions:
 
@@ -170,6 +176,7 @@ Candidate directions:
   Extraction notes: one round should improve API shape and focused tests only.
 
 - Direction id: `direction-005-dsl-transition-ports`
+  Status: complete via round 029, merged as `15cd4e5`.
   Summary: port one DocsMigration transition and one moifold transition to DSL
   helpers while preserving parity.
   Why it matters now: the DSL should prove authoring value outside synthetic
