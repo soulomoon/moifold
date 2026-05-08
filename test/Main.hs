@@ -196,6 +196,7 @@ import Data.Char (isAlphaNum)
 import Data.Foldable qualified as Foldable
 import Data.IORef
 import Data.Kind (Type)
+import Data.List (sort, (\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -204,7 +205,7 @@ import Data.Text.IO qualified as TextIO
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime, secondsToDiffTime)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removePathForcibly)
-import System.FilePath ((</>))
+import System.FilePath (dropExtension, makeRelative, splitDirectories, (</>))
 import System.Exit (ExitCode (..), exitFailure)
 import System.Posix.Process (getProcessID)
 import Test.QuickCheck
@@ -6887,6 +6888,7 @@ workflowFacadeExtractionTests = do
       , workflowIndexedSpecModuleKeepsCoreBoundary
       , workflowSpecIndexedBridgeSourceScans
       , workflowSpecInventoryCoversCurrentSpecSurfaces
+      , workflowCabalProjectListsStandaloneWorkflowPackages
       , workflowMoifoldCabalConsumesStandaloneWorkflowPackages
       , workflowCoreStandalonePackageKeepsPackageBoundary
       , workflowCodexStandalonePackageKeepsPackageBoundary
@@ -7384,6 +7386,8 @@ workflowMoifoldCabalConsumesStandaloneWorkflowPackages = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
   let mainLibrarySection = cabalComponentSection "library" cabalSource
       watcherCoreTestSection = cabalComponentSection "test-suite watcher-core-test" cabalSource
+      mainLibraryDependencyPackages = cabalBuildDependsPackages mainLibrarySection
+      watcherCoreTestDependencyPackages = cabalBuildDependsPackages watcherCoreTestSection
       internalWorkflowComponentMatches =
         filter
           (`elem` Text.lines cabalSource)
@@ -7403,6 +7407,10 @@ workflowMoifoldCabalConsumesStandaloneWorkflowPackages = do
         , "agent-workflow-codex >=0.1 && <0.2"
         , "agent-workflow-github >=0.1 && <0.2"
         ]
+      mainLibraryMissingStandalonePackages =
+        filter (`notElem` mainLibraryDependencyPackages) standaloneWorkflowPackageNames
+      watcherCoreTestMissingStandalonePackages =
+        filter (`notElem` watcherCoreTestDependencyPackages) standaloneWorkflowPackageNames
   noInternalComponentsOk <-
     assertNoTextMatches
       "moifold cabal no longer defines internal workflow sublibraries"
@@ -7411,6 +7419,14 @@ workflowMoifoldCabalConsumesStandaloneWorkflowPackages = do
     assertNoTextMatches
       "moifold cabal no longer consumes internal workflow sublibraries"
       internalWorkflowDependencyMatches
+  mainLibraryPackageNamesOk <-
+    assertNoTextMatches
+      "main moifold library depends on standalone workflow package names"
+      mainLibraryMissingStandalonePackages
+  watcherCoreTestPackageNamesOk <-
+    assertNoTextMatches
+      "watcher-core-test depends on standalone workflow package names"
+      watcherCoreTestMissingStandalonePackages
   mainLibraryDependsOk <-
     assert
       "main moifold library depends on standalone workflow packages with approved bounds"
@@ -7419,12 +7435,51 @@ workflowMoifoldCabalConsumesStandaloneWorkflowPackages = do
     assert
       "watcher-core-test depends on standalone workflow packages with approved bounds"
       (all (`Text.isInfixOf` watcherCoreTestSection) standaloneWorkflowDependencyBounds)
-  pure (noInternalComponentsOk && noInternalDependenciesOk && mainLibraryDependsOk && watcherCoreTestDependsOk)
+  pure
+    ( noInternalComponentsOk
+        && noInternalDependenciesOk
+        && mainLibraryPackageNamesOk
+        && watcherCoreTestPackageNamesOk
+        && mainLibraryDependsOk
+        && watcherCoreTestDependsOk
+    )
+
+workflowCabalProjectListsStandaloneWorkflowPackages :: IO Bool
+workflowCabalProjectListsStandaloneWorkflowPackages = do
+  projectSource <- Text.pack <$> readFile "cabal.project"
+  let projectPackages = sort (cabalFieldEntries "packages" projectSource)
+      expectedPackages = sort ("." : standaloneWorkflowPackageNames)
+      packageMismatches =
+        inventoryMismatches "cabal.project packages" expectedPackages projectPackages
+      internalWorkflowDependencyMatches =
+        filter
+          (`Text.isInfixOf` projectSource)
+          [ "moifold:agent-workflow-core"
+          , "moifold:agent-workflow-codex"
+          , "moifold:agent-workflow-github"
+          ]
+  packageInventoryOk <-
+    assertNoTextMatches
+      "cabal.project lists the root and standalone workflow packages"
+      packageMismatches
+  noInternalDependenciesOk <-
+    assertNoTextMatches
+      "cabal.project does not reference internal workflow sublibraries"
+      internalWorkflowDependencyMatches
+  pure (packageInventoryOk && noInternalDependenciesOk)
+
+standaloneWorkflowPackageNames :: [Text]
+standaloneWorkflowPackageNames =
+  [ "agent-workflow-core"
+  , "agent-workflow-codex"
+  , "agent-workflow-github"
+  ]
 
 workflowCoreStandalonePackageKeepsPackageBoundary :: IO Bool
 workflowCoreStandalonePackageKeepsPackageBoundary = do
   standaloneCabalSource <- Text.pack <$> readFile ("agent-workflow-core" </> "agent-workflow-core.cabal")
   coreSources <- sourceTextUnder ("agent-workflow-core" </> "src")
+  coreSourceModules <- sourceModulesUnder ("agent-workflow-core" </> "src")
   forbiddenImportViolations <-
     sourceImportViolationsUnder
       ("agent-workflow-core" </> "src")
@@ -7501,8 +7556,11 @@ workflowCoreStandalonePackageKeepsPackageBoundary = do
       standaloneCoreDependencyPackages = cabalBuildDependsPackages standaloneCoreSection
       unapprovedStandaloneCoreDependencyMatches =
         filter (`notElem` ["base", "bytestring", "text"]) standaloneCoreDependencyPackages
-      standaloneExposesCoreModules =
-        coreSectionExposesGenericModules standaloneCoreSection
+      standaloneExposedModules = cabalExposedModules standaloneCoreSection
+      standaloneModuleInventoryMismatches =
+        inventoryMismatches "agent-workflow-core exposed modules" (sort coreSourceModules) (sort standaloneExposedModules)
+      expectedStandaloneModuleMismatches =
+        inventoryMismatches "agent-workflow-core approved modules" (sort coreStandaloneExposedModules) (sort standaloneExposedModules)
       standaloneDependsOnlyOnCoreDeps =
         all (`elem` standaloneCoreDependencyPackages) ["base", "bytestring", "text"]
           && null unapprovedStandaloneCoreDependencyMatches
@@ -7539,10 +7597,14 @@ workflowCoreStandalonePackageKeepsPackageBoundary = do
     assertNoTextMatches
       "workflow core source excludes concrete daemon ownership text"
       forbiddenConcreteNeedleMatches
+  standaloneInventoryOk <-
+    assertNoTextMatches
+      "standalone workflow core package exposed modules match recursive source tree"
+      standaloneModuleInventoryMismatches
   standaloneExposedOk <-
-    assert
+    assertNoTextMatches
       "standalone workflow core package exposes generic core modules"
-      standaloneExposesCoreModules
+      expectedStandaloneModuleMismatches
   standaloneCoreDepsOk <-
     assert
       "standalone workflow core package keeps the approved generic dependency set"
@@ -7557,29 +7619,28 @@ workflowCoreStandalonePackageKeepsPackageBoundary = do
         && importOk
         && tokenOk
         && ownershipNeedleOk
+        && standaloneInventoryOk
         && standaloneExposedOk
         && standaloneCoreDepsOk
         && standaloneMetadataOk
     )
 
-coreSectionExposesGenericModules :: Text -> Bool
-coreSectionExposesGenericModules section =
-  all
-    (`Text.isInfixOf` section)
-    [ "CodexWatcher.Workflow.Audit"
-    , "CodexWatcher.Workflow.Codec"
-    , "CodexWatcher.Workflow.Daemon.Core"
-    , "CodexWatcher.Workflow.EventLog.Commit.Core"
-    , "CodexWatcher.Workflow.EventLog.Core"
-    , "CodexWatcher.Workflow.EventLog.File.Core"
-    , "CodexWatcher.Workflow.Execution.Core"
-    , "CodexWatcher.Workflow.Failure"
-    , "CodexWatcher.Workflow.Indexed.Spec"
-    , "CodexWatcher.Workflow.Permission.Core"
-    , "CodexWatcher.Workflow.Spec"
-    , "CodexWatcher.Workflow.DSL"
-    , "CodexWatcher.Workflow.Transaction.Core"
-    ]
+coreStandaloneExposedModules :: [Text]
+coreStandaloneExposedModules =
+  [ "CodexWatcher.Workflow.Audit"
+  , "CodexWatcher.Workflow.Codec"
+  , "CodexWatcher.Workflow.Daemon.Core"
+  , "CodexWatcher.Workflow.DSL"
+  , "CodexWatcher.Workflow.EventLog.Commit.Core"
+  , "CodexWatcher.Workflow.EventLog.Core"
+  , "CodexWatcher.Workflow.EventLog.File.Core"
+  , "CodexWatcher.Workflow.Execution.Core"
+  , "CodexWatcher.Workflow.Failure"
+  , "CodexWatcher.Workflow.Indexed.Spec"
+  , "CodexWatcher.Workflow.Permission.Core"
+  , "CodexWatcher.Workflow.Spec"
+  , "CodexWatcher.Workflow.Transaction.Core"
+  ]
 
 coreBoundaryForbiddenImportModules :: [Text]
 coreBoundaryForbiddenImportModules =
@@ -7621,6 +7682,7 @@ workflowCodexStandalonePackageKeepsPackageBoundary :: IO Bool
 workflowCodexStandalonePackageKeepsPackageBoundary = do
   standaloneCabalSource <- Text.pack <$> readFile ("agent-workflow-codex" </> "agent-workflow-codex.cabal")
   codexSources <- sourceTextUnder ("agent-workflow-codex" </> "src")
+  codexSourceModules <- sourceModulesUnder ("agent-workflow-codex" </> "src")
   forbiddenImportViolations <-
     sourceImportViolationsUnder
       ("agent-workflow-codex" </> "src")
@@ -7675,8 +7737,11 @@ workflowCodexStandalonePackageKeepsPackageBoundary = do
       standaloneCodexDependencyPackages = cabalBuildDependsPackages standaloneCodexSection
       unapprovedStandaloneCodexDependencyMatches =
         filter (`notElem` ["aeson", "agent-workflow-core", "base", "bytestring", "text", "websockets"]) standaloneCodexDependencyPackages
-      standaloneExposesCodexModules =
-        codexSectionExposesAdapterModules standaloneCodexSection
+      standaloneExposedModules = cabalExposedModules standaloneCodexSection
+      standaloneModuleInventoryMismatches =
+        inventoryMismatches "agent-workflow-codex exposed modules" (sort codexSourceModules) (sort standaloneExposedModules)
+      expectedStandaloneModuleMismatches =
+        inventoryMismatches "agent-workflow-codex approved modules" (sort codexStandaloneExposedModules) (sort standaloneExposedModules)
       standaloneDependsOnlyOnCodexDeps =
         all (`elem` standaloneCodexDependencyPackages) ["aeson", "agent-workflow-core", "base", "bytestring", "text", "websockets"]
           && null unapprovedStandaloneCodexDependencyMatches
@@ -7714,10 +7779,14 @@ workflowCodexStandalonePackageKeepsPackageBoundary = do
     assertNoTextMatches
       "workflow Codex source excludes concrete watcher state and event tokens"
       forbiddenConcreteTypeMatches
+  standaloneInventoryOk <-
+    assertNoTextMatches
+      "standalone workflow Codex package exposed modules match recursive source tree"
+      standaloneModuleInventoryMismatches
   standaloneExposedOk <-
-    assert
+    assertNoTextMatches
       "standalone workflow Codex package exposes adapter API modules"
-      standaloneExposesCodexModules
+      expectedStandaloneModuleMismatches
   standaloneCodexDepsOk <-
     assert
       "standalone workflow Codex package keeps the approved adapter dependency set"
@@ -7732,26 +7801,25 @@ workflowCodexStandalonePackageKeepsPackageBoundary = do
         && importOk
         && sourceOk
         && concreteTypeOk
+        && standaloneInventoryOk
         && standaloneExposedOk
         && standaloneCodexDepsOk
         && standaloneMetadataOk
     )
 
-codexSectionExposesAdapterModules :: Text -> Bool
-codexSectionExposesAdapterModules section =
-  all
-    (`Text.isInfixOf` section)
-    [ "CodexWatcher.AppServerProtocol"
-    , "CodexWatcher.Workflow.Agent"
-    , "CodexWatcher.Workflow.Agent.Codex"
-    , "CodexWatcher.Workflow.Agent.Codex.Client"
-    , "CodexWatcher.Workflow.Agent.Codex.Interpreter"
-    , "CodexWatcher.Workflow.Agent.Codex.Protocol"
-    , "CodexWatcher.Workflow.Agent.Codex.Transport"
-    , "CodexWatcher.Workflow.Agent.Ids"
-    , "CodexWatcher.Workflow.Agent.Types"
-    , "CodexWatcher.Workflow.Observation.Agent"
-    ]
+codexStandaloneExposedModules :: [Text]
+codexStandaloneExposedModules =
+  [ "CodexWatcher.AppServerProtocol"
+  , "CodexWatcher.Workflow.Agent"
+  , "CodexWatcher.Workflow.Agent.Codex"
+  , "CodexWatcher.Workflow.Agent.Codex.Client"
+  , "CodexWatcher.Workflow.Agent.Codex.Interpreter"
+  , "CodexWatcher.Workflow.Agent.Codex.Protocol"
+  , "CodexWatcher.Workflow.Agent.Codex.Transport"
+  , "CodexWatcher.Workflow.Agent.Ids"
+  , "CodexWatcher.Workflow.Agent.Types"
+  , "CodexWatcher.Workflow.Observation.Agent"
+  ]
 
 codexBoundaryForbiddenImportModules :: [Text]
 codexBoundaryForbiddenImportModules =
@@ -7776,6 +7844,7 @@ codexBoundaryForbiddenImportModules =
 workflowGithubStandalonePackageKeepsPackageBoundary :: IO Bool
 workflowGithubStandalonePackageKeepsPackageBoundary = do
   standaloneCabalSource <- Text.pack <$> readFile ("agent-workflow-github" </> "agent-workflow-github.cabal")
+  githubSourceModules <- sourceModulesUnder ("agent-workflow-github" </> "src")
   importViolations <-
     sourceImportViolationsUnder
       ("agent-workflow-github" </> "src")
@@ -7800,11 +7869,14 @@ workflowGithubStandalonePackageKeepsPackageBoundary = do
         , "agent-workflow-core"
         , "agent-workflow-codex"
         ]
-      standaloneExposesGithubModules =
-        githubSectionExposesAdapterModules standaloneGithubSection
       standaloneGithubDependencyPackages = cabalBuildDependsPackages standaloneGithubSection
       unapprovedStandaloneGithubDependencyMatches =
         filter (`notElem` ["aeson", "base", "text"]) standaloneGithubDependencyPackages
+      standaloneExposedModules = cabalExposedModules standaloneGithubSection
+      standaloneModuleInventoryMismatches =
+        inventoryMismatches "agent-workflow-github exposed modules" (sort githubSourceModules) (sort standaloneExposedModules)
+      expectedStandaloneModuleMismatches =
+        inventoryMismatches "agent-workflow-github approved modules" (sort githubStandaloneExposedModules) (sort standaloneExposedModules)
       standaloneDependsOnlyOnGithubDeps =
         all
           (`elem` standaloneGithubDependencyPackages)
@@ -7831,10 +7903,18 @@ workflowGithubStandalonePackageKeepsPackageBoundary = do
           , "location: https://github.com/soulomoon/moifold.git"
           , "hs-source-dirs:   src"
           ]
-  standaloneCabalOk <-
+  standaloneInventoryOk <-
+    assertNoTextMatches
+      "standalone workflow GitHub package exposed modules match recursive source tree"
+      standaloneModuleInventoryMismatches
+  standaloneExposedOk <-
+    assertNoTextMatches
+      "standalone workflow GitHub package exposes only adapter modules"
+      expectedStandaloneModuleMismatches
+  standaloneDependencyOk <-
     assert
-      "standalone workflow GitHub package exposes only adapter modules and dependencies"
-      (standaloneExposesGithubModules && standaloneDependsOnlyOnGithubDeps && standaloneDependencyBoundsMatchPolicy)
+      "standalone workflow GitHub package keeps the approved adapter dependency set"
+      (standaloneDependsOnlyOnGithubDeps && standaloneDependencyBoundsMatchPolicy)
   standaloneMetadataOk <-
     assert
       "standalone workflow GitHub package records approved metadata and source layout"
@@ -7847,16 +7927,21 @@ workflowGithubStandalonePackageKeepsPackageBoundary = do
     assertNoTextMatches
       "workflow GitHub source has no moifold lifecycle ownership tokens"
       ownershipViolations
-  pure (standaloneCabalOk && standaloneMetadataOk && importsOk && ownershipOk)
+  pure
+    ( standaloneInventoryOk
+        && standaloneExposedOk
+        && standaloneDependencyOk
+        && standaloneMetadataOk
+        && importsOk
+        && ownershipOk
+    )
 
-githubSectionExposesAdapterModules :: Text -> Bool
-githubSectionExposesAdapterModules section =
-  all
-    (`Text.isInfixOf` section)
-    [ "CodexWatcher.Workflow.GitHub.Command"
-    , "CodexWatcher.Workflow.GitHub.Ids"
-    , "CodexWatcher.Workflow.GitHub.Remote"
-    ]
+githubStandaloneExposedModules :: [Text]
+githubStandaloneExposedModules =
+  [ "CodexWatcher.Workflow.GitHub.Command"
+  , "CodexWatcher.Workflow.GitHub.Ids"
+  , "CodexWatcher.Workflow.GitHub.Remote"
+  ]
 
 githubForbiddenImportModules :: [Text]
 githubForbiddenImportModules =
@@ -8204,34 +8289,65 @@ cabalComponentSection componentName cabalSource =
         , "benchmark "
         ]
 
+cabalFieldLines :: Text -> Text -> [Text]
+cabalFieldLines fieldName cabalSource =
+  case dropWhile (not . isNamedField) (Text.lines cabalSource) of
+    [] -> []
+    fieldLine : rest ->
+      let fieldIndent = Text.length (Text.takeWhile (== ' ') fieldLine)
+          fieldValue =
+            Text.strip
+              . Text.drop 1
+              . Text.dropWhile (/= ':')
+              $ fieldLine
+          continuationLines =
+            fmap Text.strip $
+              takeWhile
+                ( \line ->
+                    not (Text.null (Text.strip line))
+                      && Text.length (Text.takeWhile (== ' ') line) > fieldIndent
+                )
+                rest
+       in fieldValue : continuationLines
+ where
+  isNamedField line =
+    (fieldName <> ":") `Text.isPrefixOf` Text.strip line
+
+cabalFieldEntries :: Text -> Text -> [Text]
+cabalFieldEntries fieldName =
+  filter (not . Text.null)
+    . Text.words
+    . Text.replace "," " "
+    . Text.unlines
+    . cabalFieldLines fieldName
+
+cabalExposedModules :: Text -> [Text]
+cabalExposedModules =
+  cabalFieldEntries "exposed-modules"
+
 cabalBuildDependsPackages :: Text -> [Text]
 cabalBuildDependsPackages componentSection =
   filter (not . Text.null)
     . fmap (Text.takeWhile isCabalDependencyPackageChar . Text.strip)
     . Text.splitOn ","
     . Text.intercalate "\n"
-    $ buildDependsLines
- where
-  buildDependsLines =
-    case dropWhile (not . isBuildDependsField) (Text.lines componentSection) of
-      [] -> []
-      fieldLine : rest ->
-        Text.drop (Text.length "build-depends:") (Text.strip fieldLine)
-          : takeWhile (not . isIndentedCabalField) rest
-
-isBuildDependsField :: Text -> Bool
-isBuildDependsField line =
-  "build-depends:" `Text.isPrefixOf` Text.strip line
-
-isIndentedCabalField :: Text -> Bool
-isIndentedCabalField line =
-  "  " `Text.isPrefixOf` line
-    && not ("    " `Text.isPrefixOf` line)
-    && ":" `Text.isInfixOf` line
+    $ cabalFieldLines "build-depends" componentSection
 
 isCabalDependencyPackageChar :: Char -> Bool
 isCabalDependencyPackageChar character =
   isAlphaNum character || character == '-' || character == '_' || character == ':'
+
+inventoryMismatches :: Text -> [Text] -> [Text] -> [Text]
+inventoryMismatches inventoryName expected actual =
+  [ inventoryName <> " missing: " <> Text.intercalate ", " missing
+  | not (null missing)
+  ]
+    <> [ inventoryName <> " extra: " <> Text.intercalate ", " extra
+       | not (null extra)
+       ]
+ where
+  missing = expected \\ actual
+  extra = actual \\ expected
 
 assertNoTextMatches :: String -> [Text] -> IO Bool
 assertNoTextMatches assertionName matches = do
@@ -8355,6 +8471,25 @@ sourceTextUnder :: FilePath -> IO Text
 sourceTextUnder root = do
   files <- sourceFilesUnder root
   Text.intercalate "\n" <$> traverse (fmap Text.pack . readFile) files
+
+sourceModulesUnder :: FilePath -> IO [Text]
+sourceModulesUnder root = do
+  files <- sourceFilesUnder root
+  pure [moduleName | Just moduleName <- fmap (sourceModuleFromPath root) files]
+
+sourceModuleFromPath :: FilePath -> FilePath -> Maybe Text
+sourceModuleFromPath root path
+  | ".hs" `Text.isSuffixOf` pathText =
+      Just
+        . Text.intercalate "."
+        . fmap Text.pack
+        . splitDirectories
+        . dropExtension
+        $ makeRelative root path
+  | otherwise =
+      Nothing
+ where
+  pathText = Text.pack path
 
 sourceIdentifierTokens :: Text -> [Text]
 sourceIdentifierTokens =

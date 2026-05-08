@@ -1,0 +1,69 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-003-release-validation-ci",
+  "direction_id": "direction-010-boundary-test-refresh-for-package-layout",
+  "extracted_item_id": "item-045-boundary-test-refresh-for-package-layout",
+  "roadmap_item_id": "item-045-boundary-test-refresh-for-package-layout",
+  "status": "approved",
+  "decision": "approved",
+  "findings": [],
+  "tests_run": [
+    {
+      "command": "git diff --stat",
+      "result": "passed",
+      "summary": "Scope inspected; implementation code changes are in test/Main.hs, with controller activation in orchestrator/state.json and round artifacts present."
+    },
+    {
+      "command": "git diff -- test/Main.hs",
+      "result": "passed",
+      "summary": "Reviewed boundary-test refresh: exact cabal.project package assertion, Cabal exposed-module parsing, recursive source-module inventory helpers, and source/exposed package inventory assertions."
+    },
+    {
+      "command": "git diff --name-only",
+      "result": "passed",
+      "summary": "No package descriptors, cabal.project, or moifold.cabal are modified."
+    },
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "passed",
+      "summary": "Test suite watcher-core-test passed; 1 of 1 test suites passed. Output included a runtime lease warning but completed successfully."
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed",
+      "summary": "Cabal reported Up to date."
+    },
+    {
+      "command": "scripts/validate-workflow-packages.sh",
+      "result": "passed",
+      "summary": "cabal check and cabal sdist validation passed for agent-workflow-core, agent-workflow-codex, and agent-workflow-github; no upload or package publication command was run."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed",
+      "summary": "No whitespace errors."
+    },
+    {
+      "command": "git diff --cached --quiet -- . && printf '%s\\n' 'No staged diff; git diff --cached --check not applicable' || git diff --cached --check",
+      "result": "passed",
+      "summary": "No staged diff; cached diff check not applicable."
+    },
+    {
+      "command": "rg -n 'workflowCabalProjectListsStandaloneWorkflowPackages|cabalExposedModules|sourceModulesUnder|sourceModuleFromPath|workflowCoreStandalonePackageKeepsPackageBoundary|workflowCodexStandalonePackageKeepsPackageBoundary|workflowGithubStandalonePackageKeepsPackageBoundary' test/Main.hs",
+      "result": "passed",
+      "summary": "Required project assertion, helper names, and strengthened package-boundary tests are present."
+    },
+    {
+      "command": "rg -n 'cabal[[:space:]]+upload|stack[[:space:]]+upload|hackage-upload|curl[[:space:]].*hackage' .",
+      "result": "passed",
+      "summary": "Matches are limited to orchestrator notes, plans, and review records quoting scan terms; no executable upload or publication behavior was introduced."
+    }
+  ],
+  "risks": [
+    "Remote CI was not run by this local review; confidence comes from the requested local build, test, package validation, and static scans.",
+    "The worktree includes orchestrator/state.json controller activation changes; reviewer did not edit state and did not treat controller state activation as implementation logic."
+  ],
+  "evidence_summary": "Approved. test/Main.hs now protects the standalone package layout with exact cabal.project package assertions and exact recursive source-tree versus Cabal exposed-module inventories for agent-workflow-core, agent-workflow-codex, and agent-workflow-github. Existing forbidden import/token/dependency/metadata/no-reexport checks remain present, no descriptors were changed, no upload behavior was introduced, and all requested checks passed."
+}
