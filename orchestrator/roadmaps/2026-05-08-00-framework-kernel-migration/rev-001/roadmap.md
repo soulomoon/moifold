@@ -64,7 +64,7 @@ issue/PR workflows behaviorally unchanged.
 
 ## Milestones
 
-### 1. [in-progress] Consolidate the WorkflowSpec Contract
+### 1. [complete] Consolidate the WorkflowSpec Contract
 
 Milestone id: `milestone-001-workflow-spec-contract`
 Depends on: none
@@ -84,7 +84,15 @@ public API shape, or roadmap coordination semantics. Round 026 completed the
 first additive indexed compatibility bridge in `a4962d7`, migrating
 DocsMigration and the representative PR-review checking adapter through the
 bridge with focused parity/source-scan coverage and no event, fixture, daemon,
-runtime, roadmap sequencing, or compatibility facade changes.
+runtime, roadmap sequencing, or compatibility facade changes. Round 027
+completed terminal and observation law hardening in `c964007`, adding
+DocsMigration and PR-review checking assertions for indexed/unindexed
+observation parity, planned-event/apply consistency, replay determinism,
+terminal-state closure, and wrong-phase permission rejection without changing
+runtime behavior, event codecs, golden fixtures, package boundaries, roadmap
+sequencing, or compatibility facades. With directions 001, 002, and 003
+complete, the milestone completion signal is satisfied for the current
+documented and tested workflow spec surface.
 
 Candidate directions:
 
@@ -114,6 +122,7 @@ Candidate directions:
   repo-wide rewrite in one round.
 
 - Direction id: `direction-003-terminal-and-observation-laws`
+  Status: complete via round 027, merged as `c964007`.
   Summary: harden laws for observation consistency, terminal closure, replay
   determinism, and permission soundness across at least one moifold workflow and
   DocsMigration.
