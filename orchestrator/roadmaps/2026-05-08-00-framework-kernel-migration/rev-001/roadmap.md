@@ -241,7 +241,7 @@ Candidate directions:
   lock, runtime-owner, or concrete `WatcherEvent`.
   Extraction notes: source scans are mandatory for every extraction round.
 
-### 4. [pending] Stabilize Codex and GitHub Adapter Package APIs
+### 4. [complete] Stabilize Codex and GitHub Adapter Package APIs
 
 Milestone id: `milestone-004-adapter-api-stabilization`
 Depends on: `milestone-001-workflow-spec-contract`
@@ -257,8 +257,14 @@ Progress: round 032 completed the Codex adapter API stabilization slice in
 `2f33153`, adding the typed `agentTurnStartRef` helper, app-server malformed
 thread/turn start parser checks, typed turn-reference request coverage, and
 stronger recursive boundary scans that keep moifold issue/PR lifecycle policy
-out of `agent-workflow-codex`. The milestone remains pending on GitHub adapter
-API stabilization.
+out of `agent-workflow-codex`. Round 033 completed the GitHub adapter API
+stabilization slice in `ae34398`, adding stable ordering for adapter-owned
+GitHub identifiers, adapter-owned GitHub/PR/check field lists and command
+rendering parity, merged-PR metadata classification shared by healthcheck, and
+focused parser plus recursive boundary coverage that keeps moifold lifecycle,
+daemon, runtime, healthcheck, repair, app-server, and compatibility policy out
+of `agent-workflow-github`. With directions 008 and 009 complete, the milestone
+completion signal is satisfied for the current adapter API surface.
 
 Candidate directions:
 
@@ -277,6 +283,7 @@ Candidate directions:
   incomplete, blocked, malformed, problems, and clean outputs when touched.
 
 - Direction id: `direction-009-github-adapter-api`
+  Status: complete via round 033, merged as `ae34398`.
   Summary: stabilize GitHub ids, remote metadata parsing, and command rendering
   helpers in `agent-workflow-github`.
   Why it matters now: GitHub assumptions must stay explicit adapter code, not
