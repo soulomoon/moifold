@@ -253,10 +253,17 @@ are either still justified or locally removed with proof.
 Parallel lane: `adapter-boundary-tests`
 Coordination notes: this milestone can be split into Codex and GitHub lanes
 only after a planner confirms disjoint write scopes.
+Progress: round 032 completed the Codex adapter API stabilization slice in
+`2f33153`, adding the typed `agentTurnStartRef` helper, app-server malformed
+thread/turn start parser checks, typed turn-reference request coverage, and
+stronger recursive boundary scans that keep moifold issue/PR lifecycle policy
+out of `agent-workflow-codex`. The milestone remains pending on GitHub adapter
+API stabilization.
 
 Candidate directions:
 
 - Direction id: `direction-008-codex-agent-adapter-api`
+  Status: complete via round 032, merged as `2f33153`.
   Summary: stabilize typed agent roles, turn refs, protocol clients,
   classifiers, and transport-facing helpers in `agent-workflow-codex`.
   Why it matters now: app-server JSON-RPC details should stay outside workflow
