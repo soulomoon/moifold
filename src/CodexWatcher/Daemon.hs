@@ -447,6 +447,93 @@ prepareDaemonObservation state observation =
           prNumber
           maybeReviewerThreadId
       pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffReady {}, DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffReadyObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffInitializedObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffInitializedWaitingForPrMergeObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffStartedHandoffInitializedObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffStartedWaitingForPrMergeObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffReady {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedHandoffReadyObservation
+          state
+          prNumber
+          maybeReviewerThreadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedHandoffInitializedObservation
+          state
+          prNumber
+          maybeReviewerThreadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedWaitingForPrMergeObservation
+          state
+          prNumber
+          maybeReviewerThreadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffReady {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffReadyObservation
+          state
+          threadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffInitializedObservation
+          state
+          threadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyWaitingForPrMergeObservation
+          state
+          threadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewPendingReviewer {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation
+          state
+          threadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewReady {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewReadyObservation
+          state
+          threadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
         WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation

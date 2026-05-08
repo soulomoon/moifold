@@ -1,0 +1,42 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-004",
+  "roadmap_item_id": "item-021-indexed-issue-implementation-handoff-and-merge-wait-daemon",
+  "decision": "approved",
+  "evidence_summary": "No blocking findings. state.json is not modified; item-021 handoff and merge-wait observations route through indexed projection; item-022+ observations remain compatibility fallback; focused tests, full watcher-core-test, cabal build all, git diff --check, and manual source scans passed; no files were staged.",
+  "checks_run": [
+    {
+      "command": "cabal test watcher-core-test --test-options='--pattern indexed workflow issue implement'",
+      "result": "passed"
+    },
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "passed"
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --cached --name-only",
+      "result": "no staged files; git diff --cached --check not applicable"
+    },
+    {
+      "command": "rg -n \"projectIssueImplement(PostMergeReviewStarted|PostMergeReviewerOutcome|IssueClosed)|ObservedPostMergeReviewStarted|ObservedPostMergeReviewerOutcome|ObservedIssueClosed\" src/CodexWatcher/Daemon.hs",
+      "result": "passed; no item-022-plus daemon route matches"
+    },
+    {
+      "command": "rg -n \"CodexWatcher.Workflow.Moifold.IssueImplement.Indexed|projectIssueImplement|IssueImplementIndexedSpec\" src/CodexWatcher/Domain/IssueImplement src/CodexWatcher/DaemonLoop.hs src/CodexWatcher/DaemonLoop src/CodexWatcher/AutomaticLoop",
+      "result": "passed; no indexed IssueImplement routing outside Daemon.hs"
+    },
+    {
+      "command": "rg -n \"projectIssueImplementReviewHandoffInitialized|projectIssueImplementReviewHandoffStarted|projectIssueImplementationCompletedHandoff|projectIssueImplementationCompletedWaitingForPrMerge|projectIssueImplementReviewerThreadReady|projectIssueImplementPullRequestMergedWaitingForPrMerge\" src/CodexWatcher/Daemon.hs",
+      "result": "passed; required item-021 projector routes found"
+    }
+  ]
+}

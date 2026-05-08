@@ -5510,25 +5510,38 @@ automaticIssueMergeWaitsForIssueClose = do
       reviewerThread = ThreadId "dry-run-issue-reviewer-thread"
       reviewedCommit = CommitSha "0123456789abcdef"
       reviewerTurn = TurnId "dry-run-issue-final-review-turn-155"
+      waitingWithReviewerEvents = issueEvents <> [IssueReviewerThreadReadyEvent reviewerThread]
       postMergeReadyEvents = issueEvents <> [IssuePullRequestMergedEvent prNumber]
       postMergeReviewReadyEvents = postMergeReadyEvents <> [IssueReviewerThreadReadyEvent reviewerThread]
       postMergeReviewingEvents = postMergeReviewReadyEvents <> [IssuePostMergeReviewStartedEvent reviewedCommit reviewerTurn]
       postMergeCleanEvents = postMergeReviewingEvents <> [IssuePostMergeReviewCleanEvent (CleanReviewEvidence reviewedCommit "LGTM")]
+  (openTick, openCalls) <- runIssueMergeTickWithCalls issueEvents openPrCommand defaultFakeAppServer
   merged <- runIssueMergeCheck issueEvents mergedPrCommand defaultFakeAppServer
+  mergedTick <- runIssueMergeTick issueEvents mergedPrCommand defaultFakeAppServer
+  mergedWithReviewerTick <- runIssueMergeTick waitingWithReviewerEvents mergedPrCommand defaultFakeAppServer
   reviewerReady <- runIssueMergeCheck postMergeReadyEvents defaultFakeCommand defaultFakeAppServer
+  reviewerReadyTick <- runIssueMergeTick postMergeReadyEvents defaultFakeCommand defaultFakeAppServer
   reviewerStarted <- runIssueMergeCheck postMergeReviewReadyEvents mergedPrCommand defaultFakeAppServer
   clean <- runIssueMergeTick postMergeReviewingEvents defaultFakeCommand cleanReviewerAppServer
   closed <- runIssueMergeCheck postMergeCleanEvents closedIssueCommand defaultFakeAppServer
   results <-
     sequence
-      [ assert "merged PR moves issue implementer to post-merge review" (merged == Just (IssuePullRequestMergedEvent prNumber, Implementing))
+      [ assert "open PR uses gh pr view and stays idle" (maybe False openPrIdled openTick && any isGhPrViewCall openCalls)
+      , assert "merged PR moves issue implementer to post-merge review" (merged == Just (IssuePullRequestMergedEvent prNumber, Implementing))
+      , assert "merged PR without reviewer matches indexed projection" (maybe False (indexedPullRequestMergedNoReviewerMatches prNumber) mergedTick)
+      , assert "merged PR with existing reviewer matches indexed projection" (maybe False (indexedPullRequestMergedWithReviewerMatches prNumber reviewerThread) mergedWithReviewerTick)
+      , assert "merged PR with existing reviewer does not start new reviewer thread" (maybe False noReviewerThreadStartAction mergedWithReviewerTick)
       , assert "post-merge review creates reviewer thread when absent" (reviewerReady == Just (IssueReviewerThreadReadyEvent reviewerThread, Implementing))
+      , assert "post-merge reviewer-ready observation matches indexed projection" (maybe False (indexedPostMergeReviewerReadyMatches prNumber reviewerThread) reviewerReadyTick)
       , assert "post-merge review starts reviewer against merged PR head" (reviewerStarted == Just (IssuePostMergeReviewStartedEvent reviewedCommit reviewerTurn, Implementing))
       , assert "clean post-merge review schedules issue close" (maybe False issueCloseScheduled clean)
       , assert "closed issue completes issue implementer" (closed == Just (IssueClosedEvent prNumber, Complete))
       ]
   pure (and results)
  where
+  openPrCommand = \case
+      GhPrView {} -> jsonCommandReport (object ["state" .= ("OPEN" :: Text)])
+      command -> defaultFakeCommand command
   mergedPrCommand = \case
       GhPrView {} -> jsonCommandReport (object ["state" .= ("MERGED" :: Text), "headRefOid" .= ("0123456789abcdef" :: Text)])
       command -> defaultFakeCommand command
@@ -5551,6 +5564,9 @@ automaticIssueMergeWaitsForIssueClose = do
     tick <- runIssueMergeTick events commandHandler appServerHandler
     pure $ tick >>= \result -> (\observed -> (observed.daemonObservedEvent, somePhase observed.daemonObservedState)) <$> result.loopObservedTick
   runIssueMergeTick events commandHandler appServerHandler = do
+    (tick, _calls) <- runIssueMergeTickWithCalls events commandHandler appServerHandler
+    pure tick
+  runIssueMergeTickWithCalls events commandHandler appServerHandler = do
     (executor, _getCalls) <-
       fakeActionExecutorWith
         commandHandler
@@ -5565,9 +5581,13 @@ automaticIssueMergeWaitsForIssueClose = do
             }
         loopConfig = DaemonLoopConfig options Nothing
     result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
-    pure case result of
-      Right tick -> Just tick
-      Left _ -> Nothing
+    calls <- _getCalls
+    pure
+      ( case result of
+          Right tick -> Just tick
+          Left _ -> Nothing
+      , calls
+      )
   issueEvents =
     let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
      in
@@ -5587,6 +5607,44 @@ automaticIssueMergeWaitsForIssueClose = do
     case report.actionExecutionAction of
       PlannedCommand GhIssueClose {} -> True
       _ -> False
+  openPrIdled tick =
+    case tick.loopObservedTick of
+      Nothing ->
+        tick.loopIdleReason == Just "waiting for PR merge before post-merge review: #7"
+      Just _ ->
+        False
+  isGhPrViewCall = \case
+    FakeCommand GhPrView {} -> True
+    _ -> False
+  noReviewerThreadStartAction tick =
+    all (not . isReviewerThreadStartAction . actionExecutionAction) tick.loopActionReports
+  isReviewerThreadStartAction = \case
+    PlannedAppServerRequest request -> request.requestMethod == "thread/start"
+    _ -> False
+  indexedPullRequestMergedNoReviewerMatches prNumber tick =
+    let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+        state = SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber (WorkerIdle (ThreadId "worker-thread")) Nothing)
+     in case (tick.loopObservedTick, IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation state prNumber) of
+          (Just observed, Right projection) ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          _ -> False
+  indexedPullRequestMergedWithReviewerMatches prNumber reviewerThread tick =
+    let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+        state = SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber (WorkerIdle (ThreadId "worker-thread")) (Just (ReviewerIdle reviewerThread)))
+     in case (tick.loopObservedTick, IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation state prNumber) of
+          (Just observed, Right projection) ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          _ -> False
+  indexedPostMergeReviewerReadyMatches prNumber reviewerThread tick =
+    let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+        state = SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig prNumber (WorkerIdle (ThreadId "worker-thread")))
+     in case (tick.loopObservedTick, IssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation state reviewerThread) of
+          (Just observed, Right projection) ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          _ -> False
 
 automaticIssueFinalReviewFindingsRequestRework :: IO Bool
 automaticIssueFinalReviewFindingsRequestRework = do
@@ -6613,7 +6671,8 @@ workflowFacadeExtractionTests = do
       , workflowIssueImplementIndexedSpecMatchesCompatibilityForPolicyTransitions
       , workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections
-      , workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanPrSetupAndImplementationWorker
+      , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProjections
+      , workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly
       , workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
@@ -10835,8 +10894,8 @@ workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility =
   wrongDomainState =
     SomeWatcherState (PlanningReady (PlannerConfig issueConfig.issueRepo (maxParallelForTest 1) []))
 
-workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanPrSetupAndImplementationWorker :: IO Bool
-workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanPrSetupAndImplementationWorker = do
+workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly :: IO Bool
+workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly = do
   let routingPaths =
         [ "src" </> "CodexWatcher" </> "Domain" </> "IssueImplement" </> "Loop.hs"
         , "src" </> "CodexWatcher" </> "DaemonLoop.hs"
@@ -10869,19 +10928,29 @@ workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
         , "projectIssueImplementationBlockedImplementationReadyObservation"
         , "projectIssueImplementationBlockedImplementingObservation"
         , "projectIssueImplementationCompletedImplementingObservation"
+        , "projectIssueImplementReviewHandoffInitializedHandoffReadyObservation"
+        , "projectIssueImplementReviewHandoffInitializedHandoffInitializedObservation"
+        , "projectIssueImplementReviewHandoffInitializedWaitingForPrMergeObservation"
+        , "projectIssueImplementReviewHandoffStartedHandoffInitializedObservation"
+        , "projectIssueImplementReviewHandoffStartedWaitingForPrMergeObservation"
+        , "projectIssueImplementationCompletedHandoffReadyObservation"
+        , "projectIssueImplementationCompletedHandoffInitializedObservation"
+        , "projectIssueImplementationCompletedWaitingForPrMergeObservation"
+        , "projectIssueImplementReviewerThreadReadyHandoffReadyObservation"
+        , "projectIssueImplementReviewerThreadReadyHandoffInitializedObservation"
+        , "projectIssueImplementReviewerThreadReadyWaitingForPrMergeObservation"
+        , "projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation"
+        , "projectIssueImplementReviewerThreadReadyPostMergeReviewReadyObservation"
+        , "projectIssueImplementPullRequestMergedWaitingForPrMergeObservation"
         ]
       forbiddenNeedles =
-        [ "projectIssueImplementReviewHandoff"
-        , "projectIssueImplementPullRequestMerged"
-        , "projectIssueImplementReviewerThreadReady"
-        , "projectIssueImplementPostMerge"
+        [ "projectIssueImplementPullRequestMergedPostMergeReview"
+        , "projectIssueImplementPullRequestMergedWaitingForIssueClose"
+        , "projectIssueImplementPostMergeReviewStartedObservation"
+        , "projectIssueImplementPostMergeReviewerOutcome"
         , "projectIssueImplementIssueClosed"
-        , "projectIssueImplementationCompletedHandoff"
-        , "projectIssueImplementationCompletedWaitingForPrMerge"
-        , "ObservedReviewHandoff"
-        , "ObservedIssueReviewerThreadReady"
-        , "ObservedPullRequestMerged"
-        , "ObservedPostMerge"
+        , "ObservedPostMergeReviewStarted"
+        , "ObservedPostMergeReviewerOutcome"
         , "ObservedIssueClosed"
         ]
       missingRequired =
@@ -10895,8 +10964,8 @@ workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
         , needle `Text.isInfixOf` source
         ]
   sequenceAnd
-    [ assert "indexed workflow issue implement daemon routes required item-020 projectors" (null missingRequired)
-    , assert "indexed workflow issue implement daemon does not route item-021-plus projectors" (null violations)
+    [ assert "indexed workflow issue implement daemon routes required item-020 and item-021 projectors" (null missingRequired)
+    , assert "indexed workflow issue implement daemon does not route item-022-plus projectors" (null violations)
     ]
 
 data IssueImplementDaemonProjectionCase = IssueImplementDaemonProjectionCase
@@ -10911,6 +10980,12 @@ workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementa
 workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections = do
   dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases
   executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases
+  pure (and dryRunResults && and executeResults)
+
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProjections :: IO Bool
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProjections = do
+  dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonHandoffAndMergeWaitProjectionCases
+  executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonHandoffAndMergeWaitProjectionCases
   pure (and dryRunResults && and executeResults)
 
 runIssueImplementDaemonProjectionCase :: ActionExecutionMode -> IssueImplementDaemonProjectionCase -> IO Bool
@@ -11148,6 +11223,177 @@ issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases =
     SomeWatcherState (IssueImplementing issueConfig (Just prNumber) (WorkerActive (ActiveTurn workerThread implementationTurn)))
   implementingNoPrState =
     SomeWatcherState (IssueImplementing issueConfig Nothing (WorkerActive (ActiveTurn workerThread implementationTurn)))
+
+issueImplementDaemonHandoffAndMergeWaitProjectionCases :: [IssueImplementDaemonProjectionCase]
+issueImplementDaemonHandoffAndMergeWaitProjectionCases =
+  [ IssueImplementDaemonProjectionCase
+      "handoff initialization from ready"
+      handoffReadyPrefix
+      handoffReadyState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffReadyObservation handoffReadyState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "duplicate handoff initialization from initialized"
+      handoffInitializedPrefix
+      handoffInitializedState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffInitializedObservation handoffInitializedState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "duplicate handoff initialization while waiting merge"
+      waitingMergeWithReviewerPrefix
+      waitingMergeWithReviewerState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "handoff initialization wrong PR blocks"
+      handoffReadyPrefix
+      handoffReadyState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffInitialized stalePr))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffReadyObservation handoffReadyState stalePr)
+  , IssueImplementDaemonProjectionCase
+      "handoff start from initialized"
+      handoffInitializedPrefix
+      handoffInitializedState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffStartedHandoffInitializedObservation handoffInitializedState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "duplicate handoff start while waiting merge"
+      waitingMergeWithReviewerPrefix
+      waitingMergeWithReviewerState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffStartedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "handoff start wrong PR blocks"
+      handoffInitializedPrefix
+      handoffInitializedState
+      (DaemonIssueImplementObservation (ObservedReviewHandoffStarted stalePr))
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffStartedHandoffInitializedObservation handoffInitializedState stalePr)
+  , IssueImplementDaemonProjectionCase
+      "implementation completion idempotent from handoff ready"
+      handoffReadyPrefix
+      handoffReadyState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber (Just reviewerThread)))
+      (IssueImplementIndexed.projectIssueImplementationCompletedHandoffReadyObservation handoffReadyState prNumber (Just reviewerThread))
+  , IssueImplementDaemonProjectionCase
+      "implementation completion idempotent from handoff initialized"
+      handoffInitializedPrefix
+      handoffInitializedState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber (Just reviewerThread)))
+      (IssueImplementIndexed.projectIssueImplementationCompletedHandoffInitializedObservation handoffInitializedState prNumber (Just reviewerThread))
+  , IssueImplementDaemonProjectionCase
+      "implementation completion idempotent while waiting merge"
+      waitingMergeWithReviewerPrefix
+      waitingMergeWithReviewerState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber (Just reviewerThread)))
+      (IssueImplementIndexed.projectIssueImplementationCompletedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber (Just reviewerThread))
+  , IssueImplementDaemonProjectionCase
+      "implementation completion wrong PR blocks after handoff"
+      handoffReadyPrefix
+      handoffReadyState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted stalePr Nothing))
+      (IssueImplementIndexed.projectIssueImplementationCompletedHandoffReadyObservation handoffReadyState stalePr Nothing)
+  , IssueImplementDaemonProjectionCase
+      "reviewer thread ready from handoff ready"
+      handoffReadyNoReviewerPrefix
+      handoffReadyNoReviewerState
+      (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady reviewerThread))
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffReadyObservation handoffReadyNoReviewerState reviewerThread)
+  , IssueImplementDaemonProjectionCase
+      "reviewer thread ready from handoff initialized"
+      handoffInitializedNoReviewerPrefix
+      handoffInitializedNoReviewerState
+      (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady reviewerThread))
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffInitializedObservation handoffInitializedNoReviewerState reviewerThread)
+  , IssueImplementDaemonProjectionCase
+      "reviewer thread ready while waiting merge"
+      waitingMergeNoReviewerPrefix
+      waitingMergeState
+      (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady reviewerThread))
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyWaitingForPrMergeObservation waitingMergeState reviewerThread)
+  , IssueImplementDaemonProjectionCase
+      "reviewer thread ready from post-merge pending"
+      postMergePendingPrefix
+      postMergePendingState
+      (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady reviewerThread))
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation postMergePendingState reviewerThread)
+  , IssueImplementDaemonProjectionCase
+      "reviewer thread ready refreshes post-merge ready"
+      postMergeReadyPrefix
+      postMergeReadyState
+      (DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady refreshedReviewer))
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewReadyObservation postMergeReadyState refreshedReviewer)
+  , IssueImplementDaemonProjectionCase
+      "pull request merged without reviewer enters pending"
+      waitingMergeNoReviewerPrefix
+      waitingMergeState
+      (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation waitingMergeState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "pull request merged with reviewer enters review ready"
+      waitingMergeWithReviewerPrefix
+      waitingMergeWithReviewerState
+      (DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber))
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "pull request merged wrong PR blocks"
+      waitingMergeWithReviewerPrefix
+      waitingMergeWithReviewerState
+      (DaemonIssueImplementObservation (ObservedPullRequestMerged stalePr))
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation waitingMergeWithReviewerState stalePr)
+  ]
+ where
+  issueConfig = issueImplementIndexedConfig
+  prNumber = PrNumber 7
+  stalePr = PrNumber 8
+  workerThread = ThreadId "worker-thread"
+  reviewerThread = ThreadId "reviewer-thread"
+  refreshedReviewer = ThreadId "reviewer-thread-refreshed"
+  planTurn = TurnId "turn-plan"
+  implementationTurn = TurnId "turn-impl"
+  readyToPlanPrefix =
+    [ IssueImplementInitialized issueConfig workerThread
+    , IssuePullRequestReusedEvent prNumber
+    ]
+  inPlanModePrefix =
+    readyToPlanPrefix <> [IssuePlanTurnStartedEvent planTurn]
+  planReadyPrefix =
+    inPlanModePrefix <> [IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)]
+  implementationReadyPrPrefix =
+    planReadyPrefix <> [IssuePullRequestBodyUpdatedEvent prNumber]
+  implementingPrPrefix =
+    implementationReadyPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
+  handoffReadyPrefix =
+    implementingPrPrefix <> [IssueImplementationCompletedEvent prNumber (Just reviewerThread)]
+  handoffReadyNoReviewerPrefix =
+    implementingPrPrefix <> [IssueImplementationCompletedEvent prNumber Nothing]
+  handoffInitializedPrefix =
+    handoffReadyPrefix <> [IssueReviewHandoffInitializedEvent prNumber]
+  handoffInitializedNoReviewerPrefix =
+    handoffReadyNoReviewerPrefix <> [IssueReviewHandoffInitializedEvent prNumber]
+  waitingMergeWithReviewerPrefix =
+    handoffInitializedPrefix <> [IssueReviewHandoffStartedEvent prNumber]
+  waitingMergeNoReviewerPrefix =
+    handoffInitializedNoReviewerPrefix <> [IssueReviewHandoffStartedEvent prNumber]
+  postMergePendingPrefix =
+    waitingMergeNoReviewerPrefix <> [IssuePullRequestMergedEvent prNumber]
+  postMergeReadyPrefix =
+    waitingMergeWithReviewerPrefix <> [IssuePullRequestMergedEvent prNumber]
+  handoffReadyState =
+    SomeWatcherState (IssueHandoffReady issueConfig prNumber (WorkerIdle workerThread) (Just (ReviewerIdle reviewerThread)))
+  handoffReadyNoReviewerState =
+    SomeWatcherState (IssueHandoffReady issueConfig prNumber (WorkerIdle workerThread) Nothing)
+  handoffInitializedState =
+    SomeWatcherState (IssueHandoffInitialized issueConfig prNumber (WorkerIdle workerThread) (Just (ReviewerIdle reviewerThread)))
+  handoffInitializedNoReviewerState =
+    SomeWatcherState (IssueHandoffInitialized issueConfig prNumber (WorkerIdle workerThread) Nothing)
+  waitingMergeState =
+    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber (WorkerIdle workerThread) Nothing)
+  waitingMergeWithReviewerState =
+    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber (WorkerIdle workerThread) (Just (ReviewerIdle reviewerThread)))
+  postMergePendingState =
+    SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig prNumber (WorkerIdle workerThread))
+  postMergeReadyState =
+    SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
 
 issueImplementIndexedSpecMatchesCompatibility :: IssueImplementIndexedPolicyCase -> IO Bool
 issueImplementIndexedSpecMatchesCompatibility (IssueImplementIndexedPolicyCase title prefix state issueObservation indexedState indexedObservation indexedEvent projection expectedTags) =
