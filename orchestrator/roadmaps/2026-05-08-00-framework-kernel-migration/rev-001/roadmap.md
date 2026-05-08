@@ -147,10 +147,18 @@ DSL with equal event, state, effect, replay, permission, and dry-run behavior.
 Parallel lane: default serial
 Coordination notes: DSL work should not introduce `liftIO`; all mutation must
 remain typed effects interpreted later.
+Progress: round 028 completed the DSL core ergonomics and law slice in
+`f3b2280`, adding a pure `failWorkflow` constructor plus focused
+`watcher-core-test` coverage for `WorkflowM` effect ordering, failure
+short-circuiting, phase-changing `advance`, and planned pre/post commit
+projection parity for both moifold and DocsMigration specs. No real
+DocsMigration or moifold transitions were ported yet, so the milestone remains
+pending on direction 005.
 
 Candidate directions:
 
 - Direction id: `direction-004-dsl-core-ergonomics`
+  Status: complete via round 028, merged as `f3b2280`.
   Summary: tighten the writer-like DSL API and tests around effect
   accumulation, phase-changing `advance`, and post/pre commit projection.
   Why it matters now: the current DSL is intentionally minimal and needs law
