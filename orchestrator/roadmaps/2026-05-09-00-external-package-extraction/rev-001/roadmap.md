@@ -254,8 +254,13 @@ entrypoint, focused package-validation documentation, exact package-level
 `cabal check` and `cabal sdist` commands, expected local tarball paths, tarball
 descriptor inspection, ignored-artifact handling, and no-upload evidence for
 `agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`.
-Milestone 003 remains in progress because CI matrix coverage and refreshed
-package-boundary assertions are still pending in directions 009 and 010.
+Round 044 completed CI matrix package validation in `55aeb31`, adding the
+explicit GHC `9.12.2` / Cabal `3.14.2.0` matrix row,
+installing `ripgrep`, and running `cabal build all`, `cabal test
+watcher-core-test`, and `scripts/validate-workflow-packages.sh` in CI without
+adding any upload or publication command. Milestone 003 remains in progress
+because refreshed package-boundary assertions are still pending in direction
+010.
 
 Candidate directions:
 
@@ -273,6 +278,7 @@ Candidate directions:
   or scripts.
 
 - Direction id: `direction-009-ci-build-matrix`
+  Status: complete via round 044, merged as `55aeb31`.
   Summary: add or adapt CI to build, test, check, and package the workflow
   packages across the supported compiler matrix.
   Why it matters now: external users need confidence that package candidates
