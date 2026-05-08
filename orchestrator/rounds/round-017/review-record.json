@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-003",
+  "roadmap_item_id": "item-017-indexed-issue-implementation-next-domain-plan",
+  "decision": "approved",
+  "evidence_summary": "Artifact-only round approved: rev-004 IssueImplement roadmap, verification, and retry contracts are present; item 017 is done; ordered items 018-024 cover policy through lifecycle hardening; no production, test, golden, rev-003, or worker-plan changes; git diff --check passed."
+}
