@@ -169,13 +169,13 @@ explicitly changes them.
     Merge after: item-021-indexed-issue-implementation-handoff-and-merge-wait-daemon
     Completion notes: Round 022 approved and merged the live IssueImplement post-merge final-review turn start and clean, rework-required, incomplete, and blocked final-review outcome routes through the moifold-owned indexed IssueImplement projection in commit `5254194`, then projected back to the existing daemon transaction surface. Reviewer evidence covered dry-run and execute parity, event and planned-effect parity, request-id behavior, compatibility writes, append ordering, replay source state, final labels, domain ownership for `IssueFinalReviewOutcome`, prompt/version validation, reviewed-commit validation, missing-field diagnostics, source-scan guards keeping item-023 issue-close routes on compatibility fallback, and package-boundary preservation, plus passing focused indexed daemon, automatic merge/final-review, turn-classifier, full watcher-core, build, and whitespace checks with no staged changes.
 
-17. [pending] Route IssueImplement issue-close terminal daemon observations through indexed projection
+17. [done] Route IssueImplement issue-close terminal daemon observations through indexed projection
     Item id: item-023-indexed-issue-implementation-close-daemon
     Depends on: item-022-indexed-issue-implementation-post-merge-review-daemon
     Parallel safe: no
     Parallel group: none
     Merge after: item-022-indexed-issue-implementation-post-merge-review-daemon
-    Completion notes: Route issue close polling and terminal close observation through indexed projection. Preserve `runIssueWaitingForIssueClose`, `retryCloseIssue`, `ObservedIssueClosed`, `CloseIssue` before `SleepUntilNextPoll` retry behavior, remote issue closed detection, idle waiting text after close command, terminal `IssueComplete` evidence, `StopDaemon`, compatibility writes, daemon result shape, dry-run text, command rendering, and wrong-PR close rejection. Do not change GitHub close semantics or issue terminal success criteria.
+    Completion notes: Round 023 approved and merged the live `IssueWaitingForIssueClose` plus `ObservedIssueClosed` daemon route through the moifold-owned indexed IssueImplement projection in commit `b712ce2`, then projected back to the existing daemon transaction surface. Reviewer evidence covered close polling and retry ownership preservation, `CloseIssue` before `SleepUntilNextPoll`, remote closed detection, wrong-PR close rejection, dry-run and execute parity, idle waiting text, terminal `IssueComplete` evidence, `StopDaemon`, compatibility writes, request-id behavior, source-scan guards keeping item-024 lifecycle routes untouched, and package-boundary preservation, plus passing full watcher-core, build, whitespace, and staged-whitespace checks with no staged changes.
 
 18. [pending] Harden IssueImplement lifecycle, repair, and child ownership after full indexed routing
     Item id: item-024-indexed-issue-implementation-lifecycle-hardening
