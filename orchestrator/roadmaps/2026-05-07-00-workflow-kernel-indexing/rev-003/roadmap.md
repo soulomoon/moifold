@@ -91,13 +91,13 @@ revision explicitly changes them.
    Merge after: item-011-indexed-pr-review-daemon-path
    Completion notes: Round 012 selected `IssuePlanning` as the next indexed adoption domain after PR-review indexed policy and one live daemon path were covered. `IssuePlanning` is smaller and policy-focused, with concrete parity anchors for planning start, issue creation requests, graph update and normalization, ready-issues-fixed, scope completion, retry, blocked, completed, replay, daemon dry-run/execute, graph/scope validation, and fanout boundaries. `IssueImplement` is explicitly deferred because PR lifecycle, implementation worker, review handoff, merge wait, post-merge review, issue close, and follow-up behavior form a larger side-effect surface that should be planned after the issue-planning indexed shape is proven.
 
-7. [pending] Port issue-planning policy transitions to the indexed API
+7. [done] Port issue-planning policy transitions to the indexed API
    Item id: item-013-indexed-issue-planning-policy
    Depends on: item-012-indexed-next-domain-plan
    Parallel safe: no
    Parallel group: none
    Merge after: item-012-indexed-next-domain-plan
-   Completion notes: Add a moifold-owned indexed issue-planning adapter for `IssuePlanningTurnStarted`, `IssuePlanningIssuesRequested`, `IssuePlanningGraphUpdated`, `IssuePlanningReadyIssuesFixed`, `IssuePlanningScopeCompleted`, `IssuePlanningTurnRetryRequested`, `IssuePlanningTurnCompleted`, and `WatcherBlocked` from valid planning states. Prove invalid-observation parity. Preserve event labels, source labels, target labels, final state labels, pre-commit effects, post-commit effects, observed effects, replay results, replay effects, effect validation, effect permissions, dry-run reports, action ordering, request-id progression, compatibility writes, graph validation results, scope validation failures, and invalid-observation failures.
+   Completion notes: Round 013 approved and merged the moifold-owned indexed issue-planning adapter in commit `e2a12a7`, covering `IssuePlanningTurnStarted`, `IssuePlanningIssuesRequested`, `IssuePlanningGraphUpdated`, `IssuePlanningReadyIssuesFixed`, `IssuePlanningScopeCompleted`, `IssuePlanningTurnRetryRequested`, `IssuePlanningTurnCompleted`, and `WatcherBlocked` policy transitions. Reviewer evidence covered graph validation success and failure cases, invalid-observation parity, replay/effect/permission/dry-run/request-id/action-ordering parity, compatibility write preservation, unchanged live daemon routing and schema/core ownership surfaces, plus passing focused indexed and issue-planning tests, `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
 8. [pending] Route live issue-planning daemon start through the indexed adapter
    Item id: item-014-indexed-issue-planning-daemon-start
