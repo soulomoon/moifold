@@ -311,10 +311,20 @@ them.
 Parallel lane: `docs-and-examples`
 Coordination notes: this is intentionally last; do not run package publishing
 or remove broad compatibility wrappers before the readiness report is reviewed.
+Progress: round 034 completed the API-freeze documentation slice in `11692a5`,
+adding the implemented internal API-freeze page and aligning framework docs for
+`WorkflowSpec`, the pure DSL, event-log/transaction contracts, the Codex
+adapter, and the GitHub adapter with the current source-backed surfaces. The
+docs explicitly keep moifold issue/PR lifecycle policy, runtime ownership,
+healthcheck, repair, compatibility files, publication, and deprecation policy
+outside the reusable framework contract. The milestone remains pending on
+direction 011, the package-readiness report and any justified Cabal or
+package-boundary cleanup.
 
 Candidate directions:
 
 - Direction id: `direction-010-api-freeze-and-docs`
+  Status: complete via round 034, merged as `11692a5`.
   Summary: align framework docs with the implemented API and document the
   stable contract versus remaining moifold-owned surfaces.
   Why it matters now: docs should become an API contract only after the code
@@ -327,6 +337,7 @@ Candidate directions:
   improve navigation.
 
 - Direction id: `direction-011-package-readiness-report`
+  Status: pending.
   Summary: produce a concrete extraction readiness report and any required
   Cabal/package-boundary cleanup.
   Why it matters now: publishing should follow a checklist, not optimism.
