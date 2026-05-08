@@ -38,13 +38,13 @@ filesystem writes, app-server startup, GitHub command execution, or concrete
    Merge after: item-007-indexed-pr-review-checking
    Completion notes: Round 008 approved and merged the indexed PR-review fix-worker outcome adapter for completed, incomplete, and blocked worker observations. Reviewer evidence covered classifier-backed `AgentOutputClass` preservation, invalid observation parity, replay/effect/validation/permission parity, unchanged golden/event/daemon/dry-run/action-ordering surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
-3. [pending] Port PR-review reviewer outcome transitions to the indexed API
+3. [done] Port PR-review reviewer outcome transitions to the indexed API
    Item id: item-009-indexed-pr-review-reviewer-outcomes
    Depends on: item-008-indexed-pr-review-worker-outcomes
    Parallel safe: no
    Parallel group: none
    Merge after: item-008-indexed-pr-review-worker-outcomes
-   Completion notes: Cover reviewer outcomes such as `PrReviewCleanFound`, `PrReviewProblemsAdded`, `PrReviewReviewIncomplete`, reviewer-blocked transitions, and verification clean or missing-thread handling. Keep normalized classifier evidence and event-log replay parity intact.
+   Completion notes: Round 009 approved and merged the indexed PR-review reviewer outcome adapter for clean, problems-added, incomplete, blocked, verification-clean, and missing-thread verification outcomes. Reviewer evidence covered MoifoldSpec delegation, classifier-backed outputs, invalid observations, replay/apply/effect/permission parity, unchanged live daemon routing and compatibility behavior, preservation of golden/daemon/dry-run/action-ordering surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
 4. [pending] Complete indexed mergeability and merge terminal coverage
    Item id: item-010-indexed-pr-review-mergeability-complete
