@@ -3,6 +3,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
+-- | Pure workflow-planning DSL for accumulating inspectable effect plans and
+-- turning them into planned transitions. The DSL has no arbitrary runtime
+-- authority is provided later by permission checks and interpreters.
 module CodexWatcher.Workflow.DSL
   ( Transition (..)
   , WorkflowM (..)

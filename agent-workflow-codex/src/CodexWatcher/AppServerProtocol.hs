@@ -3,6 +3,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Deterministic JSON-RPC request construction for the Codex app-server
+-- protocol. Runtime process startup and prompt policy are outside this
+-- protocol module.
 module CodexWatcher.AppServerProtocol
   ( AppServerRequest (..)
   , ThreadStartOptions (..)

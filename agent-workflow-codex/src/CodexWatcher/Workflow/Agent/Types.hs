@@ -3,6 +3,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Typed agent role metadata, thread and turn plans, turn references, retry
+-- decisions, and side-effect scope labels. Concrete role scheduling and prompt
+-- policy remain outside the adapter package.
 module CodexWatcher.Workflow.Agent.Types
   ( AgentRoleId (..)
   , AgentRetryDecision (..)

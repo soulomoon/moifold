@@ -1,0 +1,84 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-004-public-docs-examples",
+  "direction_id": "direction-011-package-readmes-and-haddock",
+  "extracted_item_id": "item-046-package-readmes-and-haddock",
+  "roadmap_item_id": "item-046-package-readmes-and-haddock",
+  "status": "approved",
+  "decision": "approved",
+  "findings": [],
+  "tests_run": [
+    {
+      "command": "git diff --cached --name-only",
+      "result": "passed",
+      "summary": "Staged payload does not include orchestrator/state.json."
+    },
+    {
+      "command": "git diff --cached --check",
+      "result": "passed",
+      "summary": "No whitespace errors in the staged payload."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed",
+      "summary": "No whitespace errors in the full working diff."
+    },
+    {
+      "command": "cabal haddock agent-workflow-core agent-workflow-codex agent-workflow-github",
+      "result": "passed",
+      "summary": "Generated Haddock for all three packages; missing per-export documentation warnings remain outside this module-header round."
+    },
+    {
+      "command": "scripts/validate-workflow-packages.sh",
+      "result": "passed",
+      "summary": "cabal check passed for all three descriptors, source distributions were generated, and no upload/publication command was run."
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed",
+      "summary": "Built the workflow packages, moifold library, and moifold executable."
+    },
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "passed",
+      "summary": "watcher-core-test passed."
+    },
+    {
+      "command": "README module list comparison",
+      "result": "passed",
+      "summary": "Each README module list matches its package descriptor's exposed-modules."
+    },
+    {
+      "command": "Haddock module-header scan",
+      "result": "passed",
+      "summary": "Every exposed module in the three package source trees has a module-level Haddock header."
+    },
+    {
+      "command": "static overclaim/publication scan",
+      "result": "passed",
+      "summary": "No upload commands, release notes, changelog entries, examples, consumer guides, stable 1.0 claims, or package-publication overclaims were found."
+    },
+    {
+      "command": "static ownership/non-goal scan",
+      "result": "passed",
+      "summary": "Moifold-owned lifecycle, runtime, healthcheck, repair, prompt, event-schema, and compatibility terms appear only as outside-package or non-goal wording."
+    },
+    {
+      "command": "descriptor diff inspection",
+      "result": "passed",
+      "summary": "Descriptor changes are limited to extra-doc-files: README.md."
+    },
+    {
+      "command": "staged path scope scan",
+      "result": "passed",
+      "summary": "No examples, changelog/release, CI/script, golden/fixture, facade, roadmap, or staged state paths were found."
+    }
+  ],
+  "risks": [
+    "Haddock still reports missing per-export documentation, but the selected round scoped public docs to package READMEs and module headers.",
+    "orchestrator/state.json remains modified in the live worktree as unstaged controller-owned bookkeeping; it is not staged and is not approved as part of this payload."
+  ],
+  "evidence_summary": "Approved staged docs payload. READMEs match exposed modules and describe local external-package candidates using thesis, architecture, guarantees, and non-goals. Haddock headers cover exposed modules. Descriptor edits are limited to README doc files. Validation passed for Haddock, package validation, build, watcher-core-test, whitespace checks, and static scope/overclaim scans; orchestrator/state.json is not staged."
+}

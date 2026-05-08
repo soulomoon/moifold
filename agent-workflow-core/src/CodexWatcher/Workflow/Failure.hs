@@ -4,6 +4,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Small reusable failure classification helpers for transient failures,
+-- fatal failures, policy violations, and external state mismatches. Concrete
+-- workflows decide how classifications affect lifecycle state.
 module CodexWatcher.Workflow.Failure
   ( FailureClass (..)
   , FailureClassification (..)

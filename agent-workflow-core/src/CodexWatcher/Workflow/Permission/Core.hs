@@ -6,6 +6,9 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Reusable permission policies and per-effect validation reports over a
+-- workflow spec. Permission checks run before interpretation; concrete effect
+-- authority stays with the workflow and runtime adapter.
 module CodexWatcher.Workflow.Permission.Core
   ( WorkflowEffectPermissionCheck (..)
   , WorkflowPermissionPolicy (..)

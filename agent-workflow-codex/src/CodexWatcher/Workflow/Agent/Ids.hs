@@ -1,5 +1,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 
+-- | Typed Codex app-server request, thread, and turn identifiers plus
+-- deterministic request-id progression.
 module CodexWatcher.Workflow.Agent.Ids
   ( RequestId (..)
   , ThreadId (..)

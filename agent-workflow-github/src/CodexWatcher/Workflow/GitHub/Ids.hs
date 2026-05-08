@@ -1,5 +1,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 
+-- | Typed GitHub repository, issue, PR, branch, review-thread, and commit-SHA
+-- identifiers shared by pure GitHub parser and command-spec surfaces.
 module CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)
   , CommitSha (..)

@@ -6,6 +6,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Pure parsers and classifiers for GitHub and git observations. The package
+-- owns remote-state decoding and diagnostics, not command execution,
+-- healthcheck, repair, or lifecycle decisions.
 module CodexWatcher.Workflow.GitHub.Remote
   ( GhIssue (..)
   , GhPullRequest (..)

@@ -1,3 +1,6 @@
+-- | Generic event commit boundary for encoding one event and appending it
+-- through a caller-owned committer. Concrete append targets, locking, backups,
+-- and event-log file names remain workflow-owned.
 module CodexWatcher.Workflow.EventLog.Commit.Core
   ( WorkflowEventCommitter (..)
   , appendEncodedWorkflowEvent

@@ -1,5 +1,8 @@
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Observation bridge from classified app-server turns to workflow
+-- observations and planned transitions. Event commits and lifecycle acceptance
+-- decisions remain with the concrete workflow spec.
 module CodexWatcher.Workflow.Observation.Agent
   ( classifiedAgentTurnObservation
   , classifiedAgentTurnObservationPayload

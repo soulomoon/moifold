@@ -5,6 +5,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Codex app-server client parsing, turn materialization, fallback request
+-- handling, and client failure formatting. This module parses observations; it
+-- does not decide workflow acceptance or retry policy.
 module CodexWatcher.Workflow.Agent.Codex.Client
   ( AppServerClientFailure (..)
   , AppServerIncoming (..)

@@ -3,6 +3,9 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Core workflow spec contract for the pure state, event, observation, and
+-- effect-planning boundary. Concrete workflows provide their own states,
+-- events, effect plans, replay, permissions, and interpreters.
 module CodexWatcher.Workflow.Spec
   ( PlannedTransition (..)
   , WorkflowSpec (..)

@@ -5,6 +5,10 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Operator-facing audit projections for workflow dry-run, success, and
+-- failure outcomes. This module records reusable tick evidence and
+-- recommendations; concrete daemon loops and recovery policy remain outside
+-- the core package.
 module CodexWatcher.Workflow.Audit
   ( EventLogFixtureContract (..)
   , WorkflowNextDaemonRecommendation (..)

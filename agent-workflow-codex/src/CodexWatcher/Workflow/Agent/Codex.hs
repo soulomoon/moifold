@@ -1,6 +1,9 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
+-- | High-level Codex adapter helpers that compose protocol construction,
+-- app-server parsing, interpreter calls, and typed thread or turn results.
+-- Prompt content and product lifecycle decisions remain workflow-owned.
 module CodexWatcher.Workflow.Agent.Codex
   ( agentThreadReadRequest
   , agentThreadInterruptRequest

@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Reusable daemon-facing projections over workflow transaction results and
+-- failures. This module does not own daemon scheduling, process leases, repair,
+-- or product runtime policy.
 module CodexWatcher.Workflow.Daemon.Core
   ( WorkflowDaemonTickResult (..)
   , WorkflowObservedDaemonTickFailure (..)

@@ -1,5 +1,8 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
+-- | Mapping from typed agent thread and turn plans to Codex app-server protocol
+-- requests. The module owns request translation, not role prompt text or
+-- lifecycle routing.
 module CodexWatcher.Workflow.Agent.Codex.Protocol
   ( agentThreadInterruptRequest
   , agentThreadPlanFromThreadStartOptions

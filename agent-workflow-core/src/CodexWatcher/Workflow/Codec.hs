@@ -2,6 +2,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Generic workflow codec contracts for event type labels, schema versions,
+-- metadata labels, decode errors, and validation. Concrete JSON schemas and
+-- old-log compatibility policy are supplied by each workflow.
 module CodexWatcher.Workflow.Codec
   ( WorkflowCodecContract (..)
   , WorkflowCodecRoundTripFailure (..)

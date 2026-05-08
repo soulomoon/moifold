@@ -6,6 +6,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | Websocket transport, endpoint sessions, timeouts, initialized request
+-- handling, and endpoint-backed interpreters for Codex app-server requests.
+-- Starting or supervising the app-server process remains product-owned.
 module CodexWatcher.Workflow.Agent.Codex.Transport
   ( AppServerClientOptions (..)
   , AppServerConnection (..)

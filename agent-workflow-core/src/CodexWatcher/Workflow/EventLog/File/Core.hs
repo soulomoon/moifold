@@ -2,6 +2,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Generic line-numbered event-log decoding helpers for nonblank bytestring
+-- lines. Opening files, choosing event-log paths, and repairing bad logs remain
+-- concrete workflow responsibilities.
 module CodexWatcher.Workflow.EventLog.File.Core
   ( WorkflowEventLogLineDecodeError (..)
   , decodeWorkflowEventLogLines

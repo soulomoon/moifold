@@ -7,6 +7,9 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Pure workflow event-log replay helpers, fixture contracts, replay
+-- summaries, and transition diagnostics. The core package does not read files,
+-- execute effects, or own concrete event schemas.
 module CodexWatcher.Workflow.EventLog.Core
   ( EventLogFixtureContract (..)
   , WorkflowReplayFailure (..)

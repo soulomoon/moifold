@@ -1,6 +1,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Pure @gh@ and @git@ command specifications. This module renders command
+-- data for an external interpreter; it does not execute commands or decide
+-- issue, PR, merge, or review lifecycle policy.
 module CodexWatcher.Workflow.GitHub.Command
   ( GitHubCommandSpec (..)
   , ghIssueListOpenFields

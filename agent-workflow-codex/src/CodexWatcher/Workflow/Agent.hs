@@ -1,6 +1,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 
+-- | Typed agent roles and deterministic classification of app-server turns.
+-- This module normalizes agent output; concrete workflows decide whether an
+-- output becomes durable lifecycle state.
 module CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)
   , AgentRole (..)

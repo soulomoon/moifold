@@ -1,5 +1,8 @@
 {-# LANGUAGE DerivingStrategies #-}
 
+-- | Generic effect-plan metadata, dry-run traversal, execution traversal, and
+-- commit-order partitioning. Concrete effects, command text, and runtime
+-- interpreters are supplied by adapters or products.
 module CodexWatcher.Workflow.Execution.Core
   ( EffectCommitOrder (..)
   , EffectIdempotency (..)

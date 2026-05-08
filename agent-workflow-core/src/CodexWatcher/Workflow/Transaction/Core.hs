@@ -6,6 +6,9 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Observed and prepared workflow transaction runners with explicit replay,
+-- validation, pre-commit action, event commit, post-commit replay, callback,
+-- and post-commit action stages.
 module CodexWatcher.Workflow.Transaction.Core
   ( WorkflowObservedTransactionHooks (..)
   , WorkflowObservedTransactionFailure (..)

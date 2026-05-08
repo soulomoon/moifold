@@ -6,6 +6,9 @@
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Indexed compatibility surface and bridge helpers for the unindexed
+-- workflow spec. This module preserves the implemented indexed adapter shape;
+-- it does not claim a richer public indexed redesign.
 module CodexWatcher.Workflow.Indexed.Spec
   ( IndexedPlannedTransition (..)
   , IndexedWorkflowSpec (..)
