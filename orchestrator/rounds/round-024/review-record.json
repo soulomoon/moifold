@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-004",
+  "roadmap_item_id": "item-024-indexed-issue-implementation-lifecycle-hardening",
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal test watcher-core-test, cabal build all, diff whitespace checks, required source scans, additional lifecycle routing scans, and golden/event codec diff checks all passed."
+}

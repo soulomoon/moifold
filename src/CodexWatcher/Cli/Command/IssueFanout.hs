@@ -18,6 +18,8 @@ module CodexWatcher.Cli.Command.IssueFanout
   , startIssueImplementerChildDetailed
   , resolveFanoutActiveIssues
   , issueImplementerRuntimeStatus
+  , issueImplementerLaunchManifest
+  , issueImplementerChildArgs
   , readyIssueStatusFromRuntime
   , retryableLaunchCommandFailure
   ) where

@@ -7,13 +7,14 @@
 module HealthcheckSpec
   ( prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
   , prop_healthcheckDaemonRequiredStatuses
+  , prop_healthcheckIssueImplementLifecycleReporting
   , prop_healthcheckSingletonDomains
   , prop_healthcheckSummaryJsonKeepsKindField
   , prop_healthcheckTypedAnalyzerDispatch
   ) where
 
 import CodexWatcher.Healthcheck
-import CodexWatcher.Healthcheck.Analysis (analyzeItem)
+import CodexWatcher.Healthcheck.Analysis (analyzeCrossItemRules, analyzeItem, logicReview, summaryObject)
 import CodexWatcher.Healthcheck.Types
 import CodexWatcher.Runtime.Process (skippedCommand)
 import CodexWatcher.Core.Kinds (Domain (..))
@@ -21,6 +22,7 @@ import Data.Aeson (Value (..), toJSON)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Text (Text)
+import Data.Text qualified as Text
 
 prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork :: Bool
 prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork =
@@ -80,6 +82,44 @@ prop_healthcheckTypedAnalyzerDispatch =
   implementSummary = sampleSummaryWith Nothing Nothing (Just False) (Just 8)
   reviewSummary :: WatcherSummary 'PrReview
   reviewSummary = sampleSummaryWith Nothing Nothing (Just True) (Just 8)
+
+prop_healthcheckIssueImplementLifecycleReporting :: Bool
+prop_healthcheckIssueImplementLifecycleReporting =
+  not (containsMessage "issue status is complete but daemon is not running" terminalProblems)
+    && containsMessage "issue status is in_progress but daemon is not running" stoppedProblems
+    && containsMessage "workdir has uncommitted changes while daemon is stopped" stoppedProblems
+    && containsMessage "multiple active implementers own the same issue: owner/repo#7 implementer, owner/repo#7 implementer" duplicateProblems
+    && summaryField "activeImplementers" == Just (Number 2)
+    && "This Haskell healthcheck is read-only." `Text.isInfixOf` Text.pack (show logicReview)
+ where
+  terminalProblems =
+    analyzeItem (SomeWatcherSummary SIssueImplement (issueSummary (Just "complete") False False))
+  stoppedProblems =
+    analyzeItem (SomeWatcherSummary SIssueImplement (issueSummary (Just "in_progress") False True))
+  duplicateProblems =
+    analyzeCrossItemRules
+      [ SomeWatcherSummary SIssueImplement (issueSummary (Just "in_progress") True False)
+      , SomeWatcherSummary SIssueImplement (issueSummary (Just "plan_ready") True False)
+      ]
+  summaryField key =
+    case summaryObject
+      [ SomeWatcherSummary SIssueImplement (issueSummary (Just "in_progress") True False)
+      , SomeWatcherSummary SIssueImplement (issueSummary (Just "plan_ready") True False)
+      ] of
+      Object object' -> KeyMap.lookup (Key.fromString key) object'
+      _ -> Nothing
+
+issueSummary :: Maybe Text -> Bool -> Bool -> WatcherSummary 'IssueImplement
+issueSummary status running dirty =
+  sampleSummary
+    { label = "owner/repo#7 implementer"
+    , repoFullName = Just "owner/repo"
+    , issueNumber = Just 7
+    , runtimeOwner = Just "runtime-owner-1"
+    , pid = PidReport "issue-watcher.pid" (Just "1234") running
+    , issueStatus = status
+    , workdir = sampleSummary.workdir {dirty = dirty}
+    }
 
 kindField :: SomeWatcherSummary -> Maybe Value
 kindField summary =

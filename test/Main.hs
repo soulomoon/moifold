@@ -31,7 +31,7 @@ import CodexWatcher.EventLogRepair
 import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.GoldenReplay
-import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildLaunchMode, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
+import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildArgs, issueImplementerChildLaunchMode, issueImplementerLaunchManifest, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.IssuePlanning.Fanout
@@ -238,6 +238,7 @@ import CliSpec
 import HealthcheckSpec
   ( prop_healthcheckDaemonRequiredStatuses
   , prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
+  , prop_healthcheckIssueImplementLifecycleReporting
   , prop_healthcheckSingletonDomains
   , prop_healthcheckSummaryJsonKeepsKindField
   , prop_healthcheckTypedAnalyzerDispatch
@@ -1575,6 +1576,105 @@ prop_issuePlanningFanoutDefaultsToStartingChildWatchers = do
         executeLaunch == StartChildLaunches endpoint pollSeconds
     ]
 
+issueImplementerLaunchLifecycleManifestsAndDryRunCommand :: IO Bool
+issueImplementerLaunchLifecycleManifestsAndDryRunCommand = do
+  let endpoint = AppServerEndpoint "127.0.0.1" 4500 "/api/codex"
+      pollSeconds = pollSecondsForTest 17
+      plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 3) []
+      fanoutConfig =
+        (defaultIssuePlanningFanoutConfig "/tmp/implementers")
+          { fanoutWorkdirRoot = Just "/tmp/worktrees"
+          }
+      launch =
+        withLaunchThreadId (ThreadId "thread-created") $
+          issueImplementerLaunchPlan fanoutConfig plannerConfig (IssueNumber 42)
+      pending = issueImplementerLaunchManifest "pending" (PrintChildLaunchCommands endpoint pollSeconds) launch
+      finalized = issueImplementerLaunchManifest "finalized" (StartChildLaunches endpoint pollSeconds) launch
+      args = issueImplementerChildArgs endpoint pollSeconds launch
+  sequenceAnd
+    [ assert "pending launch manifest preserves status and launch kind" $
+        lookupValue "status" pending == Just (String "pending")
+          && lookupValue "launchKind" pending == Just (String "issue-implementer")
+    , assert "launch plan writes initialized event and compatibility facade files" $
+        launchInitialEvent launch == IssueImplementInitialized (launchIssueConfig launch) (ThreadId "thread-created")
+          && fmap compatibilityWritePath launch.launchCompatibilityWrites
+            == [ "/tmp/implementers/owner_name__issue42/issue-state.json"
+               , "/tmp/implementers/owner_name__issue42/daemon-state.json"
+               ]
+          && lookupValue "threadId" launch.launchConfigJson == Just (String "thread-created")
+    , assert "pending launch manifest preserves issue identity and paths" $
+        lookupValue "repo" pending == Just (String "owner/name")
+          && lookupValue "issueNumber" pending == Just (Number 42)
+          && lookupValue "workdir" pending == Just (String "/tmp/worktrees/owner_name__issue42")
+          && lookupValue "stateDir" pending == Just (String "/tmp/implementers/owner_name__issue42")
+          && lookupValue "configPath" pending == Just (String "/tmp/implementers/owner_name__issue42/config.json")
+          && lookupValue "eventsPath" pending == Just (String "/tmp/implementers/owner_name__issue42/events.jsonl")
+    , assert "pending launch manifest preserves intended thread and child launch mode" $
+        case lookupValue "intendedThreadRoles" pending of
+          Just (Array _) ->
+            lookupValue "threadId" pending == Just (String "thread-created")
+              && lookupValue "childLaunch" pending == Just (String "print")
+          _ ->
+            False
+    , assert "finalized launch manifest preserves finalized status and start mode" $
+        lookupValue "status" finalized == Just (String "finalized")
+          && lookupValue "childLaunch" finalized == Just (String "start")
+    , assert "dry-run child command keeps run-issue-implement runtime shape" $
+        args
+          == [ "run-issue-implement"
+             , "--events"
+             , "/tmp/implementers/owner_name__issue42/events.jsonl"
+             , "--state-dir"
+             , "/tmp/implementers/owner_name__issue42"
+             , "--repo"
+             , "owner/name"
+             , "--workdir"
+             , "/tmp/worktrees/owner_name__issue42"
+             , "--app-server-host"
+             , "127.0.0.1"
+             , "--app-server-port"
+             , "4500"
+             , "--poll-seconds"
+             , "17"
+             , "--execute"
+             , "--loop"
+             , "--pid-file"
+             , "/tmp/implementers/owner_name__issue42/issue-watcher.pid"
+             , "--app-server-path"
+             , "/api/codex"
+             ]
+    ]
+
+issueImplementerLaunchSourcePreservesWriteOrdering :: IO Bool
+issueImplementerLaunchSourcePreservesWriteOrdering = do
+  source <- TextIO.readFile "src/CodexWatcher/Cli/Command/IssueFanout.hs"
+  sequenceAnd
+    [ assert "launch write appends event before compatibility writes" $
+        textNeedlesInOrder
+          [ "writeJsonValue launch.launchConfigPath launch.launchConfigJson"
+          , "appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent"
+          , "mapM_ (writeCompatibility ioRuntimeInterpreter) launch.launchCompatibilityWrites"
+          ]
+          source
+    , assert "execute launch writes pending manifest before config/events and finalizes before start" $
+        textNeedlesInOrder
+          [ "writeIssueImplementerLaunchPending childLaunch launch"
+          , "writeIssueImplementerLaunch preparedLaunch"
+          , "writeIssueImplementerLaunchFinalized childLaunch preparedLaunch"
+          , "startIssueImplementerChildDetailed childLaunch preparedLaunch"
+          ]
+          source
+    , assert "child start classification treats terminal complete before ready as complete and running as started" $
+        textNeedlesInOrder
+          [ "WatcherTerminal TerminalComplete ->"
+          , "IssueImplementerChildCompletedBeforeReady issue"
+          , "WatcherActiveRunning ->"
+          , "IssueImplementerChildStarted issue"
+          , "IssueImplementerChildStartProblem issue detail status"
+          ]
+          source
+    ]
+
 prop_issuePlanningFanoutAllowsScopedDependencyClosure :: Bool
 prop_issuePlanningFanoutAllowsScopedDependencyClosure =
   let plannerConfig = PlannerConfig (RepoName "owner/name") (maxParallelForTest 8) [IssueNumber 8]
@@ -1862,6 +1962,42 @@ prop_eventLogRepairRejectsValidEventLog config workerThread planTurn implementat
         ] of
         Left _ -> True
         Right _ -> False
+
+issueImplementEventLogRepairCliPreservesDryRunAndExecuteContract :: IO Bool
+issueImplementEventLogRepairCliPreservesDryRunAndExecuteContract = do
+  replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
+  repairSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "EventLogRepair.hs")
+  sequenceAnd
+    [ assert "repair CLI dry-run reports strategy, failed index, event counts, and phase before mutation" $
+        textNeedlesInOrder
+          [ "putStrLn (\"repair strategy: \""
+          , "putStrLn (\"failed event index: \""
+          , "putStrLn (\"inserted events: \""
+          , "putStrLn (\"dropped events: \""
+          , "putStrLn (\"repaired phase: \""
+          , "if options.repairCliExecute"
+          , "putStrLn \"dry-run: pass --execute to archive and rewrite events.jsonl\""
+          ]
+          replaySource
+    , assert "repair execute archives, rewrites events, writes repair state, rewrites compatibility, then removes block state" $
+        textNeedlesInOrder
+          [ "archivePath <- archiveEventLog options.repairCliEventsPath"
+          , "writeWatcherEventsFile options.repairCliEventsPath plan.repairRepairedEvents"
+          , "writeRepairSummary options.repairCliStateDir archivePath plan"
+          , "writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState"
+          , "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")"
+          ]
+          replaySource
+    , assert "repair rules keep stale marker and unsafe completion drops deterministic" $
+        all
+          (`Text.isInfixOf` repairSource)
+          [ "repairStalePlanningReadyIssuesFixed"
+          , "dropped stale planning ready-issues marker"
+          , "dropUnsafeImplementationCompletions"
+          , "dropped unsafe completion and re-entered implementation"
+          , "inserted missing issue plan events and re-entered implementation before marking complete"
+          ]
+    ]
 
 prop_protocolPrReviewWorkerCompletedReturnsToChecking :: PrConfig -> ThreadId -> ThreadId -> NonEmpty ReviewThreadId -> CommitSha -> TurnId -> Bool
 prop_protocolPrReviewWorkerCompletedReturnsToChecking config workerThread reviewerThread reviewThreadIds reviewedCommit workerTurn =
@@ -3221,6 +3357,62 @@ runtimeStatusHelperCoversCommonCases = do
       , assert "runtime status keeps rejected terminal replay active while pid runs" (terminalPolicyFalse == WatcherActiveRunning)
       ]
   pure (and results)
+
+runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier :: IO Bool
+runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier = do
+  let stateDir = "/tmp/moifold-runtime-status-issue-implement"
+      configPath = stateDir </> "config.json"
+      eventsPath = stateDir </> "events.jsonl"
+      pidPath = stateDir </> "issue-watcher.pid"
+      issueConfig = IssueConfig (RepoName "owner/name") (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber' = PrNumber 7
+      completeEvents =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePullRequestCreatedEvent prNumber'
+        , IssuePlanTurnStartedEvent (TurnId "plan-turn")
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+        , IssuePullRequestBodyUpdatedEvent prNumber'
+        , IssueImplementationTurnStartedEvent (TurnId "implementation-turn")
+        , IssueImplementationCompletedEvent prNumber' Nothing
+        , IssueReviewHandoffInitializedEvent prNumber'
+        , IssueReviewHandoffStartedEvent prNumber'
+        , IssuePullRequestMergedEvent prNumber'
+        , IssueReviewerThreadReadyEvent (ThreadId "reviewer-thread")
+        , IssuePostMergeReviewStartedEvent (CommitSha "0123456789abcdef") (TurnId "review-turn")
+        , IssuePostMergeReviewCleanEvent (CleanReviewEvidence (CommitSha "0123456789abcdef") "LGTM")
+        , IssueClosedEvent prNumber'
+        ]
+      status missingIsTerminal terminalIsTerminal =
+        let statusConfig :: WatcherRuntimeStatusConfig 'IssueImplement
+            statusConfig =
+              WatcherRuntimeStatusConfig
+                { watcherRuntimeConfigPath = configPath
+                , watcherRuntimeEventsPath = eventsPath
+                , watcherRuntimePidPath = pidPath
+                , watcherRuntimeMissingIsTerminal = pure missingIsTerminal
+                , watcherRuntimeReplayTerminalIsTerminal = \_replay -> pure terminalIsTerminal
+                }
+         in watcherRuntimeStatus statusConfig
+  exists <- doesDirectoryExist stateDir
+  when exists (removePathForcibly stateDir)
+  missing <- status False True
+  missingClosed <- status True True
+  createDirectoryIfMissing True stateDir
+  writeFile configPath "{}"
+  LazyByteString.writeFile eventsPath (mconcat (fmap (\event -> encode event <> "\n") completeEvents))
+  completeRejected <- status False False
+  completeAccepted <- status False True
+  removePathForcibly stateDir
+  sequenceAnd
+    [ assert "missing issue implementer remains missing before remote issue-close verifier succeeds" $
+        missing == WatcherMissing
+    , assert "missing issue implementer is terminal only when remote issue-close verifier succeeds" $
+        missingClosed == WatcherTerminal TerminalComplete
+    , assert "IssueComplete replay remains stopped until issue-close verifier succeeds" $
+        completeRejected == WatcherActiveStopped
+    , assert "IssueComplete replay becomes terminal complete when issue-close verifier succeeds" $
+        completeAccepted == WatcherTerminal TerminalComplete
+    ]
 
 appServerRequestId :: PlannedAction -> Maybe Int
 appServerRequestId = \case
@@ -6736,6 +6928,7 @@ workflowFacadeExtractionTests = do
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchIssueCloseProjections
       , workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly
       , workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors
+      , workflowIssueImplementLifecycleBoundarySourceScans
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
@@ -6841,6 +7034,106 @@ workflowIndexedSpecModuleKeepsCoreBoundary = do
       "indexed workflow spec module exposes indexed class, transitions, and existentials"
       keepsCoreDefinitions
   pure (importsOk && definitionsOk)
+
+workflowIssueImplementLifecycleBoundarySourceScans :: IO Bool
+workflowIssueImplementLifecycleBoundarySourceScans = do
+  coreSources <- sourceTextUnder ("agent-workflow-core" </> "src")
+  lifecycleSources <-
+    Text.intercalate "\n"
+      <$> traverse
+        (fmap Text.pack . readFile)
+        [ "src" </> "CodexWatcher" </> "Domain" </> "IssueImplement" </> "Watcher.hs"
+        , "src" </> "CodexWatcher" </> "Domain" </> "IssueImplement" </> "Loop.hs"
+        , "src" </> "CodexWatcher" </> "DaemonLoop.hs"
+        , "src" </> "CodexWatcher" </> "DaemonLoop" </> "Runtime.hs"
+        , "src" </> "CodexWatcher" </> "DaemonLoop" </> "TurnStart.hs"
+        , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "IssuePlanningFanout.hs"
+        ]
+  daemonSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Daemon.hs")
+  issueFanoutSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "IssueFanout.hs")
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  cabalSource <- TextIO.readFile "moifold.cabal"
+  let coreForbiddenImportModules =
+        [ "CodexWatcher.ChildDaemon"
+        , "CodexWatcher.WatcherRuntimeStatus"
+        , "CodexWatcher.Healthcheck"
+        , "CodexWatcher.EventLogRepair"
+        , "CodexWatcher.Cli.Command.IssueFanout"
+        , "CodexWatcher.AutomaticLoop.IssuePlanningFanout"
+        , "CodexWatcher.Domain.IssueImplement"
+        , "CodexWatcher.EventLog"
+        , "CodexWatcher.Core.State"
+        ]
+      coreForbiddenTokens =
+        [ "IssueConfig"
+        , "WatcherEvent"
+        , "SomeWatcherState"
+        , "runtime-owner"
+        , "issue-watcher.pid"
+        , ".lock"
+        ]
+      lifecycleIndexedRouterTokens =
+        [ "CodexWatcher.Workflow.Moifold.IssueImplement.Indexed"
+        , "projectIssueImplement"
+        , "IssueImplementIndexedSpec"
+        ]
+      mainLibrarySection = cabalComponentSection "library" cabalSource
+      coreImportViolations =
+        sourceImportViolationsIn "agent-workflow-core/src" coreForbiddenImportModules coreSources
+      coreTokenViolations =
+        filter (`Text.isInfixOf` coreSources) coreForbiddenTokens
+      lifecycleRouterViolations =
+        filter (`Text.isInfixOf` lifecycleSources) lifecycleIndexedRouterTokens
+      adapterReexportViolations =
+        filter
+          (`Text.isInfixOf` mainLibrarySection)
+          [ "reexported-modules:"
+          , "CodexWatcher.Workflow.Agent"
+          , "CodexWatcher.Workflow.GitHub"
+          ]
+  importsOk <-
+    assertNoTextMatches
+      "workflow core source has no IssueImplement lifecycle ownership imports"
+      coreImportViolations
+  tokensOk <-
+    assertNoTextMatches
+      "workflow core source has no IssueImplement lifecycle ownership tokens"
+      coreTokenViolations
+  lifecycleRouterOk <-
+    assertNoTextMatches
+      "IssueImplement lifecycle modules do not route through indexed daemon projectors"
+      lifecycleRouterViolations
+  daemonRouterOk <-
+    assert
+      "live IssueImplement indexed projection routing remains isolated to Daemon"
+      ("CodexWatcher.Workflow.Moifold.IssueImplement.Indexed" `Text.isInfixOf` daemonSource)
+  compatibilityFacadeOk <-
+    assertNoTextMatches
+      "main moifold library keeps compatibility facades without adapter reexports"
+      adapterReexportViolations
+  launchOwnershipOk <-
+    assert
+      "IssueFanout keeps child lifecycle ownership in moifold"
+      ( all
+          (`Text.isInfixOf` issueFanoutSource)
+          [ "startChildDaemonChecked"
+          , "issue-watcher.pid"
+          ]
+      )
+  healthcheckReadOnlyOk <-
+    assert
+      "healthcheck surfaces issue implement lifecycle files without mutation"
+      ( all
+          (`Text.isInfixOf` healthcheckSource)
+          [ "(\"issueState\", \"issue-state.json\")"
+          , "(\"daemonState\", \"daemon-state.json\")"
+          , "(\"blockedState\", \"block-state.json\")"
+          , "(\"runtimeOwner\", \"runtime-owner.json\")"
+          , "fallbackPidPath kind stateDir' config.pidPath"
+          ]
+          && not ("writeJsonValue" `Text.isInfixOf` healthcheckSource)
+      )
+  pure (importsOk && tokensOk && lifecycleRouterOk && daemonRouterOk && compatibilityFacadeOk && launchOwnershipOk && healthcheckReadOnlyOk)
 
 workflowCoreCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCoreCabalSublibraryKeepsPackageBoundary = do
@@ -7413,6 +7706,15 @@ assertNoTextMatches assertionName matches = do
   when (not (null matches)) $
     mapM_ (putStrLn . ("  " <>) . Text.unpack) matches
   assert assertionName (null matches)
+
+textNeedlesInOrder :: [Text] -> Text -> Bool
+textNeedlesInOrder [] _source =
+  True
+textNeedlesInOrder (needle : rest) source =
+  case Text.breakOn needle source of
+    (_before, after)
+      | Text.null after -> False
+      | otherwise -> textNeedlesInOrder rest (Text.drop (Text.length needle) after)
 
 sourceImportViolationsUnder :: FilePath -> [Text] -> IO [Text]
 sourceImportViolationsUnder root forbiddenModules = do
@@ -14885,6 +15187,8 @@ main = do
       , quickCheckResult prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers
       , quickCheckResult prop_issuePlanningFanoutTreatsClosedReadyIssuesAsTerminal
       , quickCheckResult (ioProperty prop_issuePlanningFanoutDefaultsToStartingChildWatchers)
+      , quickCheckResult (once (ioProperty issueImplementerLaunchLifecycleManifestsAndDryRunCommand))
+      , quickCheckResult (once (ioProperty issueImplementerLaunchSourcePreservesWriteOrdering))
       , quickCheckResult prop_issuePlanningFanoutAllowsScopedDependencyClosure
       , quickCheckResult prop_eventLogCanonicalJsonRoundTrips
       , quickCheckResult prop_eventLogCanonicalIssuePlanStartName
@@ -14894,6 +15198,7 @@ main = do
       , quickCheckResult prop_eventLogRepairDropsCompletionWithoutImplementationTurn
       , quickCheckResult prop_eventLogRepairDropsStalePlanningReadyIssuesFixed
       , quickCheckResult prop_eventLogRepairRejectsValidEventLog
+      , quickCheckResult (once (ioProperty issueImplementEventLogRepairCliPreservesDryRunAndExecuteContract))
       , quickCheckResult prop_protocolPrReviewWorkerCompletedReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerIncompleteReturnsToChecking
       , quickCheckResult prop_protocolPrReviewWorkerBlockedStopsInBlocked
@@ -14977,6 +15282,7 @@ main = do
       , quickCheckResult prop_runtimeOwnerJsonAndParsing
       , quickCheckResult prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
       , quickCheckResult prop_healthcheckDaemonRequiredStatuses
+      , quickCheckResult prop_healthcheckIssueImplementLifecycleReporting
       , quickCheckResult prop_healthcheckSingletonDomains
       , quickCheckResult prop_healthcheckSummaryJsonKeepsKindField
       , quickCheckResult prop_healthcheckTypedAnalyzerDispatch
@@ -15054,6 +15360,7 @@ main = do
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
+  runtimeStatusIssueImplementOk <- runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier
   runtimeOwnerLeaseOk <- runtimeOwnerLeaseParsingRejectsOwnerOnlyJson
   runtimeOwnerClaimOk <- runtimeOwnerClearRejectsRunningLease
   runtimeOwnerCleanupOk <- runtimeOwnerCleanupClearsOnlyCurrentProcessLease
@@ -15129,6 +15436,7 @@ main = do
       && runnerGuardWaitingRestartOk
       && runnerGuardRepairOk
       && runtimeStatusOk
+      && runtimeStatusIssueImplementOk
       && runtimeOwnerLeaseOk
       && runtimeOwnerClaimOk
       && runtimeOwnerCleanupOk
