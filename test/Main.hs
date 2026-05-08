@@ -3899,7 +3899,9 @@ observedDaemonTickDryRunDoesNotMutate = do
           , assert "observed dry-run does not mutate" (null calls)
           , assert "observed dry-run reports planned actions" (length tick.daemonObservedActionReports == 1)
           , assert "observed dry-run audit records no committed event" (WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing)
-          , assert "observed dry-run audit separates pre-commit reports" (length (WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit) == 1)
+          , assert "observed dry-run audit separates pre-commit reports" $
+              WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
+                && null (WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit)
           , assert "observed dry-run audit recommends continuing" (WorkflowEventLog.workflowAuditNextDaemonRecommendation tick.daemonObservedAudit == WorkflowEventLog.WorkflowDaemonContinue)
           ]
       pure (and results)
@@ -3928,6 +3930,9 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
         sequence
           [ assert "observed execute runs external action before appending event" (case calls of FakeAppServer {} : FakeAppendJsonLine "/tmp/events.jsonl" appended : _ -> appended == toJSON expectedEvent; _ -> False)
           , assert "observed execute writes compatibility state" (length [() | FakeWriteJson {} <- calls] == length tick.daemonObservedCompatibilityWrites)
+          , assert "observed execute appends before compatibility writes" $
+              let appendCall = FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)
+               in all (\write -> callBefore appendCall (FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write)) calls) tick.daemonObservedCompatibilityWrites
           , assert "observed execute runs effect actions" (any isFakeAppServer calls)
           , assert "observed execute reaches plan mode" (somePhase tick.daemonObservedState == PlanMode)
           , assert "observed execute audit records committed event" (WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started")
@@ -15380,18 +15385,25 @@ workflowDocsMigrationUsesCoreExecutionContracts = do
       expectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
       expectedState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
       reportActions = fmap DocsMigration.docsMigrationActionReportAction
+      expectedActionOrder =
+        [ DocsMigration.WriteDocsMigrationDraftAction "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidationAction "docs/target.md"
+        ]
+  let dryRunResult = DocsMigration.runDocsMigrationObservedDryRun events observation
+  dryRunCalls <- readIORef calls
   executeResult <- DocsMigration.runDocsMigrationObservedExecute interpreter events observation
   executedCalls <- readIORef calls
-  let dryRunResult = DocsMigration.runDocsMigrationObservedDryRun events observation
   assert "workflow docs-migration reuses core execution contracts" $
     case (dryRunResult, executeResult) of
       (Right dryRunTick, Right executeTick) ->
         DocsMigration.docsMigrationDaemonEvent dryRunTick == expectedEvent
           && DocsMigration.docsMigrationDaemonState dryRunTick == expectedState
           && DocsMigration.docsMigrationDaemonCommittedEvents dryRunTick == []
+          && null dryRunCalls
           && all ((== DryRunActions) . DocsMigration.docsMigrationActionReportMode) dryRunTick.docsMigrationDaemonActionReports
           && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
           && length (WorkflowExecution.workflowGenericCompiledActions dryRunTick.docsMigrationDaemonCompiledEffects) == 2
+          && reportActions dryRunTick.docsMigrationDaemonActionReports == expectedActionOrder
           && null (WorkflowEventLog.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
           && length (WorkflowEventLog.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit) == 2
           && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
@@ -15400,10 +15412,11 @@ workflowDocsMigrationUsesCoreExecutionContracts = do
           && DocsMigration.docsMigrationDaemonCommittedEvents executeTick == [expectedEvent]
           && all ((== ExecuteActions) . DocsMigration.docsMigrationActionReportMode) executeTick.docsMigrationDaemonActionReports
           && all DocsMigration.docsMigrationActionReportExecuted executeTick.docsMigrationDaemonActionReports
+          && WorkflowExecution.workflowGenericCompiledActions executeTick.docsMigrationDaemonCompiledEffects == WorkflowExecution.workflowGenericCompiledActions dryRunTick.docsMigrationDaemonCompiledEffects
           && reportActions executeTick.docsMigrationDaemonActionReports == reportActions dryRunTick.docsMigrationDaemonActionReports
           && executedCalls == ["write:docs/target.md:draft markdown", "validate:docs/target.md"]
           && null (WorkflowEventLog.workflowAuditPreCommitReports executeTick.docsMigrationDaemonAudit)
-          && length (WorkflowEventLog.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == 2
+          && reportActions (WorkflowEventLog.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == expectedActionOrder
           && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
       _ -> False
 
@@ -15470,7 +15483,8 @@ workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults = do
   pure (and results)
 
 data WorkflowTransactionFailureMode
-  = FailPreCommit
+  = NoTransactionFailure
+  | FailPreCommit
   | FailCommit
   | FailPostCommitCallback
   | FailPostCommitAction
@@ -15478,20 +15492,67 @@ data WorkflowTransactionFailureMode
 
 workflowTransactionDetailedFailuresRecordCommitBoundary :: IO Bool
 workflowTransactionDetailedFailuresRecordCommitBoundary = do
+  let invalidInitialEvents = [DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")]
+      replayOnlyEvents = [DocsMigration.DocsMigrationInitialized config]
+      invalidPreparedEvent = DocsMigration.DocsMigrationValidationPassed "too early"
+      invalidPreparedPlan =
+        PlannedTransition
+          { plannedEvent = invalidPreparedEvent
+          , plannedPreCommitEffects = []
+          , plannedPostCommitEffects = []
+          }
+  prepareBeforeReplayFailure <-
+    WorkflowTransaction.runWorkflowObservedExecuteTransactionDetailed
+      @DocsMigration.DocsMigrationSpec
+      (docsMigrationFailureHooks NoTransactionFailure)
+      invalidInitialEvents
+      observation
+  prepareAfterReplayFailure <-
+    WorkflowTransaction.runWorkflowObservedExecuteTransactionDetailed
+      @DocsMigration.DocsMigrationSpec
+      (docsMigrationFailureHooks NoTransactionFailure)
+      replayOnlyEvents
+      observation
   preCommitFailure <- failureResult FailPreCommit
   commitFailure <- failureResult FailCommit
+  postCommitReplayFailure <-
+    case DocsMigration.replayDocsMigrationEvents events of
+      Left reason -> pure (Left (prepareSyntheticFailure reason))
+      Right priorReplay ->
+        WorkflowTransaction.runWorkflowPreparedExecuteTransactionDetailed
+          @DocsMigration.DocsMigrationSpec
+          (docsMigrationFailureHooks NoTransactionFailure)
+          events
+          priorReplay
+          observation
+          invalidPreparedPlan
   postCommitCallbackFailure <- failureResult FailPostCommitCallback
   postCommitActionFailure <- failureResult FailPostCommitAction
   results <-
     sequence
-      [ assert "workflow transaction pre-commit failure records no committed event" $
+      [ assert "workflow transaction prepare failure before replay has no audit" $
+          case prepareBeforeReplayFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPrepareFailure
+                && WorkflowTransaction.workflowTransactionFailurePriorReplay failure == Nothing
+                && WorkflowTransaction.workflowTransactionFailureAudit failure == Nothing
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == []
+            Right _ -> False
+      , assert "workflow transaction prepare failure after replay records audit without commit" $
+          case prepareAfterReplayFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPrepareFailure
+                && WorkflowTransaction.workflowTransactionFailurePriorReplay failure /= Nothing
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == []
+                && failureAuditLabels failure "ready" (Just "docs-migration-agent-returned") Nothing Nothing WorkflowEventLog.WorkflowDaemonStop
+            Right _ -> False
+      , assert "workflow transaction pre-commit failure records no committed event" $
           case preCommitFailure of
             Left failure ->
               WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPreCommitActionFailure
                 && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == []
                 && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == []
-                && failureAuditCommittedEvent failure == Just Nothing
-                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonRetry
+                && failureAuditLabels failure "turn-active" (Just "docs-migration-agent-returned") Nothing Nothing WorkflowEventLog.WorkflowDaemonRetry
             Right _ -> False
       , assert "workflow transaction commit failure preserves pre-commit reports without committed event" $
           case commitFailure of
@@ -15499,8 +15560,16 @@ workflowTransactionDetailedFailuresRecordCommitBoundary = do
               WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionEventCommitFailure
                 && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == []
                 && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
-                && failureAuditCommittedEvent failure == Just Nothing
-                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonStop
+                && failureAuditLabels failure "turn-active" (Just "docs-migration-agent-returned") Nothing Nothing WorkflowEventLog.WorkflowDaemonStop
+            Right _ -> False
+      , assert "workflow transaction post-commit replay failure records committed event without final state" $
+          case postCommitReplayFailure of
+            Left failure ->
+              WorkflowTransaction.workflowTransactionFailureStage failure == WorkflowTransaction.WorkflowTransactionPostCommitReplayFailure
+                && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == [invalidPreparedEvent]
+                && WorkflowTransaction.workflowTransactionFailureFinalState failure == Nothing
+                && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
+                && failureAuditLabels failure "turn-active" (Just "docs-migration-agent-returned") (Just "docs-migration-validation-passed") Nothing WorkflowEventLog.WorkflowDaemonStop
             Right _ -> False
       , assert "workflow transaction post-commit callback failure records committed event and final state" $
           case postCommitCallbackFailure of
@@ -15509,8 +15578,7 @@ workflowTransactionDetailedFailuresRecordCommitBoundary = do
                 && WorkflowTransaction.workflowTransactionFailureCommittedEvents failure == [expectedEvent]
                 && WorkflowTransaction.workflowTransactionFailureFinalState failure == Just expectedState
                 && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
-                && failureAuditCommittedEvent failure == Just (Just "docs-migration-draft-produced")
-                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonStop
+                && failureAuditLabels failure "turn-active" (Just "docs-migration-agent-returned") (Just "docs-migration-draft-produced") (Just "draft-ready") WorkflowEventLog.WorkflowDaemonStop
             Right _ -> False
       , assert "workflow transaction post-commit action failure records committed event and prior reports" $
           case postCommitActionFailure of
@@ -15520,8 +15588,7 @@ workflowTransactionDetailedFailuresRecordCommitBoundary = do
                 && WorkflowTransaction.workflowTransactionFailureFinalState failure == Just expectedState
                 && WorkflowTransaction.workflowTransactionFailurePreCommitReports failure == ["pre-action"]
                 && WorkflowTransaction.workflowTransactionFailurePostCommitReports failure == []
-                && failureAuditCommittedEvent failure == Just (Just "docs-migration-draft-produced")
-                && failureAuditRecommendation failure == Just WorkflowEventLog.WorkflowDaemonStop
+                && failureAuditLabels failure "turn-active" (Just "docs-migration-agent-returned") (Just "docs-migration-draft-produced") (Just "draft-ready") WorkflowEventLog.WorkflowDaemonStop
             Right _ -> False
       ]
   pure (and results)
@@ -15552,13 +15619,114 @@ workflowTransactionDetailedFailuresRecordCommitBoundary = do
       events
       observation
 
-  failureAuditCommittedEvent failure =
-    WorkflowEventLog.workflowAuditCommittedEventLabel
-      <$> WorkflowTransaction.workflowTransactionFailureAudit failure
+  failureAuditLabels failure expectedPrior expectedObservation expectedCommitted expectedFinal expectedRecommendation =
+    case WorkflowTransaction.workflowTransactionFailureAudit failure of
+      Just audit ->
+        WorkflowEventLog.workflowAuditPriorStateLabel audit == expectedPrior
+          && WorkflowEventLog.workflowAuditObservationLabel audit == expectedObservation
+          && WorkflowEventLog.workflowAuditCommittedEventLabel audit == expectedCommitted
+          && WorkflowEventLog.workflowAuditFinalStateLabel audit == expectedFinal
+          && WorkflowEventLog.workflowAuditFailureClassification audit == Just (WorkflowTransaction.workflowTransactionFailureReason failure)
+          && WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == expectedRecommendation
+      Nothing -> False
 
-  failureAuditRecommendation failure =
-    WorkflowEventLog.workflowAuditNextDaemonRecommendation
-      <$> WorkflowTransaction.workflowTransactionFailureAudit failure
+  prepareSyntheticFailure reason =
+    WorkflowTransaction.WorkflowObservedTransactionFailure
+      { WorkflowTransaction.workflowTransactionFailureStage = WorkflowTransaction.WorkflowTransactionPrepareFailure
+      , WorkflowTransaction.workflowTransactionFailureReason = reason
+      , WorkflowTransaction.workflowTransactionFailurePriorReplay = Nothing
+      , WorkflowTransaction.workflowTransactionFailurePlanned = Nothing
+      , WorkflowTransaction.workflowTransactionFailureFinalState = Nothing
+      , WorkflowTransaction.workflowTransactionFailureCommittedEvents = []
+      , WorkflowTransaction.workflowTransactionFailureCompiledEffects = Nothing
+      , WorkflowTransaction.workflowTransactionFailurePreCommitReports = []
+      , WorkflowTransaction.workflowTransactionFailurePostCommitReports = []
+      , WorkflowTransaction.workflowTransactionFailureAudit = Nothing
+      }
+
+workflowTransactionDryRunExecuteParityUsesCommitBoundary :: IO Bool
+workflowTransactionDryRunExecuteParityUsesCommitBoundary = do
+  calls <- newIORef []
+  let record call = modifyIORef' calls (<> [call])
+      compiledOnce = ["compiled-once"] :: [Text]
+      hooks =
+        WorkflowTransaction.WorkflowObservedTransactionHooks
+          { WorkflowTransaction.workflowTransactionMapError = id
+          , WorkflowTransaction.workflowTransactionCompileEffects = const compiledOnce
+          , WorkflowTransaction.workflowTransactionPartitionActions = const (["pre-action"], ["post-action"])
+          , WorkflowTransaction.workflowTransactionDryRunActions = fmap ("dry:" <>)
+          , WorkflowTransaction.workflowTransactionExecuteActions = \actions -> do
+              mapM_ (record . ("execute:" <>)) actions
+              pure (Right (fmap ("execute:" <>) actions))
+          , WorkflowTransaction.workflowTransactionCommitEvent =
+              WorkflowEventLogCommit.WorkflowEventCommitter \event -> do
+                record ("commit:" <> workflowEventLabel @DocsMigration.DocsMigrationSpec event)
+                pure (Right ())
+          , WorkflowTransaction.workflowTransactionAfterCommit = \state -> do
+              record ("after:" <> workflowStateLabel @DocsMigration.DocsMigrationSpec state)
+              pure (Right ())
+          , WorkflowTransaction.workflowTransactionFailureIsRetryable = const False
+          }
+      config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+      expectedEvent =
+        DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedState =
+        DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      dryRunResult =
+        WorkflowTransaction.runWorkflowObservedDryRunTransaction
+          @DocsMigration.DocsMigrationSpec
+          hooks
+          events
+          observation
+  dryRunCalls <- readIORef calls
+  executeResult <-
+    WorkflowTransaction.runWorkflowObservedExecuteTransactionDetailed
+      @DocsMigration.DocsMigrationSpec
+      hooks
+      events
+      observation
+  executeCalls <- readIORef calls
+  results <-
+    sequence
+      [ assert "workflow transaction dry-run partitions reports without mutating" $
+          case dryRunResult of
+            Right dryRun ->
+              dryRun.workflowTransactionCommittedEvents == []
+                && dryRun.workflowTransactionCompiledEffects == compiledOnce
+                && dryRun.workflowTransactionPreCommitReports == ["dry:pre-action"]
+                && dryRun.workflowTransactionPostCommitReports == ["dry:post-action"]
+                && WorkflowEventLog.workflowAuditCommittedEventLabel dryRun.workflowTransactionAudit == Nothing
+                && WorkflowEventLog.workflowAuditPreCommitReports dryRun.workflowTransactionAudit == ["dry:pre-action"]
+                && WorkflowEventLog.workflowAuditPostCommitReports dryRun.workflowTransactionAudit == ["dry:post-action"]
+                && null dryRunCalls
+            Left _ -> False
+      , assert "workflow transaction execute commits before callback and post actions" $
+          case executeResult of
+            Right execute ->
+              execute.workflowTransactionPlanned.plannedEvent == expectedEvent
+                && execute.workflowTransactionFinalState == expectedState
+                && execute.workflowTransactionCommittedEvents == [expectedEvent]
+                && execute.workflowTransactionCompiledEffects == compiledOnce
+                && execute.workflowTransactionPreCommitReports == ["execute:pre-action"]
+                && execute.workflowTransactionPostCommitReports == ["execute:post-action"]
+                && executeCalls == ["execute:pre-action", "commit:docs-migration-draft-produced", "after:draft-ready", "execute:post-action"]
+                && WorkflowEventLog.workflowAuditCommittedEventLabel execute.workflowTransactionAudit == Just "docs-migration-draft-produced"
+            Left _ -> False
+      ]
+  pure (and results)
 
 docsMigrationFailureHooks
   :: WorkflowTransactionFailureMode
@@ -16104,6 +16272,7 @@ main = do
   observedDaemonExecuteOk <- observedDaemonTickExecuteAppendsWritesAndRunsEffects
   observedDaemonAuditOk <- observedDaemonTickAuditSeparatesPreAndPostReports
   observedDaemonFailureOk <- observedDaemonTickExecuteCommandFailureDoesNotAppendEvent
+  workflowTransactionParityOk <- workflowTransactionDryRunExecuteParityUsesCommitBoundary
   preMergeHeadChangedOk <- observedDaemonTickPreMergeGateRechecksWhenHeadChanged
   preMergeCleanOk <- observedDaemonTickPreMergeGateMergesWhenClean
   preMergeUnstableOk <- observedDaemonTickPreMergeGateWaitsWhenUnstable
@@ -16180,6 +16349,7 @@ main = do
       && observedDaemonExecuteOk
       && observedDaemonAuditOk
       && observedDaemonFailureOk
+      && workflowTransactionParityOk
       && preMergeHeadChangedOk
       && preMergeCleanOk
       && preMergeUnstableOk

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-003-core-runtime-contracts",
+  "direction_id": "direction-006-transaction-law-coverage",
+  "extracted_item_id": "item-030-transaction-law-coverage",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after inspecting the integrated diff and running cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check. Changes are test-focused transaction-law coverage with no production boundary or package ownership movement."
+}
