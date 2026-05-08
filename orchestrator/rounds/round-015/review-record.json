@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-003",
+  "roadmap_item_id": "item-015-indexed-issue-planning-daemon-graph-and-requests",
+  "decision": "approved",
+  "evidence_summary": "Only active-turn ObservedPlanningIssuesRequested and normalized ObservedPlanningGraphUpdated route through the indexed adapter; item-016 observations remain on compatibility routing. cabal build all, cabal test watcher-core-test, and git diff --check passed."
+}

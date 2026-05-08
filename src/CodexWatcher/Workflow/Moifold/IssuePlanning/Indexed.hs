@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
@@ -23,14 +24,17 @@ module CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedWaitingReadyIssues
   , issuePlanningIndexedSomeEvent
   , issuePlanningIndexedTransitionToCompatibility
+  , projectIssuePlanningGraphUpdatedObservation
+  , projectIssuePlanningIssuesRequestedObservation
   , projectIssuePlanningTurnStartedObservation
   ) where
 
 import CodexWatcher.Core.Ids (ThreadId, TurnId)
 import CodexWatcher.Core.State (SomeWatcherState)
+import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)
 import CodexWatcher.Domain.IssuePlanning.Watcher qualified as IssuePlanning
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
-import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent)
+import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Observation (DaemonObservation, ObservedPolicyTick (..))
 import CodexWatcher.Workflow.Observation qualified as WorkflowObservation
@@ -41,6 +45,8 @@ import CodexWatcher.Workflow.Types
   , legacyObservedPlannedTransition
   , moifoldPlannedTransitionFromEffects
   )
+import Data.Kind (Type)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 
 data IssuePlanningIndexedPoint
@@ -177,7 +183,75 @@ projectIssuePlanningTurnStartedObservation
   -> ThreadId
   -> TurnId
   -> Either Text IssuePlanningIndexedProjection
-projectIssuePlanningTurnStartedObservation state threadId turnId = do
+projectIssuePlanningTurnStartedObservation state threadId turnId =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedInitialized
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/Initialized"
+      "IssuePlanning/PlanMode"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningTurnStarted threadId turnId))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
+
+projectIssuePlanningIssuesRequestedObservation
+  :: SomeWatcherState
+  -> NonEmpty IssueCreationRequest
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningIssuesRequestedObservation state requests =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Initialized"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningIssuesRequested requests))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedInitialized
+
+projectIssuePlanningGraphUpdatedObservation
+  :: SomeWatcherState
+  -> PlanningGraph
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningGraphUpdatedObservation state graph =
+  case workflowObserve @MoifoldSpec state observation of
+    Right observed ->
+      case observed.observedEvent of
+        WatcherBlocked {} ->
+          projectIssuePlanningObservation indexedState blockedObservation
+        _ ->
+          projectIssuePlanningObservation indexedState updatedObservation
+    Left failure ->
+      Left failure
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
+  observation =
+    WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningGraphUpdated graph)
+  updatedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Initialized"
+      observation
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
+  blockedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Blocked"
+      observation
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+
+projectIssuePlanningObservation
+  :: forall (source :: Type) (target :: Type).
+     IssuePlanningIndexedState source
+  -> IssuePlanningIndexedObservation source target
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningObservation indexedState indexedObservation = do
   observed <-
     IndexedWorkflow.indexedWorkflowObserve
       @IssuePlanningIndexedSpec
@@ -206,16 +280,6 @@ projectIssuePlanningTurnStartedObservation state threadId turnId = do
       , issuePlanningIndexedProjectionEffectPlan =
           projectedPlan.plannedPreCommitEffects <> projectedPlan.plannedPostCommitEffects
       }
- where
-  indexedState =
-    IssuePlanningIndexedState state
-      :: IssuePlanningIndexedState IssuePlanningIndexedInitialized
-  indexedObservation =
-    IssuePlanningIndexedObservation
-      "IssuePlanning/Initialized"
-      "IssuePlanning/PlanMode"
-      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningTurnStarted threadId turnId))
-      :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
 
 issuePlanningIndexedTransitionToCompatibility
   :: IndexedWorkflow.IndexedPlannedTransition IssuePlanningIndexedSpec source target

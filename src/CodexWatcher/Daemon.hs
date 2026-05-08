@@ -319,6 +319,30 @@ prepareDaemonObservation state observation =
           , preparedDaemonObservationFinalState =
               projected.issuePlanningIndexedProjectionFinalState
           }
+    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested requests)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningIssuesRequestedObservation
+          state
+          requests
+      pure
+        PreparedDaemonObservation
+          { preparedDaemonObservationPlanned =
+              projected.issuePlanningIndexedProjectionPlanned
+          , preparedDaemonObservationFinalState =
+              projected.issuePlanningIndexedProjectionFinalState
+          }
+    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated graph)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningGraphUpdatedObservation
+          state
+          graph
+      pure
+        PreparedDaemonObservation
+          { preparedDaemonObservationPlanned =
+              projected.issuePlanningIndexedProjectionPlanned
+          , preparedDaemonObservationFinalState =
+              projected.issuePlanningIndexedProjectionFinalState
+          }
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
         WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation
