@@ -6935,6 +6935,7 @@ workflowFacadeExtractionTests = do
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
       , workflowPrReviewCheckingIndexedSpecRejectsInvalidObservationLikeFacade
+      , workflowPrReviewCheckingIndexedSpecPreservesTerminalAndPermissionLaws
       , workflowPrReviewWorkerIndexedSpecMatchesCompatibilityForOutcomes
       , workflowPrReviewWorkerIndexedSpecMatchesClassifierBackedOutcomes
       , workflowPrReviewWorkerIndexedSpecRejectsInvalidObservationLikeFacade
@@ -12991,6 +12992,69 @@ workflowPrReviewCheckingIndexedSpecRejectsInvalidObservationLikeFacade = do
           && indexedPlanFailure == facadeFailure
       _ -> False
 
+workflowPrReviewCheckingIndexedSpecPreservesTerminalAndPermissionLaws :: IO Bool
+workflowPrReviewCheckingIndexedSpecPreservesTerminalAndPermissionLaws = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) commit
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      checkingState =
+        SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      wrongPhaseState =
+        SomeWatcherState (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      blockedState =
+        SomeWatcherState (BlockedState (BlockedReason "review blocked") :: WatcherState 'PrReview 'Blocked)
+      completeState =
+        SomeWatcherState (CompleteState (PrMerged (MergeCommit (CommitSha "def456"))) :: WatcherState 'PrReview 'Complete)
+      checkingIndexedState =
+        PrReviewCheckingIndexedState checkingState
+          :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews
+      wrongPhaseIndexedState =
+        PrReviewCheckingIndexedState wrongPhaseState
+          :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews
+      blockedIndexedState =
+        PrReviewCheckingIndexedState blockedState
+          :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews
+      completeIndexedState =
+        PrReviewCheckingIndexedState completeState
+          :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews
+      checkingEffects = [SomeEffect (StartWorkerTurn evidence workerThread)]
+      wrongPhasePlan =
+        PrReviewCheckingIndexedEffectPlan checkingEffects
+          :: PrReviewCheckingIndexedEffectPlan PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+      wrongPhaseEffect =
+        PrReviewCheckingIndexedEffect (SomeEffect (StartWorkerTurn evidence workerThread))
+          :: PrReviewCheckingIndexedEffect PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+  results <-
+    sequence
+      [ assert "indexed workflow PR-review checking terminal law delegates to compatibility state" $
+          not (workflowIsTerminal @MoifoldSpec checkingState)
+            && not (IndexedWorkflow.indexedWorkflowIsTerminal @PrReviewCheckingIndexedSpec checkingIndexedState)
+            && workflowIsTerminal @MoifoldSpec blockedState
+            && IndexedWorkflow.indexedWorkflowIsTerminal @PrReviewCheckingIndexedSpec blockedIndexedState
+            && workflowIsTerminal @MoifoldSpec completeState
+            && IndexedWorkflow.indexedWorkflowIsTerminal @PrReviewCheckingIndexedSpec completeIndexedState
+      , assert "indexed workflow PR-review checking permission rejects wrong phase like compatibility" $
+          case
+            ( workflowValidateEffects @MoifoldSpec wrongPhaseState checkingEffects
+            , IndexedWorkflow.indexedWorkflowValidateEffects @PrReviewCheckingIndexedSpec wrongPhaseIndexedState wrongPhasePlan
+            , workflowEffectAllowed @MoifoldSpec wrongPhaseState (SomeEffect (StartWorkerTurn evidence workerThread))
+            , IndexedWorkflow.indexedWorkflowEffectAllowed @PrReviewCheckingIndexedSpec wrongPhaseIndexedState wrongPhaseEffect
+            , WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec wrongPhaseState checkingEffects
+            )
+            of
+            (Left compatibilityPlanError, Left indexedPlanError, Left compatibilityEffectError, Left indexedEffectError, Left coreError) ->
+              indexedPlanError == compatibilityPlanError
+                && indexedEffectError == compatibilityEffectError
+                && coreError.workflowPermissionEffectLabel == "StartWorkerTurn"
+                && "effect is not allowed" `Text.isInfixOf` coreError.workflowPermissionReason
+            _ -> False
+      ]
+  pure (and results)
+
 prReviewCheckingIndexedSpecMatchesCompatibility
   :: forall (source :: Type) (target :: Type).
      String
@@ -13012,15 +13076,32 @@ prReviewCheckingIndexedSpecMatchesCompatibility title state facadeObservation ob
       , workflowPlanObservation @MoifoldSpec state observation
       , IndexedWorkflow.indexedWorkflowObserve @PrReviewCheckingIndexedSpec indexedState indexedObservation
       , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewCheckingIndexedSpec indexedState indexedObservation
+      , workflowApplyEvent @MoifoldSpec state expectedEvent
+      , IndexedWorkflow.indexedWorkflowApplyEvent @PrReviewCheckingIndexedSpec indexedState indexedEvent
       , workflowReplayEvents @MoifoldSpec (replayPrefix <> [expectedEvent])
+      , workflowReplayEvents @MoifoldSpec (replayPrefix <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @PrReviewCheckingIndexedSpec
+          (indexedReplayPrefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
       , IndexedWorkflow.indexedWorkflowReplayEvents @PrReviewCheckingIndexedSpec
           (indexedReplayPrefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
       )
       of
-      (Right facadeObserved, Right compatibilityObserved, Right compatibilityPlan, Right indexedObserved, Right indexedPlan, Right compatibilityReplay, Right indexedReplay) ->
+      ( Right facadeObserved
+        , Right compatibilityObserved
+        , Right compatibilityPlan
+        , Right indexedObserved
+        , Right indexedPlan
+        , Right (appliedState, appliedEffects)
+        , Right (PrReviewCheckingIndexedState indexedAppliedState, PrReviewCheckingIndexedEffectPlan indexedAppliedEffects)
+        , Right compatibilityReplay
+        , Right compatibilityReplayAgain
+        , Right indexedReplay
+        , Right indexedReplayAgain
+        ) ->
         let PrReviewCheckingIndexedState indexedNextState =
               IndexedWorkflow.indexedWorkflowObservedState @PrReviewCheckingIndexedSpec indexedObserved
             indexedReplayResultValue = prReviewCheckingIndexedReplayResult indexedReplay
+            indexedReplayAgainValue = prReviewCheckingIndexedReplayResult indexedReplayAgain
             wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
             fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
             indexedFullPlan =
@@ -13036,9 +13117,16 @@ prReviewCheckingIndexedSpecMatchesCompatibility title state facadeObservation ob
               && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @PrReviewCheckingIndexedSpec wrappedTransition == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
               && workflowStateLabel @MoifoldSpec indexedNextState == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
               && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+              && sameWatcherStateShape compatibilityObserved.observedState appliedState
+              && sameWatcherStateShape appliedState indexedAppliedState
               && prReviewCheckingIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
               && prReviewCheckingIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
               && fullCompatibilityPlan == compatibilityObserved.observedEffects
+              && prReviewCheckingAppliedEffectsMatch expectedEvent fullCompatibilityPlan appliedEffects
+              && prReviewCheckingAppliedEffectsMatch expectedEvent fullCompatibilityPlan indexedAppliedEffects
+              && prReviewCheckingEffectLabels appliedEffects == prReviewCheckingEffectLabels indexedAppliedEffects
+              && lastEffectPlanLabelsAre appliedEffects compatibilityReplay.replayEffects
+              && lastEffectPlanLabelsAre indexedAppliedEffects indexedReplayResultValue.replayEffects
               && IndexedWorkflow.indexedWorkflowPlannedTransitionPreCommitEffectLabels @PrReviewCheckingIndexedSpec indexedPlan
                 == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPreCommitEffects
               && IndexedWorkflow.indexedWorkflowPlannedTransitionPostCommitEffectLabels @PrReviewCheckingIndexedSpec indexedPlan
@@ -13054,7 +13142,29 @@ prReviewCheckingIndexedSpecMatchesCompatibility title state facadeObservation ob
               && sameWatcherStateShape compatibilityReplay.replayState indexedReplayResultValue.replayState
               && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
               && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
+              && sameWatcherStateShape compatibilityReplay.replayState compatibilityReplayAgain.replayState
+              && compatibilityReplay.replayEffects == compatibilityReplayAgain.replayEffects
+              && sameWatcherStateShape indexedReplayResultValue.replayState indexedReplayAgainValue.replayState
+              && indexedReplayResultValue.replayEffects == indexedReplayAgainValue.replayEffects
       _ -> False
+
+prReviewCheckingAppliedEffectsMatch :: WatcherEvent -> EffectPlan -> EffectPlan -> Bool
+prReviewCheckingAppliedEffectsMatch expectedEvent planned applied =
+  case expectedEvent of
+    PrReviewUnresolvedFound {} ->
+      prReviewCheckingEffectLabels applied == prReviewCheckingEffectLabels planned
+    _ ->
+      applied == planned
+
+prReviewCheckingEffectLabels :: EffectPlan -> [Text]
+prReviewCheckingEffectLabels =
+  fmap (workflowEffectLabel @MoifoldSpec)
+
+lastEffectPlanLabelsAre :: EffectPlan -> [EffectPlan] -> Bool
+lastEffectPlanLabelsAre expected plans =
+  case reverse plans of
+    actual : _ -> prReviewCheckingEffectLabels actual == prReviewCheckingEffectLabels expected
+    [] -> False
 
 data PrReviewWorkerIndexedFixture = PrReviewWorkerIndexedFixture
   { prReviewWorkerIndexedPrefix :: [WatcherEvent]
@@ -14139,6 +14249,7 @@ workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions
       activeState = DocsMigration.DocsMigrationTurnActive config turnRef
       readyState = DocsMigration.DocsMigrationReady config
       completeState = DocsMigration.DocsMigrationComplete "done"
+      blockedState = DocsMigration.DocsMigrationBlocked "blocked"
       output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
       observation =
         DocsMigration.DocsMigrationAgentReturned
@@ -14177,6 +14288,9 @@ workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions
       completeIndexedState =
         DocsMigration.DocsMigrationIndexedState completeState
           :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedComplete
+      blockedIndexedState =
+        DocsMigration.DocsMigrationIndexedState blockedState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedBlocked
       allowedIndexedPlan =
         DocsMigration.DocsMigrationIndexedEffectPlan expectedEffects
           :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
@@ -14196,12 +14310,16 @@ workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions
       , IndexedWorkflow.indexedWorkflowObserve @DocsMigration.DocsMigrationSpec indexedState indexedObservation
       , IndexedWorkflow.indexedWorkflowPlanObservation @DocsMigration.DocsMigrationSpec indexedState indexedObservation
       , workflowReplayEvents @DocsMigration.DocsMigrationSpec (events <> [expectedEvent])
+      , workflowReplayEvents @DocsMigration.DocsMigrationSpec (events <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @DocsMigration.DocsMigrationSpec indexedEvents
       , IndexedWorkflow.indexedWorkflowReplayEvents @DocsMigration.DocsMigrationSpec indexedEvents
       )
       of
-      (Right observed, Right planned, Right indexedObserved, Right indexedPlan, Right replay, Right indexedReplay) ->
+      (Right observed, Right planned, Right indexedObserved, Right indexedPlan, Right replay, Right replayAgain, Right indexedReplay, Right indexedReplayAgain) ->
         let DocsMigration.DocsMigrationIndexedState indexedObservedState =
               IndexedWorkflow.indexedWorkflowObservedState @DocsMigration.DocsMigrationSpec indexedObserved
+            indexedReplayValue = docsMigrationIndexedReplayResult indexedReplay
+            indexedReplayAgainValue = docsMigrationIndexedReplayResult indexedReplayAgain
             wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
          in observed.docsMigrationTickEvent == planned.plannedEvent
               && docsMigrationIndexedTransitionEvent indexedPlan == planned.plannedEvent
@@ -14221,8 +14339,14 @@ workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions
                 == IndexedWorkflow.someIndexedWorkflowReplayStateLabel @DocsMigration.DocsMigrationSpec indexedReplay
               && workflowIsTerminal @DocsMigration.DocsMigrationSpec completeState
                 == IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec completeIndexedState
+              && workflowIsTerminal @DocsMigration.DocsMigrationSpec blockedState
+                == IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec blockedIndexedState
               && workflowIsTerminal @DocsMigration.DocsMigrationSpec activeState
                 == IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec activeIndexedState
+              && workflowReplayState @DocsMigration.DocsMigrationSpec replay == workflowReplayState @DocsMigration.DocsMigrationSpec replayAgain
+              && replay.docsMigrationReplayEffects == replayAgain.docsMigrationReplayEffects
+              && indexedReplayValue.docsMigrationReplayState == indexedReplayAgainValue.docsMigrationReplayState
+              && indexedReplayValue.docsMigrationReplayEffects == indexedReplayAgainValue.docsMigrationReplayEffects
               && IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec activeIndexedState allowedIndexedPlan
                 == workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState expectedEffects
               && IndexedWorkflow.indexedWorkflowEffectAllowed @DocsMigration.DocsMigrationSpec activeIndexedState allowedIndexedEffect
@@ -14890,6 +15014,12 @@ workflowDocsMigrationFixtureFailureReportsThroughCore = do
       terminalEvents =
         DocsMigration.docsMigrationEventLogFixture
           <> [DocsMigration.DocsMigrationWorkflowBlocked "blocked after terminal"]
+      blockedTerminalEvents =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        , DocsMigration.DocsMigrationWorkflowBlocked "blocked by agent"
+        , DocsMigration.DocsMigrationWorkflowCompleted "completed after blocked"
+        ]
   results <-
     sequence
       [ assert "workflow docs-migration fixture failures report through core replay" $
@@ -14906,6 +15036,13 @@ workflowDocsMigrationFixtureFailureReportsThroughCore = do
               WorkflowEventLog.workflowReplayFailureEventIndex failure == length terminalEvents
                 && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-blocked"
                 && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "complete"
+            Right _summary -> False
+      , assert "workflow docs-migration blocked terminal state rejects completion transitions" $
+          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id blockedTerminalEvents of
+            Left failure ->
+              WorkflowEventLog.workflowReplayFailureEventIndex failure == length blockedTerminalEvents
+                && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-completed"
+                && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "blocked"
             Right _summary -> False
       ]
   pure (and results)

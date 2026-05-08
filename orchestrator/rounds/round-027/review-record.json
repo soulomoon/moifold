@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-001-workflow-spec-contract",
+  "direction_id": "direction-003-terminal-and-observation-laws",
+  "extracted_item_id": "item-027-terminal-observation-law-assertions",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build watcher-core-test, cabal test watcher-core-test, cabal build all, git diff --check, and git diff --cached --check passed; diff is limited to workflow law assertions in test/Main.hs plus orchestrator active-round state metadata."
+}
