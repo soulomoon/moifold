@@ -6074,9 +6074,13 @@ automaticDaemonLoopStartsImplementationAfterPrBodyUpdate = do
   calls <- getCalls
   case result of
     Right tick -> do
+      let actions = fmap actionExecutionAction tick.loopActionReports
       results <-
         sequence
           [ assert "body-updated PR starts implementation" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssueImplementationTurnStartedEvent (TurnId "turn-started")))
+          , assert "body-updated PR start tick matches indexed projection" (indexedImplementationTurnStartMatches issueConfig prNumber (TurnId "turn-started") tick.loopObservedTick)
+          , assert "body-updated PR schedules implementation worker turn" (any isTurnStartAction actions)
+          , assert "body-updated PR advances app-server request id" (maybe False (\observed -> observed.daemonObservedCompiledEffects.compiledNextRequestId == RequestId 163) tick.loopObservedTick)
           , assert "body-updated PR does not update body again" (FakeCommand (GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md") `notElem` calls)
           , assert "body-updated PR starts app-server turn" (any isTurnStartCall calls)
           ]
@@ -6085,8 +6089,226 @@ automaticDaemonLoopStartsImplementationAfterPrBodyUpdate = do
       putStrLn ("FAIL automatic implementation start after PR body update: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
  where
+  isTurnStartAction = \case
+    PlannedAppServerRequest request -> request.requestMethod == "turn/start" && request.requestId == RequestId 162
+    _ -> False
   isTurnStartCall = \case
     FakeAppServer request -> request.requestMethod == "turn/start"
+    _ -> False
+
+indexedImplementationTurnStartMatches :: IssueConfig -> PrNumber -> TurnId -> Maybe DaemonObservedTickResult -> Bool
+indexedImplementationTurnStartMatches issueConfig prNumber turnId = \case
+  Just observed ->
+    let state = SomeWatcherState (IssueImplementationReady issueConfig (Just prNumber) (WorkerIdle (ThreadId "worker-thread")))
+     in case IssueImplementIndexed.projectIssueImplementationTurnStartedObservation state turnId of
+          Right projection ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          Left _ -> False
+  Nothing ->
+    False
+
+automaticDaemonLoopIncompleteImplementationRestartsWorker :: IO Bool
+automaticDaemonLoopIncompleteImplementationRestartsWorker = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-impl" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= ("{\"outcome\":\"incomplete\",\"reason\":\"needs another pass\"}" :: Text)
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 164
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      reason = "needs another pass"
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePullRequestCreatedEvent prNumber
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+        , IssuePullRequestBodyUpdatedEvent prNumber
+        , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let actions = fmap actionExecutionAction tick.loopActionReports
+      results <-
+        sequence
+          [ assert "automatic implementation incomplete reads active turn" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
+          , assert "automatic implementation incomplete emits incomplete event" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssueImplementationIncompleteEvent reason))
+          , assert "automatic implementation incomplete matches indexed projection" (indexedImplementationIncompleteMatches issueConfig prNumber reason tick.loopObservedTick)
+          , assert "automatic implementation incomplete restarts worker" (any isTurnStartAction actions)
+          , assert "automatic implementation incomplete returns to ready state" (maybe False ((== Implementing) . somePhase . daemonObservedState) tick.loopObservedTick)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic implementation incomplete restart: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isTurnStartAction = \case
+    PlannedAppServerRequest request -> request.requestMethod == "turn/start" && request.requestId == RequestId 164
+    _ -> False
+
+indexedImplementationIncompleteMatches :: IssueConfig -> PrNumber -> Text -> Maybe DaemonObservedTickResult -> Bool
+indexedImplementationIncompleteMatches issueConfig prNumber reason = \case
+  Just observed ->
+    let state = SomeWatcherState (IssueImplementing issueConfig (Just prNumber) (WorkerActive (ActiveTurn (ThreadId "worker-thread") (TurnId "turn-impl"))))
+     in case IssueImplementIndexed.projectIssueImplementationIncompleteObservation state reason of
+          Right projection ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          Left _ -> False
+  Nothing ->
+    False
+
+automaticDaemonLoopMissingImplementationOutputBlocks :: IO Bool
+automaticDaemonLoopMissingImplementationOutputBlocks = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-impl" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 165
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      prNumber = PrNumber 7
+      reason = BlockedReason "implementation turn completed without output"
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssuePullRequestCreatedEvent prNumber
+        , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+        , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+        , IssuePullRequestBodyUpdatedEvent prNumber
+        , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let actions = fmap actionExecutionAction tick.loopActionReports
+      results <-
+        sequence
+          [ assert "automatic implementation missing output reads active turn" (length [() | FakeAppServer request <- calls, request.requestMethod == "thread/read"] == 1)
+          , assert "automatic implementation missing output blocks" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssueImplementationBlockedEvent reason))
+          , assert "automatic implementation missing output matches indexed projection" (indexedImplementationBlockedMatches issueConfig prNumber reason tick.loopObservedTick)
+          , assert "automatic implementation missing output records blocked state" (maybe False ((== Blocked) . somePhase . daemonObservedState) tick.loopObservedTick)
+          , assert "automatic implementation missing output stops daemon" (PlannedStopDaemon `elem` actions)
+          , assert "automatic implementation missing output does not restart" (not (any isTurnStartAction actions))
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic implementation missing output block: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isTurnStartAction = \case
+    PlannedAppServerRequest request -> request.requestMethod == "turn/start"
+    _ -> False
+
+indexedImplementationBlockedMatches :: IssueConfig -> PrNumber -> BlockedReason -> Maybe DaemonObservedTickResult -> Bool
+indexedImplementationBlockedMatches issueConfig prNumber reason = \case
+  Just observed ->
+    let state = SomeWatcherState (IssueImplementing issueConfig (Just prNumber) (WorkerActive (ActiveTurn (ThreadId "worker-thread") (TurnId "turn-impl"))))
+     in case IssueImplementIndexed.projectIssueImplementationBlockedImplementingObservation state reason of
+          Right projection ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          Left _ -> False
+  Nothing ->
+    False
+
+automaticDaemonLoopCompleteImplementationWithoutKnownPrStaysIncomplete :: IO Bool
+automaticDaemonLoopCompleteImplementationWithoutKnownPrStaysIncomplete = do
+  (executor, _getCalls) <-
+    fakeActionExecutorWith
+      defaultFakeCommand
+      ( \request ->
+          if request.requestMethod == "thread/read"
+            then
+              object
+                [ "turns"
+                    .= [ object
+                          [ "id" .= ("turn-impl" :: Text)
+                          , "status" .= ("completed" :: Text)
+                          , "output" .= ("{\"outcome\":\"complete\",\"reason\":\"ready for review\"}" :: Text)
+                          ]
+                       ]
+                ]
+            else defaultFakeAppServer request
+      )
+  let repo = RepoName "soulomoon/mlf2"
+      runtimeConfig = effectRuntimeConfig repo "/tmp/work" 166
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      reason = "implementation completed before a pull request was known"
+      events =
+        [ IssueImplementInitialized issueConfig (ThreadId "worker-thread")
+        , IssueImplementationTurnStartedEvent (TurnId "turn-impl")
+        ]
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  case result of
+    Right tick -> do
+      let actions = fmap actionExecutionAction tick.loopActionReports
+      results <-
+        sequence
+          [ assert "automatic implementation complete without PR stays incomplete" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssueImplementationIncompleteEvent reason))
+          , assert "automatic implementation complete without PR does not hand off" (not (any isReviewHandoffEvent (daemonObservedEvent <$> tick.loopObservedTick)))
+          , assert "automatic implementation complete without PR restarts worker" (any isTurnStartAction actions)
+          ]
+      pure (and results)
+    Left failure -> do
+      putStrLn ("FAIL automatic implementation complete without known PR: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  isTurnStartAction = \case
+    PlannedAppServerRequest request -> request.requestMethod == "turn/start"
+    _ -> False
+  isReviewHandoffEvent = \case
+    IssueReviewHandoffInitializedEvent {} -> True
+    IssueReviewHandoffStartedEvent {} -> True
     _ -> False
 
 automaticDaemonLoopMissingPlanFailsPrBodyUpdate :: IO Bool
@@ -6390,8 +6612,8 @@ workflowFacadeExtractionTests = do
       , workflowIssuePlanningIndexedDaemonRejectsInvalidTerminalAndRetryRoutingLikeCompatibility
       , workflowIssueImplementIndexedSpecMatchesCompatibilityForPolicyTransitions
       , workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility
-      , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanAndPrSetupProjections
-      , workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup
+      , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections
+      , workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanPrSetupAndImplementationWorker
       , workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
@@ -10613,8 +10835,8 @@ workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility =
   wrongDomainState =
     SomeWatcherState (PlanningReady (PlannerConfig issueConfig.issueRepo (maxParallelForTest 1) []))
 
-workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup :: IO Bool
-workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup = do
+workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanPrSetupAndImplementationWorker :: IO Bool
+workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanPrSetupAndImplementationWorker = do
   let routingPaths =
         [ "src" </> "CodexWatcher" </> "Domain" </> "IssueImplement" </> "Loop.hs"
         , "src" </> "CodexWatcher" </> "DaemonLoop.hs"
@@ -10640,32 +10862,42 @@ workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup = do
 workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors :: IO Bool
 workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
   source <- Text.pack <$> readFile ("src" </> "CodexWatcher" </> "Daemon.hs")
-  let forbiddenNeedles =
-        [ "projectIssueImplementationTurnStartedObservation"
+  let requiredNeedles =
+        [ "projectIssueImplementWorkerThreadRefreshedImplementationReadyObservation"
+        , "projectIssueImplementationTurnStartedObservation"
         , "projectIssueImplementationIncompleteObservation"
-        , "projectIssueImplementationBlocked"
-        , "projectIssueImplementationCompleted"
-        , "projectIssueImplementReviewHandoff"
+        , "projectIssueImplementationBlockedImplementationReadyObservation"
+        , "projectIssueImplementationBlockedImplementingObservation"
+        , "projectIssueImplementationCompletedImplementingObservation"
+        ]
+      forbiddenNeedles =
+        [ "projectIssueImplementReviewHandoff"
         , "projectIssueImplementPullRequestMerged"
         , "projectIssueImplementReviewerThreadReady"
         , "projectIssueImplementPostMerge"
         , "projectIssueImplementIssueClosed"
-        , "ObservedImplementationTurnStarted"
-        , "ObservedImplementationIncomplete"
-        , "ObservedImplementationBlocked"
-        , "ObservedImplementationCompleted"
+        , "projectIssueImplementationCompletedHandoff"
+        , "projectIssueImplementationCompletedWaitingForPrMerge"
         , "ObservedReviewHandoff"
         , "ObservedIssueReviewerThreadReady"
         , "ObservedPullRequestMerged"
         , "ObservedPostMerge"
         , "ObservedIssueClosed"
         ]
+      missingRequired =
+        [ Text.unpack needle
+        | needle <- requiredNeedles
+        , not (needle `Text.isInfixOf` source)
+        ]
       violations =
         [ Text.unpack needle
         | needle <- forbiddenNeedles
         , needle `Text.isInfixOf` source
         ]
-  assert "indexed workflow issue implement daemon does not route item-020-plus projectors" (null violations)
+  sequenceAnd
+    [ assert "indexed workflow issue implement daemon routes required item-020 projectors" (null missingRequired)
+    , assert "indexed workflow issue implement daemon does not route item-021-plus projectors" (null violations)
+    ]
 
 data IssueImplementDaemonProjectionCase = IssueImplementDaemonProjectionCase
   { issueImplementDaemonProjectionCaseName :: String
@@ -10675,10 +10907,10 @@ data IssueImplementDaemonProjectionCase = IssueImplementDaemonProjectionCase
   , issueImplementDaemonProjectionCaseProjection :: Either Text IssueImplementIndexed.IssueImplementIndexedProjection
   }
 
-workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanAndPrSetupProjections :: IO Bool
-workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanAndPrSetupProjections = do
-  dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonPlanAndPrSetupProjectionCases
-  executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonPlanAndPrSetupProjectionCases
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections :: IO Bool
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections = do
+  dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases
+  executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases
   pure (and dryRunResults && and executeResults)
 
 runIssueImplementDaemonProjectionCase :: ActionExecutionMode -> IssueImplementDaemonProjectionCase -> IO Bool
@@ -10774,8 +11006,8 @@ runIssueImplementDaemonProjectionCase executionMode testCase = do
     _ ->
       assert (title "prepares compatibility and indexed plans") False
 
-issueImplementDaemonPlanAndPrSetupProjectionCases :: [IssueImplementDaemonProjectionCase]
-issueImplementDaemonPlanAndPrSetupProjectionCases =
+issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases :: [IssueImplementDaemonProjectionCase]
+issueImplementDaemonPlanPrSetupAndImplementationWorkerProjectionCases =
   [ IssueImplementDaemonProjectionCase
       "plan turn start"
       readyToPlanPrefix
@@ -10818,15 +11050,74 @@ issueImplementDaemonPlanAndPrSetupProjectionCases =
       planReadyState
       (DaemonIssueImplementObservation (ObservedPullRequestBodyUpdated prNumber))
       (IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedPlanReadyObservation planReadyState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "implementation-ready worker refresh"
+      implementationReadyPrPrefix
+      implementationReadyPrState
+      (DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed refreshedWorker))
+      (IssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedImplementationReadyObservation implementationReadyPrState refreshedWorker)
+  , IssueImplementDaemonProjectionCase
+      "implementation turn start"
+      implementationReadyPrPrefix
+      implementationReadyPrState
+      (DaemonIssueImplementObservation (ObservedImplementationTurnStarted implementationTurn))
+      (IssueImplementIndexed.projectIssueImplementationTurnStartedObservation implementationReadyPrState implementationTurn)
+  , IssueImplementDaemonProjectionCase
+      "implementation incomplete restart"
+      implementingPrPrefix
+      implementingPrState
+      (DaemonIssueImplementObservation (ObservedImplementationIncomplete incompleteReason))
+      (IssueImplementIndexed.projectIssueImplementationIncompleteObservation implementingPrState incompleteReason)
+  , IssueImplementDaemonProjectionCase
+      "implementation blocked from ready"
+      implementationReadyPrPrefix
+      implementationReadyPrState
+      (DaemonIssueImplementObservation (ObservedImplementationBlocked blockedReason))
+      (IssueImplementIndexed.projectIssueImplementationBlockedImplementationReadyObservation implementationReadyPrState blockedReason)
+  , IssueImplementDaemonProjectionCase
+      "implementation blocked from implementing"
+      implementingPrPrefix
+      implementingPrState
+      (DaemonIssueImplementObservation (ObservedImplementationBlocked blockedReason))
+      (IssueImplementIndexed.projectIssueImplementationBlockedImplementingObservation implementingPrState blockedReason)
+  , IssueImplementDaemonProjectionCase
+      "implementation completed with reviewer thread"
+      implementingPrPrefix
+      implementingPrState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber (Just reviewerThread)))
+      (IssueImplementIndexed.projectIssueImplementationCompletedImplementingObservation implementingPrState prNumber (Just reviewerThread))
+  , IssueImplementDaemonProjectionCase
+      "implementation completed without reviewer thread"
+      implementingPrPrefix
+      implementingPrState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber Nothing))
+      (IssueImplementIndexed.projectIssueImplementationCompletedImplementingObservation implementingPrState prNumber Nothing)
+  , IssueImplementDaemonProjectionCase
+      "implementation completed before known PR remains incomplete"
+      implementingNoPrPrefix
+      implementingNoPrState
+      (DaemonIssueImplementObservation (ObservedImplementationIncomplete completedBeforeKnownPrReason))
+      (IssueImplementIndexed.projectIssueImplementationIncompleteObservation implementingNoPrState completedBeforeKnownPrReason)
+  , IssueImplementDaemonProjectionCase
+      "implementation stale PR completion blocks"
+      implementingPrPrefix
+      implementingPrState
+      (DaemonIssueImplementObservation (ObservedImplementationCompleted stalePr Nothing))
+      (IssueImplementIndexed.projectIssueImplementationCompletedImplementingObservation implementingPrState stalePr Nothing)
   ]
  where
   issueConfig = issueImplementIndexedConfig
   prNumber = PrNumber 7
+  stalePr = PrNumber 8
   workerThread = ThreadId "worker-thread"
   refreshedWorker = ThreadId "worker-thread-refreshed"
+  reviewerThread = ThreadId "reviewer-thread"
   planTurn = TurnId "turn-plan"
   implementationTurn = TurnId "turn-impl"
   followUpBranch = BranchName "codex/issue-42-2"
+  incompleteReason = "incomplete"
+  completedBeforeKnownPrReason = "implementation completed before a pull request was known"
+  blockedReason = BlockedReason "blocked"
   readyToPlanPrefix =
     [ IssueImplementInitialized issueConfig workerThread
     , IssuePullRequestReusedEvent prNumber
@@ -10835,16 +11126,28 @@ issueImplementDaemonPlanAndPrSetupProjectionCases =
     readyToPlanPrefix <> [IssuePlanTurnStartedEvent planTurn]
   planReadyPrefix =
     inPlanModePrefix <> [IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)]
+  implementationReadyPrPrefix =
+    planReadyPrefix <> [IssuePullRequestBodyUpdatedEvent prNumber]
   implementationReadyNoPrPrefix =
     [IssueImplementInitialized issueConfig workerThread]
+  implementingPrPrefix =
+    implementationReadyPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
+  implementingNoPrPrefix =
+    implementationReadyNoPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
   readyToPlanState =
     SomeWatcherState (IssueReadyToPlan issueConfig prNumber (WorkerIdle workerThread))
   inPlanModeState =
     SomeWatcherState (IssueInPlanMode issueConfig prNumber (WorkerActive (ActiveTurn workerThread planTurn)))
   planReadyState =
     SomeWatcherState (IssuePlanReady issueConfig prNumber (WorkerIdle workerThread))
+  implementationReadyPrState =
+    SomeWatcherState (IssueImplementationReady issueConfig (Just prNumber) (WorkerIdle workerThread))
   implementationReadyNoPrState =
     SomeWatcherState (IssueImplementationReady issueConfig Nothing (WorkerIdle workerThread))
+  implementingPrState =
+    SomeWatcherState (IssueImplementing issueConfig (Just prNumber) (WorkerActive (ActiveTurn workerThread implementationTurn)))
+  implementingNoPrState =
+    SomeWatcherState (IssueImplementing issueConfig Nothing (WorkerActive (ActiveTurn workerThread implementationTurn)))
 
 issueImplementIndexedSpecMatchesCompatibility :: IssueImplementIndexedPolicyCase -> IO Bool
 issueImplementIndexedSpecMatchesCompatibility (IssueImplementIndexedPolicyCase title prefix state issueObservation indexedState indexedObservation indexedEvent projection expectedTags) =
@@ -14288,6 +14591,9 @@ main = do
   automaticNewPrBodyOk <- automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation
   automaticReusedPrBodyOk <- automaticDaemonLoopUpdatesReusedPrBodyBeforeImplementation
   automaticBodyThenImplementationOk <- automaticDaemonLoopStartsImplementationAfterPrBodyUpdate
+  automaticImplementationIncompleteOk <- automaticDaemonLoopIncompleteImplementationRestartsWorker
+  automaticImplementationMissingOutputOk <- automaticDaemonLoopMissingImplementationOutputBlocks
+  automaticImplementationNoPrOk <- automaticDaemonLoopCompleteImplementationWithoutKnownPrStaysIncomplete
   automaticMissingPlanBodyOk <- automaticDaemonLoopMissingPlanFailsPrBodyUpdate
   automaticTerminalStopOk <- automaticDaemonLoopTerminalStateStops
   automaticLoopLoggingOk <- automaticDaemonLoopEmitsBoundaryLogs
@@ -14360,6 +14666,9 @@ main = do
       && automaticNewPrBodyOk
       && automaticReusedPrBodyOk
       && automaticBodyThenImplementationOk
+      && automaticImplementationIncompleteOk
+      && automaticImplementationMissingOutputOk
+      && automaticImplementationNoPrOk
       && automaticMissingPlanBodyOk
       && automaticTerminalStopOk
       && automaticLoopLoggingOk

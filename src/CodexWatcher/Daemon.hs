@@ -410,6 +410,43 @@ prepareDaemonObservation state observation =
           state
           prNumber
       pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed threadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedImplementationReadyObservation
+          state
+          threadId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedImplementationTurnStarted turnId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationTurnStartedObservation
+          state
+          turnId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedImplementationBlocked reason)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationBlockedImplementationReadyObservation
+          state
+          reason
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueImplementing {}, DaemonIssueImplementObservation (ObservedImplementationIncomplete reason)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationIncompleteObservation
+          state
+          reason
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueImplementing {}, DaemonIssueImplementObservation (ObservedImplementationBlocked reason)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationBlockedImplementingObservation
+          state
+          reason
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueImplementing {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedImplementingObservation
+          state
+          prNumber
+          maybeReviewerThreadId
+      pure (preparedFromIssueImplementProjection projected)
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
         WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation

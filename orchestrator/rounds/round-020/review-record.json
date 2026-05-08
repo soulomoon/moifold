@@ -1,0 +1,47 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-004",
+  "roadmap_item_id": "item-020-indexed-issue-implementation-worker-daemon",
+  "round_id": "round-020",
+  "decision": "approved",
+  "evidence_summary": "Item-020 IssueImplement implementation-turn daemon observations route through indexed projection with compatibility parity; item-021+ routes and package boundaries remain fallback/intact; required focused tests, full watcher-core-test, cabal build all, whitespace checks, and source scans passed.",
+  "checks_run": [
+    {
+      "command": "cabal test watcher-core-test --test-option=--match --test-option='indexed workflow issue implement daemon'",
+      "result": "passed"
+    },
+    {
+      "command": "cabal test watcher-core-test --test-option=--match --test-option='automatic implementation'",
+      "result": "passed"
+    },
+    {
+      "command": "cabal test watcher-core-test --test-option=--match --test-option='implementation turn'",
+      "result": "passed"
+    },
+    {
+      "command": "cabal test watcher-core-test --test-option=--match --test-option='indexed workflow issue implement daemon routing'",
+      "result": "passed"
+    },
+    {
+      "command": "cabal test watcher-core-test --test-option=--match --test-option='indexed workflow issue implement daemon does not route'",
+      "result": "passed"
+    },
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "passed"
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --cached --quiet; code=$?; if [ $code -eq 0 ]; then printf 'no staged changes\\n'; else git diff --cached --check; fi",
+      "result": "passed_no_staged_changes"
+    }
+  ]
+}
