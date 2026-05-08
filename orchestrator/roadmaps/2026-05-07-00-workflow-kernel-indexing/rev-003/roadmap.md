@@ -107,13 +107,13 @@ revision explicitly changes them.
    Merge after: item-013-indexed-issue-planning-policy
    Completion notes: Round 014 approved and merged the live `PlanningReady` plus `ObservedPlanningTurnStarted` daemon-start route through the moifold-owned indexed issue-planning adapter in commit `6cbb843`, then projected back to existing daemon transaction surfaces. Reviewer evidence covered planner turn start, request-id progression, dry-run and execute reports, action ordering, compatibility writes, snapshot-path preservation, invalid-observation rejection, unchanged non-start issue-planning daemon routes, and package-boundary preservation, plus passing `cabal test watcher-core-test` before and after `cabal build all`, passing `cabal build all`, clean `git diff --check`, and clean staged whitespace when committed.
 
-9. [pending] Route issue-planning graph and request daemon observations through the indexed adapter
+9. [done] Route issue-planning graph and request daemon observations through the indexed adapter
    Item id: item-015-indexed-issue-planning-daemon-graph-and-requests
    Depends on: item-014-indexed-issue-planning-daemon-start
    Parallel safe: no
    Parallel group: none
    Merge after: item-014-indexed-issue-planning-daemon-start
-   Completion notes: Route active-turn planning completion observations through the indexed adapter after classifier and normalization have produced `ObservedPlanningIssuesRequested` or `ObservedPlanningGraphUpdated`. Preserve issue creation command plans, graph update recording, `planning-state.json`, `issue-snapshot.json`, closed-dependency filtering, canonical open-scope coverage, duplicate ready issue rejection, ready/blocked overlap rejection, dependency-on-ready rejection, out-of-scope blocking, scoped dependency closure, dry-run and execute parity, replay effects, action ordering, request-id progression, compatibility writes, and invalid-observation failures.
+   Completion notes: Round 015 approved and merged the active-turn `ObservedPlanningIssuesRequested` and normalized `ObservedPlanningGraphUpdated` daemon routes through the moifold-owned indexed issue-planning adapter in commit `98441ab`, then projected back to the existing daemon transaction surface. Reviewer evidence covered issue creation command plans, graph update recording, `planning-state.json` compatibility writes, dry-run and execute parity, action ordering, request-id behavior, wrong-source rejection, invalid graph blocked-route behavior, unchanged compatibility routing for item-016 terminal/retry observations, and package-boundary preservation, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and clean staged whitespace when committed.
 
 10. [pending] Route issue-planning terminal and retry daemon observations through the indexed adapter
     Item id: item-016-indexed-issue-planning-terminal-and-retry-daemon
