@@ -6874,6 +6874,7 @@ workflowFacadeExtractionTests = do
       [ workflowFacadeReplayMatchesEventLog
       , workflowSpecModuleKeepsCoreBoundary
       , workflowIndexedSpecModuleKeepsCoreBoundary
+      , workflowSpecInventoryCoversCurrentSpecSurfaces
       , workflowCoreCabalSublibraryKeepsPackageBoundary
       , workflowCodexCabalSublibraryKeepsPackageBoundary
       , workflowGithubCabalSublibraryKeepsPackageBoundary
@@ -6953,6 +6954,7 @@ workflowFacadeExtractionTests = do
       , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
       , workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions
+      , workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions
       , workflowDocsMigrationIndexedSpecMatchesCompatibilityForDraft
       , workflowDocsMigrationIndexedSpecMatchesCompatibilityForValidationAndBlocked
       , workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec
@@ -7034,6 +7036,149 @@ workflowIndexedSpecModuleKeepsCoreBoundary = do
       "indexed workflow spec module exposes indexed class, transitions, and existentials"
       keepsCoreDefinitions
   pure (importsOk && definitionsOk)
+
+workflowSpecInventoryCoversCurrentSpecSurfaces :: IO Bool
+workflowSpecInventoryCoversCurrentSpecSurfaces = do
+  workflowSpecSource <-
+    Text.pack
+      <$> readFile
+        ( "agent-workflow-core"
+            </> "src"
+            </> "CodexWatcher"
+            </> "Workflow"
+            </> "Spec.hs"
+        )
+  indexedSpecSource <-
+    Text.pack
+      <$> readFile
+        ( "agent-workflow-core"
+            </> "src"
+            </> "CodexWatcher"
+            </> "Workflow"
+            </> "Indexed"
+            </> "Spec.hs"
+        )
+  moifoldSpecSource <-
+    Text.pack
+      <$> readFile ("src" </> "CodexWatcher" </> "Workflow" </> "Types.hs")
+  docsMigrationSource <-
+    Text.pack
+      <$> readFile ("src" </> "CodexWatcher" </> "Workflow" </> "DocsMigration.hs")
+  indexedAdapterSources <-
+    traverse
+      ( \(path, needles) -> do
+          source <- Text.pack <$> readFile path
+          pure (source, needles)
+      )
+      [ ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssuePlanning" </> "Indexed.hs"
+        , ["data IssuePlanningIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec IssuePlanningIndexedSpec"]
+        )
+      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssueImplement" </> "Indexed.hs"
+        , ["data IssueImplementIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec IssueImplementIndexedSpec"]
+        )
+      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Checking" </> "Indexed.hs"
+        , ["data PrReviewCheckingIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewCheckingIndexedSpec"]
+        )
+      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Worker" </> "Indexed.hs"
+        , ["data PrReviewWorkerIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewWorkerIndexedSpec"]
+        )
+      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Reviewer" </> "Indexed.hs"
+        , ["data PrReviewReviewerIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewReviewerIndexedSpec"]
+        )
+      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Mergeability" </> "Indexed.hs"
+        , ["data PrReviewMergeabilityIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewMergeabilityIndexedSpec"]
+        )
+      ]
+  results <-
+    sequence
+      [ assert "workflow spec inventory covers unindexed hooks" $
+          all
+            (`Text.isInfixOf` workflowSpecSource)
+            [ "type WorkflowState spec"
+            , "type WorkflowEvent spec"
+            , "type WorkflowObservation spec"
+            , "type WorkflowObservedTick spec"
+            , "type WorkflowEffect spec"
+            , "type WorkflowEffectPlan spec"
+            , "type WorkflowReplayResult spec"
+            , "workflowReplayEvents"
+            , "workflowValidateEffects"
+            , "workflowEffectPlanEffects"
+            , "workflowEffectAllowed"
+            , "workflowIsTerminal"
+            , "workflowStateLabel"
+            , "workflowEventLabel"
+            , "workflowObservationLabel"
+            , "workflowEffectLabel"
+            ]
+      , assert "workflow spec inventory covers indexed hooks and existential helpers" $
+          all
+            (`Text.isInfixOf` indexedSpecSource)
+            [ "type IndexedWorkflowState spec state"
+            , "type IndexedWorkflowEvent spec source target"
+            , "type IndexedWorkflowObservation spec source target"
+            , "type IndexedWorkflowObservedTick spec source target"
+            , "type IndexedWorkflowEffect spec source target"
+            , "type IndexedWorkflowEffectPlan spec source target"
+            , "type IndexedWorkflowReplayResult spec state"
+            , "indexedWorkflowReplayEvents"
+            , "indexedWorkflowReplayState"
+            , "indexedWorkflowValidateEffects"
+            , "indexedWorkflowEffectAllowed"
+            , "indexedWorkflowIsTerminal"
+            , "indexedWorkflowEventSourceLabel"
+            , "indexedWorkflowEventTargetLabel"
+            , "indexedWorkflowObservationSourceLabel"
+            , "indexedWorkflowObservationTargetLabel"
+            , "SomeIndexedWorkflowState"
+            , "SomeIndexedWorkflowEvent"
+            , "SomeIndexedWorkflowObservation"
+            , "SomeIndexedWorkflowEffect"
+            , "SomeIndexedWorkflowEffectPlan"
+            , "SomeIndexedWorkflowReplayResult"
+            , "someIndexedWorkflowReplayStateLabel"
+            , "withSomeIndexedPlannedTransition"
+            ]
+      , assert "workflow spec inventory covers moifold and docs-migration instances" $
+          all
+            (`Text.isInfixOf` moifoldSpecSource)
+            [ "data MoifoldSpec"
+            , "instance WorkflowSpec MoifoldSpec"
+            , "workflowReplayEvents events"
+            , "workflowValidateEffects state effects"
+            , "workflowEffectAllowed state effect"
+            , "workflowIsTerminal = isTerminalState"
+            ]
+            && all
+              (`Text.isInfixOf` docsMigrationSource)
+              [ "data DocsMigrationSpec"
+              , "instance WorkflowSpec DocsMigrationSpec"
+              , "instance IndexedWorkflow.IndexedWorkflowSpec DocsMigrationSpec"
+              , "docsMigrationIndexedSomeReplayResult"
+              , "indexedWorkflowReplayEvents events"
+              , "indexedWorkflowEffectAllowed (DocsMigrationIndexedState state)"
+              , "indexedWorkflowEventSourceLabel"
+              , "indexedWorkflowObservationTargetLabel"
+              ]
+      , assert "workflow spec inventory covers current moifold indexed adapters" $
+          all
+            ( \(source, needles) ->
+                all (`Text.isInfixOf` source) (needles <> indexedAdapterNeedles)
+            )
+            indexedAdapterSources
+      ]
+  pure (and results)
+ where
+  indexedAdapterNeedles =
+    [ "indexedWorkflowReplayEvents events"
+    , "indexedWorkflowValidateEffects"
+    , "indexedWorkflowEffectAllowed"
+    , "indexedWorkflowIsTerminal"
+    , "indexedWorkflowEventSourceLabel"
+    , "indexedWorkflowEventTargetLabel"
+    , "indexedWorkflowObservationSourceLabel"
+    , "indexedWorkflowObservationTargetLabel"
+    ]
 
 workflowIssueImplementLifecycleBoundarySourceScans :: IO Bool
 workflowIssueImplementLifecycleBoundarySourceScans = do
@@ -13899,6 +14044,116 @@ workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions = 
       ]
   pure (and results)
 
+workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions :: IO Bool
+workflowDocsMigrationIndexedLawMatchesUnindexedDraftReplayTerminalAndPermissions = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      turnRef = WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn")
+      events =
+        [ DocsMigration.DocsMigrationInitialized config
+        , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+        ]
+      activeState = DocsMigration.DocsMigrationTurnActive config turnRef
+      readyState = DocsMigration.DocsMigrationReady config
+      completeState = DocsMigration.DocsMigrationComplete "done"
+      output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+      expectedEvent = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      indexedState =
+        DocsMigration.DocsMigrationIndexedState activeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedTurnActive
+      indexedObservation =
+        DocsMigration.DocsMigrationIndexedObservation "turn-active" "draft-ready" observation
+          :: DocsMigration.DocsMigrationIndexedObservation DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      indexedEvents =
+        [ IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( DocsMigration.DocsMigrationIndexedEvent "uninitialized" "ready" (DocsMigration.DocsMigrationInitialized config)
+                :: DocsMigration.DocsMigrationIndexedEvent DocsMigration.DocsMigrationIndexedUninitialized DocsMigration.DocsMigrationIndexedReady
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( DocsMigration.DocsMigrationIndexedEvent "ready" "turn-active" (DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn"))
+                :: DocsMigration.DocsMigrationIndexedEvent DocsMigration.DocsMigrationIndexedReady DocsMigration.DocsMigrationIndexedTurnActive
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( DocsMigration.DocsMigrationIndexedEvent "turn-active" "draft-ready" expectedEvent
+                :: DocsMigration.DocsMigrationIndexedEvent DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+            )
+        ]
+      activeIndexedState =
+        DocsMigration.DocsMigrationIndexedState activeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedTurnActive
+      readyIndexedState =
+        DocsMigration.DocsMigrationIndexedState readyState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedReady
+      completeIndexedState =
+        DocsMigration.DocsMigrationIndexedState completeState
+          :: DocsMigration.DocsMigrationIndexedState DocsMigration.DocsMigrationIndexedComplete
+      allowedIndexedPlan =
+        DocsMigration.DocsMigrationIndexedEffectPlan expectedEffects
+          :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      rejectedReadyIndexedPlan =
+        DocsMigration.DocsMigrationIndexedEffectPlan expectedEffects
+          :: DocsMigration.DocsMigrationIndexedEffectPlan DocsMigration.DocsMigrationIndexedReady DocsMigration.DocsMigrationIndexedDraftReady
+      allowedIndexedEffect =
+        DocsMigration.DocsMigrationIndexedEffect (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
+          :: DocsMigration.DocsMigrationIndexedEffect DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady
+      rejectedReadyIndexedEffect =
+        DocsMigration.DocsMigrationIndexedEffect (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
+          :: DocsMigration.DocsMigrationIndexedEffect DocsMigration.DocsMigrationIndexedReady DocsMigration.DocsMigrationIndexedDraftReady
+  assert "indexed docs-migration law matches unindexed draft replay terminal and permissions" $
+    case
+      ( workflowObserve @DocsMigration.DocsMigrationSpec activeState observation
+      , workflowPlanObservation @DocsMigration.DocsMigrationSpec activeState observation
+      , IndexedWorkflow.indexedWorkflowObserve @DocsMigration.DocsMigrationSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @DocsMigration.DocsMigrationSpec indexedState indexedObservation
+      , workflowReplayEvents @DocsMigration.DocsMigrationSpec (events <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @DocsMigration.DocsMigrationSpec indexedEvents
+      )
+      of
+      (Right observed, Right planned, Right indexedObserved, Right indexedPlan, Right replay, Right indexedReplay) ->
+        let DocsMigration.DocsMigrationIndexedState indexedObservedState =
+              IndexedWorkflow.indexedWorkflowObservedState @DocsMigration.DocsMigrationSpec indexedObserved
+            wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+         in observed.docsMigrationTickEvent == planned.plannedEvent
+              && docsMigrationIndexedTransitionEvent indexedPlan == planned.plannedEvent
+              && observed.docsMigrationTickState == indexedObservedState
+              && planned.plannedPreCommitEffects == []
+              && docsMigrationIndexedTransitionPreCommitEffects indexedPlan == planned.plannedPreCommitEffects
+              && docsMigrationIndexedTransitionPostCommitEffects indexedPlan == planned.plannedPostCommitEffects
+              && planned.plannedPostCommitEffects == expectedEffects
+              && IndexedWorkflow.someIndexedWorkflowTransitionEventLabel @DocsMigration.DocsMigrationSpec wrappedTransition
+                == workflowEventLabel @DocsMigration.DocsMigrationSpec expectedEvent
+              && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @DocsMigration.DocsMigrationSpec wrappedTransition == "turn-active"
+              && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @DocsMigration.DocsMigrationSpec wrappedTransition == "draft-ready"
+              && IndexedWorkflow.someIndexedWorkflowTransitionPreCommitEffectLabels @DocsMigration.DocsMigrationSpec wrappedTransition == []
+              && IndexedWorkflow.someIndexedWorkflowTransitionPostCommitEffectLabels @DocsMigration.DocsMigrationSpec wrappedTransition
+                == fmap (workflowEffectLabel @DocsMigration.DocsMigrationSpec) expectedEffects
+              && workflowStateLabel @DocsMigration.DocsMigrationSpec (workflowReplayState @DocsMigration.DocsMigrationSpec replay)
+                == IndexedWorkflow.someIndexedWorkflowReplayStateLabel @DocsMigration.DocsMigrationSpec indexedReplay
+              && workflowIsTerminal @DocsMigration.DocsMigrationSpec completeState
+                == IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec completeIndexedState
+              && workflowIsTerminal @DocsMigration.DocsMigrationSpec activeState
+                == IndexedWorkflow.indexedWorkflowIsTerminal @DocsMigration.DocsMigrationSpec activeIndexedState
+              && IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec activeIndexedState allowedIndexedPlan
+                == workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState expectedEffects
+              && IndexedWorkflow.indexedWorkflowEffectAllowed @DocsMigration.DocsMigrationSpec activeIndexedState allowedIndexedEffect
+                == workflowEffectAllowed @DocsMigration.DocsMigrationSpec activeState (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
+              && IndexedWorkflow.indexedWorkflowValidateEffects @DocsMigration.DocsMigrationSpec readyIndexedState rejectedReadyIndexedPlan
+                == workflowValidateEffects @DocsMigration.DocsMigrationSpec readyState expectedEffects
+              && IndexedWorkflow.indexedWorkflowEffectAllowed @DocsMigration.DocsMigrationSpec readyIndexedState rejectedReadyIndexedEffect
+                == workflowEffectAllowed @DocsMigration.DocsMigrationSpec readyState (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
+      _ -> False
+
 workflowDocsMigrationIndexedSpecMatchesCompatibilityForDraft :: IO Bool
 workflowDocsMigrationIndexedSpecMatchesCompatibilityForDraft = do
   let config =
@@ -14255,6 +14510,10 @@ workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermiss
         SomeWatcherState
           (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
       observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+      indexedState =
+        PrReviewIndexedState state
+          :: PrReviewIndexedState PrReviewIndexedWaitingForMergeability
+      indexedObservation = indexedPrReviewMergeabilityCleanObservation commit
       facadeObservation = WorkflowPrReviewMergeability.MergeabilityObservedClean commit
       expectedEvent = PrReviewMergeabilityClean commit
       expectedEffects = [SomeEffect (MergePullRequest prNumberValue cleanEvidence)]
@@ -14334,6 +14593,37 @@ workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermiss
             && legacy.compiledActions == [expectedAction]
             && postCommitActions == []
             && dryRunReports == expectedDryRunReports
+      , assert "indexed PR-review mergeability law exposes matching labels effects and terminal status" $
+          case
+            ( workflowObserve @MoifoldSpec state observation
+            , workflowPlanObservation @MoifoldSpec state observation
+            , IndexedWorkflow.indexedWorkflowObserve @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+            , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+            )
+            of
+            (Right compatibilityObserved, Right compatibilityPlan, Right indexedObserved, Right indexedPlan) ->
+              let PrReviewIndexedState indexedNextState =
+                    IndexedWorkflow.indexedWorkflowObservedState @PrReviewMergeabilityIndexedSpec indexedObserved
+                  wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+                  indexedTargetState =
+                    PrReviewIndexedState indexedNextState
+                      :: PrReviewIndexedState PrReviewIndexedMerging
+               in prReviewIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+                    && IndexedWorkflow.someIndexedWorkflowTransitionEventLabel @PrReviewMergeabilityIndexedSpec wrappedTransition
+                      == workflowEventLabel @MoifoldSpec compatibilityPlan.plannedEvent
+                    && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @PrReviewMergeabilityIndexedSpec wrappedTransition
+                      == workflowStateLabel @MoifoldSpec state
+                    && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @PrReviewMergeabilityIndexedSpec wrappedTransition
+                      == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                    && prReviewIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+                    && prReviewIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+                    && IndexedWorkflow.someIndexedWorkflowTransitionPreCommitEffectLabels @PrReviewMergeabilityIndexedSpec wrappedTransition
+                      == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPreCommitEffects
+                    && IndexedWorkflow.someIndexedWorkflowTransitionPostCommitEffectLabels @PrReviewMergeabilityIndexedSpec wrappedTransition
+                      == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPostCommitEffects
+                    && workflowIsTerminal @MoifoldSpec compatibilityObserved.observedState
+                      == IndexedWorkflow.indexedWorkflowIsTerminal @PrReviewMergeabilityIndexedSpec indexedTargetState
+            _ -> False
       ]
   pure (and results)
 

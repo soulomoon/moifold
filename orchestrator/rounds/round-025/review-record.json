@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-001-workflow-spec-contract",
+  "direction_id": "direction-001-spec-inventory-and-laws",
+  "extracted_item_id": "item-025-workflow-spec-inventory-law-baseline",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after focused workflow facade extraction test, full watcher-core-test, cabal build all, diff whitespace checks, package-boundary source scan, and manual diff checks all passed; implementation is limited to test/Main.hs with no runtime, event-log, golden, roadmap, or public API changes."
+}
