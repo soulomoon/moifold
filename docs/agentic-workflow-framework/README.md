@@ -47,6 +47,10 @@ Implemented contract:
 - [implemented-api-freeze.md](implemented-api-freeze.md): frozen internal API
   surface for `agent-workflow-core`, `agent-workflow-codex`, and
   `agent-workflow-github`, plus the moifold-owned policy boundary.
+- [package-extraction-readiness.md](package-extraction-readiness.md):
+  source-backed readiness report for the internal package split, dependency
+  ownership, compatibility facades, validation commands, and remaining
+  blockers before any external package publication decision.
 - [workflow-spec.md](workflow-spec.md): current `WorkflowSpec`,
   `IndexedWorkflowSpec`, existentials, bridges, laws, and deferred richer
   design ideas.

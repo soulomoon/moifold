@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-005-extraction-readiness",
+  "direction_id": "direction-011-package-readiness-report",
+  "extracted_item_id": "item-035-package-readiness-report",
+  "roadmap_item_id": "item-035-package-readiness-report",
+  "decision": "approved",
+  "evidence_summary": "Baseline checks passed, import and Cabal scans match the readiness report, boundary assertions remain unchanged and covered by watcher-core-test, and the report respects project contract/API-freeze/roadmap non-goals."
+}
