@@ -46,13 +46,13 @@ filesystem writes, app-server startup, GitHub command execution, or concrete
    Merge after: item-008-indexed-pr-review-worker-outcomes
    Completion notes: Round 009 approved and merged the indexed PR-review reviewer outcome adapter for clean, problems-added, incomplete, blocked, verification-clean, and missing-thread verification outcomes. Reviewer evidence covered MoifoldSpec delegation, classifier-backed outputs, invalid observations, replay/apply/effect/permission parity, unchanged live daemon routing and compatibility behavior, preservation of golden/daemon/dry-run/action-ordering surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
-4. [pending] Complete indexed mergeability and merge terminal coverage
+4. [done] Complete indexed mergeability and merge terminal coverage
    Item id: item-010-indexed-pr-review-mergeability-complete
    Depends on: item-009-indexed-pr-review-reviewer-outcomes
    Parallel safe: no
    Parallel group: none
    Merge after: item-009-indexed-pr-review-reviewer-outcomes
-   Completion notes: Extend the existing clean-mergeability indexed slice to waiting, recheck, fix-required, blocked, stopped, and `PrReviewMergeCompleted` terminal paths. Preserve merge pre-commit ordering, request-id progression, and dry-run text.
+   Completion notes: Round 010 approved and merged the indexed PR-review mergeability terminal coverage for retry, recheck, fix-required, blocked, clean merge, and merge-completed observations. Reviewer evidence covered indexed blocked/complete markers, invalid observation failure parity, replay/effect/permission parity, dry-run parity, request-id preservation, clean merge pre-commit ordering, merged compatibility writes, unchanged golden/schema/daemon/action-ordering surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
 5. [pending] Route one live PR-review daemon observation path through the indexed adapter
    Item id: item-011-indexed-pr-review-daemon-path
