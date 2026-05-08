@@ -312,37 +312,59 @@ prepareDaemonObservation state observation =
           state
           threadId
           turnId
-      pure
-        PreparedDaemonObservation
-          { preparedDaemonObservationPlanned =
-              projected.issuePlanningIndexedProjectionPlanned
-          , preparedDaemonObservationFinalState =
-              projected.issuePlanningIndexedProjectionFinalState
-          }
+      pure (preparedFromIssuePlanningProjection projected)
     (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested requests)) -> do
       projected <-
         WorkflowIssuePlanningIndexed.projectIssuePlanningIssuesRequestedObservation
           state
           requests
-      pure
-        PreparedDaemonObservation
-          { preparedDaemonObservationPlanned =
-              projected.issuePlanningIndexedProjectionPlanned
-          , preparedDaemonObservationFinalState =
-              projected.issuePlanningIndexedProjectionFinalState
-          }
+      pure (preparedFromIssuePlanningProjection projected)
     (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated graph)) -> do
       projected <-
         WorkflowIssuePlanningIndexed.projectIssuePlanningGraphUpdatedObservation
           state
           graph
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningWaitingForReadyIssues {}, DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningReadyIssuesFixedObservation
+          state
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningReady {}, DaemonIssuePlanningObservation ObservedPlanningScopeCompleted) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningScopeCompletedObservation
+          state
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested reason)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningTurnRetryObservation
+          state
+          reason
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation ObservedPlanningTurnCompleted) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningTurnCompletedObservation
+          state
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningReady {}, DaemonIssuePlanningObservation (ObservedPlanningBlocked reason)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedInitializedObservation
+          state
+          reason
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningBlocked reason)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedActiveTurnObservation
+          state
+          reason
+      pure (preparedFromIssuePlanningProjection projected)
+    (SomeWatcherState PlanningWaitingForReadyIssues {}, DaemonIssuePlanningObservation (ObservedPlanningBlocked reason)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedWaitingReadyIssuesObservation
+          state
+          reason
       pure
-        PreparedDaemonObservation
-          { preparedDaemonObservationPlanned =
-              projected.issuePlanningIndexedProjectionPlanned
-          , preparedDaemonObservationFinalState =
-              projected.issuePlanningIndexedProjectionFinalState
-          }
+        (preparedFromIssuePlanningProjection projected)
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
         WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation
@@ -363,6 +385,17 @@ prepareDaemonObservation state observation =
               legacyObservedPlannedTransition observed
           , preparedDaemonObservationFinalState = observed.observedState
           }
+
+preparedFromIssuePlanningProjection
+  :: WorkflowIssuePlanningIndexed.IssuePlanningIndexedProjection
+  -> PreparedDaemonObservation
+preparedFromIssuePlanningProjection projected =
+  PreparedDaemonObservation
+    { preparedDaemonObservationPlanned =
+        projected.issuePlanningIndexedProjectionPlanned
+    , preparedDaemonObservationFinalState =
+        projected.issuePlanningIndexedProjectionFinalState
+    }
 
 runObservedDaemonDryRun
   :: Monad m

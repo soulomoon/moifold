@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-003",
+  "roadmap_item_id": "item-016-indexed-issue-planning-terminal-and-retry-daemon",
+  "decision": "approved",
+  "evidence_summary": "Approved after source review and passing cabal build all, cabal test watcher-core-test, git diff --check, staged-state check, git diff --cached --check, and agent-workflow-core boundary scan. Indexed issue-planning terminal/retry/fanout routes preserve compatibility events, dry-run and execute parity, action ordering, request ids, compatibility writes, invalid-observation failures, completion boundaries, golden surfaces, and package boundaries."
+}

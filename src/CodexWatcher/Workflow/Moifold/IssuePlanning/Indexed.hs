@@ -24,12 +24,20 @@ module CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedWaitingReadyIssues
   , issuePlanningIndexedSomeEvent
   , issuePlanningIndexedTransitionToCompatibility
+  , projectIssuePlanningBlockedActiveTurnObservation
+  , projectIssuePlanningBlockedInitializedObservation
+  , projectIssuePlanningBlockedWaitingReadyIssuesObservation
   , projectIssuePlanningGraphUpdatedObservation
   , projectIssuePlanningIssuesRequestedObservation
+  , projectIssuePlanningReadyIssuesFixedObservation
+  , projectIssuePlanningScopeCompletedObservation
+  , projectIssuePlanningTurnCompletedObservation
+  , projectIssuePlanningTurnRetryObservation
   , projectIssuePlanningTurnStartedObservation
   ) where
 
 import CodexWatcher.Core.Ids (ThreadId, TurnId)
+import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState)
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)
 import CodexWatcher.Domain.IssuePlanning.Watcher qualified as IssuePlanning
@@ -245,6 +253,122 @@ projectIssuePlanningGraphUpdatedObservation state graph =
       "IssuePlanning/Blocked"
       observation
       :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+
+projectIssuePlanningReadyIssuesFixedObservation
+  :: SomeWatcherState
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningReadyIssuesFixedObservation state =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedWaitingReadyIssues
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Initialized"
+      (WorkflowObservation.DaemonIssuePlanningObservation IssuePlanning.ObservedPlanningReadyIssuesFixed)
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedInitialized
+
+projectIssuePlanningScopeCompletedObservation
+  :: SomeWatcherState
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningScopeCompletedObservation state =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedInitialized
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Complete"
+      (WorkflowObservation.DaemonIssuePlanningObservation IssuePlanning.ObservedPlanningScopeCompleted)
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedComplete
+
+projectIssuePlanningTurnRetryObservation
+  :: SomeWatcherState
+  -> BlockedReason
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningTurnRetryObservation state reason =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Initialized"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningTurnRetryRequested reason))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedInitialized
+
+projectIssuePlanningTurnCompletedObservation
+  :: SomeWatcherState
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningTurnCompletedObservation state =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Complete"
+      (WorkflowObservation.DaemonIssuePlanningObservation IssuePlanning.ObservedPlanningTurnCompleted)
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedComplete
+
+projectIssuePlanningBlockedInitializedObservation
+  :: SomeWatcherState
+  -> BlockedReason
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningBlockedInitializedObservation state reason =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedInitialized
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Blocked"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningBlocked reason))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedBlocked
+
+projectIssuePlanningBlockedActiveTurnObservation
+  :: SomeWatcherState
+  -> BlockedReason
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningBlockedActiveTurnObservation state reason =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Blocked"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningBlocked reason))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+
+projectIssuePlanningBlockedWaitingReadyIssuesObservation
+  :: SomeWatcherState
+  -> BlockedReason
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningBlockedWaitingReadyIssuesObservation state reason =
+  projectIssuePlanningObservation indexedState indexedObservation
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedWaitingReadyIssues
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Blocked"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningBlocked reason))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedBlocked
 
 projectIssuePlanningObservation
   :: forall (source :: Type) (target :: Type).

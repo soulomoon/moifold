@@ -30,7 +30,6 @@ import CodexWatcher.Cli.Command.IssueFanout
   , startIssueImplementerChildDetailed
   )
 import CodexWatcher.Domain.IssuePlanning.Fanout
-import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..), IssuePlanningTick (..), issuePlanningObserve)
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Cli.Command.Replay (formatReplayFailure)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
@@ -40,6 +39,8 @@ import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..), PlanningGraph (..))
+import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed qualified as WorkflowIssuePlanningIndexed
+import CodexWatcher.Workflow.Spec (PlannedTransition (plannedEvent))
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Applicative ((<|>))
 import Control.Monad (when)
@@ -294,22 +295,26 @@ issueText issue =
 blockPlanningFanout :: ActionExecutionMode -> LoopCli -> SomeWatcherState -> BlockedReason -> IO ()
 blockPlanningFanout executionMode cli planningState reason =
   case executionMode of
-    DryRunActions ->
+    DryRunActions -> do
+      _projection <- applyBlocked planningState
       putStrLn ("would block planner fanout: " <> Text.unpack reason.unBlockedReason)
-    ExecuteActions ->
-      case issuePlanningObserve planningState (ObservedPlanningBlocked reason) of
-        Left failure ->
-          die ("failed to block planner fanout: " <> Text.unpack failure)
-        Right blockedTick -> do
-          appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath blockedTick.issuePlanningTickEvent
-          mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir blockedTick.issuePlanningTickState)
-          putStrLn ("blocked planner fanout: " <> Text.unpack reason.unBlockedReason)
+    ExecuteActions -> do
+      projection <- applyBlocked planningState
+      appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath projection.issuePlanningIndexedProjectionPlanned.plannedEvent
+      mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState)
+      putStrLn ("blocked planner fanout: " <> Text.unpack reason.unBlockedReason)
+ where
+  applyBlocked state =
+    either
+      (\failure -> die ("failed to block planner fanout: " <> Text.unpack failure))
+      pure
+      (WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedWaitingReadyIssuesObservation state reason)
 
 markPlanningReadyIssuesFixed :: ActionExecutionMode -> LoopCli -> SomeWatcherState -> IO ()
 markPlanningReadyIssuesFixed executionMode cli planningState =
   case executionMode of
     DryRunActions ->
-      applyReadyIssuesFixed planningState \_fixedTick ->
+      applyReadyIssuesFixed planningState \_projection ->
         putStrLn "planner ready issues fixed; would re-enter planning"
     ExecuteActions -> do
       currentState <- loadCurrentPlanningState
@@ -319,9 +324,9 @@ markPlanningReadyIssuesFixed executionMode cli planningState =
         SomeWatcherState PlanningTurnActive {} ->
           putStrLn "planner already re-entered planning; skipping stale ready-issues marker"
         SomeWatcherState PlanningWaitingForReadyIssues {} ->
-          applyReadyIssuesFixed currentState \fixedTick -> do
-            appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath fixedTick.issuePlanningTickEvent
-            mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir fixedTick.issuePlanningTickState)
+          applyReadyIssuesFixed currentState \projection -> do
+            appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath projection.issuePlanningIndexedProjectionPlanned.plannedEvent
+            mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState)
             putStrLn "planner ready issues fixed; re-entering planning"
         other ->
           die
@@ -337,11 +342,11 @@ markPlanningReadyIssuesFixed executionMode cli planningState =
     replay <- either (die . formatReplayFailure) pure (replayEventLog events)
     pure replay.replayState
   applyReadyIssuesFixed state onFixed =
-    case issuePlanningObserve state ObservedPlanningReadyIssuesFixed of
+    case WorkflowIssuePlanningIndexed.projectIssuePlanningReadyIssuesFixedObservation state of
       Left reason ->
         die ("failed to mark planning ready issues fixed: " <> Text.unpack reason)
-      Right fixedTick ->
-        onFixed fixedTick
+      Right projection ->
+        onFixed projection
 
 resolveFanoutReadyIssues :: WatcherEvent -> IO [IssueNumber]
 resolveFanoutReadyIssues = \case

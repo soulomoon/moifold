@@ -98,8 +98,15 @@ import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedState (..)
   , IssuePlanningIndexedWaitingReadyIssues
   , issuePlanningIndexedTransitionToCompatibility
+  , projectIssuePlanningBlockedActiveTurnObservation
+  , projectIssuePlanningBlockedInitializedObservation
+  , projectIssuePlanningBlockedWaitingReadyIssuesObservation
   , projectIssuePlanningGraphUpdatedObservation
   , projectIssuePlanningIssuesRequestedObservation
+  , projectIssuePlanningReadyIssuesFixedObservation
+  , projectIssuePlanningScopeCompletedObservation
+  , projectIssuePlanningTurnCompletedObservation
+  , projectIssuePlanningTurnRetryObservation
   , projectIssuePlanningTurnStartedObservation
   )
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
@@ -191,6 +198,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
+import Data.Text.IO qualified as TextIO
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), addUTCTime, getCurrentTime, secondsToDiffTime)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removePathForcibly)
@@ -1418,6 +1426,21 @@ prop_issuePlanningFanoutDetectsCompletionBoundary =
         && not (issuePlanningCompletionEvent IssuePlanningTurnCompleted)
         && not (issuePlanningCompletionEvent (IssuePlanningIssuesRequested (IssueCreationRequest "subissue" "details" Nothing :| [])))
         && not (issuePlanningCompletionEvent (IssuePlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn")))
+
+issuePlanningFanoutRoutesTerminalWritesThroughIndexedProjection :: IO Bool
+issuePlanningFanoutRoutesTerminalWritesThroughIndexedProjection = do
+  source <- TextIO.readFile "src/CodexWatcher/AutomaticLoop/IssuePlanningFanout.hs"
+  sequenceAnd
+    [ assert "issue planning fanout ready-issues marker uses indexed projection" $
+        "projectIssuePlanningReadyIssuesFixedObservation" `Text.isInfixOf` source
+    , assert "issue planning fanout blocked marker uses indexed projection" $
+        "projectIssuePlanningBlockedWaitingReadyIssuesObservation" `Text.isInfixOf` source
+    , assert "issue planning fanout writes compatibility from projected final state after append" $
+        "appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath projection.issuePlanningIndexedProjectionPlanned.plannedEvent" `Text.isInfixOf` source
+          && "compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState" `Text.isInfixOf` source
+    , assert "issue planning fanout no longer derives terminal writes through compatibility observer" $
+        not ("issuePlanningObserve" `Text.isInfixOf` source)
+    ]
 
 prop_issuePlanningFanoutUsesOnlyReadyIssues :: Bool
 prop_issuePlanningFanoutUsesOnlyReadyIssues =
@@ -6300,12 +6323,16 @@ workflowFacadeExtractionTests = do
       , workflowIssuePlanningIndexedSpecRejectsInvalidObservationsLikeCompatibility
       , workflowIssuePlanningIndexedProjectionStartsPlannerTurn
       , workflowIssuePlanningIndexedProjectionHandlesActiveTurnOutcomes
+      , workflowIssuePlanningIndexedProjectionHandlesTerminalAndRetryOutcomes
       , workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility
       , workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility
       , workflowIssuePlanningIndexedDaemonDryRunMatchesActiveTurnCompatibility
       , workflowIssuePlanningIndexedDaemonExecuteMatchesActiveTurnCompatibility
+      , workflowIssuePlanningIndexedDaemonDryRunMatchesTerminalAndRetryCompatibility
+      , workflowIssuePlanningIndexedDaemonExecuteMatchesTerminalAndRetryCompatibility
       , workflowIssuePlanningIndexedDaemonRejectsInvalidTurnStart
       , workflowIssuePlanningIndexedDaemonRejectsInvalidActiveTurnRoutingLikeCompatibility
+      , workflowIssuePlanningIndexedDaemonRejectsInvalidTerminalAndRetryRoutingLikeCompatibility
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
@@ -8456,6 +8483,155 @@ workflowIssuePlanningIndexedProjectionHandlesActiveTurnOutcomes = do
         _ -> False
   pure (requestResult && graphResult)
 
+workflowIssuePlanningIndexedProjectionHandlesTerminalAndRetryOutcomes :: IO Bool
+workflowIssuePlanningIndexedProjectionHandlesTerminalAndRetryOutcomes = do
+  readyFixedResult <-
+    projectionCase
+      "indexed issue-planning projection preserves ready-issues-fixed compatibility plan"
+      waitingState
+      (DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed)
+      (projectIssuePlanningReadyIssuesFixedObservation waitingState)
+      IssuePlanningReadyIssuesFixed
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Initialized"
+      [SomeEffect SleepUntilNextPoll]
+      requestIdStable
+      (const True)
+  scopeCompletedResult <-
+    projectionCase
+      "indexed issue-planning projection preserves scope-completed compatibility plan"
+      readyState
+      (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted)
+      (projectIssuePlanningScopeCompletedObservation readyState)
+      IssuePlanningScopeCompleted
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Complete"
+      "IssuePlanning/Complete"
+      [SomeEffect StopDaemon]
+      requestIdStable
+      (const True)
+  retryResult <-
+    projectionCase
+      "indexed issue-planning projection preserves retry compatibility plan"
+      activeState
+      (DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested retryReason))
+      (projectIssuePlanningTurnRetryObservation activeState retryReason)
+      (IssuePlanningTurnRetryRequested retryReason)
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Initialized"
+      [SomeEffect SleepUntilNextPoll]
+      requestIdStable
+      (const True)
+  completedResult <-
+    projectionCase
+      "indexed issue-planning projection preserves turn-completed compatibility plan"
+      activeState
+      (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
+      (projectIssuePlanningTurnCompletedObservation activeState)
+      IssuePlanningTurnCompleted
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Complete"
+      "IssuePlanning/Complete"
+      [SomeEffect StopDaemon]
+      requestIdStable
+      (const True)
+  blockedReadyResult <-
+    projectionCase
+      "indexed issue-planning projection preserves initialized blocked compatibility plan"
+      readyState
+      blockedObservation
+      (projectIssuePlanningBlockedInitializedObservation readyState blockedReason)
+      (WatcherBlocked blockedReason)
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Blocked"
+      "IssuePlanning/Blocked"
+      [SomeEffect (RecordBlocked blockedReason), SomeEffect StopDaemon]
+      requestIdStable
+      (const True)
+  blockedActiveResult <-
+    projectionCase
+      "indexed issue-planning projection preserves active blocked compatibility plan"
+      activeState
+      blockedObservation
+      (projectIssuePlanningBlockedActiveTurnObservation activeState blockedReason)
+      (WatcherBlocked blockedReason)
+      "IssuePlanning/PlanMode"
+      "IssuePlanning/Blocked"
+      "IssuePlanning/Blocked"
+      [SomeEffect (RecordBlocked blockedReason), SomeEffect StopDaemon]
+      requestIdStable
+      (const True)
+  blockedWaitingResult <-
+    projectionCase
+      "indexed issue-planning projection preserves waiting blocked compatibility plan"
+      waitingState
+      blockedObservation
+      (projectIssuePlanningBlockedWaitingReadyIssuesObservation waitingState blockedReason)
+      (WatcherBlocked blockedReason)
+      "IssuePlanning/Initialized"
+      "IssuePlanning/Blocked"
+      "IssuePlanning/Blocked"
+      [SomeEffect (RecordBlocked blockedReason), SomeEffect StopDaemon]
+      requestIdStable
+      (const True)
+  pure
+    ( and
+        [ readyFixedResult
+        , scopeCompletedResult
+        , retryResult
+        , completedResult
+        , blockedReadyResult
+        , blockedActiveResult
+        , blockedWaitingResult
+        ]
+    )
+ where
+  config = issuePlanningIndexedConfig
+  threadId = ThreadId "planner-thread"
+  turnId = TurnId "planner-turn"
+  graph = PlanningGraph [IssueNumber 12] [] []
+  readyState = SomeWatcherState (PlanningReady config)
+  activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+  waitingState = SomeWatcherState (PlanningWaitingForReadyIssues config graph)
+  retryReason = BlockedReason "planner requested another pass"
+  blockedReason = BlockedReason "planner could not continue"
+  blockedObservation = DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason)
+  requestIdStable compiled =
+    compiled.workflowCompiledNextRequestId == RequestId 1020
+      && all ((== Nothing) . appServerRequestId . WorkflowExecution.workflowPlannedAction) compiled.workflowCompiledActions
+  projectionCase title state observation projection expectedEvent expectedSourceLabel expectedTargetLabel expectedFinalLabel expectedEffects compiledCheck writeCheck =
+    assert title $
+      case
+        ( workflowObserve @MoifoldSpec state observation
+        , workflowPlanObservation @MoifoldSpec state observation
+        , projection
+        )
+        of
+        (Right observed, Right compatibilityPlan, Right projected) ->
+          let projectedPlan = projected.issuePlanningIndexedProjectionPlanned
+              runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 1020
+              compiled =
+                WorkflowExecution.compileWorkflowEffectPlanWithMetadata
+                  runtimeConfig
+                  projected.issuePlanningIndexedProjectionEffectPlan
+              compatibilityWrites = compatibilityStateWrites "/tmp/state" observed.observedState
+              indexedWrites = compatibilityStateWrites "/tmp/state" projected.issuePlanningIndexedProjectionFinalState
+           in projectedPlan.plannedEvent == expectedEvent
+                && projectedPlan.plannedEvent == compatibilityPlan.plannedEvent
+                && projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+                && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+                && projected.issuePlanningIndexedProjectionEffectPlan == expectedEffects
+                && projected.issuePlanningIndexedProjectionSourceLabel == expectedSourceLabel
+                && projected.issuePlanningIndexedProjectionTargetLabel == expectedTargetLabel
+                && workflowStateLabel @MoifoldSpec projected.issuePlanningIndexedProjectionFinalState == expectedFinalLabel
+                && sameWatcherStateShape projected.issuePlanningIndexedProjectionFinalState observed.observedState
+                && compatibilityWrites == indexedWrites
+                && writeCheck indexedWrites
+                && compiledCheck compiled
+        _ -> False
+
 workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility :: IO Bool
 workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility = do
   (executor, getCalls) <- fakeActionExecutor
@@ -8860,6 +9036,323 @@ workflowIssuePlanningIndexedDaemonRejectsInvalidActiveTurnRoutingLikeCompatibili
         pure False
       _ ->
         assert "indexed issue-planning daemon invalid graph prepares compatibility and indexed plans" False
+
+workflowIssuePlanningIndexedDaemonRejectsInvalidTerminalAndRetryRoutingLikeCompatibility :: IO Bool
+workflowIssuePlanningIndexedDaemonRejectsInvalidTerminalAndRetryRoutingLikeCompatibility = do
+  results <-
+    sequence
+      [ invalidRouteCase
+          "ready issues fixed"
+          readyEvents
+          readyState
+          (DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed)
+          (projectIssuePlanningReadyIssuesFixedObservation readyState)
+      , invalidRouteCase
+          "scope completed"
+          activeEvents
+          activeState
+          (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted)
+          (projectIssuePlanningScopeCompletedObservation activeState)
+      , invalidRouteCase
+          "retry"
+          readyEvents
+          readyState
+          (DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested retryReason))
+          (projectIssuePlanningTurnRetryObservation readyState retryReason)
+      , invalidRouteCase
+          "turn completed"
+          readyEvents
+          readyState
+          (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
+          (projectIssuePlanningTurnCompletedObservation readyState)
+      , invalidRouteCase
+          "blocked from terminal complete"
+          completeEvents
+          completeState
+          blockedObservation
+          (projectIssuePlanningBlockedInitializedObservation completeState blockedReason)
+      ]
+  pure (and results)
+ where
+  config = issuePlanningIndexedConfig
+  threadId = ThreadId "planner-thread"
+  turnId = TurnId "planner-turn"
+  readyState = SomeWatcherState (PlanningReady config)
+  activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+  completeState = SomeWatcherState (CompleteState PlanningComplete :: WatcherState 'IssuePlanning 'Complete)
+  readyEvents = [IssuePlanningInitialized config]
+  activeEvents = readyEvents <> [IssuePlanningTurnStarted threadId turnId]
+  completeEvents = readyEvents <> [IssuePlanningScopeCompleted]
+  retryReason = BlockedReason "retry planning turn"
+  blockedReason = BlockedReason "block planning"
+  blockedObservation = DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason)
+  invalidRouteCase caseName events state observation projectionFailure = do
+    (executor, getCalls) <- fakeActionExecutor
+    let options = DaemonOptions "/tmp/events.jsonl" (effectRuntimeConfig config.plannerRepo "/tmp/work" 1050) DryRunActions
+    result <- runObservedDaemonTickWithEvents executor options events observation
+    calls <- getCalls
+    let directFailure = workflowPlanObservation @MoifoldSpec state observation
+    checks <-
+      sequence
+        [ assert ("indexed issue-planning daemon rejects invalid terminal/retry " <> caseName <> " like compatibility") $
+            case (result, directFailure, projectionFailure) of
+              (Left (DaemonObservationRejected daemonFailure), Left compatibilityFailure, Left indexedFailure) ->
+                daemonFailure == compatibilityFailure
+                  && indexedFailure == compatibilityFailure
+              _ -> False
+        , assert ("indexed issue-planning daemon invalid terminal/retry " <> caseName <> " commits no event") (null calls)
+        ]
+    pure (and checks)
+
+workflowIssuePlanningIndexedDaemonDryRunMatchesTerminalAndRetryCompatibility :: IO Bool
+workflowIssuePlanningIndexedDaemonDryRunMatchesTerminalAndRetryCompatibility = do
+  results <-
+    sequence
+      [ dryRunRouteCase
+          "ready issues fixed"
+          waitingEvents
+          waitingState
+          (DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed)
+          (projectIssuePlanningReadyIssuesFixedObservation waitingState)
+          IssuePlanningReadyIssuesFixed
+          [SomeEffect SleepUntilNextPoll]
+          "IssuePlanning/Initialized"
+      , dryRunRouteCase
+          "scope completed"
+          readyEvents
+          readyState
+          (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted)
+          (projectIssuePlanningScopeCompletedObservation readyState)
+          IssuePlanningScopeCompleted
+          [SomeEffect StopDaemon]
+          "IssuePlanning/Complete"
+      , dryRunRouteCase
+          "retry"
+          activeEvents
+          activeState
+          (DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested retryReason))
+          (projectIssuePlanningTurnRetryObservation activeState retryReason)
+          (IssuePlanningTurnRetryRequested retryReason)
+          [SomeEffect SleepUntilNextPoll]
+          "IssuePlanning/Initialized"
+      , dryRunRouteCase
+          "turn completed"
+          activeEvents
+          activeState
+          (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
+          (projectIssuePlanningTurnCompletedObservation activeState)
+          IssuePlanningTurnCompleted
+          [SomeEffect StopDaemon]
+          "IssuePlanning/Complete"
+      , dryRunRouteCase
+          "initialized blocked"
+          readyEvents
+          readyState
+          blockedObservation
+          (projectIssuePlanningBlockedInitializedObservation readyState blockedReason)
+          (WatcherBlocked blockedReason)
+          blockedEffects
+          "IssuePlanning/Blocked"
+      , dryRunRouteCase
+          "active blocked"
+          activeEvents
+          activeState
+          blockedObservation
+          (projectIssuePlanningBlockedActiveTurnObservation activeState blockedReason)
+          (WatcherBlocked blockedReason)
+          blockedEffects
+          "IssuePlanning/Blocked"
+      , dryRunRouteCase
+          "waiting blocked"
+          waitingEvents
+          waitingState
+          blockedObservation
+          (projectIssuePlanningBlockedWaitingReadyIssuesObservation waitingState blockedReason)
+          (WatcherBlocked blockedReason)
+          blockedEffects
+          "IssuePlanning/Blocked"
+      ]
+  pure (and results)
+ where
+  config = issuePlanningIndexedConfig
+  threadId = ThreadId "planner-thread"
+  turnId = TurnId "planner-turn"
+  graph = PlanningGraph [IssueNumber 12] [] []
+  readyState = SomeWatcherState (PlanningReady config)
+  activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+  waitingState = SomeWatcherState (PlanningWaitingForReadyIssues config graph)
+  readyEvents = [IssuePlanningInitialized config]
+  activeEvents = readyEvents <> [IssuePlanningTurnStarted threadId turnId]
+  waitingEvents = activeEvents <> [IssuePlanningGraphUpdated graph]
+  retryReason = BlockedReason "retry planning turn"
+  blockedReason = BlockedReason "block planning"
+  blockedObservation = DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason)
+  blockedEffects = [SomeEffect (RecordBlocked blockedReason), SomeEffect StopDaemon]
+  dryRunRouteCase caseName events state observation projection expectedEvent expectedEffects expectedTargetLabel = do
+    (executor, getCalls) <- fakeActionExecutor
+    let runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 1030
+        options = DaemonOptions "/tmp/events.jsonl" runtimeConfig DryRunActions
+        expectedCompiled = compileEffectPlan runtimeConfig expectedEffects
+        expectedReports = dryRunCompiledEffectPlan expectedCompiled
+    result <- runObservedDaemonTickWithEvents executor options events observation
+    calls <- getCalls
+    case (result, workflowPlanObservation @MoifoldSpec state observation, projection) of
+      (Right tick, Right compatibilityPlan, Right projected) -> do
+        let expectedWrites = compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
+            audit = tick.daemonObservedAudit
+        checks <-
+          sequence
+            [ assert ("indexed issue-planning daemon dry-run " <> caseName <> " emits compatibility event") $
+                tick.daemonObservedEvent == expectedEvent
+                  && tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                  && tick.daemonObservedEvent == projected.issuePlanningIndexedProjectionPlanned.plannedEvent
+            , assert ("indexed issue-planning daemon dry-run " <> caseName <> " reaches projected state") $
+                workflowStateLabel @MoifoldSpec tick.daemonObservedState == expectedTargetLabel
+                  && sameWatcherStateShape tick.daemonObservedState projected.issuePlanningIndexedProjectionFinalState
+                  && sameWatcherStateShape tick.daemonObservedReplayResult.replayState state
+            , assert ("indexed issue-planning daemon dry-run " <> caseName <> " keeps reports, writes, and audit stable") $
+                tick.daemonObservedCommittedEvents == []
+                  && tick.daemonObservedCompiledEffects == expectedCompiled
+                  && tick.daemonObservedActionReports == expectedReports
+                  && tick.daemonObservedCompatibilityWrites == expectedWrites
+                  && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
+                  && WorkflowEventLog.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
+                  && WorkflowEventLog.workflowAuditFinalStateLabel audit == Just expectedTargetLabel
+            , assert ("indexed issue-planning daemon dry-run " <> caseName <> " does not mutate runtime state") (null calls)
+            ]
+        pure (and checks)
+      (Left failure, _, _) -> do
+        putStrLn ("FAIL indexed issue-planning daemon dry-run " <> caseName <> ": " <> Text.unpack (formatDaemonFailure failure))
+        pure False
+      _ ->
+        assert ("indexed issue-planning daemon dry-run " <> caseName <> " prepares compatibility and indexed plans") False
+
+workflowIssuePlanningIndexedDaemonExecuteMatchesTerminalAndRetryCompatibility :: IO Bool
+workflowIssuePlanningIndexedDaemonExecuteMatchesTerminalAndRetryCompatibility = do
+  results <-
+    sequence
+      [ executeRouteCase
+          "ready issues fixed"
+          waitingEvents
+          waitingState
+          (DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed)
+          IssuePlanningReadyIssuesFixed
+          [SomeEffect SleepUntilNextPoll]
+          "IssuePlanning/Initialized"
+          (Just FakeSleep)
+      , executeRouteCase
+          "scope completed"
+          readyEvents
+          readyState
+          (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted)
+          IssuePlanningScopeCompleted
+          [SomeEffect StopDaemon]
+          "IssuePlanning/Complete"
+          (Just FakeStop)
+      , executeRouteCase
+          "retry"
+          activeEvents
+          activeState
+          (DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested retryReason))
+          (IssuePlanningTurnRetryRequested retryReason)
+          [SomeEffect SleepUntilNextPoll]
+          "IssuePlanning/Initialized"
+          (Just FakeSleep)
+      , executeRouteCase
+          "turn completed"
+          activeEvents
+          activeState
+          (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
+          IssuePlanningTurnCompleted
+          [SomeEffect StopDaemon]
+          "IssuePlanning/Complete"
+          (Just FakeStop)
+      , executeRouteCase
+          "initialized blocked"
+          readyEvents
+          readyState
+          blockedObservation
+          (WatcherBlocked blockedReason)
+          blockedEffects
+          "IssuePlanning/Blocked"
+          (Just FakeStop)
+      , executeRouteCase
+          "active blocked"
+          activeEvents
+          activeState
+          blockedObservation
+          (WatcherBlocked blockedReason)
+          blockedEffects
+          "IssuePlanning/Blocked"
+          (Just FakeStop)
+      , executeRouteCase
+          "waiting blocked"
+          waitingEvents
+          waitingState
+          blockedObservation
+          (WatcherBlocked blockedReason)
+          blockedEffects
+          "IssuePlanning/Blocked"
+          (Just FakeStop)
+      ]
+  pure (and results)
+ where
+  config = issuePlanningIndexedConfig
+  threadId = ThreadId "planner-thread"
+  turnId = TurnId "planner-turn"
+  graph = PlanningGraph [IssueNumber 12] [] []
+  readyState = SomeWatcherState (PlanningReady config)
+  activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+  waitingState = SomeWatcherState (PlanningWaitingForReadyIssues config graph)
+  readyEvents = [IssuePlanningInitialized config]
+  activeEvents = readyEvents <> [IssuePlanningTurnStarted threadId turnId]
+  waitingEvents = activeEvents <> [IssuePlanningGraphUpdated graph]
+  retryReason = BlockedReason "retry planning turn"
+  blockedReason = BlockedReason "block planning"
+  blockedObservation = DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason)
+  blockedEffects = [SomeEffect (RecordBlocked blockedReason), SomeEffect StopDaemon]
+  executeRouteCase caseName events state observation expectedEvent expectedEffects expectedTargetLabel expectedPostCall = do
+    (executor, getCalls) <- fakeActionExecutor
+    let runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 1040
+        options = DaemonOptions "/tmp/events.jsonl" runtimeConfig ExecuteActions
+        expectedCompiled = compileEffectPlan runtimeConfig expectedEffects
+        expectedAppend = FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)
+    result <- runObservedDaemonTickWithEvents executor options events observation
+    calls <- getCalls
+    case (result, workflowPlanObservation @MoifoldSpec state observation) of
+      (Right tick, Right compatibilityPlan) -> do
+        let expectedWrites = compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
+            expectedWriteCalls = [FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write) | write <- expectedWrites]
+            postCallOk =
+              case expectedPostCall of
+                Nothing -> True
+                Just call -> callBefore expectedAppend call calls
+        checks <-
+          sequence
+            [ assert ("indexed issue-planning daemon execute " <> caseName <> " commits compatibility event") $
+                tick.daemonObservedEvent == expectedEvent
+                  && tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                  && tick.daemonObservedCommittedEvents == [expectedEvent]
+                  && expectedAppend `elem` calls
+            , assert ("indexed issue-planning daemon execute " <> caseName <> " reaches target state") $
+                workflowStateLabel @MoifoldSpec tick.daemonObservedState == expectedTargetLabel
+            , assert ("indexed issue-planning daemon execute " <> caseName <> " writes compatibility after append") $
+                tick.daemonObservedCompiledEffects == expectedCompiled
+                  && tick.daemonObservedCompatibilityWrites == expectedWrites
+                  && all (`elem` calls) expectedWriteCalls
+                  && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                  && postCallOk
+            , assert ("indexed issue-planning daemon execute " <> caseName <> " keeps audit labels") $
+                WorkflowEventLog.workflowAuditPriorStateLabel tick.daemonObservedAudit == workflowStateLabel @MoifoldSpec state
+                  && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just (eventName expectedEvent)
+                  && WorkflowEventLog.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just expectedTargetLabel
+            ]
+        pure (and checks)
+      (Left failure, _) -> do
+        putStrLn ("FAIL indexed issue-planning daemon execute " <> caseName <> ": " <> Text.unpack (formatDaemonFailure failure))
+        pure False
+      _ ->
+        assert ("indexed issue-planning daemon execute " <> caseName <> " prepares compatibility plan") False
 
 issuePlanningIndexedSpecMatchesCompatibility
   :: forall (source :: Type) (target :: Type).
@@ -12577,6 +13070,7 @@ main = do
       , quickCheckResult prop_issuePlanningFanoutRetriesTransientCloneFailures
       , quickCheckResult prop_issuePlanningFanoutParsesImplementerConfig
       , quickCheckResult prop_issuePlanningFanoutDetectsCompletionBoundary
+      , quickCheckResult (once (ioProperty issuePlanningFanoutRoutesTerminalWritesThroughIndexedProjection))
       , quickCheckResult prop_issuePlanningFanoutUsesOnlyReadyIssues
       , quickCheckResult prop_issuePlanningReadyFanoutDoesNotRecreateExistingImplementers
       , quickCheckResult prop_issuePlanningFanoutTreatsClosedReadyIssuesAsTerminal
