@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-003",
+  "roadmap_item_id": "item-014-indexed-issue-planning-daemon-start",
+  "decision": "approved",
+  "evidence_summary": "Only PlanningReady plus ObservedPlanningTurnStarted is routed through the indexed issue-planning adapter; compatibility transaction runners, reports, action ordering, request-id progression, writes, labels, and package boundaries remain covered by passing focused tests and baseline checks."
+}

@@ -93,10 +93,12 @@ import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedInitialized
   , IssuePlanningIndexedObservation (..)
   , IssuePlanningIndexedReplayResult (..)
+  , IssuePlanningIndexedProjection (..)
   , IssuePlanningIndexedSpec
   , IssuePlanningIndexedState (..)
   , IssuePlanningIndexedWaitingReadyIssues
   , issuePlanningIndexedTransitionToCompatibility
+  , projectIssuePlanningTurnStartedObservation
   )
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
@@ -6294,6 +6296,10 @@ workflowFacadeExtractionTests = do
       , workflowIssuePlanningIndexedSpecMatchesPolicyTransitions
       , workflowIssuePlanningIndexedSpecPreservesGraphValidation
       , workflowIssuePlanningIndexedSpecRejectsInvalidObservationsLikeCompatibility
+      , workflowIssuePlanningIndexedProjectionStartsPlannerTurn
+      , workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility
+      , workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility
+      , workflowIssuePlanningIndexedDaemonRejectsInvalidTurnStart
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
@@ -7803,6 +7809,27 @@ prReviewIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult P
 prReviewIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewIndexedReplayResult replay)) =
   replay
 
+issuePlanningIndexedTransitionEvent
+  :: IndexedWorkflow.IndexedPlannedTransition IssuePlanningIndexedSpec source target
+  -> WatcherEvent
+issuePlanningIndexedTransitionEvent transition =
+  case IndexedWorkflow.indexedPlannedEvent transition of
+    IssuePlanningIndexedEvent _sourceLabel _targetLabel event -> event
+
+issuePlanningIndexedTransitionPreCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition IssuePlanningIndexedSpec source target
+  -> EffectPlan
+issuePlanningIndexedTransitionPreCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPreCommitEffects transition of
+    IssuePlanningIndexedEffectPlan effects -> effects
+
+issuePlanningIndexedTransitionPostCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition IssuePlanningIndexedSpec source target
+  -> EffectPlan
+issuePlanningIndexedTransitionPostCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPostCommitEffects transition of
+    IssuePlanningIndexedEffectPlan effects -> effects
+
 prReviewCheckingIndexedTransitionEvent
   :: IndexedWorkflow.IndexedPlannedTransition PrReviewCheckingIndexedSpec source target
   -> WatcherEvent
@@ -8302,6 +8329,225 @@ workflowIssuePlanningIndexedSpecRejectsInvalidObservationsLikeCompatibility = do
       of
       (Left compatibilityFailure, Left indexedFailure) -> compatibilityFailure == indexedFailure
       _ -> False
+
+workflowIssuePlanningIndexedProjectionStartsPlannerTurn :: IO Bool
+workflowIssuePlanningIndexedProjectionStartsPlannerTurn = do
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      state = SomeWatcherState (PlanningReady config)
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId turnId)
+      indexedState =
+        IssuePlanningIndexedState state
+          :: IssuePlanningIndexedState IssuePlanningIndexedInitialized
+      indexedObservation =
+        IssuePlanningIndexedObservation
+          "IssuePlanning/Initialized"
+          "IssuePlanning/PlanMode"
+          observation
+          :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
+      expectedEvent = IssuePlanningTurnStarted threadId turnId
+      expectedEffects = [SomeEffect (StartPlannerTurn threadId)]
+      runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 920
+  assert "indexed issue-planning projection starts planner turn with compatibility labels and request id" $
+    case
+      ( workflowObserve @MoifoldSpec state observation
+      , workflowPlanObservation @MoifoldSpec state observation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @IssuePlanningIndexedSpec indexedState indexedObservation
+      , projectIssuePlanningTurnStartedObservation state threadId turnId
+      )
+      of
+      (Right observed, Right compatibilityPlan, Right indexedPlan, Right projection) ->
+        let projectedPlan = projection.issuePlanningIndexedProjectionPlanned
+            compiled =
+              WorkflowExecution.compileWorkflowEffectPlanWithMetadata
+                runtimeConfig
+                projection.issuePlanningIndexedProjectionEffectPlan
+         in projectedPlan.plannedEvent == compatibilityPlan.plannedEvent
+              && projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+              && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+              && projectedPlan.plannedEvent == expectedEvent
+              && issuePlanningIndexedTransitionEvent indexedPlan == expectedEvent
+              && issuePlanningIndexedTransitionPreCommitEffects indexedPlan == expectedEffects
+              && null (issuePlanningIndexedTransitionPostCommitEffects indexedPlan)
+              && projection.issuePlanningIndexedProjectionSourceLabel == workflowStateLabel @MoifoldSpec state
+              && projection.issuePlanningIndexedProjectionTargetLabel == "IssuePlanning/PlanMode"
+              && workflowStateLabel @MoifoldSpec projection.issuePlanningIndexedProjectionFinalState == "IssuePlanning/PlanMode"
+              && sameWatcherStateShape projection.issuePlanningIndexedProjectionFinalState observed.observedState
+              && projection.issuePlanningIndexedProjectionEffectPlan == expectedEffects
+              && fmap (appServerRequestId . WorkflowExecution.workflowPlannedAction) compiled.workflowCompiledActions == [Just 920]
+              && compiled.workflowCompiledNextRequestId == RequestId 921
+      _ -> False
+
+workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility :: IO Bool
+workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility = do
+  (executor, getCalls) <- fakeActionExecutor
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      state = SomeWatcherState (PlanningReady config)
+      events = [IssuePlanningInitialized config]
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId turnId)
+      runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 930
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+      expectedEvent = IssuePlanningTurnStarted threadId turnId
+      expectedEffects = [SomeEffect (StartPlannerTurn threadId)]
+      expectedCompiled = compileEffectPlan runtimeConfig expectedEffects
+      expectedReports = dryRunCompiledEffectPlan expectedCompiled
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case
+    ( result
+    , workflowPlanObservation @MoifoldSpec state observation
+    , projectIssuePlanningTurnStartedObservation state threadId turnId
+    )
+    of
+    (Right tick, Right compatibilityPlan, Right projection) -> do
+      let audit = tick.daemonObservedAudit
+          expectedWrites =
+            compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
+      results <-
+        sequence
+          [ assert "indexed issue-planning daemon dry-run emits compatibility start event" $
+              tick.daemonObservedEvent == expectedEvent
+                && tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                && tick.daemonObservedEvent == projection.issuePlanningIndexedProjectionPlanned.plannedEvent
+          , assert "indexed issue-planning daemon dry-run reaches active planner state" $
+              sameWatcherStateShape tick.daemonObservedState projection.issuePlanningIndexedProjectionFinalState
+                && workflowStateLabel @MoifoldSpec tick.daemonObservedState == "IssuePlanning/PlanMode"
+                && sameWatcherStateShape tick.daemonObservedReplayResult.replayState state
+          , assert "indexed issue-planning daemon dry-run preserves labels and request id progression" $
+              projection.issuePlanningIndexedProjectionSourceLabel == workflowStateLabel @MoifoldSpec state
+                && projection.issuePlanningIndexedProjectionTargetLabel == "IssuePlanning/PlanMode"
+                && tick.daemonObservedCompiledEffects == expectedCompiled
+                && tick.daemonObservedCompiledEffects.compiledNextRequestId == RequestId 931
+                && fmap appServerRequestId tick.daemonObservedCompiledEffects.compiledActions == [Just 930]
+          , assert "indexed issue-planning daemon dry-run keeps report and audit surfaces stable" $
+              tick.daemonObservedCommittedEvents == []
+                && tick.daemonObservedActionReports == expectedReports
+                && tick.daemonObservedCompatibilityWrites == expectedWrites
+                && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
+                && WorkflowEventLog.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
+                && WorkflowEventLog.workflowAuditFinalStateLabel audit == Just "IssuePlanning/PlanMode"
+                && WorkflowEventLog.workflowAuditPreCommitReports audit == expectedReports
+                && WorkflowEventLog.workflowAuditPostCommitReports audit == []
+          , assert "indexed issue-planning daemon dry-run does not mutate runtime state" (null calls)
+          ]
+      pure (and results)
+    (Left failure, _, _) -> do
+      putStrLn ("FAIL indexed issue-planning daemon dry-run: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+    _ ->
+      assert "indexed issue-planning daemon dry-run prepares compatibility and indexed plans" False
+
+workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility :: IO Bool
+workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility = do
+  (executor, getCalls) <- fakeActionExecutor
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      state = SomeWatcherState (PlanningReady config)
+      events = [IssuePlanningInitialized config]
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId turnId)
+      runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 940
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      expectedEvent = IssuePlanningTurnStarted threadId turnId
+      expectedEffects = [SomeEffect (StartPlannerTurn threadId)]
+      expectedCompiled = compileEffectPlan runtimeConfig expectedEffects
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  case
+    ( result
+    , workflowPlanObservation @MoifoldSpec state observation
+    , projectIssuePlanningTurnStartedObservation state threadId turnId
+    )
+    of
+    (Right tick, Right compatibilityPlan, Right projection) -> do
+      let expectedWrites =
+            compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
+          expectedAppend = FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)
+          expectedWriteCalls =
+            [ FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write)
+            | write <- expectedWrites
+            ]
+      results <-
+        sequence
+          [ assert "indexed issue-planning daemon execute commits compatibility start event" $
+              tick.daemonObservedEvent == expectedEvent
+                && tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                && tick.daemonObservedCommittedEvents == [expectedEvent]
+          , assert "indexed issue-planning daemon execute reaches active planner state" $
+              sameWatcherStateShape tick.daemonObservedState projection.issuePlanningIndexedProjectionFinalState
+                && workflowStateLabel @MoifoldSpec tick.daemonObservedState == "IssuePlanning/PlanMode"
+          , assert "indexed issue-planning daemon execute starts planner turn before append" $
+              tick.daemonObservedCompiledEffects == expectedCompiled
+                && tick.daemonObservedCompiledEffects.compiledNextRequestId == RequestId 941
+                && case calls of
+                  FakeAppServer request : FakeAppendJsonLine "/tmp/events.jsonl" appended : _ ->
+                    request.requestMethod == "turn/start"
+                      && request.requestId == RequestId 940
+                      && appended == toJSON expectedEvent
+                  _ -> False
+          , assert "indexed issue-planning daemon execute writes compatibility after event append" $
+              tick.daemonObservedCompatibilityWrites == expectedWrites
+                && length [() | FakeWriteJson {} <- calls] == length expectedWrites
+                && all (`elem` calls) expectedWriteCalls
+                && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+          , assert "indexed issue-planning daemon execute keeps audit surfaces stable" $
+              WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started"
+                && WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
+                && WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit == []
+          ]
+      pure (and results)
+    (Left failure, _, _) -> do
+      putStrLn ("FAIL indexed issue-planning daemon execute: " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+    _ ->
+      assert "indexed issue-planning daemon execute prepares compatibility and indexed plans" False
+
+workflowIssuePlanningIndexedDaemonRejectsInvalidTurnStart :: IO Bool
+workflowIssuePlanningIndexedDaemonRejectsInvalidTurnStart = do
+  (executor, getCalls) <- fakeActionExecutor
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      secondTurnId = TurnId "planner-turn-2"
+      state = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+      events = [IssuePlanningInitialized config, IssuePlanningTurnStarted threadId turnId]
+      observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId secondTurnId)
+      runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 950
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = DryRunActions
+          }
+  result <- runObservedDaemonTickWithEvents executor options events observation
+  calls <- getCalls
+  let directFailure = workflowPlanObservation @MoifoldSpec state observation
+      indexedFailure = projectIssuePlanningTurnStartedObservation state threadId secondTurnId
+  results <-
+    sequence
+      [ assert "indexed issue-planning daemon rejects turn start outside ready state like compatibility" $
+          case (result, directFailure, indexedFailure) of
+            (Left (DaemonObservationRejected daemonFailure), Left compatibilityFailure, Left projectionFailure) ->
+              daemonFailure == compatibilityFailure
+                && projectionFailure == compatibilityFailure
+                && "ObservedPlanningTurnStarted" `Text.isInfixOf` daemonFailure
+            _ -> False
+      , assert "indexed issue-planning daemon invalid turn start commits no event" (null calls)
+      ]
+  pure (and results)
 
 issuePlanningIndexedSpecMatchesCompatibility
   :: forall (source :: Type) (target :: Type).

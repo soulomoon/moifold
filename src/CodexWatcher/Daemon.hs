@@ -44,6 +44,7 @@ import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.Ids (CommitSha (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
+import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
 import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
@@ -65,6 +66,7 @@ import CodexWatcher.Workflow.Transaction.Core
   , runWorkflowPreparedExecuteTransactionDetailed
   )
 import CodexWatcher.Workflow.Types (MoifoldSpec, legacyObservedPlannedTransition)
+import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed qualified as WorkflowIssuePlanningIndexed
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed qualified as WorkflowPrReviewMergeabilityIndexed
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
@@ -304,6 +306,19 @@ prepareDaemonObservation
   -> Either Text PreparedDaemonObservation
 prepareDaemonObservation state observation =
   case (state, observation) of
+    (SomeWatcherState PlanningReady {}, DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId turnId)) -> do
+      projected <-
+        WorkflowIssuePlanningIndexed.projectIssuePlanningTurnStartedObservation
+          state
+          threadId
+          turnId
+      pure
+        PreparedDaemonObservation
+          { preparedDaemonObservationPlanned =
+              projected.issuePlanningIndexedProjectionPlanned
+          , preparedDaemonObservationFinalState =
+              projected.issuePlanningIndexedProjectionFinalState
+          }
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
         WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation

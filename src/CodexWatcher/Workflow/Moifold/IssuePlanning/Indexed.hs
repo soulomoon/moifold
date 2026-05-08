@@ -15,6 +15,7 @@ module CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedInitialized
   , IssuePlanningIndexedObservation (..)
   , IssuePlanningIndexedPoint
+  , IssuePlanningIndexedProjection (..)
   , IssuePlanningIndexedReplayResult (..)
   , IssuePlanningIndexedSpec
   , IssuePlanningIndexedState (..)
@@ -22,13 +23,17 @@ module CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedWaitingReadyIssues
   , issuePlanningIndexedSomeEvent
   , issuePlanningIndexedTransitionToCompatibility
+  , projectIssuePlanningTurnStartedObservation
   ) where
 
+import CodexWatcher.Core.Ids (ThreadId, TurnId)
 import CodexWatcher.Core.State (SomeWatcherState)
+import CodexWatcher.Domain.IssuePlanning.Watcher qualified as IssuePlanning
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent)
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Observation (DaemonObservation, ObservedPolicyTick (..))
+import CodexWatcher.Workflow.Observation qualified as WorkflowObservation
 import CodexWatcher.Workflow.Types
   ( MoifoldSpec
   , PlannedTransition (..)
@@ -72,6 +77,14 @@ data IssuePlanningIndexedTick source target =
 
 newtype IssuePlanningIndexedReplayResult state =
   IssuePlanningIndexedReplayResult EventReplayResult
+
+data IssuePlanningIndexedProjection = IssuePlanningIndexedProjection
+  { issuePlanningIndexedProjectionPlanned :: PlannedTransition MoifoldSpec
+  , issuePlanningIndexedProjectionFinalState :: SomeWatcherState
+  , issuePlanningIndexedProjectionSourceLabel :: Text
+  , issuePlanningIndexedProjectionTargetLabel :: Text
+  , issuePlanningIndexedProjectionEffectPlan :: EffectPlan
+  }
 
 type instance IndexedWorkflow.WorkflowIndex IssuePlanningIndexedSpec = IssuePlanningIndexedPoint
 
@@ -158,6 +171,51 @@ issuePlanningIndexedPlannedTransitionFromCompatibility sourceLabel targetLabel p
 issuePlanningIndexedSomeEvent :: IndexedWorkflow.SomeIndexedWorkflowEvent IssuePlanningIndexedSpec -> WatcherEvent
 issuePlanningIndexedSomeEvent (IndexedWorkflow.SomeIndexedWorkflowEvent (IssuePlanningIndexedEvent _sourceLabel _targetLabel event)) =
   event
+
+projectIssuePlanningTurnStartedObservation
+  :: SomeWatcherState
+  -> ThreadId
+  -> TurnId
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningTurnStartedObservation state threadId turnId = do
+  observed <-
+    IndexedWorkflow.indexedWorkflowObserve
+      @IssuePlanningIndexedSpec
+      indexedState
+      indexedObservation
+  planned <-
+    IndexedWorkflow.indexedWorkflowPlanObservation
+      @IssuePlanningIndexedSpec
+      indexedState
+      indexedObservation
+  let IssuePlanningIndexedState finalState =
+        IndexedWorkflow.indexedWorkflowObservedState @IssuePlanningIndexedSpec observed
+      projectedPlan = issuePlanningIndexedTransitionToCompatibility planned
+  pure
+    IssuePlanningIndexedProjection
+      { issuePlanningIndexedProjectionPlanned = projectedPlan
+      , issuePlanningIndexedProjectionFinalState = finalState
+      , issuePlanningIndexedProjectionSourceLabel =
+          IndexedWorkflow.indexedWorkflowPlannedTransitionSourceLabel
+            @IssuePlanningIndexedSpec
+            planned
+      , issuePlanningIndexedProjectionTargetLabel =
+          IndexedWorkflow.indexedWorkflowPlannedTransitionTargetLabel
+            @IssuePlanningIndexedSpec
+            planned
+      , issuePlanningIndexedProjectionEffectPlan =
+          projectedPlan.plannedPreCommitEffects <> projectedPlan.plannedPostCommitEffects
+      }
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState IssuePlanningIndexedInitialized
+  indexedObservation =
+    IssuePlanningIndexedObservation
+      "IssuePlanning/Initialized"
+      "IssuePlanning/PlanMode"
+      (WorkflowObservation.DaemonIssuePlanningObservation (IssuePlanning.ObservedPlanningTurnStarted threadId turnId))
+      :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
 
 issuePlanningIndexedTransitionToCompatibility
   :: IndexedWorkflow.IndexedPlannedTransition IssuePlanningIndexedSpec source target
