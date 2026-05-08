@@ -1,0 +1,42 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-004",
+  "roadmap_item_id": "item-023-indexed-issue-implementation-close-daemon",
+  "decision": "approved",
+  "checks_run": [
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "passed"
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --cached --name-only",
+      "result": "no staged files"
+    },
+    {
+      "command": "git diff --cached --check",
+      "result": "passed; no staged files"
+    },
+    {
+      "command": "rg -n \"IssueWaitingForIssueClose|ObservedIssueClosed|projectIssueImplementIssueClosedObservation\" src/CodexWatcher/Daemon.hs test/Main.hs",
+      "result": "passed"
+    },
+    {
+      "command": "rg -n \"runIssueWaitingForIssueClose|retryCloseIssue|CloseIssue|SleepUntilNextPoll|waiting to observe closed issue|would close issue after merged PR\" src/CodexWatcher/Domain/IssueImplement/Loop.hs test/Main.hs",
+      "result": "passed"
+    },
+    {
+      "command": "rg -n \"CodexWatcher.Workflow.Moifold.IssueImplement.Indexed|IssueImplementIndexedSpec|projectIssueImplement\" src/CodexWatcher/Domain src/CodexWatcher/DaemonLoop src/CodexWatcher/AutomaticLoop",
+      "result": "passed; no matches"
+    }
+  ],
+  "evidence_summary": "Round 023 routes only IssueWaitingForIssueClose plus ObservedIssueClosed through projectIssueImplementIssueClosedObservation, preserves close polling and retry behavior in the domain loop, adds dry-run/execute daemon parity plus automatic close polling assertions, keeps indexed routing out of domain/daemon-loop/automatic-loop modules, and passes watcher-core-test, cabal build all, and whitespace checks."
+}

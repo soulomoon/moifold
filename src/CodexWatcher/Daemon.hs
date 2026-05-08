@@ -565,6 +565,12 @@ prepareDaemonObservation state observation =
           state
           reason
       pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssueWaitingForIssueClose {}, DaemonIssueImplementObservation (ObservedIssueClosed prNumber)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementIssueClosedObservation
+          state
+          prNumber
+      pure (preparedFromIssueImplementProjection projected)
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
         WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation

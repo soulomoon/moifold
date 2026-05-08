@@ -5516,6 +5516,8 @@ automaticIssueMergeWaitsForIssueClose = do
       postMergeReviewingEvents = postMergeReviewReadyEvents <> [IssuePostMergeReviewStartedEvent reviewedCommit reviewerTurn]
       postMergeCleanEvents = postMergeReviewingEvents <> [IssuePostMergeReviewCleanEvent (CleanReviewEvidence reviewedCommit "LGTM")]
   (openTick, openCalls) <- runIssueMergeTickWithCalls issueEvents openPrCommand defaultFakeAppServer
+  openIssueRetryTick <- runIssueMergeTick postMergeCleanEvents openIssueCommand defaultFakeAppServer
+  openIssueRetryExecuteTick <- runIssueMergeTickWithMode ExecuteActions postMergeCleanEvents openIssueCommand defaultFakeAppServer
   merged <- runIssueMergeCheck issueEvents mergedPrCommand defaultFakeAppServer
   mergedTick <- runIssueMergeTick issueEvents mergedPrCommand defaultFakeAppServer
   mergedWithReviewerTick <- runIssueMergeTick waitingWithReviewerEvents mergedPrCommand defaultFakeAppServer
@@ -5523,6 +5525,7 @@ automaticIssueMergeWaitsForIssueClose = do
   reviewerReadyTick <- runIssueMergeTick postMergeReadyEvents defaultFakeCommand defaultFakeAppServer
   reviewerStarted <- runIssueMergeCheck postMergeReviewReadyEvents mergedPrCommand defaultFakeAppServer
   clean <- runIssueMergeTick postMergeReviewingEvents defaultFakeCommand cleanReviewerAppServer
+  closedTick <- runIssueMergeTick postMergeCleanEvents closedIssueCommand defaultFakeAppServer
   closed <- runIssueMergeCheck postMergeCleanEvents closedIssueCommand defaultFakeAppServer
   results <-
     sequence
@@ -5535,7 +5538,12 @@ automaticIssueMergeWaitsForIssueClose = do
       , assert "post-merge reviewer-ready observation matches indexed projection" (maybe False (indexedPostMergeReviewerReadyMatches prNumber reviewerThread) reviewerReadyTick)
       , assert "post-merge review starts reviewer against merged PR head" (reviewerStarted == Just (IssuePostMergeReviewStartedEvent reviewedCommit reviewerTurn, Implementing))
       , assert "clean post-merge review schedules issue close" (maybe False issueCloseScheduled clean)
+      , assert "open issue close retry closes before sleeping" (maybe False issueCloseRetryOrdered openIssueRetryTick)
+      , assert "open issue close retry stays idle after close command" (maybe False issueCloseRetryIdlesAfterClose openIssueRetryExecuteTick)
+      , assert "open issue close retry dry-run renders close command" (maybe False issueCloseRetryDryRunRendersCommand openIssueRetryTick)
+      , assert "open issue close retry does not prematurely observe issue closed" (maybe False noPrematureIssueClosedEvent openIssueRetryTick)
       , assert "closed issue completes issue implementer" (closed == Just (IssueClosedEvent prNumber, Complete))
+      , assert "closed issue observation matches indexed projection" (maybe False (indexedIssueClosedMatches prNumber) closedTick)
       ]
   pure (and results)
  where
@@ -5544,6 +5552,9 @@ automaticIssueMergeWaitsForIssueClose = do
       command -> defaultFakeCommand command
   mergedPrCommand = \case
       GhPrView {} -> jsonCommandReport (object ["state" .= ("MERGED" :: Text), "headRefOid" .= ("0123456789abcdef" :: Text)])
+      command -> defaultFakeCommand command
+  openIssueCommand = \case
+      GhIssueView {} -> jsonCommandReport (object ["state" .= ("OPEN" :: Text), "closed" .= False])
       command -> defaultFakeCommand command
   closedIssueCommand = \case
       GhIssueView {} -> jsonCommandReport (object ["state" .= ("CLOSED" :: Text), "closed" .= True])
@@ -5564,9 +5575,13 @@ automaticIssueMergeWaitsForIssueClose = do
     tick <- runIssueMergeTick events commandHandler appServerHandler
     pure $ tick >>= \result -> (\observed -> (observed.daemonObservedEvent, somePhase observed.daemonObservedState)) <$> result.loopObservedTick
   runIssueMergeTick events commandHandler appServerHandler = do
-    (tick, _calls) <- runIssueMergeTickWithCalls events commandHandler appServerHandler
+    runIssueMergeTickWithMode DryRunActions events commandHandler appServerHandler
+  runIssueMergeTickWithMode executionMode events commandHandler appServerHandler = do
+    (tick, _calls) <- runIssueMergeTickWithCallsAndMode executionMode events commandHandler appServerHandler
     pure tick
   runIssueMergeTickWithCalls events commandHandler appServerHandler = do
+    runIssueMergeTickWithCallsAndMode DryRunActions events commandHandler appServerHandler
+  runIssueMergeTickWithCallsAndMode executionMode events commandHandler appServerHandler = do
     (executor, _getCalls) <-
       fakeActionExecutorWith
         commandHandler
@@ -5577,7 +5592,7 @@ automaticIssueMergeWaitsForIssueClose = do
           DaemonOptions
             { daemonEventLogPath = "/tmp/events.jsonl"
             , daemonRuntimeConfig = runtimeConfig
-            , daemonExecutionMode = DryRunActions
+            , daemonExecutionMode = executionMode
             }
         loopConfig = DaemonLoopConfig options Nothing
     result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
@@ -5607,6 +5622,41 @@ automaticIssueMergeWaitsForIssueClose = do
     case report.actionExecutionAction of
       PlannedCommand GhIssueClose {} -> True
       _ -> False
+  issueCloseRetryOrdered tick =
+    actionBefore
+      (PlannedCommand (GhIssueClose (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")) (PrNumber 7)))
+      PlannedSleepUntilNextPoll
+      (fmap actionExecutionAction tick.loopActionReports)
+  issueCloseRetryIdlesAfterClose tick =
+    tick.loopIdleReason == Just "closed issue after merged PR #7; waiting to observe closed issue"
+  issueCloseRetryDryRunRendersCommand tick =
+    any rendersExpectedClose tick.loopActionReports
+   where
+    expectedCommand = GhIssueClose (IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")) (PrNumber 7)
+    expectedSpec = renderRuntimeCommand expectedCommand
+    rendersExpectedClose report =
+      report.actionExecutionMode == DryRunActions
+        && report.actionExecutionResult == DryRunActionResult
+        && case report.actionExecutionAction of
+          PlannedCommand command ->
+            command == expectedCommand
+              && renderRuntimeCommand command == expectedSpec
+          _ -> False
+  noPrematureIssueClosedEvent tick =
+    case (tick.loopObservation, tick.loopObservedTick) of
+      (Nothing, Nothing) -> True
+      _ -> False
+  actionBefore first second actions =
+    case (firstIndex (== first) actions, firstIndex (== second) actions) of
+      (Just firstPosition, Just secondPosition) -> firstPosition < secondPosition
+      _ -> False
+  firstIndex predicate =
+    go (0 :: Int)
+   where
+    go _ [] = Nothing
+    go index (value : values)
+      | predicate value = Just index
+      | otherwise = go (index + 1) values
   openPrIdled tick =
     case tick.loopObservedTick of
       Nothing ->
@@ -5644,6 +5694,16 @@ automaticIssueMergeWaitsForIssueClose = do
           (Just observed, Right projection) ->
             observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
               && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          _ -> False
+  indexedIssueClosedMatches prNumber tick =
+    let issueConfig = IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+        state = SomeWatcherState (IssueWaitingForIssueClose issueConfig prNumber)
+     in case (tick.loopObservedTick, IssueImplementIndexed.projectIssueImplementIssueClosedObservation state prNumber) of
+          (Just observed, Right projection) ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+              && fmap effectTag projection.issueImplementIndexedProjectionEffectPlan == [StopDaemonTag]
+              && fmap actionExecutionAction observed.daemonObservedActionReports == [PlannedStopDaemon]
           _ -> False
 
 automaticIssueFinalReviewFindingsRequestRework :: IO Bool
@@ -6673,6 +6733,7 @@ workflowFacadeExtractionTests = do
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProjections
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPostMergeReviewProjections
+      , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchIssueCloseProjections
       , workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly
       , workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
@@ -10948,12 +11009,12 @@ workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
         , "projectIssueImplementPostMergeReviewerOutcomeReworkObservation"
         , "projectIssueImplementPostMergeReviewerOutcomeIncompleteObservation"
         , "projectIssueImplementPostMergeReviewerOutcomeBlockedObservation"
+        , "projectIssueImplementIssueClosedObservation"
+        , "ObservedIssueClosed"
         ]
       forbiddenNeedles =
-        [ "projectIssueImplementPullRequestMergedPostMergeReview"
-        , "projectIssueImplementPullRequestMergedWaitingForIssueClose"
-        , "projectIssueImplementIssueClosed"
-        , "ObservedIssueClosed"
+        [ "projectIssueImplementBlocked"
+        , "ObservedIssueImplementBlocked"
         ]
       missingRequired =
         [ Text.unpack needle
@@ -10966,8 +11027,8 @@ workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
         , needle `Text.isInfixOf` source
         ]
   sequenceAnd
-    [ assert "indexed workflow issue implement daemon routes required item-020 through item-022 projectors" (null missingRequired)
-    , assert "indexed workflow issue implement daemon does not route item-023-plus projectors" (null violations)
+    [ assert "indexed workflow issue implement daemon routes required item-020 through item-023 projectors" (null missingRequired)
+    , assert "indexed workflow issue implement daemon does not route item-024 projectors" (null violations)
     ]
 
 data IssueImplementDaemonProjectionCase = IssueImplementDaemonProjectionCase
@@ -10994,6 +11055,12 @@ workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPostMergeReviewProjectio
 workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPostMergeReviewProjections = do
   dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonPostMergeReviewProjectionCases
   executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonPostMergeReviewProjectionCases
+  pure (and dryRunResults && and executeResults)
+
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchIssueCloseProjections :: IO Bool
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchIssueCloseProjections = do
+  dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonIssueCloseProjectionCases
+  executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonIssueCloseProjectionCases
   pure (and dryRunResults && and executeResults)
 
 runIssueImplementDaemonProjectionCase :: ActionExecutionMode -> IssueImplementDaemonProjectionCase -> IO Bool
@@ -11475,6 +11542,59 @@ issueImplementDaemonPostMergeReviewProjectionCases =
     SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
   postMergeReviewingState =
     SomeWatcherState (IssuePostMergeReviewing issueConfig prNumber (WorkerIdle workerThread) reviewedCommit (ReviewerActive (ActiveTurn reviewerThread finalReviewTurn)))
+
+issueImplementDaemonIssueCloseProjectionCases :: [IssueImplementDaemonProjectionCase]
+issueImplementDaemonIssueCloseProjectionCases =
+  [ IssueImplementDaemonProjectionCase
+      "issue close completes"
+      waitingClosePrefix
+      waitingCloseState
+      (DaemonIssueImplementObservation (ObservedIssueClosed prNumber))
+      (IssueImplementIndexed.projectIssueImplementIssueClosedObservation waitingCloseState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "wrong issue close blocks"
+      waitingClosePrefix
+      waitingCloseState
+      (DaemonIssueImplementObservation (ObservedIssueClosed stalePr))
+      (IssueImplementIndexed.projectIssueImplementIssueClosedObservation waitingCloseState stalePr)
+  ]
+ where
+  issueConfig = issueImplementIndexedConfig
+  prNumber = PrNumber 7
+  stalePr = PrNumber 8
+  workerThread = ThreadId "worker-thread"
+  reviewerThread = ThreadId "reviewer-thread"
+  planTurn = TurnId "turn-plan"
+  implementationTurn = TurnId "turn-impl"
+  finalReviewTurn = TurnId "turn-final-review"
+  reviewedCommit = CommitSha "0123456789abcdef"
+  cleanEvidence = CleanReviewEvidence reviewedCommit "LGTM"
+  readyToPlanPrefix =
+    [ IssueImplementInitialized issueConfig workerThread
+    , IssuePullRequestReusedEvent prNumber
+    ]
+  inPlanModePrefix =
+    readyToPlanPrefix <> [IssuePlanTurnStartedEvent planTurn]
+  planReadyPrefix =
+    inPlanModePrefix <> [IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)]
+  implementationReadyPrPrefix =
+    planReadyPrefix <> [IssuePullRequestBodyUpdatedEvent prNumber]
+  implementingPrPrefix =
+    implementationReadyPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
+  handoffReadyPrefix =
+    implementingPrPrefix <> [IssueImplementationCompletedEvent prNumber (Just reviewerThread)]
+  handoffInitializedPrefix =
+    handoffReadyPrefix <> [IssueReviewHandoffInitializedEvent prNumber]
+  waitingMergePrefix =
+    handoffInitializedPrefix <> [IssueReviewHandoffStartedEvent prNumber]
+  postMergeReadyPrefix =
+    waitingMergePrefix <> [IssuePullRequestMergedEvent prNumber]
+  postMergeReviewingPrefix =
+    postMergeReadyPrefix <> [IssuePostMergeReviewStartedEvent reviewedCommit finalReviewTurn]
+  waitingClosePrefix =
+    postMergeReviewingPrefix <> [IssuePostMergeReviewCleanEvent cleanEvidence]
+  waitingCloseState =
+    SomeWatcherState (IssueWaitingForIssueClose issueConfig prNumber)
 
 issueImplementIndexedSpecMatchesCompatibility :: IssueImplementIndexedPolicyCase -> IO Bool
 issueImplementIndexedSpecMatchesCompatibility (IssueImplementIndexedPolicyCase title prefix state issueObservation indexedState indexedObservation indexedEvent projection expectedTags) =
