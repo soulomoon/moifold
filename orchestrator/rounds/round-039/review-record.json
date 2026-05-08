@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-002-standalone-package-layout",
+  "direction_id": "direction-004-core-package-layout",
+  "extracted_item_id": "item-039-core-package-layout",
+  "roadmap_item_id": "item-039-core-package-layout",
+  "decision": "approved",
+  "evidence_summary": "Approved after validating the standalone agent-workflow-core descriptor, project wiring, unchanged core source layout, untouched adapter/moifold consumer surfaces, package-boundary tests, package-specific Cabal checks, boundary scans, full build/test validation, and diff whitespace checks."
+}

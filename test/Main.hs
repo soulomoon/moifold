@@ -7381,12 +7381,14 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
 workflowCoreCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCoreCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  standaloneCabalSource <- Text.pack <$> readFile ("agent-workflow-core" </> "agent-workflow-core.cabal")
   coreSources <- sourceTextUnder ("agent-workflow-core" </> "src")
   forbiddenImportViolations <-
     sourceImportViolationsUnder
       ("agent-workflow-core" </> "src")
       coreBoundaryForbiddenImportModules
   let coreSection = cabalComponentSection "library agent-workflow-core" cabalSource
+      standaloneCoreSection = cabalComponentSection "library" standaloneCabalSource
       forbiddenPackageNeedles =
         [ "aeson"
         , "directory"
@@ -7399,6 +7401,20 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         , "moifold,"
         , "moifold:agent-workflow-codex"
         , "moifold:agent-workflow-github"
+        ]
+      standaloneForbiddenPackageNeedles =
+        [ "aeson"
+        , "directory"
+        , "filepath"
+        , "optparse-applicative"
+        , "singletons"
+        , "typed-process"
+        , "unix"
+        , "websockets"
+        , "moifold,"
+        , "moifold:"
+        , "agent-workflow-codex"
+        , "agent-workflow-github"
         ]
       forbiddenConcreteTypes =
         [ "ChildDaemon"
@@ -7450,40 +7466,59 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
       coreSourceTokens = sourceIdentifierTokens coreSources
       forbiddenPackageMatches =
         filter (`Text.isInfixOf` coreSection) forbiddenPackageNeedles
+      standaloneForbiddenPackageMatches =
+        filter (`Text.isInfixOf` standaloneCoreSection) standaloneForbiddenPackageNeedles
       forbiddenConcreteTokenMatches =
         filter (`elem` coreSourceTokens) forbiddenConcreteTypes
       forbiddenConcreteNeedleMatches =
         filter (`Text.isInfixOf` coreSources) forbiddenConcreteNeedles
       coreDependencyPackages = cabalBuildDependsPackages coreSection
+      standaloneCoreDependencyPackages = cabalBuildDependsPackages standaloneCoreSection
       unapprovedCoreDependencyMatches =
         filter (`notElem` ["base", "bytestring", "text"]) coreDependencyPackages
+      unapprovedStandaloneCoreDependencyMatches =
+        filter (`notElem` ["base", "bytestring", "text"]) standaloneCoreDependencyPackages
       exposesCoreModules =
-        "CodexWatcher.Workflow.Audit" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Codec" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Daemon.Core" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.EventLog.Commit.Core" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.EventLog.Core" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.EventLog.File.Core" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Execution.Core" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Failure" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Indexed.Spec" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Permission.Core" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Spec" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.DSL" `Text.isInfixOf` coreSection
-          && "CodexWatcher.Workflow.Transaction.Core" `Text.isInfixOf` coreSection
+        coreSectionExposesGenericModules coreSection
+      standaloneExposesCoreModules =
+        coreSectionExposesGenericModules standaloneCoreSection
       dependsOnlyOnCoreDeps =
         all (`elem` coreDependencyPackages) ["base", "bytestring", "text"]
           && null unapprovedCoreDependencyMatches
+      standaloneDependsOnlyOnCoreDeps =
+        all (`elem` standaloneCoreDependencyPackages) ["base", "bytestring", "text"]
+          && null unapprovedStandaloneCoreDependencyMatches
       moifoldDependsOnCore =
         "moifold:agent-workflow-core" `Text.isInfixOf` cabalSource
+      standaloneMetadataMatchesPolicy =
+        all
+          (`Text.isInfixOf` standaloneCabalSource)
+          [ "name:          agent-workflow-core"
+          , "version:       0.1.0.0"
+          , "license:       MIT"
+          , "author:        soulomoon"
+          , "maintainer:    soulomoon"
+          , "category:      Development"
+          , "build-type:    Simple"
+          , "location: https://github.com/soulomoon/moifold.git"
+          , "hs-source-dirs:   src"
+          ]
   packageOk <-
     assertNoTextMatches
       "workflow core sublibrary excludes forbidden package dependencies"
       forbiddenPackageMatches
+  standalonePackageOk <-
+    assertNoTextMatches
+      "standalone workflow core package excludes forbidden package dependencies"
+      standaloneForbiddenPackageMatches
   approvedDependencyOk <-
     assertNoTextMatches
       "workflow core sublibrary excludes unapproved package dependencies"
       unapprovedCoreDependencyMatches
+  standaloneApprovedDependencyOk <-
+    assertNoTextMatches
+      "standalone workflow core package excludes unapproved package dependencies"
+      unapprovedStandaloneCoreDependencyMatches
   importOk <-
     assertNoTextMatches
       "workflow core source excludes forbidden concrete imports"
@@ -7500,15 +7535,60 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
     assert
       "workflow core sublibrary exposes generic core modules"
       exposesCoreModules
+  standaloneExposedOk <-
+    assert
+      "standalone workflow core package exposes generic core modules"
+      standaloneExposesCoreModules
   coreDepsOk <-
     assert
       "workflow core sublibrary keeps the approved generic dependency set"
       dependsOnlyOnCoreDeps
+  standaloneCoreDepsOk <-
+    assert
+      "standalone workflow core package keeps the approved generic dependency set"
+      standaloneDependsOnlyOnCoreDeps
   mainDependsOk <-
     assert
       "main moifold library depends on workflow core"
       moifoldDependsOnCore
-  pure (packageOk && approvedDependencyOk && importOk && tokenOk && ownershipNeedleOk && exposedOk && coreDepsOk && mainDependsOk)
+  standaloneMetadataOk <-
+    assert
+      "standalone workflow core package records approved metadata and source layout"
+      standaloneMetadataMatchesPolicy
+  pure
+    ( packageOk
+        && standalonePackageOk
+        && approvedDependencyOk
+        && standaloneApprovedDependencyOk
+        && importOk
+        && tokenOk
+        && ownershipNeedleOk
+        && exposedOk
+        && standaloneExposedOk
+        && coreDepsOk
+        && standaloneCoreDepsOk
+        && mainDependsOk
+        && standaloneMetadataOk
+    )
+
+coreSectionExposesGenericModules :: Text -> Bool
+coreSectionExposesGenericModules section =
+  all
+    (`Text.isInfixOf` section)
+    [ "CodexWatcher.Workflow.Audit"
+    , "CodexWatcher.Workflow.Codec"
+    , "CodexWatcher.Workflow.Daemon.Core"
+    , "CodexWatcher.Workflow.EventLog.Commit.Core"
+    , "CodexWatcher.Workflow.EventLog.Core"
+    , "CodexWatcher.Workflow.EventLog.File.Core"
+    , "CodexWatcher.Workflow.Execution.Core"
+    , "CodexWatcher.Workflow.Failure"
+    , "CodexWatcher.Workflow.Indexed.Spec"
+    , "CodexWatcher.Workflow.Permission.Core"
+    , "CodexWatcher.Workflow.Spec"
+    , "CodexWatcher.Workflow.DSL"
+    , "CodexWatcher.Workflow.Transaction.Core"
+    ]
 
 coreBoundaryForbiddenImportModules :: [Text]
 coreBoundaryForbiddenImportModules =
