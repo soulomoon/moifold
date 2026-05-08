@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-002",
+  "roadmap_item_id": "item-007-indexed-pr-review-checking",
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed. Diff inspection and passing focused tests show PR-review checking indexed parity for unresolved/no-unresolved threads, feedback observations, verification start, replay/effect/permission parity, invalid observation failures, and preservation of schemas/golden/daemon/dry-run/action-ordering surfaces."
+}

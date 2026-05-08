@@ -3,6 +3,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -84,6 +85,19 @@ import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
+import CodexWatcher.Workflow.Moifold.PrReview.Checking.Indexed
+  ( PrReviewCheckingIndexedCheckingReviews
+  , PrReviewCheckingIndexedEffect (..)
+  , PrReviewCheckingIndexedEffectPlan (..)
+  , PrReviewCheckingIndexedEvent (..)
+  , PrReviewCheckingIndexedFixingReviews
+  , PrReviewCheckingIndexedObservation (..)
+  , PrReviewCheckingIndexedReplayResult (..)
+  , PrReviewCheckingIndexedReviewingClean
+  , PrReviewCheckingIndexedSpec
+  , PrReviewCheckingIndexedState (..)
+  , PrReviewCheckingIndexedUninitialized
+  )
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
   ( PrReviewIndexedCheckingReviews
   , PrReviewIndexedEffectPlan (..)
@@ -119,6 +133,7 @@ import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Char (isAlphaNum)
 import Data.Foldable qualified as Foldable
 import Data.IORef
+import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -6227,6 +6242,10 @@ workflowFacadeExtractionTests = do
       , workflowAgentObservationKernelMatchesPrReviewClassifiers
       , workflowPlanObservationLawHoldsForPrReviewAgentObservation
       , workflowIndexedSpecExistentialsPreserveLabels
+      , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
+      , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
+      , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
+      , workflowPrReviewCheckingIndexedSpecRejectsInvalidObservationLikeFacade
       , workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForCleanFromGoldenLifecycle
       , workflowPrReviewMergeabilityIndexedSpecPreservesMergeEffectOrdering
       , workflowPrReviewMergeabilityIndexedSpecRejectsMismatchedCleanCommitLikeFacade
@@ -7719,6 +7738,31 @@ prReviewIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult P
 prReviewIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewIndexedReplayResult replay)) =
   replay
 
+prReviewCheckingIndexedTransitionEvent
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewCheckingIndexedSpec source target
+  -> WatcherEvent
+prReviewCheckingIndexedTransitionEvent transition =
+  case IndexedWorkflow.indexedPlannedEvent transition of
+    PrReviewCheckingIndexedEvent _sourceLabel _targetLabel event -> event
+
+prReviewCheckingIndexedTransitionPreCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewCheckingIndexedSpec source target
+  -> EffectPlan
+prReviewCheckingIndexedTransitionPreCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPreCommitEffects transition of
+    PrReviewCheckingIndexedEffectPlan effects -> effects
+
+prReviewCheckingIndexedTransitionPostCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewCheckingIndexedSpec source target
+  -> EffectPlan
+prReviewCheckingIndexedTransitionPostCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPostCommitEffects transition of
+    PrReviewCheckingIndexedEffectPlan effects -> effects
+
+prReviewCheckingIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult PrReviewCheckingIndexedSpec -> EventReplayResult
+prReviewCheckingIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (PrReviewCheckingIndexedReplayResult replay)) =
+  replay
+
 docsMigrationIndexedTransitionEvent
   :: IndexedWorkflow.IndexedPlannedTransition DocsMigration.DocsMigrationSpec source target
   -> DocsMigration.DocsMigrationEvent
@@ -8032,6 +8076,354 @@ workflowPrReviewMergeabilityIndexedSpecRejectsMismatchedCleanCommitLikeFacade = 
               && indexedFailure == facadeFailure
               && indexedPlanFailure == facadeFailure
           _ -> False
+
+workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads :: IO Bool
+workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      workerTurn = TurnId "worker-turn"
+      reviewerTurn = TurnId "reviewer-turn"
+      initialized = PrReviewInitialized prConfig workerThread reviewerThread
+      initializedIndexed =
+        IndexedWorkflow.SomeIndexedWorkflowEvent
+          ( PrReviewCheckingIndexedEvent "PrReview/Uninitialized" "PrReview/CheckingReviews" initialized
+              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedUninitialized PrReviewCheckingIndexedCheckingReviews
+          )
+      checkingState =
+        SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      indexedState =
+        PrReviewCheckingIndexedState checkingState
+          :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews
+      reviewThreadId = ReviewThreadId "thread-1"
+      unresolvedReport = reviewThreadsReport [reviewThreadId]
+      cleanReport = reviewThreadsReport []
+      unresolvedEvent = PrReviewUnresolvedFound (reviewThreadId :| []) commit workerTurn
+      cleanEvent = PrReviewNoUnresolvedFound commit reviewerTurn
+  results <-
+    sequence
+      [ prReviewCheckingIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review checking unresolved threads match compatibility"
+          checkingState
+          (WorkflowPrReview.CheckingObservedReviewThreads unresolvedReport commit workerTurn)
+          (DaemonPrReviewObservation (ObservedReviewThreads unresolvedReport commit workerTurn))
+          indexedState
+          ( PrReviewCheckingIndexedObservation
+              "PrReview/CheckingReviews"
+              "PrReview/FixingReviews"
+              (DaemonPrReviewObservation (ObservedReviewThreads unresolvedReport commit workerTurn))
+              :: PrReviewCheckingIndexedObservation PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+          )
+          unresolvedEvent
+          [initialized]
+          [initializedIndexed]
+          ( PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/FixingReviews" unresolvedEvent
+              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+          )
+      , prReviewCheckingIndexedSpecMatchesCompatibility
+          "indexed workflow PR-review checking clean threads match compatibility"
+          checkingState
+          (WorkflowPrReview.CheckingObservedReviewThreads cleanReport commit reviewerTurn)
+          (DaemonPrReviewObservation (ObservedReviewThreads cleanReport commit reviewerTurn))
+          indexedState
+          ( PrReviewCheckingIndexedObservation
+              "PrReview/CheckingReviews"
+              "PrReview/ReviewingClean"
+              (DaemonPrReviewObservation (ObservedReviewThreads cleanReport commit reviewerTurn))
+              :: PrReviewCheckingIndexedObservation PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedReviewingClean
+          )
+          cleanEvent
+          [initialized]
+          [initializedIndexed]
+          ( PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/ReviewingClean" cleanEvent
+              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedReviewingClean
+          )
+      ]
+  pure (and results)
+
+workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources :: IO Bool
+workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      firstTurn = TurnId "worker-turn-1"
+      secondTurn = TurnId "worker-turn-2"
+      initialized = PrReviewInitialized prConfig workerThread reviewerThread
+      initializedIndexed =
+        IndexedWorkflow.SomeIndexedWorkflowEvent
+          ( PrReviewCheckingIndexedEvent "PrReview/Uninitialized" "PrReview/CheckingReviews" initialized
+              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedUninitialized PrReviewCheckingIndexedCheckingReviews
+          )
+      queuedEvidence = reviewEvidenceFromSummaries ("queued review feedback" :| []) commit
+      feedbackEvidence = reviewEvidenceFromSummaries ("new review feedback" :| []) commit
+      checkingEvent = PrReviewFeedbackFound feedbackEvidence secondTurn
+      queuedPrefix = [initialized, PrReviewFeedbackFound queuedEvidence firstTurn, PrReviewFixIncomplete "worker needs more time"]
+      queuedIndexedPrefix =
+        [ initializedIndexed
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/FixingReviews" (PrReviewFeedbackFound queuedEvidence firstTurn)
+                :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+            )
+        , IndexedWorkflow.SomeIndexedWorkflowEvent
+            ( PrReviewCheckingIndexedEvent "PrReview/FixingReviews" "PrReview/CheckingReviews" (PrReviewFixIncomplete "worker needs more time")
+                :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedFixingReviews PrReviewCheckingIndexedCheckingReviews
+            )
+        ]
+      checkingState =
+        SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      queuedState =
+        SomeWatcherState (PrReviewFixQueued prConfig queuedEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      checkingObservation =
+        PrReviewCheckingIndexedObservation
+          "PrReview/CheckingReviews"
+          "PrReview/FixingReviews"
+          (DaemonPrReviewObservation (ObservedReviewFeedback feedbackEvidence secondTurn))
+          :: PrReviewCheckingIndexedObservation PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+      checkingIndexedEvent =
+        PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/FixingReviews" checkingEvent
+          :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+  verifyingLoaded <- loadPrReviewCheckingVerificationGoldenSlice
+  feedbackFromChecking <-
+    prReviewCheckingIndexedSpecMatchesCompatibility
+      "indexed workflow PR-review feedback from checking matches compatibility"
+      checkingState
+      (WorkflowPrReview.CheckingObservedReviewFeedback feedbackEvidence secondTurn)
+      (DaemonPrReviewObservation (ObservedReviewFeedback feedbackEvidence secondTurn))
+      (PrReviewCheckingIndexedState checkingState :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews)
+      checkingObservation
+      checkingEvent
+      [initialized]
+      [initializedIndexed]
+      checkingIndexedEvent
+  feedbackFromQueued <-
+    prReviewCheckingIndexedSpecMatchesCompatibility
+      "indexed workflow PR-review feedback from queued fix matches compatibility"
+      queuedState
+      (WorkflowPrReview.CheckingObservedReviewFeedback feedbackEvidence secondTurn)
+      (DaemonPrReviewObservation (ObservedReviewFeedback feedbackEvidence secondTurn))
+      (PrReviewCheckingIndexedState queuedState :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews)
+      checkingObservation
+      checkingEvent
+      queuedPrefix
+      queuedIndexedPrefix
+      checkingIndexedEvent
+  feedbackFromVerifying <-
+    case verifyingLoaded of
+      Left failure -> assert "indexed workflow PR-review verification golden lifecycle loads for feedback" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+      Right slice ->
+        let event = PrReviewFeedbackFound feedbackEvidence secondTurn
+            indexedEvent =
+              PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/FixingReviews" event
+                :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+         in prReviewCheckingIndexedSpecMatchesCompatibility
+              "indexed workflow PR-review feedback from verification checking matches compatibility"
+              slice.prReviewCheckingVerificationState
+              (WorkflowPrReview.CheckingObservedReviewFeedback feedbackEvidence secondTurn)
+              (DaemonPrReviewObservation (ObservedReviewFeedback feedbackEvidence secondTurn))
+              (PrReviewCheckingIndexedState slice.prReviewCheckingVerificationState :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews)
+              checkingObservation
+              event
+              slice.prReviewCheckingVerificationPrefix
+              slice.prReviewCheckingVerificationIndexedPrefix
+              indexedEvent
+  pure (feedbackFromChecking && feedbackFromQueued && feedbackFromVerifying)
+
+data PrReviewCheckingVerificationGoldenSlice = PrReviewCheckingVerificationGoldenSlice
+  { prReviewCheckingVerificationPrefix :: [WatcherEvent]
+  , prReviewCheckingVerificationIndexedPrefix :: [IndexedWorkflow.SomeIndexedWorkflowEvent PrReviewCheckingIndexedSpec]
+  , prReviewCheckingVerificationState :: SomeWatcherState
+  , prReviewCheckingVerificationEvidence :: ReviewEvidence
+  , prReviewCheckingVerificationTarget :: CommitSha
+  , prReviewCheckingVerificationTurn :: TurnId
+  }
+
+loadPrReviewCheckingVerificationGoldenSlice :: IO (Either String PrReviewCheckingVerificationGoldenSlice)
+loadPrReviewCheckingVerificationGoldenSlice = do
+  loaded <- loadEventLogFile "golden/event-log/pr-review/mlf2-pr6-merged/events.jsonl"
+  pure $ do
+    events <- loaded
+    case events of
+      [ initialized@PrReviewInitialized {}
+        , unresolved@PrReviewUnresolvedFound {}
+        , fixCompleted@PrReviewFixCompleted
+        , PrReviewFixVerificationStarted evidence reviewTarget turnId
+        , _cleanFoundBeforeFinalCheck
+        , _noUnresolved
+        , _cleanFound
+        , _mergeability
+        , _merged
+        ] -> do
+          let prefix = [initialized, unresolved, fixCompleted]
+          replay <-
+            case workflowReplayEvents @MoifoldSpec prefix of
+              Right replayResult -> Right replayResult
+              Left failure -> Left (Text.unpack failure)
+          case replay.replayState of
+            SomeWatcherState (PrVerifyingReviewFix {}) ->
+              Right
+                PrReviewCheckingVerificationGoldenSlice
+                  { prReviewCheckingVerificationPrefix = prefix
+                  , prReviewCheckingVerificationIndexedPrefix =
+                      [ IndexedWorkflow.SomeIndexedWorkflowEvent
+                          ( PrReviewCheckingIndexedEvent "PrReview/Uninitialized" "PrReview/CheckingReviews" initialized
+                              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedUninitialized PrReviewCheckingIndexedCheckingReviews
+                          )
+                      , IndexedWorkflow.SomeIndexedWorkflowEvent
+                          ( PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/FixingReviews" unresolved
+                              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+                          )
+                      , IndexedWorkflow.SomeIndexedWorkflowEvent
+                          ( PrReviewCheckingIndexedEvent "PrReview/FixingReviews" "PrReview/CheckingReviews" fixCompleted
+                              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedFixingReviews PrReviewCheckingIndexedCheckingReviews
+                          )
+                      ]
+                  , prReviewCheckingVerificationState = replay.replayState
+                  , prReviewCheckingVerificationEvidence = evidence
+                  , prReviewCheckingVerificationTarget = reviewTarget
+                  , prReviewCheckingVerificationTurn = turnId
+                  }
+            _ -> Left "golden PR-review lifecycle prefix does not replay to PrVerifyingReviewFix"
+      _ -> Left "golden PR-review lifecycle shape changed before review-fix verification"
+
+workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart :: IO Bool
+workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart = do
+  loaded <- loadPrReviewCheckingVerificationGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed workflow PR-review verification golden lifecycle loads" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      let event =
+            PrReviewFixVerificationStarted
+              slice.prReviewCheckingVerificationEvidence
+              slice.prReviewCheckingVerificationTarget
+              slice.prReviewCheckingVerificationTurn
+          observation =
+            DaemonPrReviewObservation
+              (ObservedReviewFixVerificationStarted slice.prReviewCheckingVerificationTarget slice.prReviewCheckingVerificationTurn)
+          indexedObservation =
+            PrReviewCheckingIndexedObservation "PrReview/CheckingReviews" "PrReview/ReviewingClean" observation
+              :: PrReviewCheckingIndexedObservation PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedReviewingClean
+          indexedEvent =
+            PrReviewCheckingIndexedEvent "PrReview/CheckingReviews" "PrReview/ReviewingClean" event
+              :: PrReviewCheckingIndexedEvent PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedReviewingClean
+      prReviewCheckingIndexedSpecMatchesCompatibility
+        "indexed workflow PR-review verification start matches compatibility from golden lifecycle"
+        slice.prReviewCheckingVerificationState
+        ( WorkflowPrReview.CheckingObservedReviewFixVerificationStarted
+            slice.prReviewCheckingVerificationTarget
+            slice.prReviewCheckingVerificationTurn
+        )
+        observation
+        (PrReviewCheckingIndexedState slice.prReviewCheckingVerificationState :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews)
+        indexedObservation
+        event
+        slice.prReviewCheckingVerificationPrefix
+        slice.prReviewCheckingVerificationIndexedPrefix
+        indexedEvent
+
+workflowPrReviewCheckingIndexedSpecRejectsInvalidObservationLikeFacade :: IO Bool
+workflowPrReviewCheckingIndexedSpecRejectsInvalidObservationLikeFacade = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      reviewerThread = ThreadId "reviewer"
+      commit = CommitSha "abc123"
+      cleanEvidence = CleanReviewEvidence commit "LGTM"
+      feedbackEvidence = reviewEvidenceFromSummaries ("new review feedback" :| []) commit
+      turnId = TurnId "worker-turn"
+      state =
+        SomeWatcherState
+          (PrWaitingForMergeability prConfig cleanEvidence (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+      daemonObservation = DaemonPrReviewObservation (ObservedReviewFeedback feedbackEvidence turnId)
+      indexedState =
+        PrReviewCheckingIndexedState state
+          :: PrReviewCheckingIndexedState PrReviewCheckingIndexedCheckingReviews
+      indexedObservation =
+        PrReviewCheckingIndexedObservation "PrReview/CheckingReviews" "PrReview/FixingReviews" daemonObservation
+          :: PrReviewCheckingIndexedObservation PrReviewCheckingIndexedCheckingReviews PrReviewCheckingIndexedFixingReviews
+  assert "indexed workflow PR-review checking rejects invalid observation like facade" $
+    case
+      ( WorkflowPrReview.observePrReviewChecking state (WorkflowPrReview.CheckingObservedReviewFeedback feedbackEvidence turnId)
+      , workflowObserve @MoifoldSpec state daemonObservation
+      , workflowPlanObservation @MoifoldSpec state daemonObservation
+      , IndexedWorkflow.indexedWorkflowObserve @PrReviewCheckingIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewCheckingIndexedSpec indexedState indexedObservation
+      )
+      of
+      (Left facadeFailure, Left compatibilityFailure, Left compatibilityPlanFailure, Left indexedFailure, Left indexedPlanFailure) ->
+        compatibilityFailure == facadeFailure
+          && compatibilityPlanFailure == facadeFailure
+          && indexedFailure == facadeFailure
+          && indexedPlanFailure == facadeFailure
+      _ -> False
+
+prReviewCheckingIndexedSpecMatchesCompatibility
+  :: forall (source :: Type) (target :: Type).
+     String
+  -> SomeWatcherState
+  -> WorkflowPrReview.PrReviewCheckingObservation
+  -> DaemonObservation
+  -> PrReviewCheckingIndexedState source
+  -> PrReviewCheckingIndexedObservation source target
+  -> WatcherEvent
+  -> [WatcherEvent]
+  -> [IndexedWorkflow.SomeIndexedWorkflowEvent PrReviewCheckingIndexedSpec]
+  -> PrReviewCheckingIndexedEvent source target
+  -> IO Bool
+prReviewCheckingIndexedSpecMatchesCompatibility title state facadeObservation observation indexedState indexedObservation expectedEvent replayPrefix indexedReplayPrefix indexedEvent =
+  assert title $
+    case
+      ( WorkflowPrReview.observePrReviewChecking state facadeObservation
+      , workflowObserve @MoifoldSpec state observation
+      , workflowPlanObservation @MoifoldSpec state observation
+      , IndexedWorkflow.indexedWorkflowObserve @PrReviewCheckingIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewCheckingIndexedSpec indexedState indexedObservation
+      , workflowReplayEvents @MoifoldSpec (replayPrefix <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @PrReviewCheckingIndexedSpec
+          (indexedReplayPrefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
+      )
+      of
+      (Right facadeObserved, Right compatibilityObserved, Right compatibilityPlan, Right indexedObserved, Right indexedPlan, Right compatibilityReplay, Right indexedReplay) ->
+        let PrReviewCheckingIndexedState indexedNextState =
+              IndexedWorkflow.indexedWorkflowObservedState @PrReviewCheckingIndexedSpec indexedObserved
+            indexedReplayResultValue = prReviewCheckingIndexedReplayResult indexedReplay
+            wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+            fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
+            indexedFullPlan =
+              PrReviewCheckingIndexedEffectPlan fullCompatibilityPlan
+                :: PrReviewCheckingIndexedEffectPlan source target
+         in facadeObserved.observedEvent == compatibilityObserved.observedEvent
+              && facadeObserved.observedEffects == compatibilityObserved.observedEffects
+              && sameWatcherStateShape facadeObserved.observedState compatibilityObserved.observedState
+              && compatibilityObserved.observedEvent == expectedEvent
+              && prReviewCheckingIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+              && prReviewCheckingIndexedTransitionEvent indexedPlan == expectedEvent
+              && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @PrReviewCheckingIndexedSpec wrappedTransition == workflowStateLabel @MoifoldSpec state
+              && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @PrReviewCheckingIndexedSpec wrappedTransition == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+              && workflowStateLabel @MoifoldSpec indexedNextState == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+              && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+              && prReviewCheckingIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+              && prReviewCheckingIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+              && fullCompatibilityPlan == compatibilityObserved.observedEffects
+              && IndexedWorkflow.indexedWorkflowPlannedTransitionPreCommitEffectLabels @PrReviewCheckingIndexedSpec indexedPlan
+                == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPreCommitEffects
+              && IndexedWorkflow.indexedWorkflowPlannedTransitionPostCommitEffectLabels @PrReviewCheckingIndexedSpec indexedPlan
+                == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPostCommitEffects
+              && workflowValidateEffects @MoifoldSpec state fullCompatibilityPlan
+                == IndexedWorkflow.indexedWorkflowValidateEffects @PrReviewCheckingIndexedSpec indexedState indexedFullPlan
+              && all
+                ( \effect ->
+                    workflowEffectAllowed @MoifoldSpec state effect
+                      == IndexedWorkflow.indexedWorkflowEffectAllowed @PrReviewCheckingIndexedSpec indexedState (PrReviewCheckingIndexedEffect effect)
+                )
+                fullCompatibilityPlan
+              && sameWatcherStateShape compatibilityReplay.replayState indexedReplayResultValue.replayState
+              && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
+              && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
+      _ -> False
 
 workflowPlannedTransitionPreservesObservedEffects :: IO Bool
 workflowPlannedTransitionPreservesObservedEffects = do

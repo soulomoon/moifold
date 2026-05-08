@@ -1,0 +1,46 @@
+### Goal
+Port PR-review checking and verification observation transitions to the indexed workflow API while preserving the existing compatibility facade and all externally visible moifold behavior. The covered observations are `ReviewThreadsFound`, `NoReviewThreadsFound`, `PrReviewFeedbackFound`, and `PrReviewFixVerificationStarted`, including their current event JSON schemas, golden replay behavior, source/target state labels, next states, pre/post effect plans, observed-effect ordering, replay results, permission decisions, dry-run output, daemon result shapes, and action ordering.
+
+### Approach
+Keep this as a sequential, single-owner change. The selected roadmap item is explicitly not parallel-safe, and the implementation must touch the same PR-review checking facade, indexed adapter, and focused parity assertions. Splitting worker ownership would create overlapping responsibility for the same transition labels, wrappers, and compatibility comparisons.
+
+`CodexWatcher.Workflow.Moifold.PrReview` remains the compatibility facade for checking observations. It continues to own `PrReviewCheckingObservation(..)`, `observePrReviewChecking`, and the unresolved-thread evidence helpers used by existing daemon/domain paths. Do not route a live daemon call site through the indexed adapter in this round; daemon routing is reserved for the later roadmap item.
+
+Extend the existing PR-review indexed adapter pattern from `CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed` instead of introducing a second state machine. The indexed path should wrap the same `WatcherEvent`, `SomeWatcherState`, `DaemonObservation`, `ObservedPolicyTick`, `EffectPlan`, and `EventReplayResult` values used by `MoifoldSpec`, and delegate behavior to the current compatibility `WorkflowSpec` methods. The only new ownership should be typed source/target markers and small wrapper constructors needed to express the checking and verification transitions through `IndexedWorkflowSpec`.
+
+Compatibility facades remain available. `agent-workflow-core` continues to own only the generic indexed API in `CodexWatcher.Workflow.Indexed.Spec`; moifold continues to own concrete PR-review policy, concrete `WatcherEvent`/`SomeWatcherState`, event codecs, replay policy, lifecycle effects, GitHub/app-server/runtime actions, dry-run reports, and daemon result projection.
+
+### Steps
+1. Inspect the current PR-review compatibility surface before editing: `src/CodexWatcher/Workflow/Moifold/PrReview.hs`, `src/CodexWatcher/Workflow/Moifold/PrReview/Mergeability/Indexed.hs`, the PR-review `WorkflowSpec MoifoldSpec` methods in `src/CodexWatcher/Workflow/Types.hs` and `src/CodexWatcher/Workflow/Observation.hs`, and the existing PR-review indexed tests in `test/Main.hs`.
+2. Add or extend a PR-review checking indexed adapter module. Prefer a sibling module such as `src/CodexWatcher/Workflow/Moifold/PrReview/Checking/Indexed.hs` if that keeps mergeability ownership narrow; otherwise extend the existing indexed PR-review adapter only if it remains clearly named and not mergeability-specific. Add the new module to `moifold.cabal`.
+3. Define typed markers for the covered checking states and transitions: `PrReview/CheckingReviews -> PrReview/FixingReviews` for unresolved threads and feedback, `PrReview/CheckingReviews -> PrReview/ReviewingClean` for no unresolved threads, `PrReview/FixingReviews -> PrReview/CheckingReviews` only as replay-prefix support when needed by golden lifecycle tests, and `PrReview/CheckingReviews -> PrReview/ReviewingClean` from `PrVerifyingReviewFix` via `PrReviewFixVerificationStarted`. Include `PrReview/Uninitialized` only for replay-prefix construction if tests need the full golden lifecycle prefix.
+4. Add indexed wrapper types for state, event, observation, observed tick, effect, effect plan, and replay result. They should carry the existing concrete moifold values plus source and target labels. Do not add new `WatcherEvent` constructors, new event `type` fields, new JSON fields, new golden fixtures, or new daemon result constructors.
+5. Implement `IndexedWorkflowSpec` for the checking adapter by delegating to `MoifoldSpec`: initial/apply event, observe, plan transition, plan observation, replay, replay state, effect validation, effect allowed, effect-plan effects, terminal check, and label rendering must all unwrap to existing `MoifoldSpec` behavior. Use the same `legacyObservedPlannedTransition` and `moifoldPlannedTransitionFromEffects` partitioning used by the mergeability indexed adapter so pre/post commit effects stay identical.
+6. Map indexed checking observations to the same daemon observations used by compatibility planning:
+   - unresolved review threads: `DaemonPrReviewObservation (ObservedReviewThreads report commit turnId)` producing `PrReviewUnresolvedFound` and `StartWorkerTurn`.
+   - no unresolved review threads: `DaemonPrReviewObservation (ObservedReviewThreads report commit turnId)` producing `PrReviewNoUnresolvedFound` and `StartReviewerTurn`.
+   - worker/review feedback: the existing feedback observation shape producing `PrReviewFeedbackFound` and `StartWorkerTurn`.
+   - verification start: `DaemonPrReviewObservation (ObservedReviewFixVerificationStarted reviewTargetSha turnId)` producing `PrReviewFixVerificationStarted` and `StartReviewerVerificationTurn`.
+7. Preserve `CodexWatcher.Workflow.Moifold.PrReview.observePrReviewChecking` as the facade used by existing callers. If shared helpers are needed, extract only pure helper logic within moifold and keep the facade API and behavior stable. Do not change `CodexWatcher.Domain.PrReview.Watcher`, `CodexWatcher.Domain.PrReview.Loop`, daemon tick routing, effect interpreters, runtime command rendering, dry-run text, or action ordering.
+8. Add focused indexed parity tests in `test/Main.hs` beside the existing PR-review facade and mergeability indexed tests. The tests should compare compatibility `workflowObserve`/`workflowPlanObservation` with indexed observe/plan for each covered observation, asserting identical emitted event, source label, target label, next state label, pre-commit effects, post-commit effects, observed effects, replay state/effects, effect validation, effect permission, and effect-label ordering.
+9. Use real lifecycle or golden-backed setup where it matters. At minimum, include a replay-prefix test over `golden/event-log/pr-review/mlf2-pr6-merged/events.jsonl` that reaches the verification-checking path already represented by `PrReviewFixVerificationStarted`; do not weaken existing golden shape checks from the mergeability slice.
+10. Keep negative and edge coverage at least as strong as the facade: empty review threads must choose `PrReviewNoUnresolvedFound`, unresolved threads must retain the evidence built from thread comments or thread ids, feedback observations must work from `PrCheckingReviews`, `PrReviewFixQueued`, and `PrVerifyingReviewFix`, and invalid state/observation pairs must fail through the same compatibility error path.
+11. Inspect the final diff before verification. It should be limited to the new or extended PR-review indexed adapter module, `moifold.cabal`, and focused `test/Main.hs` imports/helpers/assertions unless the implementer can justify a directly required facade helper extraction. Do not edit `orchestrator/state.json`, roadmap files, review/merge artifacts, golden files, event-log codec/replay modules, daemon loops, runtime action rendering, dry-run output code, or compatibility module exports except for adding intentionally small indexed test support.
+
+### Verification
+Run the baseline commands from `orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-002/verification.md`:
+
+- `cabal build all`
+- `cabal test watcher-core-test`
+- `git diff --check`
+- `git diff --cached --check`
+
+The focused `watcher-core-test` evidence should include PR-review checking indexed parity assertions for:
+
+- unresolved review threads from `PrCheckingReviews`, proving `PrReviewUnresolvedFound`, `PrReview/CheckingReviews -> PrReview/FixingReviews`, `StartWorkerTurn`, replay parity, validation parity, and permission parity.
+- no unresolved review threads from `PrCheckingReviews`, proving `PrReviewNoUnresolvedFound`, `PrReview/CheckingReviews -> PrReview/ReviewingClean`, `StartReviewerTurn`, replay parity, validation parity, and permission parity.
+- feedback found from `PrCheckingReviews`, `PrReviewFixQueued`, and `PrVerifyingReviewFix`, proving `PrReviewFeedbackFound` keeps the existing worker-start effect and target labels.
+- verification start from `PrVerifyingReviewFix`, proving `PrReviewFixVerificationStarted`, `PrReview/CheckingReviews -> PrReview/ReviewingClean`, `StartReviewerVerificationTurn`, observed-effect ordering, replay parity, validation parity, and permission parity.
+- invalid checking observations, proving the indexed path returns the same failure as the compatibility path and does not produce an event or effect plan.
+
+Also verify by diff inspection that these surfaces remain unchanged: event `type` fields, JSON schemas, golden logs, `EventReplayResult` semantics, daemon tick result records, dry-run report text/fields, runtime command rendering, app-server/GitHub action ordering, compatibility facade modules, roadmap files, and `orchestrator/state.json`.
