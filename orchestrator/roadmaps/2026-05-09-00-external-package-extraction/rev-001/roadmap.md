@@ -93,8 +93,12 @@ Progress: round 036 completed the package names and versioning contract in
 `agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`,
 pre-1.0 versioning policy, module namespace policy, semantic-versioning
 expectations, compatibility analysis for the current internal sublibraries, and
-release-gate limits. Milestone 001 remains in progress until release metadata
-and compatibility/deprecation policy directions are complete.
+release-gate limits. Round 037 completed the release metadata policy in
+`bad28e9`, recording package metadata requirements, package-specific wording
+constraints, changelog and release-note gates, metadata truth rules, and
+descriptor-time checks without changing descriptors, source layout, artifacts,
+upload state, or publication approval. Milestone 001 remains in progress until
+the compatibility/deprecation policy direction is complete.
 
 Candidate directions:
 
@@ -112,6 +116,7 @@ Candidate directions:
   and package names.
 
 - Direction id: `direction-002-release-metadata-policy`
+  Status: complete via round 037, merged as `bad28e9`.
   Summary: define license, maintainer, category, synopsis, description,
   source-repository, changelog, and release-note requirements.
   Why it matters now: `cabal check`, Hackage readiness, and public docs depend
