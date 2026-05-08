@@ -51,6 +51,9 @@ Implemented contract:
   source-backed readiness report for the internal package split, dependency
   ownership, compatibility facades, validation commands, and remaining
   blockers before any external package publication decision.
+- [package-identity-versioning-contract.md](package-identity-versioning-contract.md):
+  package-name, initial-version, module-namespace, semantic-versioning, and
+  compatibility contract for future external package candidates.
 - [workflow-spec.md](workflow-spec.md): current `WorkflowSpec`,
   `IndexedWorkflowSpec`, existentials, bridges, laws, and deferred richer
   design ideas.

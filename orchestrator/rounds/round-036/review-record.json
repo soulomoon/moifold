@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-001-package-identity-release-contract",
+  "direction_id": "direction-001-package-names-and-versioning",
+  "extracted_item_id": "item-036-package-names-versioning-contract",
+  "roadmap_item_id": "item-036-package-names-versioning-contract",
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, git diff --check, git diff --cached --check, tracked/untracked scope inspection, and source-backed review of moifold.cabal, the new identity contract, README diff, package extraction readiness, API freeze, project contract, and release-gate limits. The round is artifact-only and does not change Cabal files, Haskell source, tests, generated fixtures, release notes, changelogs, compatibility facades, source layout, package descriptors, or publication state."
+}
