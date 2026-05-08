@@ -236,7 +236,7 @@ Candidate directions:
   Extraction notes: prove `cabal build all` and `watcher-core-test` still cover
   moifold behavior.
 
-### 3. [pending] Establish Release Validation And CI Matrix
+### 3. [in-progress] Establish Release Validation And CI Matrix
 
 Milestone id: `milestone-003-release-validation-ci`
 Depends on: `milestone-002-standalone-package-layout`
@@ -248,10 +248,19 @@ package candidate.
 Parallel lane: `ci-validation`
 Coordination notes: validation can be split by package only after descriptors
 are stable and planner assigns disjoint ownership.
+Progress: round 043 completed package check and source distribution validation
+in `0a643e9`, adding the repeatable `scripts/validate-workflow-packages.sh`
+entrypoint, focused package-validation documentation, exact package-level
+`cabal check` and `cabal sdist` commands, expected local tarball paths, tarball
+descriptor inspection, ignored-artifact handling, and no-upload evidence for
+`agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`.
+Milestone 003 remains in progress because CI matrix coverage and refreshed
+package-boundary assertions are still pending in directions 009 and 010.
 
 Candidate directions:
 
 - Direction id: `direction-008-package-check-and-sdist`
+  Status: complete via round 043, merged as `0a643e9`.
   Summary: add repeatable `cabal check` and source distribution validation for
   the three packages.
   Why it matters now: package candidates need real package artifacts before
