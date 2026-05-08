@@ -236,7 +236,7 @@ Candidate directions:
   Extraction notes: prove `cabal build all` and `watcher-core-test` still cover
   moifold behavior.
 
-### 3. [in-progress] Establish Release Validation And CI Matrix
+### 3. [complete] Establish Release Validation And CI Matrix
 
 Milestone id: `milestone-003-release-validation-ci`
 Depends on: `milestone-002-standalone-package-layout`
@@ -258,9 +258,16 @@ Round 044 completed CI matrix package validation in `55aeb31`, adding the
 explicit GHC `9.12.2` / Cabal `3.14.2.0` matrix row,
 installing `ripgrep`, and running `cabal build all`, `cabal test
 watcher-core-test`, and `scripts/validate-workflow-packages.sh` in CI without
-adding any upload or publication command. Milestone 003 remains in progress
-because refreshed package-boundary assertions are still pending in direction
-010.
+adding any upload or publication command. Round 045 completed the boundary-test
+refresh for the package layout in `1dd1449`, asserting exact `cabal.project`
+package entries, exact recursive source-tree versus Cabal exposed-module
+inventories for `agent-workflow-core`, `agent-workflow-codex`, and
+`agent-workflow-github`, parsed moifold build-depends package names, and the
+existing forbidden import, forbidden token, dependency, metadata, and
+no-reexport checks. Milestone 003 is complete because directions 008, 009, and
+010 now satisfy repeatable package checks, source distribution validation,
+build/test CI evidence, and refreshed package-boundary assertions for each
+package candidate.
 
 Candidate directions:
 
@@ -291,6 +298,7 @@ Candidate directions:
   candidate gates.
 
 - Direction id: `direction-010-boundary-test-refresh-for-package-layout`
+  Status: complete via round 045, merged as `1dd1449`.
   Summary: update recursive boundary and Cabal/package assertions to reflect
   the external-package layout.
   Why it matters now: existing internal sublibrary tests must keep protecting
