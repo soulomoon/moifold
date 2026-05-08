@@ -58,6 +58,9 @@ Implemented contract:
   license, maintainer, category, synopsis, description, source-repository,
   changelog, release-note, and metadata truth policy for future external
   package candidates.
+- [compatibility-deprecation-policy.md](compatibility-deprecation-policy.md):
+  preferred-import guidance, compatibility facade status, and deprecation and
+  removal gates for future external package candidates.
 - [workflow-spec.md](workflow-spec.md): current `WorkflowSpec`,
   `IndexedWorkflowSpec`, existentials, bridges, laws, and deferred richer
   design ideas.

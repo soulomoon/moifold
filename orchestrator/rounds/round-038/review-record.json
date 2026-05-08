@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-001-package-identity-release-contract",
+  "direction_id": "direction-003-compatibility-and-deprecation-policy",
+  "extracted_item_id": "item-038-compatibility-deprecation-policy",
+  "roadmap_item_id": "item-038-compatibility-deprecation-policy",
+  "decision": "approved",
+  "evidence_summary": "Approved after full roadmap baseline passed, diff stayed limited to the compatibility policy docs slice plus round artifacts and controller bookkeeping, and the new policy preserved preferred-import guidance, compatibility facade availability, deprecation gates, removal gates, release metadata constraints, package identity, and moifold-owned runtime/event/file boundaries."
+}
