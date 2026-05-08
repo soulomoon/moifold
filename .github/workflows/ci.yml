@@ -8,8 +8,14 @@ on:
 
 jobs:
   watcher-core-test:
-    name: watcher-core-test
+    name: watcher-core-test (GHC ${{ matrix.ghc-version }}, Cabal ${{ matrix.cabal-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ghc-version: "9.12.2"
+            cabal-version: "3.14.2.0"
 
     steps:
       - name: Checkout
@@ -18,11 +24,22 @@ jobs:
       - name: Set up Haskell
         uses: haskell-actions/setup@v2
         with:
-          ghc-version: "9.12.2"
-          cabal-version: "3.14.2.0"
+          ghc-version: ${{ matrix.ghc-version }}
+          cabal-version: ${{ matrix.cabal-version }}
 
       - name: Update package index
         run: cabal update
 
-      - name: Run tests
+      - name: Build all packages
+        run: cabal build all
+
+      - name: Run watcher core tests
         run: cabal test watcher-core-test
+
+      - name: Install package validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      - name: Validate workflow package candidates
+        run: scripts/validate-workflow-packages.sh

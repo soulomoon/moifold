@@ -1,0 +1,69 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-003-release-validation-ci",
+  "direction_id": "direction-009-ci-build-matrix",
+  "extracted_item_id": "item-044-ci-build-matrix",
+  "roadmap_item_id": "item-044-ci-build-matrix",
+  "status": "approved",
+  "decision": "approved",
+  "findings": [],
+  "tests_run": [
+    {
+      "command": "git diff -- .github/workflows/ci.yml scripts/validate-workflow-packages.sh cabal.project moifold.cabal agent-workflow-core/agent-workflow-core.cabal agent-workflow-codex/agent-workflow-codex.cabal agent-workflow-github/agent-workflow-github.cabal orchestrator/rounds/round-044/implementation-notes.md",
+      "result": "passed",
+      "summary": "Implementation diff inspected; only .github/workflows/ci.yml changed among implementation files."
+    },
+    {
+      "command": "rg -n 'with-compiler|packages:|^name:|^version:|^build-depends|agent-workflow-(core|codex|github)|moifold' cabal.project moifold.cabal agent-workflow-core/agent-workflow-core.cabal agent-workflow-codex/agent-workflow-codex.cabal agent-workflow-github/agent-workflow-github.cabal",
+      "result": "passed",
+      "summary": "Baseline project and package descriptors inspected; supported compiler and package candidate wiring remain aligned."
+    },
+    {
+      "command": "rg -n 'strategy:|matrix:|ghc-version|cabal-version|ripgrep|cabal build all|cabal test watcher-core-test|validate-workflow-packages' .github/workflows/ci.yml",
+      "result": "passed",
+      "summary": "Required matrix row, matrix setup, ripgrep installation, and CI gate strings found."
+    },
+    {
+      "command": "rg -n 'cabal[[:space:]]+upload|stack[[:space:]]+upload|hackage-upload|curl[[:space:]].*hackage' .github/workflows/ci.yml scripts/validate-workflow-packages.sh",
+      "result": "passed",
+      "summary": "No upload or publication command matched; exit 1 was expected because there were no matches."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed",
+      "summary": "No whitespace errors."
+    },
+    {
+      "command": "git diff --cached --quiet -- . && printf '%s\\n' 'No staged diff; git diff --cached --check not applicable' || git diff --cached --check",
+      "result": "passed",
+      "summary": "No staged diff; cached check not applicable."
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed",
+      "summary": "Cabal reported Up to date."
+    },
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "passed",
+      "summary": "Test suite watcher-core-test passed; output included a runtime lease warning but completed successfully."
+    },
+    {
+      "command": "scripts/validate-workflow-packages.sh",
+      "result": "passed",
+      "summary": "Package validation passed for cabal check, cabal sdist, tarball root checks, cabal-file checks, and no-upload statement."
+    },
+    {
+      "command": "git status --short",
+      "result": "passed",
+      "summary": "Scope inspected; reviewer edits were limited to review.md and review-record.json."
+    }
+  ],
+  "risks": [
+    "Remote GitHub Actions was not executed in this local review; confidence comes from static workflow inspection plus successful local equivalents.",
+    "The worktree includes orchestrator/state.json controller activation changes; reviewer did not modify state and did not treat it as implementation logic."
+  ],
+  "evidence_summary": "Approved. The revised CI matrix covers the supported GHC 9.12.2 and Cabal 3.14.2.0 row, runs cabal build all, cabal test watcher-core-test, and scripts/validate-workflow-packages.sh, provisions ripgrep before the package validator, and adds no upload or publication command. All requested local baseline and round-specific checks passed."
+}
