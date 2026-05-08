@@ -124,7 +124,23 @@ issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewPendingReviewe
   Right (reviewerThreadReadyTick state reviewerThreadId)
 issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewReady {}) (ObservedIssueReviewerThreadReady reviewerThreadId) =
   Right (reviewerThreadReadyTick state reviewerThreadId)
+issueImplementObserve (SomeWatcherState state@IssueImplementationReady {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueImplementing {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueHandoffReady {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueHandoffInitialized {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
 issueImplementObserve (SomeWatcherState state@IssueWaitingForPrMerge {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewPendingReviewer {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewReady {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssuePostMergeReviewing {}) (ObservedPullRequestMerged prNumber) =
+  Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
+issueImplementObserve (SomeWatcherState state@IssueWaitingForIssueClose {}) (ObservedPullRequestMerged prNumber) =
   Right (tick (IssuePullRequestMergedEvent prNumber) (step state (IssuePullRequestMerged prNumber)))
 issueImplementObserve (SomeWatcherState state@(IssuePostMergeReviewReady _config _prNumber _worker reviewer)) (ObservedPostMergeReviewStarted commit turnId) =
   let activeTurn = ActiveTurn (reviewerIdleThreadId reviewer) turnId

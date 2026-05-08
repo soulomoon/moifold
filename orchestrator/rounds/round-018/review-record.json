@@ -1,0 +1,30 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-004",
+  "roadmap_item_id": "item-018-indexed-issue-implementation-policy",
+  "decision": "approved",
+  "checks_run": [
+    {
+      "command": "cabal test watcher-core-test --test-option=--match --test-option='indexed workflow issue implement'",
+      "result": "pass"
+    },
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "pass"
+    },
+    {
+      "command": "cabal build all",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --cached --check",
+      "result": "not_run_no_staged_changes"
+    }
+  ],
+  "evidence_summary": "Approved after focused and full watcher-core tests, cabal build all, and whitespace checks passed. Prior rejection coverage gaps are fixed, waiting-for-merge merged-PR projection uses the reviewer-present post-merge-ready indexed target, ignored merged-PR compatibility/replay behavior is aligned, live daemon routing is unchanged, and agent-workflow-core ownership remains untouched."
+}

@@ -226,7 +226,23 @@ applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssueImplementat
   fromDecision (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssueImplementationCompletedEvent prNumber maybeReviewerThreadId) =
   fromDecision (step state (IssueImplementationCompleted prNumber maybeReviewerThreadId))
+applyEvent (SomeWatcherState state@IssueImplementationReady {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssueImplementing {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssueHandoffReady {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssueHandoffInitialized {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
 applyEvent (SomeWatcherState state@IssueWaitingForPrMerge {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewPendingReviewer {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewReady {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssuePostMergeReviewing {}) (IssuePullRequestMergedEvent prNumber) =
+  fromDecision (step state (IssuePullRequestMerged prNumber))
+applyEvent (SomeWatcherState state@IssueWaitingForIssueClose {}) (IssuePullRequestMergedEvent prNumber) =
   fromDecision (step state (IssuePullRequestMerged prNumber))
 applyEvent (SomeWatcherState state@(IssuePostMergeReviewReady _config _prNumber _worker (ReviewerIdle reviewerThread))) (IssuePostMergeReviewStartedEvent commit turnId) =
   fromDecision (step state (StartIssuePostMergeReview commit (ActiveTurn reviewerThread turnId)))

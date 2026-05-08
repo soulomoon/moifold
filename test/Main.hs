@@ -83,6 +83,7 @@ import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
 import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
+import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as IssueImplementIndexed
 import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   ( IssuePlanningIndexedActiveTurn
   , IssuePlanningIndexedBlocked
@@ -743,14 +744,16 @@ prop_eventLogPostMergeReviewStartUsesExistingReviewer config workerThread planTu
           someDomain replay.replayState == IssueImplement
             && somePhase replay.replayState == Complete
 
-prop_eventLogCannotCompleteIssueBeforePlanning :: IssueConfig -> ThreadId -> PrNumber -> Bool
-prop_eventLogCannotCompleteIssueBeforePlanning config workerThread prNumber =
-  expectLeft
-    ( replayEventLog
-        [ IssueImplementInitialized config workerThread
-        , IssuePullRequestMergedEvent prNumber
-        ]
-    )
+prop_eventLogIgnoresMergedPrBeforeHandoff :: IssueConfig -> ThreadId -> PrNumber -> Bool
+prop_eventLogIgnoresMergedPrBeforeHandoff config workerThread prNumber =
+  replaySatisfies
+    [ IssueImplementInitialized config workerThread
+    , IssuePullRequestMergedEvent prNumber
+    ]
+    \replay ->
+      someDomain replay.replayState == IssueImplement
+        && somePhase replay.replayState == Implementing
+        && replay.replayEffects == [[], [SomeEffect SleepUntilNextPoll]]
 
 prop_eventLogRefreshesIdleIssueWorkerThread :: IssueConfig -> ThreadId -> ThreadId -> TurnId -> Bool
 prop_eventLogRefreshesIdleIssueWorkerThread config oldThread newThread turnId =
@@ -6333,6 +6336,9 @@ workflowFacadeExtractionTests = do
       , workflowIssuePlanningIndexedDaemonRejectsInvalidTurnStart
       , workflowIssuePlanningIndexedDaemonRejectsInvalidActiveTurnRoutingLikeCompatibility
       , workflowIssuePlanningIndexedDaemonRejectsInvalidTerminalAndRetryRoutingLikeCompatibility
+      , workflowIssueImplementIndexedSpecMatchesCompatibilityForPolicyTransitions
+      , workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility
+      , workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
@@ -10372,6 +10378,797 @@ prReviewMergeabilityIndexedSpecMatchesCompatibility title state replayPrefix ind
       :: PrReviewIndexedState source
   observation = DaemonPrReviewObservation facadeObservation
 
+data IssueImplementIndexedPolicyCase where
+  IssueImplementIndexedPolicyCase
+    :: forall (source :: Type) (target :: Type).
+       String
+    -> [WatcherEvent]
+    -> SomeWatcherState
+    -> IssueImplementObservation
+    -> IssueImplementIndexed.IssueImplementIndexedState source
+    -> IssueImplementIndexed.IssueImplementIndexedObservation source target
+    -> IssueImplementIndexed.IssueImplementIndexedEvent source target
+    -> Either Text IssueImplementIndexed.IssueImplementIndexedProjection
+    -> [EffectTag]
+    -> IssueImplementIndexedPolicyCase
+
+workflowIssueImplementIndexedSpecMatchesCompatibilityForPolicyTransitions :: IO Bool
+workflowIssueImplementIndexedSpecMatchesCompatibilityForPolicyTransitions = do
+  results <- traverse issueImplementIndexedSpecMatchesCompatibility issueImplementIndexedPolicyCases
+  pure (and results)
+
+workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility :: IO Bool
+workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility =
+  sequenceAnd
+    [ blockingCase
+        "indexed workflow issue implement wrong pull request body update blocks observation like compatibility"
+        implementationReadyPrState
+        (ObservedPullRequestBodyUpdated stalePr)
+        (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+        ( issueImplementIndexedObservation "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedPullRequestBodyUpdated stalePr)
+            :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedBlocked
+        )
+        (IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedImplementationReadyObservation implementationReadyPrState stalePr)
+    , invalidCase
+        "indexed workflow issue implement rejects duplicate plan start like compatibility"
+        readyToPlanPrefix
+        inPlanModeState
+        (ObservedPlanTurnStarted planTurn2)
+        (IssueImplementIndexed.IssueImplementIndexedState inPlanModeState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedInPlanMode)
+        ( issueImplementIndexedObservation "IssueImplement/PlanMode" "IssueImplement/PlanMode" (ObservedPlanTurnStarted planTurn2)
+            :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedInPlanMode IssueImplementIndexed.IssueImplementIndexedInPlanMode
+        )
+    , invalidCase
+        "indexed workflow issue implement rejects completion before implementation turn like compatibility"
+        implementationReadyPrPrefix
+        implementationReadyPrState
+        (ObservedImplementationCompleted prNumber Nothing)
+        (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+        ( issueImplementIndexedObservation "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationCompleted prNumber Nothing)
+            :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedHandoffReady
+        )
+    , invalidCase
+        "indexed workflow issue implement rejects post-merge review start without reviewer like compatibility"
+        postMergePendingPrefix
+        postMergePendingState
+        (ObservedPostMergeReviewStarted reviewedCommit finalReviewTurn)
+        (IssueImplementIndexed.IssueImplementIndexedState postMergePendingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+        ( issueImplementIndexedObservation "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPostMergeReviewStarted reviewedCommit finalReviewTurn)
+            :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing
+        )
+    , invalidCase
+        "indexed workflow issue implement rejects terminal observations like compatibility"
+        completePrefix
+        completeState
+        (ObservedIssueClosed prNumber)
+        (IssueImplementIndexed.IssueImplementIndexedState completeState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedComplete)
+        ( issueImplementIndexedObservation "IssueImplement/Complete" "IssueImplement/Complete" (ObservedIssueClosed prNumber)
+            :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedComplete IssueImplementIndexed.IssueImplementIndexedComplete
+        )
+    , invalidCase
+        "indexed workflow issue implement rejects wrong-domain observations like compatibility"
+        []
+        wrongDomainState
+        (ObservedIssueImplementBlocked blockedReason)
+        (IssueImplementIndexed.IssueImplementIndexedState wrongDomainState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+        ( issueImplementIndexedObservation "IssuePlanning/Initialized" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason)
+            :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedBlocked
+        )
+    ]
+ where
+  invalidCase title _prefix state issueObservation indexedState indexedObservation =
+    assert title $
+      case
+        ( issueImplementObserve state issueObservation
+        , workflowObserve @MoifoldSpec state (DaemonIssueImplementObservation issueObservation)
+        , workflowPlanObservation @MoifoldSpec state (DaemonIssueImplementObservation issueObservation)
+        , IndexedWorkflow.indexedWorkflowObserve @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedObservation
+        , IndexedWorkflow.indexedWorkflowPlanObservation @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedObservation
+        )
+        of
+        (Left facadeFailure, Left compatibilityFailure, Left compatibilityPlanFailure, Left indexedFailure, Left indexedPlanFailure) ->
+          facadeFailure == compatibilityFailure
+            && facadeFailure == compatibilityPlanFailure
+            && facadeFailure == indexedFailure
+            && facadeFailure == indexedPlanFailure
+        _ -> False
+  blockingCase title state issueObservation indexedState indexedObservation projection =
+    assert title $
+      case
+        ( issueImplementObserve state issueObservation
+        , workflowObserve @MoifoldSpec state (DaemonIssueImplementObservation issueObservation)
+        , workflowPlanObservation @MoifoldSpec state (DaemonIssueImplementObservation issueObservation)
+        , IndexedWorkflow.indexedWorkflowObserve @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedObservation
+        , IndexedWorkflow.indexedWorkflowPlanObservation @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedObservation
+        , projection
+        )
+        of
+        ( Right facadeObserved
+          , Right compatibilityObserved
+          , Right compatibilityPlan
+          , Right indexedObserved
+          , Right indexedPlan
+          , Right projected
+          ) ->
+            let IssueImplementIndexed.IssueImplementIndexedState indexedNextState =
+                  IndexedWorkflow.indexedWorkflowObservedState @IssueImplementIndexed.IssueImplementIndexedSpec indexedObserved
+                projectedPlan = IssueImplementIndexed.issueImplementIndexedProjectionPlanned projected
+                fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
+             in facadeObserved.issueImplementTickEvent == compatibilityObserved.observedEvent
+                  && facadeObserved.issueImplementTickEffects == compatibilityObserved.observedEffects
+                  && sameWatcherStateShape facadeObserved.issueImplementTickState compatibilityObserved.observedState
+                  && workflowStateLabel @MoifoldSpec compatibilityObserved.observedState == "IssueImplement/Blocked"
+                  && workflowStateLabel @MoifoldSpec indexedNextState == "IssueImplement/Blocked"
+                  && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+                  && projectedPlan.plannedEvent == compatibilityPlan.plannedEvent
+                  && projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+                  && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+                  && issueImplementIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+                  && issueImplementIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+                  && issueImplementIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+                  && IssueImplementIndexed.issueImplementIndexedProjectionSourceLabel projected == workflowStateLabel @MoifoldSpec state
+                  && IssueImplementIndexed.issueImplementIndexedProjectionTargetLabel projected == "IssueImplement/Blocked"
+                  && workflowStateLabel @MoifoldSpec (IssueImplementIndexed.issueImplementIndexedProjectionFinalState projected) == "IssueImplement/Blocked"
+                  && IssueImplementIndexed.issueImplementIndexedProjectionEffectPlan projected == fullCompatibilityPlan
+                  && fmap effectTag fullCompatibilityPlan == [RecordBlockedTag, StopDaemonTag]
+        _ -> False
+  issueConfig = issueImplementIndexedConfig
+  prNumber = PrNumber 7
+  stalePr = PrNumber 8
+  workerThread = ThreadId "worker-thread"
+  planTurn = TurnId "turn-plan"
+  planTurn2 = TurnId "turn-plan-2"
+  implementationTurn = TurnId "turn-impl"
+  reviewerThread = ThreadId "reviewer-thread"
+  reviewedCommit = CommitSha "0123456789abcdef"
+  finalReviewTurn = TurnId "turn-final-review"
+  blockedReason = BlockedReason "blocked"
+  readyToPlanPrefix =
+    [ IssueImplementInitialized issueConfig workerThread
+    , IssuePullRequestReusedEvent prNumber
+    ]
+  inPlanModeState =
+    SomeWatcherState (IssueInPlanMode issueConfig prNumber (WorkerActive (ActiveTurn workerThread planTurn)))
+  implementationReadyPrPrefix =
+    readyToPlanPrefix
+      <> [ IssuePlanTurnStartedEvent planTurn
+         , IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+         , IssuePullRequestBodyUpdatedEvent prNumber
+         ]
+  implementationReadyPrState =
+    SomeWatcherState (IssueImplementationReady issueConfig (Just prNumber) (WorkerIdle workerThread))
+  postMergePendingPrefix =
+    implementationReadyPrPrefix
+      <> [ IssueImplementationTurnStartedEvent implementationTurn
+         , IssueImplementationCompletedEvent prNumber Nothing
+         , IssueReviewHandoffInitializedEvent prNumber
+         , IssueReviewHandoffStartedEvent prNumber
+         , IssuePullRequestMergedEvent prNumber
+         ]
+  postMergePendingState =
+    SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig prNumber (WorkerIdle workerThread))
+  completePrefix =
+    postMergePendingPrefix
+      <> [ IssueReviewerThreadReadyEvent reviewerThread
+         , IssuePostMergeReviewStartedEvent reviewedCommit finalReviewTurn
+         , IssuePostMergeReviewCleanEvent (CleanReviewEvidence reviewedCommit "LGTM")
+         , IssueClosedEvent prNumber
+         ]
+  completeState =
+    SomeWatcherState (CompleteState (IssueComplete prNumber) :: WatcherState 'IssueImplement 'Complete)
+  wrongDomainState =
+    SomeWatcherState (PlanningReady (PlannerConfig issueConfig.issueRepo (maxParallelForTest 1) []))
+
+workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths :: IO Bool
+workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths = do
+  let routingPaths =
+        [ "src" </> "CodexWatcher" </> "Domain" </> "IssueImplement" </> "Loop.hs"
+        , "src" </> "CodexWatcher" </> "DaemonLoop.hs"
+        , "src" </> "CodexWatcher" </> "DaemonLoop" </> "ActiveTurn.hs"
+        , "src" </> "CodexWatcher" </> "DaemonLoop" </> "Runtime.hs"
+        , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "Runner.hs"
+        , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "Output.hs"
+        ]
+  sources <- traverse (\path -> (\source -> (path, Text.pack source)) <$> readFile path) routingPaths
+  let forbiddenNeedles =
+        [ "CodexWatcher.Workflow.Moifold.IssueImplement.Indexed"
+        , "projectIssueImplement"
+        , "IssueImplementIndexedSpec"
+        ]
+      violations =
+        [ path <> ": " <> Text.unpack needle
+        | (path, source) <- sources
+        , needle <- forbiddenNeedles
+        , needle `Text.isInfixOf` source
+        ]
+  assert "indexed workflow issue implement adapter is not routed through live daemon paths" (null violations)
+
+issueImplementIndexedSpecMatchesCompatibility :: IssueImplementIndexedPolicyCase -> IO Bool
+issueImplementIndexedSpecMatchesCompatibility (IssueImplementIndexedPolicyCase title prefix state issueObservation indexedState indexedObservation indexedEvent projection expectedTags) =
+  assert title $
+    case
+      ( issueImplementObserve state issueObservation
+      , workflowObserve @MoifoldSpec state daemonObservation
+      , workflowPlanObservation @MoifoldSpec state daemonObservation
+      , IndexedWorkflow.indexedWorkflowObserve @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowApplyEvent @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedEvent
+      , workflowApplyEvent @MoifoldSpec state expectedEvent
+      , workflowReplayEvents @MoifoldSpec (prefix <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @IssueImplementIndexed.IssueImplementIndexedSpec (issueImplementIndexedSomePrefix prefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
+      , projection
+      )
+      of
+      ( Right facadeObserved
+        , Right compatibilityObserved
+        , Right compatibilityPlan
+        , Right indexedObserved
+        , Right indexedPlan
+        , Right (IssueImplementIndexed.IssueImplementIndexedState indexedAppliedState, IssueImplementIndexed.IssueImplementIndexedEffectPlan indexedAppliedEffects)
+        , Right (compatibilityAppliedState, compatibilityAppliedEffects)
+        , Right compatibilityReplay
+        , Right indexedReplay
+        , Right projected
+        ) ->
+          let IssueImplementIndexed.IssueImplementIndexedState indexedNextState =
+                IndexedWorkflow.indexedWorkflowObservedState @IssueImplementIndexed.IssueImplementIndexedSpec indexedObserved
+              projectedPlan = IssueImplementIndexed.issueImplementIndexedProjectionPlanned projected
+              fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
+              indexedFullPlan =
+                IssueImplementIndexed.IssueImplementIndexedEffectPlan fullCompatibilityPlan
+                  :: IssueImplementIndexed.IssueImplementIndexedEffectPlan source target
+              indexedReplayValue = issueImplementIndexedReplayResult indexedReplay
+              runtimeConfig = effectRuntimeConfig issueImplementIndexedConfig.issueRepo "/tmp/work" 1700
+              workflowCompiled = WorkflowExecution.compileWorkflowEffectPlanWithMetadata runtimeConfig fullCompatibilityPlan
+              legacyCompiled = compileEffectPlan runtimeConfig fullCompatibilityPlan
+              compatibilityWrites = compatibilityStateWrites "/tmp/state" compatibilityObserved.observedState
+              indexedWrites = compatibilityStateWrites "/tmp/state" (IssueImplementIndexed.issueImplementIndexedProjectionFinalState projected)
+           in facadeObserved.issueImplementTickEvent == compatibilityObserved.observedEvent
+                && facadeObserved.issueImplementTickEffects == compatibilityObserved.observedEffects
+                && sameWatcherStateShape facadeObserved.issueImplementTickState compatibilityObserved.observedState
+                && projectedPlan.plannedEvent == compatibilityPlan.plannedEvent
+                && projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+                && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+                && issueImplementIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+                && issueImplementIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+                && issueImplementIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+                && fullCompatibilityPlan == compatibilityObserved.observedEffects
+                && fmap effectTag fullCompatibilityPlan == expectedTags
+                && workflowStateLabel @MoifoldSpec indexedNextState == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+                && sameWatcherStateShape compatibilityObserved.observedState indexedAppliedState
+                && sameWatcherStateShape compatibilityObserved.observedState compatibilityAppliedState
+                && indexedAppliedEffects == compatibilityAppliedEffects
+                && IssueImplementIndexed.issueImplementIndexedProjectionSourceLabel projected == workflowStateLabel @MoifoldSpec state
+                && IssueImplementIndexed.issueImplementIndexedProjectionTargetLabel projected == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                && workflowStateLabel @MoifoldSpec (IssueImplementIndexed.issueImplementIndexedProjectionFinalState projected) == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                && IssueImplementIndexed.issueImplementIndexedProjectionEffectPlan projected == fullCompatibilityPlan
+                && compatibilityWrites == indexedWrites
+                && workflowValidateEffects @MoifoldSpec state fullCompatibilityPlan
+                  == IndexedWorkflow.indexedWorkflowValidateEffects @IssueImplementIndexed.IssueImplementIndexedSpec indexedState indexedFullPlan
+                && and
+                  [ workflowEffectAllowed @MoifoldSpec state effect
+                      == IndexedWorkflow.indexedWorkflowEffectAllowed @IssueImplementIndexed.IssueImplementIndexedSpec indexedState (IssueImplementIndexed.IssueImplementIndexedEffect effect)
+                  | effect <- fullCompatibilityPlan
+                  ]
+                && sameWatcherStateShape compatibilityReplay.replayState indexedReplayValue.replayState
+                && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayValue.replayState
+                && compatibilityReplay.replayEffects == indexedReplayValue.replayEffects
+                && fmap WorkflowExecution.workflowPlannedAction workflowCompiled.workflowCompiledActions == legacyCompiled.compiledActions
+                && WorkflowExecution.workflowCompiledNextRequestId workflowCompiled == legacyCompiled.compiledNextRequestId
+                && WorkflowExecution.dryRunWorkflowCompiledEffectPlan workflowCompiled == dryRunCompiledEffectPlan legacyCompiled
+      _ -> False
+ where
+  daemonObservation = DaemonIssueImplementObservation issueObservation
+  expectedEvent =
+    case indexedEvent of
+      IssueImplementIndexed.IssueImplementIndexedEvent _sourceLabel _targetLabel event -> event
+
+issueImplementIndexedTransitionEvent
+  :: IndexedWorkflow.IndexedPlannedTransition IssueImplementIndexed.IssueImplementIndexedSpec source target
+  -> WatcherEvent
+issueImplementIndexedTransitionEvent transition =
+  case IndexedWorkflow.indexedPlannedEvent transition of
+    IssueImplementIndexed.IssueImplementIndexedEvent _sourceLabel _targetLabel event -> event
+
+issueImplementIndexedTransitionPreCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition IssueImplementIndexed.IssueImplementIndexedSpec source target
+  -> EffectPlan
+issueImplementIndexedTransitionPreCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPreCommitEffects transition of
+    IssueImplementIndexed.IssueImplementIndexedEffectPlan effects -> effects
+
+issueImplementIndexedTransitionPostCommitEffects
+  :: IndexedWorkflow.IndexedPlannedTransition IssueImplementIndexed.IssueImplementIndexedSpec source target
+  -> EffectPlan
+issueImplementIndexedTransitionPostCommitEffects transition =
+  case IndexedWorkflow.indexedPlannedPostCommitEffects transition of
+    IssueImplementIndexed.IssueImplementIndexedEffectPlan effects -> effects
+
+issueImplementIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult IssueImplementIndexed.IssueImplementIndexedSpec -> EventReplayResult
+issueImplementIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (IssueImplementIndexed.IssueImplementIndexedReplayResult replay)) =
+  replay
+
+issueImplementIndexedSomePrefix :: [WatcherEvent] -> [IndexedWorkflow.SomeIndexedWorkflowEvent IssueImplementIndexed.IssueImplementIndexedSpec]
+issueImplementIndexedSomePrefix =
+  fmap (issueImplementIndexedSomeEvent "IssueImplement/Implementing" "IssueImplement/Implementing")
+
+issueImplementIndexedSomeEvent :: Text -> Text -> WatcherEvent -> IndexedWorkflow.SomeIndexedWorkflowEvent IssueImplementIndexed.IssueImplementIndexedSpec
+issueImplementIndexedSomeEvent sourceLabel targetLabel event =
+  IndexedWorkflow.SomeIndexedWorkflowEvent
+    ( IssueImplementIndexed.IssueImplementIndexedEvent sourceLabel targetLabel event
+        :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing
+    )
+
+issueImplementIndexedObservation
+  :: Text
+  -> Text
+  -> IssueImplementObservation
+  -> IssueImplementIndexed.IssueImplementIndexedObservation source target
+issueImplementIndexedObservation sourceLabel targetLabel =
+  IssueImplementIndexed.IssueImplementIndexedObservation sourceLabel targetLabel . DaemonIssueImplementObservation
+
+issueImplementIndexedConfig :: IssueConfig
+issueImplementIndexedConfig =
+  IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
+
+issueImplementIndexedPolicyCases :: [IssueImplementIndexedPolicyCase]
+issueImplementIndexedPolicyCases =
+  [ c "indexed workflow issue implement plan turn start matches compatibility" readyToPlanPrefix readyToPlanState (ObservedPlanTurnStarted planTurn)
+      (IssueImplementIndexed.IssueImplementIndexedState readyToPlanState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (obs "IssueImplement/PlanMode" "IssueImplement/PlanMode" (ObservedPlanTurnStarted planTurn) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedInPlanMode)
+      (ev "IssueImplement/PlanMode" "IssueImplement/PlanMode" (IssuePlanTurnStartedEvent planTurn) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedInPlanMode)
+      (IssueImplementIndexed.projectIssueImplementPlanTurnStartedObservation readyToPlanState planTurn)
+      [StartIssuePlanWorkerTurnTag]
+  , c "indexed workflow issue implement plan completion matches compatibility" inPlanModePrefix inPlanModeState (ObservedPlanCompleted sampleIssuePlanMarkdown (Just implementationTurn))
+      (IssueImplementIndexed.IssueImplementIndexedState inPlanModeState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedInPlanMode)
+      (obs "IssueImplement/PlanMode" "IssueImplement/Implementing" (ObservedPlanCompleted sampleIssuePlanMarkdown (Just implementationTurn)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedInPlanMode IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (ev "IssueImplement/PlanMode" "IssueImplement/Implementing" (IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedInPlanMode IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (IssueImplementIndexed.projectIssueImplementPlanCompletedObservation inPlanModeState sampleIssuePlanMarkdown (Just implementationTurn))
+      [RecordIssuePlanTag, SleepUntilNextPollTag]
+  , c "indexed workflow issue implement attempt branch advance matches compatibility" implementationReadyNoPrPrefix implementationReadyNoPrState (ObservedIssueAttemptBranchAdvanced followUpBranch)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyNoPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueAttemptBranchAdvanced followUpBranch) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueAttemptBranchAdvancedEvent followUpBranch) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementAttemptBranchAdvancedObservation implementationReadyNoPrState followUpBranch)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement worker refresh ready-to-plan matches compatibility" readyToPlanPrefix readyToPlanState (ObservedIssueWorkerThreadRefreshed refreshedWorker)
+      (IssueImplementIndexed.IssueImplementIndexedState readyToPlanState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (obs "IssueImplement/PlanMode" "IssueImplement/PlanMode" (ObservedIssueWorkerThreadRefreshed refreshedWorker) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (ev "IssueImplement/PlanMode" "IssueImplement/PlanMode" (IssueWorkerThreadRefreshed refreshedWorker) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (IssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedReadyToPlanObservation readyToPlanState refreshedWorker)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement worker refresh plan-ready matches compatibility" planReadyPrefix planReadyState (ObservedIssueWorkerThreadRefreshed refreshedWorker)
+      (IssueImplementIndexed.IssueImplementIndexedState planReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueWorkerThreadRefreshed refreshedWorker) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPlanReady IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueWorkerThreadRefreshed refreshedWorker) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPlanReady IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (IssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedPlanReadyObservation planReadyState refreshedWorker)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement worker refresh implementation-ready matches compatibility" implementationReadyPrPrefix implementationReadyPrState (ObservedIssueWorkerThreadRefreshed refreshedWorker)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueWorkerThreadRefreshed refreshedWorker) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueWorkerThreadRefreshed refreshedWorker) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedImplementationReadyObservation implementationReadyPrState refreshedWorker)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request created from ready matches compatibility" implementationReadyNoPrPrefix implementationReadyNoPrState (ObservedPullRequestCreated prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyNoPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/PlanMode" (ObservedPullRequestCreated prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (ev "IssueImplement/Implementing" "IssueImplement/PlanMode" (IssuePullRequestCreatedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (IssueImplementIndexed.projectIssueImplementPullRequestCreatedImplementationReadyObservation implementationReadyNoPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request created from implementing matches compatibility" implementingNoPrPrefix implementingNoPrState (ObservedPullRequestCreated prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingNoPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestCreated prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestCreatedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (IssueImplementIndexed.projectIssueImplementPullRequestCreatedImplementingObservation implementingNoPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request reused from ready matches compatibility" implementationReadyNoPrPrefix implementationReadyNoPrState (ObservedPullRequestReused prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyNoPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/PlanMode" (ObservedPullRequestReused prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (ev "IssueImplement/Implementing" "IssueImplement/PlanMode" (IssuePullRequestReusedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (IssueImplementIndexed.projectIssueImplementPullRequestReusedImplementationReadyObservation implementationReadyNoPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request reused from implementing matches compatibility" implementingNoPrPrefix implementingNoPrState (ObservedPullRequestReused prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingNoPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestReused prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestReusedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (IssueImplementIndexed.projectIssueImplementPullRequestReusedImplementingObservation implementingNoPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request body update plan-ready matches compatibility writes" planReadyPrefix planReadyState (ObservedPullRequestBodyUpdated prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState planReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestBodyUpdated prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPlanReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestBodyUpdatedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPlanReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedPlanReadyObservation planReadyState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request body update implementation-ready matches compatibility writes" implementationReadyPrPrefix implementationReadyPrState (ObservedPullRequestBodyUpdated prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestBodyUpdated prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestBodyUpdatedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedImplementationReadyObservation implementationReadyPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request body update implementing matches compatibility writes" implementingPrPrefix implementingPrState (ObservedPullRequestBodyUpdated prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestBodyUpdated prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestBodyUpdatedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedImplementingObservation implementingPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement implementation turn start matches compatibility request id" implementationReadyPrPrefix implementationReadyPrState (ObservedImplementationTurnStarted implementationTurn)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationTurnStarted implementationTurn) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueImplementationTurnStartedEvent implementationTurn) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (IssueImplementIndexed.projectIssueImplementationTurnStartedObservation implementationReadyPrState implementationTurn)
+      [StartIssueImplementationWorkerTurnTag]
+  , c "indexed workflow issue implement incomplete restarts worker" implementingPrPrefix implementingPrState (ObservedImplementationIncomplete incompleteReason)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationIncomplete incompleteReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueImplementationIncompleteEvent incompleteReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementationIncompleteObservation implementingPrState incompleteReason)
+      [StartIssueImplementationWorkerTurnTag]
+  , c "indexed workflow issue implement implementation blocked stops from active turn" implementingPrPrefix implementingPrState (ObservedImplementationBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedImplementationBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (IssueImplementationBlockedEvent blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementationBlockedImplementingObservation implementingPrState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement implementation blocked stops from ready state" implementationReadyPrPrefix implementationReadyPrState (ObservedImplementationBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedImplementationBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (IssueImplementationBlockedEvent blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementationBlockedImplementationReadyObservation implementationReadyPrState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement completion initializes handoff" implementingPrPrefix implementingPrState (ObservedImplementationCompleted prNumber (Just reviewerThread))
+      (IssueImplementIndexed.IssueImplementIndexedState implementingPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationCompleted prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueImplementationCompletedEvent prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (IssueImplementIndexed.projectIssueImplementationCompletedImplementingObservation implementingPrState prNumber (Just reviewerThread))
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement completion from handoff ready is idempotent" handoffReadyPrefix handoffReadyState (ObservedImplementationCompleted prNumber (Just reviewerThread))
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationCompleted prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueImplementationCompletedEvent prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (IssueImplementIndexed.projectIssueImplementationCompletedHandoffReadyObservation handoffReadyState prNumber (Just reviewerThread))
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement completion from handoff initialized is idempotent" handoffInitializedPrefix handoffInitializedState (ObservedImplementationCompleted prNumber (Just reviewerThread))
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationCompleted prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueImplementationCompletedEvent prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (IssueImplementIndexed.projectIssueImplementationCompletedHandoffInitializedObservation handoffInitializedState prNumber (Just reviewerThread))
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement completion while waiting for merge is idempotent" waitingMergeWithReviewerPrefix waitingMergeWithReviewerState (ObservedImplementationCompleted prNumber (Just reviewerThread))
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeWithReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedImplementationCompleted prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueImplementationCompletedEvent prNumber (Just reviewerThread)) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (IssueImplementIndexed.projectIssueImplementationCompletedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber (Just reviewerThread))
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement stale completion blocks like compatibility" handoffReadyPrefix handoffReadyState (ObservedImplementationCompleted stalePr Nothing)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedImplementationCompleted stalePr Nothing) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (IssueImplementationCompletedEvent stalePr Nothing) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementationCompletedHandoffReadyObservation handoffReadyState stalePr Nothing)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement handoff initialization matches compatibility" handoffReadyPrefix handoffReadyState (ObservedReviewHandoffInitialized prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedReviewHandoffInitialized prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewHandoffInitializedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffReadyObservation handoffReadyState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement handoff initialization from initialized is idempotent" handoffInitializedPrefix handoffInitializedState (ObservedReviewHandoffInitialized prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedReviewHandoffInitialized prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewHandoffInitializedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffInitializedObservation handoffInitializedState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement handoff initialization while waiting merge is idempotent" waitingMergeWithReviewerPrefix waitingMergeWithReviewerState (ObservedReviewHandoffInitialized prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeWithReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedReviewHandoffInitialized prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewHandoffInitializedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement wrong handoff initialization blocks like compatibility" handoffReadyPrefix handoffReadyState (ObservedReviewHandoffInitialized stalePr)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedReviewHandoffInitialized stalePr) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (IssueReviewHandoffInitializedEvent stalePr) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffReadyObservation handoffReadyState stalePr)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement handoff start matches compatibility" handoffInitializedPrefix handoffInitializedState (ObservedReviewHandoffStarted prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedReviewHandoffStarted prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewHandoffStartedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffStartedHandoffInitializedObservation handoffInitializedState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement handoff start while waiting merge is idempotent" waitingMergeWithReviewerPrefix waitingMergeWithReviewerState (ObservedReviewHandoffStarted prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeWithReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedReviewHandoffStarted prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewHandoffStartedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffStartedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement wrong handoff start blocks like compatibility" handoffInitializedPrefix handoffInitializedState (ObservedReviewHandoffStarted stalePr)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedReviewHandoffStarted stalePr) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (IssueReviewHandoffStartedEvent stalePr) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementReviewHandoffStartedHandoffInitializedObservation handoffInitializedState stalePr)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement reviewer ready from handoff ready matches compatibility" handoffReadyNoReviewerPrefix handoffReadyNoReviewerState (ObservedIssueReviewerThreadReady reviewerThread)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyNoReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueReviewerThreadReady reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewerThreadReadyEvent reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffReadyObservation handoffReadyNoReviewerState reviewerThread)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement reviewer ready from handoff initialized matches compatibility" handoffInitializedNoReviewerPrefix handoffInitializedNoReviewerState (ObservedIssueReviewerThreadReady reviewerThread)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedNoReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueReviewerThreadReady reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewerThreadReadyEvent reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffInitializedObservation handoffInitializedNoReviewerState reviewerThread)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement reviewer ready while waiting merge matches compatibility" waitingMergePrefix waitingMergeState (ObservedIssueReviewerThreadReady reviewerThread)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueReviewerThreadReady reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewerThreadReadyEvent reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyWaitingForPrMergeObservation waitingMergeState reviewerThread)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement reviewer ready from post-merge pending enters ready" postMergePendingPrefix postMergePendingState (ObservedIssueReviewerThreadReady reviewerThread)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergePendingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueReviewerThreadReady reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewerThreadReadyEvent reviewerThread) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation postMergePendingState reviewerThread)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement reviewer ready from post-merge ready refreshes reviewer" postMergeReadyPrefix postMergeReadyState (ObservedIssueReviewerThreadReady refreshedReviewer)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedIssueReviewerThreadReady refreshedReviewer) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssueReviewerThreadReadyEvent refreshedReviewer) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (IssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewReadyObservation postMergeReadyState refreshedReviewer)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request merge without reviewer enters pending review" waitingMergeNoReviewerPrefix waitingMergeState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation waitingMergeState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement pull request merge enters post-merge review" waitingMergeWithReviewerPrefix waitingMergeWithReviewerState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeWithReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation waitingMergeWithReviewerState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR while implementation-ready sleeps" implementationReadyPrPrefix implementationReadyPrState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedImplementationReadyObservation implementationReadyPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR while implementing sleeps" implementingPrPrefix implementingPrState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedImplementingObservation implementingPrState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR from handoff ready sleeps" handoffReadyPrefix handoffReadyState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedHandoffReadyObservation handoffReadyState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR from handoff initialized sleeps" handoffInitializedPrefix handoffInitializedState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedHandoffInitializedObservation handoffInitializedState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR from post-merge pending sleeps" postMergePendingPrefix postMergePendingState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergePendingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedPostMergeReviewPendingReviewerObservation postMergePendingState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR from post-merge ready sleeps" postMergeReadyPrefix postMergeReadyState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedPostMergeReviewReadyObservation postMergeReadyState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR from post-merge reviewing sleeps" postMergeReviewingPrefix postMergeReviewingState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReviewingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedPostMergeReviewingObservation postMergeReviewingState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement ignored merged PR while waiting for issue close sleeps" waitingClosePrefix waitingCloseState (ObservedPullRequestMerged prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingCloseState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPullRequestMerged prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePullRequestMergedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (IssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForIssueCloseObservation waitingCloseState prNumber)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement post-merge review start matches compatibility" postMergeReadyPrefix postMergeReadyState (ObservedPostMergeReviewStarted reviewedCommit finalReviewTurn)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPostMergeReviewStarted reviewedCommit finalReviewTurn) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePostMergeReviewStartedEvent reviewedCommit finalReviewTurn) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewStartedObservation postMergeReadyState reviewedCommit finalReviewTurn)
+      [StartIssueFinalReviewTurnTag]
+  , c "indexed workflow issue implement clean final review closes issue" postMergeReviewingPrefix postMergeReviewingState (ObservedPostMergeReviewerOutcome (IssueFinalReviewClean cleanEvidence))
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReviewingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPostMergeReviewerOutcome (IssueFinalReviewClean cleanEvidence)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePostMergeReviewCleanEvent cleanEvidence) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeCleanObservation postMergeReviewingState cleanEvidence)
+      [CloseIssueTag, SleepUntilNextPollTag]
+  , c "indexed workflow issue implement rework final review starts follow-up" postMergeReviewingPrefix postMergeReviewingState (ObservedPostMergeReviewerOutcome (IssueFinalReviewRework reviewEvidence))
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReviewingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPostMergeReviewerOutcome (IssueFinalReviewRework reviewEvidence)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePostMergeReviewFollowUpEvent reviewEvidence) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeReworkObservation postMergeReviewingState reviewEvidence)
+      [UpdateIssueFollowUpTag, SleepUntilNextPollTag]
+  , c "indexed workflow issue implement incomplete final review retries" postMergeReviewingPrefix postMergeReviewingState (ObservedPostMergeReviewerOutcome (IssueFinalReviewIncomplete incompleteReason))
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReviewingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Implementing" (ObservedPostMergeReviewerOutcome (IssueFinalReviewIncomplete incompleteReason)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (ev "IssueImplement/Implementing" "IssueImplement/Implementing" (IssuePostMergeReviewIncompleteEvent incompleteReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeIncompleteObservation postMergeReviewingState incompleteReason)
+      [SleepUntilNextPollTag]
+  , c "indexed workflow issue implement blocked final review stops" postMergeReviewingPrefix postMergeReviewingState (ObservedPostMergeReviewerOutcome (IssueFinalReviewBlocked blockedReason))
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReviewingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedPostMergeReviewerOutcome (IssueFinalReviewBlocked blockedReason)) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeBlockedObservation postMergeReviewingState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement issue close completes" waitingClosePrefix waitingCloseState (ObservedIssueClosed prNumber)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingCloseState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (obs "IssueImplement/Implementing" "IssueImplement/Complete" (ObservedIssueClosed prNumber) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedComplete)
+      (ev "IssueImplement/Implementing" "IssueImplement/Complete" (IssueClosedEvent prNumber) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedComplete)
+      (IssueImplementIndexed.projectIssueImplementIssueClosedObservation waitingCloseState prNumber)
+      [StopDaemonTag]
+  , c "indexed workflow issue implement wrong issue close blocks like compatibility" waitingClosePrefix waitingCloseState (ObservedIssueClosed stalePr)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingCloseState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueClosed stalePr) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (IssueClosedEvent stalePr) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementIssueClosedObservation waitingCloseState stalePr)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from ready to plan" readyToPlanPrefix readyToPlanState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState readyToPlanState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedReadyToPlan)
+      (obs "IssueImplement/PlanMode" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/PlanMode" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedReadyToPlan IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedReadyToPlanObservation readyToPlanState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from plan mode" inPlanModePrefix inPlanModeState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState inPlanModeState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedInPlanMode)
+      (obs "IssueImplement/PlanMode" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedInPlanMode IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/PlanMode" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedInPlanMode IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedInPlanModeObservation inPlanModeState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from plan ready" planReadyPrefix planReadyState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState planReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPlanReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPlanReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPlanReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedPlanReadyObservation planReadyState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from implementation ready" implementationReadyPrPrefix implementationReadyPrState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState implementationReadyPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementationReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementationReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedImplementationReadyObservation implementationReadyPrState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from implementing" implementingPrPrefix implementingPrState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState implementingPrState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedImplementing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedImplementing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedImplementingObservation implementingPrState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from handoff ready" handoffReadyPrefix handoffReadyState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedHandoffReadyObservation handoffReadyState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from handoff initialized" handoffInitializedPrefix handoffInitializedState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState handoffInitializedState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedHandoffInitialized)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedHandoffInitialized IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedHandoffInitializedObservation handoffInitializedState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from waiting merge" waitingMergeWithReviewerPrefix waitingMergeWithReviewerState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingMergeWithReviewerState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForPrMerge IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedWaitingForPrMergeObservation waitingMergeWithReviewerState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from post-merge pending" postMergePendingPrefix postMergePendingState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergePendingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewPendingReviewer IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedPostMergeReviewPendingReviewerObservation postMergePendingState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from post-merge ready" postMergeReadyPrefix postMergeReadyState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReadyState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewReady IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedPostMergeReviewReadyObservation postMergeReadyState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from post-merge reviewing" postMergeReviewingPrefix postMergeReviewingState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState postMergeReviewingState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedPostMergeReviewing IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedPostMergeReviewingObservation postMergeReviewingState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  , c "indexed workflow issue implement generic blocked works from waiting close" waitingClosePrefix waitingCloseState (ObservedIssueImplementBlocked blockedReason)
+      (IssueImplementIndexed.IssueImplementIndexedState waitingCloseState :: IssueImplementIndexed.IssueImplementIndexedState IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose)
+      (obs "IssueImplement/Implementing" "IssueImplement/Blocked" (ObservedIssueImplementBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedObservation IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (ev "IssueImplement/Implementing" "IssueImplement/Blocked" (WatcherBlocked blockedReason) :: IssueImplementIndexed.IssueImplementIndexedEvent IssueImplementIndexed.IssueImplementIndexedWaitingForIssueClose IssueImplementIndexed.IssueImplementIndexedBlocked)
+      (IssueImplementIndexed.projectIssueImplementBlockedWaitingForIssueCloseObservation waitingCloseState blockedReason)
+      [RecordBlockedTag, StopDaemonTag]
+  ]
+ where
+  c = IssueImplementIndexedPolicyCase
+  obs = issueImplementIndexedObservation
+  ev = IssueImplementIndexed.IssueImplementIndexedEvent
+  issueConfig = issueImplementIndexedConfig
+  prNumber = PrNumber 7
+  stalePr = PrNumber 8
+  workerThread = ThreadId "worker-thread"
+  refreshedWorker = ThreadId "worker-thread-refreshed"
+  reviewerThread = ThreadId "reviewer-thread"
+  refreshedReviewer = ThreadId "reviewer-thread-refreshed"
+  planTurn = TurnId "turn-plan"
+  implementationTurn = TurnId "turn-impl"
+  finalReviewTurn = TurnId "turn-final-review"
+  reviewedCommit = CommitSha "0123456789abcdef"
+  followUpBranch = BranchName "codex/issue-42-2"
+  incompleteReason = "incomplete"
+  blockedReason = BlockedReason "blocked"
+  cleanEvidence = CleanReviewEvidence reviewedCommit "LGTM"
+  reviewEvidence = reviewEvidenceFromSummaries ("needs follow-up" :| []) reviewedCommit
+  readyToPlanPrefix =
+    [ IssueImplementInitialized issueConfig workerThread
+    , IssuePullRequestReusedEvent prNumber
+    ]
+  inPlanModePrefix = readyToPlanPrefix <> [IssuePlanTurnStartedEvent planTurn]
+  planReadyPrefix = inPlanModePrefix <> [IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)]
+  implementationReadyPrPrefix = planReadyPrefix <> [IssuePullRequestBodyUpdatedEvent prNumber]
+  implementationReadyNoPrPrefix = [IssueImplementInitialized issueConfig workerThread]
+  implementingPrPrefix = implementationReadyPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
+  implementingNoPrPrefix = implementationReadyNoPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
+  handoffReadyPrefix = implementingPrPrefix <> [IssueImplementationCompletedEvent prNumber (Just reviewerThread)]
+  handoffReadyNoReviewerPrefix = implementingPrPrefix <> [IssueImplementationCompletedEvent prNumber Nothing]
+  handoffInitializedPrefix = handoffReadyPrefix <> [IssueReviewHandoffInitializedEvent prNumber]
+  handoffInitializedNoReviewerPrefix = handoffReadyNoReviewerPrefix <> [IssueReviewHandoffInitializedEvent prNumber]
+  waitingMergePrefix = handoffInitializedPrefix <> [IssueReviewHandoffStartedEvent prNumber]
+  waitingMergeNoReviewerPrefix = handoffInitializedNoReviewerPrefix <> [IssueReviewHandoffStartedEvent prNumber]
+  waitingMergeWithReviewerPrefix = waitingMergePrefix
+  postMergePendingPrefix = waitingMergeNoReviewerPrefix <> [IssuePullRequestMergedEvent prNumber]
+  postMergeReadyPrefix = waitingMergeWithReviewerPrefix <> [IssuePullRequestMergedEvent prNumber]
+  postMergeReviewingPrefix = postMergeReadyPrefix <> [IssuePostMergeReviewStartedEvent reviewedCommit finalReviewTurn]
+  waitingClosePrefix = postMergeReviewingPrefix <> [IssuePostMergeReviewCleanEvent cleanEvidence]
+  readyToPlanState =
+    SomeWatcherState (IssueReadyToPlan issueConfig prNumber (WorkerIdle workerThread))
+  inPlanModeState =
+    SomeWatcherState (IssueInPlanMode issueConfig prNumber (WorkerActive (ActiveTurn workerThread planTurn)))
+  planReadyState =
+    SomeWatcherState (IssuePlanReady issueConfig prNumber (WorkerIdle workerThread))
+  implementationReadyPrState =
+    SomeWatcherState (IssueImplementationReady issueConfig (Just prNumber) (WorkerIdle workerThread))
+  implementationReadyNoPrState =
+    SomeWatcherState (IssueImplementationReady issueConfig Nothing (WorkerIdle workerThread))
+  implementingPrState =
+    SomeWatcherState (IssueImplementing issueConfig (Just prNumber) (WorkerActive (ActiveTurn workerThread implementationTurn)))
+  implementingNoPrState =
+    SomeWatcherState (IssueImplementing issueConfig Nothing (WorkerActive (ActiveTurn workerThread implementationTurn)))
+  handoffReadyState =
+    SomeWatcherState (IssueHandoffReady issueConfig prNumber (WorkerIdle workerThread) (Just (ReviewerIdle reviewerThread)))
+  handoffReadyNoReviewerState =
+    SomeWatcherState (IssueHandoffReady issueConfig prNumber (WorkerIdle workerThread) Nothing)
+  handoffInitializedState =
+    SomeWatcherState (IssueHandoffInitialized issueConfig prNumber (WorkerIdle workerThread) (Just (ReviewerIdle reviewerThread)))
+  handoffInitializedNoReviewerState =
+    SomeWatcherState (IssueHandoffInitialized issueConfig prNumber (WorkerIdle workerThread) Nothing)
+  waitingMergeState =
+    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber (WorkerIdle workerThread) Nothing)
+  waitingMergeWithReviewerState =
+    SomeWatcherState (IssueWaitingForPrMerge issueConfig prNumber (WorkerIdle workerThread) (Just (ReviewerIdle reviewerThread)))
+  postMergePendingState =
+    SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig prNumber (WorkerIdle workerThread))
+  postMergeReadyState =
+    SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+  postMergeReviewingState =
+    SomeWatcherState (IssuePostMergeReviewing issueConfig prNumber (WorkerIdle workerThread) reviewedCommit (ReviewerActive (ActiveTurn reviewerThread finalReviewTurn)))
+  waitingCloseState =
+    SomeWatcherState (IssueWaitingForIssueClose issueConfig prNumber)
+
 workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads :: IO Bool
 workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads = do
   let repo = RepoName "soulomoon/mlf2"
@@ -13028,7 +13825,7 @@ main = do
       , quickCheckResult prop_eventLogCannotMergeBeforeCleanReview
       , quickCheckResult prop_eventLogFullIssueImplementationPathCompletes
       , quickCheckResult prop_eventLogPostMergeReviewStartUsesExistingReviewer
-      , quickCheckResult prop_eventLogCannotCompleteIssueBeforePlanning
+      , quickCheckResult prop_eventLogIgnoresMergedPrBeforeHandoff
       , quickCheckResult prop_eventLogRefreshesIdleIssueWorkerThread
       , quickCheckResult prop_eventLogRefreshesIdlePrReviewThreads
       , quickCheckResult prop_eventLogRefreshesPrReviewVerificationThreads
