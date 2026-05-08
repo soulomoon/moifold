@@ -5696,6 +5696,7 @@ automaticIssueFollowUpRefreshesWorkerBeforePlanTurn = do
         sequence
           [ assert "issue follow-up refreshes worker thread before plan" (observedEvent == Just (IssueWorkerThreadRefreshed (ThreadId "thread-started")))
           , assert "issue follow-up keeps ready-to-plan state with fresh worker" (freshReadyToPlan observedState)
+          , assert "issue follow-up refresh tick matches indexed projection" (indexedRefreshMatches tick.loopObservedTick)
           , assert "issue follow-up starts one replacement worker thread" (length threadStarts == 1)
           , assert "issue follow-up does not start a plan turn on stale worker" (null turnStarts)
           ]
@@ -5727,13 +5728,25 @@ automaticIssueFollowUpRefreshesWorkerBeforePlanTurn = do
     , IssuePullRequestCreatedEvent followUpPrNumber
     ]
   freshReadyToPlan = \case
-    Just (SomeWatcherState (IssueReadyToPlan followUpConfig observedPrNumber (WorkerIdle workerThread))) ->
-      followUpConfig.issueRepo == issueConfig.issueRepo
-        && followUpConfig.issueNumber == issueConfig.issueNumber
-        && unBranchName followUpConfig.issueBranch == "codex/issue-42-2"
+    Just (SomeWatcherState (IssueReadyToPlan observedConfig observedPrNumber (WorkerIdle workerThread))) ->
+      observedConfig.issueRepo == issueConfig.issueRepo
+        && observedConfig.issueNumber == issueConfig.issueNumber
+        && unBranchName observedConfig.issueBranch == "codex/issue-42-2"
         && observedPrNumber == followUpPrNumber
         && workerThread == ThreadId "thread-started"
     _ ->
+      False
+  followUpConfig = IssueConfig issueConfig.issueRepo issueConfig.issueNumber (BranchName "codex/issue-42-2")
+  readyToPlanState = SomeWatcherState (IssueReadyToPlan followUpConfig followUpPrNumber (WorkerIdle oldWorker))
+  indexedRefreshMatches = \case
+    Just observed ->
+      case IssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedReadyToPlanObservation readyToPlanState (ThreadId "thread-started") of
+        Right projection ->
+          observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+            && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+        Left _ ->
+          False
+    Nothing ->
       False
 
 automaticStalePlanningTurnRetriesAfterThreeMisses :: IO Bool
@@ -5817,6 +5830,7 @@ automaticDaemonLoopRetriesPrCreateWhileWaitingForPr = do
       results <-
         sequence
           [ assert "missing PR retry records created PR" ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssuePullRequestCreatedEvent (PrNumber 7)))
+          , assert "missing PR retry tick matches indexed projection" (indexedPrCreatedMatches issueConfig (PrNumber 7) tick.loopObservedTick)
           , assert "missing PR retry checks open PRs" (FakeCommand (GhPrListOpen repo) `elem` calls)
           , assert "missing PR retry re-runs create PR" (FakeCommand (GhCreatePullRequest "/tmp/work" issueConfig) `elem` calls)
           , assert "missing PR retry sleeps after create attempt" (FakeSleep `elem` calls)
@@ -5872,8 +5886,10 @@ automaticDaemonLoopAdvancesMergedAttemptBranchBeforePrCreate = do
       results <-
         sequence
           [ assert "merged old branch advances attempt branch" ((daemonObservedEvent <$> firstTick.loopObservedTick) == Just (IssueAttemptBranchAdvancedEvent nextBranch))
+          , assert "merged old branch advance tick matches indexed projection" (indexedBranchAdvanceMatches firstTick.loopObservedTick)
           , assert "merged old branch does not create PR on advance tick" (FakeCommand (GhCreatePullRequest "/tmp/work" oldIssueConfig) `notElem` calls)
           , assert "advanced branch creates next PR" ((daemonObservedEvent <$> secondTick.loopObservedTick) == Just (IssuePullRequestCreatedEvent (PrNumber 7)))
+          , assert "advanced branch create tick matches indexed projection" (indexedPrCreatedMatches nextIssueConfig (PrNumber 7) secondTick.loopObservedTick)
           , assert "advanced branch is used for new PR creation" (FakeCommand (GhCreatePullRequest "/tmp/work" nextIssueConfig) `elem` calls)
           ]
       pure (and results)
@@ -5889,6 +5905,15 @@ automaticDaemonLoopAdvancesMergedAttemptBranchBeforePrCreate = do
   nextBranch = BranchName "codex/issue-42-2"
   oldIssueConfig = IssueConfig repo (IssueNumber 42) oldBranch
   nextIssueConfig = IssueConfig repo (IssueNumber 42) nextBranch
+  indexedBranchAdvanceMatches = \case
+    Just observed ->
+      let state = SomeWatcherState (IssueImplementationReady oldIssueConfig Nothing (WorkerIdle (ThreadId "worker-thread")))
+       in case IssueImplementIndexed.projectIssueImplementAttemptBranchAdvancedObservation state nextBranch of
+            Right projection ->
+              observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+                && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+            Left _ -> False
+    Nothing -> False
 
 automaticDaemonLoopBlocksUnlinkedBranchPr :: IO Bool
 automaticDaemonLoopBlocksUnlinkedBranchPr = do
@@ -5947,6 +5972,30 @@ automaticDaemonLoopBlocksUnlinkedBranchPr = do
       putStrLn ("FAIL automatic unlinked branch PR block: " <> Text.unpack (formatDaemonLoopFailure failure))
       pure False
 
+indexedPrCreatedMatches :: IssueConfig -> PrNumber -> Maybe DaemonObservedTickResult -> Bool
+indexedPrCreatedMatches issueConfig prNumber = \case
+  Just observed ->
+    let state = SomeWatcherState (IssueImplementationReady issueConfig Nothing (WorkerIdle (ThreadId "worker-thread")))
+     in case IssueImplementIndexed.projectIssueImplementPullRequestCreatedImplementationReadyObservation state prNumber of
+          Right projection ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          Left _ -> False
+  Nothing ->
+    False
+
+indexedPrBodyUpdateMatches :: IssueConfig -> PrNumber -> Maybe DaemonObservedTickResult -> Bool
+indexedPrBodyUpdateMatches issueConfig prNumber = \case
+  Just observed ->
+    let state = SomeWatcherState (IssuePlanReady issueConfig prNumber (WorkerIdle (ThreadId "worker-thread")))
+     in case IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedPlanReadyObservation state prNumber of
+          Right projection ->
+            observed.daemonObservedEvent == projection.issueImplementIndexedProjectionPlanned.plannedEvent
+              && sameWatcherStateShape observed.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+          Left _ -> False
+  Nothing ->
+    False
+
 automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation :: IO Bool
 automaticDaemonLoopUpdatesNewPrBodyBeforeImplementation =
   automaticDaemonLoopUpdatesPrBodyBeforeImplementation "new PR" IssuePullRequestCreatedEvent
@@ -5977,6 +6026,7 @@ automaticDaemonLoopUpdatesPrBodyBeforeImplementation caseName prEvent = do
         ]
       expectedCommand = GhUpdatePullRequestBody "/tmp/work" issueConfig prNumber "/tmp/work/.watcher/issue-plan.md"
       expectedWrite = FakeWriteText "/tmp/work/.watcher/issue-plan.md" (sampleIssuePlanFile issueConfig prNumber)
+      expectedAppend = FakeAppendJsonLine "/tmp/events.jsonl" (toJSON (IssuePullRequestBodyUpdatedEvent prNumber))
   result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
   calls <- getCalls
   case result of
@@ -5984,7 +6034,9 @@ automaticDaemonLoopUpdatesPrBodyBeforeImplementation caseName prEvent = do
       results <-
         sequence
           [ assert (caseName <> " body update emits event") ((daemonObservedEvent <$> tick.loopObservedTick) == Just (IssuePullRequestBodyUpdatedEvent prNumber))
+          , assert (caseName <> " body update tick matches indexed projection") (indexedPrBodyUpdateMatches issueConfig prNumber tick.loopObservedTick)
           , assert (caseName <> " body update writes plan before command") (callBefore expectedWrite (FakeCommand expectedCommand) calls)
+          , assert (caseName <> " body update writes plan before event append") (callBefore expectedWrite expectedAppend calls)
           , assert (caseName <> " body update command is scheduled") (FakeCommand expectedCommand `elem` calls)
           , assert (caseName <> " body update does not start implementation yet") (not (any isTurnStartCall calls))
           ]
@@ -6338,7 +6390,9 @@ workflowFacadeExtractionTests = do
       , workflowIssuePlanningIndexedDaemonRejectsInvalidTerminalAndRetryRoutingLikeCompatibility
       , workflowIssueImplementIndexedSpecMatchesCompatibilityForPolicyTransitions
       , workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility
-      , workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths
+      , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanAndPrSetupProjections
+      , workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup
+      , workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
@@ -10559,8 +10613,8 @@ workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility =
   wrongDomainState =
     SomeWatcherState (PlanningReady (PlannerConfig issueConfig.issueRepo (maxParallelForTest 1) []))
 
-workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths :: IO Bool
-workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths = do
+workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup :: IO Bool
+workflowIssueImplementIndexedDaemonRoutingIsLimitedToPlanAndPrSetup = do
   let routingPaths =
         [ "src" </> "CodexWatcher" </> "Domain" </> "IssueImplement" </> "Loop.hs"
         , "src" </> "CodexWatcher" </> "DaemonLoop.hs"
@@ -10581,7 +10635,216 @@ workflowIssueImplementIndexedAdapterDoesNotRouteLiveDaemonPaths = do
         , needle <- forbiddenNeedles
         , needle `Text.isInfixOf` source
         ]
-  assert "indexed workflow issue implement adapter is not routed through live daemon paths" (null violations)
+  assert "indexed workflow issue implement daemon routing stays out of loop modules" (null violations)
+
+workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors :: IO Bool
+workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
+  source <- Text.pack <$> readFile ("src" </> "CodexWatcher" </> "Daemon.hs")
+  let forbiddenNeedles =
+        [ "projectIssueImplementationTurnStartedObservation"
+        , "projectIssueImplementationIncompleteObservation"
+        , "projectIssueImplementationBlocked"
+        , "projectIssueImplementationCompleted"
+        , "projectIssueImplementReviewHandoff"
+        , "projectIssueImplementPullRequestMerged"
+        , "projectIssueImplementReviewerThreadReady"
+        , "projectIssueImplementPostMerge"
+        , "projectIssueImplementIssueClosed"
+        , "ObservedImplementationTurnStarted"
+        , "ObservedImplementationIncomplete"
+        , "ObservedImplementationBlocked"
+        , "ObservedImplementationCompleted"
+        , "ObservedReviewHandoff"
+        , "ObservedIssueReviewerThreadReady"
+        , "ObservedPullRequestMerged"
+        , "ObservedPostMerge"
+        , "ObservedIssueClosed"
+        ]
+      violations =
+        [ Text.unpack needle
+        | needle <- forbiddenNeedles
+        , needle `Text.isInfixOf` source
+        ]
+  assert "indexed workflow issue implement daemon does not route item-020-plus projectors" (null violations)
+
+data IssueImplementDaemonProjectionCase = IssueImplementDaemonProjectionCase
+  { issueImplementDaemonProjectionCaseName :: String
+  , issueImplementDaemonProjectionCaseEvents :: [WatcherEvent]
+  , issueImplementDaemonProjectionCaseState :: SomeWatcherState
+  , issueImplementDaemonProjectionCaseObservation :: DaemonObservation
+  , issueImplementDaemonProjectionCaseProjection :: Either Text IssueImplementIndexed.IssueImplementIndexedProjection
+  }
+
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanAndPrSetupProjections :: IO Bool
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanAndPrSetupProjections = do
+  dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonPlanAndPrSetupProjectionCases
+  executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonPlanAndPrSetupProjectionCases
+  pure (and dryRunResults && and executeResults)
+
+runIssueImplementDaemonProjectionCase :: ActionExecutionMode -> IssueImplementDaemonProjectionCase -> IO Bool
+runIssueImplementDaemonProjectionCase executionMode testCase = do
+  (executor, getCalls) <- fakeActionExecutor
+  let runtimeConfig = effectRuntimeConfig issueImplementIndexedConfig.issueRepo "/tmp/work" 1200
+      options = DaemonOptions "/tmp/events.jsonl" runtimeConfig executionMode
+      modeName =
+        case executionMode of
+          DryRunActions -> "dry-run"
+          ExecuteActions -> "execute"
+      title suffix =
+        "indexed workflow issue implement daemon "
+          <> modeName
+          <> " "
+          <> issueImplementDaemonProjectionCaseName testCase
+          <> " "
+          <> suffix
+  result <-
+    runObservedDaemonTickWithEvents
+      executor
+      options
+      testCase.issueImplementDaemonProjectionCaseEvents
+      testCase.issueImplementDaemonProjectionCaseObservation
+  calls <- getCalls
+  case
+    ( result
+    , workflowPlanObservation @MoifoldSpec testCase.issueImplementDaemonProjectionCaseState testCase.issueImplementDaemonProjectionCaseObservation
+    , testCase.issueImplementDaemonProjectionCaseProjection
+    )
+    of
+    (Right tick, Right compatibilityPlan, Right projection) -> do
+      let projectedPlan = projection.issueImplementIndexedProjectionPlanned
+          projectedEffects = projection.issueImplementIndexedProjectionEffectPlan
+          expectedCompiled = compileEffectPlan runtimeConfig projectedEffects
+          expectedWrites =
+            compatibilityStateWrites
+              (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir)
+              tick.daemonObservedState
+          expectedAppend =
+            FakeAppendJsonLine "/tmp/events.jsonl" (toJSON tick.daemonObservedEvent)
+          expectedWriteCalls =
+            [ FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write)
+            | write <- expectedWrites
+            ]
+      modeResults <-
+        case executionMode of
+          DryRunActions ->
+            sequence
+              [ assert (title "does not commit or mutate") $
+                  tick.daemonObservedCommittedEvents == []
+                    && tick.daemonObservedActionReports == dryRunCompiledEffectPlan expectedCompiled
+                    && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing
+                    && null calls
+              ]
+          ExecuteActions ->
+            sequence
+              [ assert (title "commits event and compatibility writes") $
+                  tick.daemonObservedCommittedEvents == [tick.daemonObservedEvent]
+                    && expectedAppend `elem` calls
+                    && all (`elem` calls) expectedWriteCalls
+                    && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                    && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit /= Nothing
+              ]
+      commonResults <-
+        sequence
+          [ assert (title "emits compatibility and indexed event") $
+              tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                && tick.daemonObservedEvent == projectedPlan.plannedEvent
+          , assert (title "preserves planned effects and compiled request ids") $
+              projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+                && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+                && tick.daemonObservedCompiledEffects == expectedCompiled
+          , assert (title "reaches indexed final state") $
+              sameWatcherStateShape tick.daemonObservedState projection.issueImplementIndexedProjectionFinalState
+                && workflowStateLabel @MoifoldSpec tick.daemonObservedState
+                  == workflowStateLabel @MoifoldSpec projection.issueImplementIndexedProjectionFinalState
+          , assert (title "keeps labels and compatibility writes stable") $
+              projection.issueImplementIndexedProjectionSourceLabel
+                == workflowStateLabel @MoifoldSpec testCase.issueImplementDaemonProjectionCaseState
+                && projection.issueImplementIndexedProjectionTargetLabel
+                  == workflowStateLabel @MoifoldSpec tick.daemonObservedState
+                && tick.daemonObservedCompatibilityWrites == expectedWrites
+          , assert (title "replays from expected source state") $
+              sameWatcherStateShape
+                tick.daemonObservedReplayResult.replayState
+                testCase.issueImplementDaemonProjectionCaseState
+          ]
+      pure (and modeResults && and commonResults)
+    (Left failure, _, _) -> do
+      putStrLn ("FAIL indexed issue-implement daemon " <> modeName <> " " <> issueImplementDaemonProjectionCaseName testCase <> ": " <> Text.unpack (formatDaemonFailure failure))
+      pure False
+    _ ->
+      assert (title "prepares compatibility and indexed plans") False
+
+issueImplementDaemonPlanAndPrSetupProjectionCases :: [IssueImplementDaemonProjectionCase]
+issueImplementDaemonPlanAndPrSetupProjectionCases =
+  [ IssueImplementDaemonProjectionCase
+      "plan turn start"
+      readyToPlanPrefix
+      readyToPlanState
+      (DaemonIssueImplementObservation (ObservedPlanTurnStarted planTurn))
+      (IssueImplementIndexed.projectIssueImplementPlanTurnStartedObservation readyToPlanState planTurn)
+  , IssueImplementDaemonProjectionCase
+      "plan completion"
+      inPlanModePrefix
+      inPlanModeState
+      (DaemonIssueImplementObservation (ObservedPlanCompleted sampleIssuePlanMarkdown (Just implementationTurn)))
+      (IssueImplementIndexed.projectIssueImplementPlanCompletedObservation inPlanModeState sampleIssuePlanMarkdown (Just implementationTurn))
+  , IssueImplementDaemonProjectionCase
+      "follow-up worker refresh"
+      readyToPlanPrefix
+      readyToPlanState
+      (DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed refreshedWorker))
+      (IssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedReadyToPlanObservation readyToPlanState refreshedWorker)
+  , IssueImplementDaemonProjectionCase
+      "attempt branch advance"
+      implementationReadyNoPrPrefix
+      implementationReadyNoPrState
+      (DaemonIssueImplementObservation (ObservedIssueAttemptBranchAdvanced followUpBranch))
+      (IssueImplementIndexed.projectIssueImplementAttemptBranchAdvancedObservation implementationReadyNoPrState followUpBranch)
+  , IssueImplementDaemonProjectionCase
+      "pull request created"
+      implementationReadyNoPrPrefix
+      implementationReadyNoPrState
+      (DaemonIssueImplementObservation (ObservedPullRequestCreated prNumber))
+      (IssueImplementIndexed.projectIssueImplementPullRequestCreatedImplementationReadyObservation implementationReadyNoPrState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "pull request reused"
+      implementationReadyNoPrPrefix
+      implementationReadyNoPrState
+      (DaemonIssueImplementObservation (ObservedPullRequestReused prNumber))
+      (IssueImplementIndexed.projectIssueImplementPullRequestReusedImplementationReadyObservation implementationReadyNoPrState prNumber)
+  , IssueImplementDaemonProjectionCase
+      "pull request body update"
+      planReadyPrefix
+      planReadyState
+      (DaemonIssueImplementObservation (ObservedPullRequestBodyUpdated prNumber))
+      (IssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedPlanReadyObservation planReadyState prNumber)
+  ]
+ where
+  issueConfig = issueImplementIndexedConfig
+  prNumber = PrNumber 7
+  workerThread = ThreadId "worker-thread"
+  refreshedWorker = ThreadId "worker-thread-refreshed"
+  planTurn = TurnId "turn-plan"
+  implementationTurn = TurnId "turn-impl"
+  followUpBranch = BranchName "codex/issue-42-2"
+  readyToPlanPrefix =
+    [ IssueImplementInitialized issueConfig workerThread
+    , IssuePullRequestReusedEvent prNumber
+    ]
+  inPlanModePrefix =
+    readyToPlanPrefix <> [IssuePlanTurnStartedEvent planTurn]
+  planReadyPrefix =
+    inPlanModePrefix <> [IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)]
+  implementationReadyNoPrPrefix =
+    [IssueImplementInitialized issueConfig workerThread]
+  readyToPlanState =
+    SomeWatcherState (IssueReadyToPlan issueConfig prNumber (WorkerIdle workerThread))
+  inPlanModeState =
+    SomeWatcherState (IssueInPlanMode issueConfig prNumber (WorkerActive (ActiveTurn workerThread planTurn)))
+  planReadyState =
+    SomeWatcherState (IssuePlanReady issueConfig prNumber (WorkerIdle workerThread))
+  implementationReadyNoPrState =
+    SomeWatcherState (IssueImplementationReady issueConfig Nothing (WorkerIdle workerThread))
 
 issueImplementIndexedSpecMatchesCompatibility :: IssueImplementIndexedPolicyCase -> IO Bool
 issueImplementIndexedSpecMatchesCompatibility (IssueImplementIndexedPolicyCase title prefix state issueObservation indexedState indexedObservation indexedEvent projection expectedTags) =

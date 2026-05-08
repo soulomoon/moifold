@@ -1,0 +1,34 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-004",
+  "roadmap_item_id": "item-019-indexed-issue-implementation-plan-and-pr-setup-daemon",
+  "decision": "approved",
+  "checks_run": [
+    {
+      "command": "cabal test watcher-core-test",
+      "result": "pass"
+    },
+    {
+      "command": "cabal build all",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --cached --name-only",
+      "result": "no staged changes; git diff --cached --check not applicable"
+    },
+    {
+      "command": "rg -n \"CodexWatcher.Workflow.Moifold.IssueImplement.Indexed|IssueImplementIndexedSpec|projectIssueImplement\" src/CodexWatcher/Domain/IssueImplement/Loop.hs src/CodexWatcher/DaemonLoop.hs src/CodexWatcher/DaemonLoop src/CodexWatcher/AutomaticLoop/Runner.hs src/CodexWatcher/AutomaticLoop/Output.hs",
+      "result": "pass; no matches"
+    },
+    {
+      "command": "rg -n \"projectIssueImplementationTurnStartedObservation|projectIssueImplementationIncompleteObservation|projectIssueImplementationBlocked|projectIssueImplementReviewHandoff|projectIssueImplementPullRequestMerged|projectIssueImplementReviewerThreadReady|projectIssueImplementPostMerge|projectIssueImplementIssueClosed\" src/CodexWatcher/Daemon.hs",
+      "result": "pass; no matches"
+    }
+  ],
+  "evidence_summary": "Only the seven item-019 IssueImplement plan-mode and PR setup daemon observations are routed through indexed projection in Daemon.hs; later IssueImplement daemon paths remain on compatibility fallback. Baseline build, test, whitespace, and manual source-scan checks passed."
+}
