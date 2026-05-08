@@ -25,65 +25,6 @@ common warnings
     -Wredundant-constraints
     -Werror
 
-library agent-workflow-core
-  import:           warnings
-  hs-source-dirs:   agent-workflow-core/src
-  exposed-modules:
-    CodexWatcher.Workflow.Audit
-    CodexWatcher.Workflow.Codec
-    CodexWatcher.Workflow.Daemon.Core
-    CodexWatcher.Workflow.DSL
-    CodexWatcher.Workflow.EventLog.Commit.Core
-    CodexWatcher.Workflow.EventLog.Core
-    CodexWatcher.Workflow.EventLog.File.Core
-    CodexWatcher.Workflow.Execution.Core
-    CodexWatcher.Workflow.Failure
-    CodexWatcher.Workflow.Indexed.Spec
-    CodexWatcher.Workflow.Permission.Core
-    CodexWatcher.Workflow.Spec
-    CodexWatcher.Workflow.Transaction.Core
-  build-depends:
-    base >=4.18 && <5,
-    bytestring >=0.12 && <0.13,
-    text >=2.0 && <3
-  default-language: GHC2021
-
-library agent-workflow-codex
-  import:           warnings
-  hs-source-dirs:   agent-workflow-codex/src
-  exposed-modules:
-    CodexWatcher.AppServerProtocol
-    CodexWatcher.Workflow.Agent
-    CodexWatcher.Workflow.Agent.Codex
-    CodexWatcher.Workflow.Agent.Codex.Client
-    CodexWatcher.Workflow.Agent.Codex.Interpreter
-    CodexWatcher.Workflow.Agent.Codex.Protocol
-    CodexWatcher.Workflow.Agent.Codex.Transport
-    CodexWatcher.Workflow.Agent.Ids
-    CodexWatcher.Workflow.Agent.Types
-    CodexWatcher.Workflow.Observation.Agent
-  build-depends:
-    aeson >=2.2 && <3,
-    base >=4.18 && <5,
-    bytestring >=0.12 && <0.13,
-    text >=2.0 && <3,
-    websockets >=0.13 && <0.14,
-    moifold:agent-workflow-core
-  default-language: GHC2021
-
-library agent-workflow-github
-  import:           warnings
-  hs-source-dirs:   agent-workflow-github/src
-  exposed-modules:
-    CodexWatcher.Workflow.GitHub.Command
-    CodexWatcher.Workflow.GitHub.Ids
-    CodexWatcher.Workflow.GitHub.Remote
-  build-depends:
-    aeson >=2.2 && <3,
-    base >=4.18 && <5,
-    text >=2.0 && <3
-  default-language: GHC2021
-
 library
   import:           warnings
   hs-source-dirs:   src
@@ -215,9 +156,9 @@ library
     text >=2.0 && <3,
     typed-process >=0.2 && <0.3,
     unix >=2.8 && <2.9,
-    moifold:agent-workflow-core,
-    moifold:agent-workflow-codex,
-    moifold:agent-workflow-github
+    agent-workflow-core >=0.1 && <0.2,
+    agent-workflow-codex >=0.1 && <0.2,
+    agent-workflow-github >=0.1 && <0.2
   default-language: GHC2021
 
 executable moifold
@@ -247,9 +188,9 @@ test-suite watcher-core-test
     bytestring >=0.12 && <0.13,
     co-log-core >=0.3.2.6 && <0.4,
     moifold,
-    moifold:agent-workflow-core,
-    moifold:agent-workflow-codex,
-    moifold:agent-workflow-github,
+    agent-workflow-core >=0.1 && <0.2,
+    agent-workflow-codex >=0.1 && <0.2,
+    agent-workflow-github >=0.1 && <0.2,
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
     process >=1.6 && <1.7,

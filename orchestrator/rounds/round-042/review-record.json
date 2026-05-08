@@ -1,0 +1,12 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-002-standalone-package-layout",
+  "direction_id": "direction-007-moifold-local-consumer-wiring",
+  "extracted_item_id": "item-042-moifold-local-consumer-wiring",
+  "roadmap_item_id": "item-042-moifold-local-consumer-wiring",
+  "status": "approved",
+  "decision": "approved",
+  "evidence_summary": "Moifold now consumes standalone agent-workflow packages with approved bounds, internal sublibrary wiring is absent, compatibility facades remain available, package-boundary scans pass, all required package/product/full builds and watcher-core-test pass, and whitespace validation passed with no staged files."
+}
