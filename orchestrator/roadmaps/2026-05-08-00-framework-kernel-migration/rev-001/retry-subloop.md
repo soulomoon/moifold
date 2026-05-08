@@ -1,0 +1,69 @@
+# Retry Subloop Contract
+
+Active roadmap revision:
+`orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001/`.
+
+## Scope
+
+- Same-round retry is allowed after rejected review when the extracted item
+  remains valid and required changes stay inside the recorded
+  `milestone_id`, `direction_id`, and `extracted_item_id` boundaries.
+- Same-round retry is allowed after implementation failure when the planner can
+  revise `plan.md` without changing the extracted item identity.
+- Same-round retry is allowed when an API, DSL, core, adapter, or docs round
+  violates `orchestrator/project-contract.md`; the retry must restore the
+  shared invariant rather than broadening the roadmap scope.
+- Same-round retry is allowed when parity, law, or package-boundary checks fail;
+  the retry must either restore compatibility or return the round to planning
+  with a narrower implementation path.
+- Worker-slice retry is not enabled by default. If a future plan uses
+  `worker-plan.json`, retry must target the failed worker slice or integration
+  pass named in that plan.
+- A reviewed round may pause in `pending-merge` only when dependency ordering
+  or base-branch freshness blocks immediate merge.
+
+## Machine State
+
+- Use `active_rounds[].resume_error` for per-round retryable failures.
+- Use top-level `resume_error` only for controller-level failures.
+- Use `pending_merge_rounds` for approved rounds waiting on merge ordering or
+  base refresh.
+- Use `roadmap_update` for delegated update-roadmap branches and artifacts.
+- If worker fan-out is introduced, worker retry state must live in
+  `active_rounds[].worker_records` and the round-local `worker-plan.json`.
+
+## Review Output
+
+- `REJECTED` because selection lineage is missing or scoped incorrectly returns
+  the same round to `select-task`.
+- `REJECTED` because the plan is incomplete or out of scope returns the same
+  round to `plan`.
+- `REJECTED` because implementation diverged from an acceptable plan returns
+  the same round to `implement`.
+- `REJECTED` because verification evidence is missing or stale returns the same
+  round to `review` after the missing checks are run.
+- `REJECTED` because compatibility behavior changes unexpectedly returns the
+  same round to `implement` unless the reviewer says the plan itself must be
+  narrowed.
+- `APPROVED` with all baseline and task-specific checks passing finalizes
+  review and allows `merge` or `pending-merge`.
+
+## Roadmap Revision Rule
+
+- If an accepted `update-roadmap` stage changes future coordination,
+  sequencing, milestone boundaries, or active revision metadata, author a new
+  roadmap revision directory instead of rewriting a used revision.
+- Status-only updates for the just-merged round may update the active revision
+  when the repo-local roadmap-update review approves that update.
+
+## Pending-Merge Refresh
+
+- Base-branch drift that changes touched files sends the round from
+  `pending-merge` back to `implement`.
+- Base-branch drift that does not change touched files sends the round back to
+  `review` for baseline checks only.
+- A dependency merge that invalidates the extracted item sends the round back
+  to `plan`.
+- Without worker fan-out, the whole-round implementer owns refresh work. With
+  worker fan-out, the integration implementer owns refresh unless
+  `worker-plan.json` assigns otherwise.

@@ -8,17 +8,23 @@ Every check runs, every conclusion is evidence-backed, and every decision is exp
 - Round diff
 - `plan.md`
 - Active roadmap bundle `verification.md` resolved from `orchestrator/state.json`
+- `orchestrator/project-contract.md`
 - `implementation-notes.md`
 
 ## Duties
 - Own verification and approval for the current round in the repo-local orchestrator loop.
 - Run every baseline check plus any round-specific checks.
+- Check repo-wide invariants from `orchestrator/project-contract.md` when the
+  round touches a listed stable surface.
 - Compare the diff against the round plan.
-- For workflow-kernel rounds, verify that reusable code did not import moifold lifecycle types, GitHub adapters, Codex app-server transport, runtime interpreters, or Aeson unless the package boundary allows it.
-- Confirm compatibility paths preserve existing event schemas, golden replay behavior, dry-run output, daemon result types, and action ordering.
 - Write `review.md` with commands, evidence, and an explicit approve or reject decision.
 - Review the integrated round result rather than isolated worker slices.
-- When the round finalizes, write `review-record.json` with the active `roadmap_id`, `roadmap_revision`, `roadmap_dir`, and `roadmap_item_id`.
+- When the round finalizes, write `review-record.json` with the active
+  `roadmap_id`, `roadmap_revision`, `roadmap_dir`, `milestone_id`,
+  `direction_id`, and `extracted_item_id`.
+- During `update-roadmap`, review `roadmap-update.md` and the roadmap bundle
+  diff before the controller activates a new revision or treats the roadmap
+  update as complete.
 
 ## Boundaries
 - Do not fix implementation directly.
@@ -50,11 +56,26 @@ When the round finalizes, also write `review-record.json`:
   "roadmap_id": "<from selection>",
   "roadmap_revision": "<from selection>",
   "roadmap_dir": "<from selection>",
-  "roadmap_item_id": "<from selection>",
+  "milestone_id": "<from selection>",
+  "direction_id": "<from selection>",
+  "extracted_item_id": "<from selection>",
+  "roadmap_item_id": "<legacy mirror when applicable>",
   "decision": "approved",
   "evidence_summary": "<brief>"
 }
 ```
+
+For `update-roadmap`, write
+`orchestrator/roadmap-updates/<round-id>-roadmap-update-review.md` with:
+
+### Checks Run
+- <roadmap update checks and any commands>
+
+### Roadmap Compliance
+- <whether the update follows the merged round evidence and revision rules>
+
+### Decision
+**APPROVED** or **REJECTED: <specific reason and required changes>**
 
 ## Self-Check
 - Did I run every baseline check from `verification.md`?
@@ -62,3 +83,5 @@ When the round finalizes, also write `review-record.json`:
 - Is my decision explicitly APPROVED or REJECTED (not hedged)?
 - Does my evidence actually support my decision?
 - Am I reviewing the integrated round result, not isolated worker slices?
+- For `update-roadmap`, did I verify roadmap immutability and state activation
+  metadata before approval?

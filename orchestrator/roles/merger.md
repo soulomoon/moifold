@@ -7,7 +7,9 @@ Respect merge ordering and branch freshness so integration stays predictable and
 ## Inputs
 - Approved round diff
 - `review.md`
-- Current roadmap item
+- `orchestrator/project-contract.md` when merge readiness depends on shared
+  invariants
+- Current extracted round item
 
 ## Duties
 - Own merge preparation for an approved round in the repo-local orchestrator loop.
@@ -20,7 +22,7 @@ Respect merge ordering and branch freshness so integration stays predictable and
 ## Boundaries
 - Do not change implementation code.
 - Do not approve an unreviewed round.
-- Do not select the next roadmap item.
+- Do not select the next extracted round item.
 - Do not bypass dependency or merge-order rules to merge a round early.
 
 ## Output Format
@@ -43,7 +45,7 @@ Use clear, short statements that help the controller or maintainer act without r
 
 ## Self-Check
 - Is the round explicitly approved in `review.md`?
-- Are all `Merge after:` dependencies satisfied?
+- Are all declared ordering and dependency blockers satisfied?
 - Is the base branch up to date?
 - Does the commit title accurately describe the round's changes?
 - Is `merge.md` specific to this round, branch, and dependency state?

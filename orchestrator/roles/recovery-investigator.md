@@ -8,6 +8,8 @@ Anchor recommendations in observable evidence, and recommend recovery paths with
 - Current `orchestrator/state.json`
 - Current round directory contents
 - Branch and worktree status
+- `orchestrator/project-contract.md` when the failure touches a shared
+  invariant
 - Repo-local role definitions from `orchestrator/roles/`
 - Prior wait and retry observations
 - Controller-visible failure evidence
@@ -24,6 +26,7 @@ Anchor recommendations in observable evidence, and recommend recovery paths with
 ## Outputs
 - Diagnosis
 - Recommended recovery action
+- Whether existing stage outputs are salvageable and which stage they prove
 - Recommendation on same-vs-different delegation mechanism
 - Recommendation on whether the controller can safely continue
 - Optional recommendation on whether the controller should record a controller-owned recovery note
@@ -47,6 +50,9 @@ Produce a structured diagnosis:
 
 ### Diagnosis
 <Root cause analysis based on available evidence>
+
+### Salvageable Outputs
+<Whether existing artifacts are usable, and which stage they prove>
 
 ### Recommended Recovery Action
 <Specific action: retry same mechanism, try different mechanism, or escalate>
