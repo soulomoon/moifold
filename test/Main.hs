@@ -99,7 +99,10 @@ import CodexWatcher.Workflow.Moifold.PrReview.Checking.Indexed
   , PrReviewCheckingIndexedUninitialized
   )
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
-  ( PrReviewIndexedCheckingReviews
+  ( PrReviewIndexedBlocked
+  , PrReviewIndexedCheckingReviews
+  , PrReviewIndexedComplete
+  , PrReviewIndexedEffect (..)
   , PrReviewIndexedEffectPlan (..)
   , PrReviewIndexedEvent (..)
   , PrReviewIndexedFixingReviews
@@ -6281,9 +6284,12 @@ workflowFacadeExtractionTests = do
       , workflowPrReviewReviewerIndexedSpecMatchesCompatibilityForOutcomes
       , workflowPrReviewReviewerIndexedSpecMatchesClassifierBackedOutcomes
       , workflowPrReviewReviewerIndexedSpecRejectsInvalidObservationLikeFacade
+      , workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForWaitingOutcomes
       , workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForCleanFromGoldenLifecycle
+      , workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForBlockedAndMergeComplete
       , workflowPrReviewMergeabilityIndexedSpecPreservesMergeEffectOrdering
       , workflowPrReviewMergeabilityIndexedSpecRejectsMismatchedCleanCommitLikeFacade
+      , workflowPrReviewMergeabilityIndexedSpecRejectsInvalidTerminalObservationsLikeCompatibility
       , workflowPlannedTransitionPreservesObservedEffects
       , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
@@ -7942,6 +7948,7 @@ data PrReviewMergeabilityGoldenSlice = PrReviewMergeabilityGoldenSlice
   , prReviewMergeabilityGoldenConfig :: PrConfig
   , prReviewMergeabilityGoldenEvidence :: CleanReviewEvidence
   , prReviewMergeabilityGoldenCommit :: CommitSha
+  , prReviewMergeabilityGoldenMergeCommit :: MergeCommit
   }
 
 loadPrReviewMergeabilityGoldenSlice :: IO (Either String PrReviewMergeabilityGoldenSlice)
@@ -7954,6 +7961,10 @@ loadPrReviewMergeabilityGoldenSlice = do
       case suffix of
         PrReviewMergeabilityClean cleanCommit : _ -> Right cleanCommit
         _ -> Left "golden PR-review lifecycle does not contain pr_review_mergeability_clean"
+    mergeCommit <-
+      case suffix of
+        PrReviewMergeabilityClean _ : PrReviewMergeCompleted completedCommit : _ -> Right completedCommit
+        _ -> Left "golden PR-review lifecycle does not contain pr_review_merge_completed after pr_review_mergeability_clean"
     indexedPrefix <- indexedPrReviewGoldenLifecyclePrefix prefix
     replay <-
       case workflowReplayEvents @MoifoldSpec prefix of
@@ -7970,6 +7981,7 @@ loadPrReviewMergeabilityGoldenSlice = do
                 , prReviewMergeabilityGoldenConfig = prConfig
                 , prReviewMergeabilityGoldenEvidence = cleanEvidence
                 , prReviewMergeabilityGoldenCommit = commit
+                , prReviewMergeabilityGoldenMergeCommit = mergeCommit
                 }
         | otherwise ->
             Left "golden PR-review lifecycle mergeability commit does not match clean review commit"
@@ -8038,6 +8050,87 @@ indexedPrReviewMergeabilityCleanObservation commit =
     "PrReview/Merging"
     (DaemonPrReviewObservation (ObservedMergeabilityClean commit))
 
+workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForWaitingOutcomes :: IO Bool
+workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForWaitingOutcomes = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed workflow PR-review mergeability golden lifecycle loads for waiting outcomes" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      let state = prReviewMergeabilityGoldenState slice
+          commit = prReviewMergeabilityGoldenCommit slice
+          prConfig = prReviewMergeabilityGoldenConfig slice
+          retryReason = "mergeability still pending"
+          recheckReason = "reviewed head changed"
+          fixEvidence = reviewEvidenceFromSummaries ("merge latest base branch into the PR branch" :| []) commit
+          retryObservation =
+            PrReviewIndexedObservation
+              "PrReview/WaitingMergeability"
+              "PrReview/WaitingMergeability"
+              (DaemonPrReviewObservation (ObservedMergeabilityRetry retryReason))
+              :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedWaitingForMergeability
+          retryEvent =
+            PrReviewIndexedEvent "PrReview/WaitingMergeability" "PrReview/WaitingMergeability" (PrReviewMergeabilityWaiting retryReason)
+              :: PrReviewIndexedEvent PrReviewIndexedWaitingForMergeability PrReviewIndexedWaitingForMergeability
+          recheckObservation =
+            PrReviewIndexedObservation
+              "PrReview/WaitingMergeability"
+              "PrReview/CheckingReviews"
+              (DaemonPrReviewObservation (ObservedMergeabilityRecheck recheckReason))
+              :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedCheckingReviews
+          recheckEvent =
+            PrReviewIndexedEvent "PrReview/WaitingMergeability" "PrReview/CheckingReviews" (PrReviewMergeabilityRecheck recheckReason)
+              :: PrReviewIndexedEvent PrReviewIndexedWaitingForMergeability PrReviewIndexedCheckingReviews
+          fixObservation =
+            PrReviewIndexedObservation
+              "PrReview/WaitingMergeability"
+              "PrReview/FixingReviews"
+              (DaemonPrReviewObservation (ObservedMergeabilityFixRequired fixEvidence))
+              :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedFixingReviews
+          fixEvent =
+            PrReviewIndexedEvent "PrReview/WaitingMergeability" "PrReview/FixingReviews" (PrReviewMergeabilityFixRequired fixEvidence)
+              :: PrReviewIndexedEvent PrReviewIndexedWaitingForMergeability PrReviewIndexedFixingReviews
+      results <-
+        sequence
+          [ prReviewMergeabilityIndexedSpecMatchesCompatibility
+              "indexed workflow PR-review mergeability retry matches compatibility"
+              state
+              slice.prReviewMergeabilityGoldenPrefix
+              slice.prReviewMergeabilityGoldenIndexedPrefix
+              (ObservedMergeabilityRetry retryReason)
+              retryObservation
+              "PrReview/WaitingMergeability"
+              (PrReviewMergeabilityWaiting retryReason)
+              retryEvent
+              sleepPostCommitPlan
+          , prReviewMergeabilityIndexedSpecMatchesCompatibility
+              "indexed workflow PR-review mergeability recheck matches compatibility"
+              state
+              slice.prReviewMergeabilityGoldenPrefix
+              slice.prReviewMergeabilityGoldenIndexedPrefix
+              (ObservedMergeabilityRecheck recheckReason)
+              recheckObservation
+              "PrReview/CheckingReviews"
+              (PrReviewMergeabilityRecheck recheckReason)
+              recheckEvent
+              (effectTagPlan [ReadReviewThreadsTag])
+          , prReviewMergeabilityIndexedSpecMatchesCompatibility
+              "indexed workflow PR-review mergeability fix-required matches compatibility"
+              state
+              slice.prReviewMergeabilityGoldenPrefix
+              slice.prReviewMergeabilityGoldenIndexedPrefix
+              (ObservedMergeabilityFixRequired fixEvidence)
+              fixObservation
+              "PrReview/FixingReviews"
+              (PrReviewMergeabilityFixRequired fixEvidence)
+              fixEvent
+              ( \planned ->
+                  effectTagPlan [PublishReviewFindingsTag, SleepUntilNextPollTag] planned
+                    && planned.plannedPreCommitEffects == [SomeEffect (PublishReviewFindings prConfig fixEvidence)]
+                    && planned.plannedPostCommitEffects == [SomeEffect SleepUntilNextPoll]
+              )
+          ]
+      pure (and results)
+
 workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForCleanFromGoldenLifecycle :: IO Bool
 workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForCleanFromGoldenLifecycle = do
   loaded <- loadPrReviewMergeabilityGoldenSlice
@@ -8087,6 +8180,116 @@ workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForCleanFromGoldenLif
                   && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
                   && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
           _ -> False
+
+workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForBlockedAndMergeComplete :: IO Bool
+workflowPrReviewMergeabilityIndexedSpecMatchesCompatibilityForBlockedAndMergeComplete = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed workflow PR-review mergeability golden lifecycle loads for blocked and complete" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      let waitingState = prReviewMergeabilityGoldenState slice
+          commit = prReviewMergeabilityGoldenCommit slice
+          mergeCommit = prReviewMergeabilityGoldenMergeCommit slice
+          waitingBlockedReason = BlockedReason "mergeability gate blocked"
+          mergingBlockedReason = BlockedReason "merge terminal blocked"
+          waitingBlockedObservation =
+            PrReviewIndexedObservation
+              "PrReview/WaitingMergeability"
+              "PrReview/Blocked"
+              (DaemonPrReviewObservation (ObservedPrReviewBlocked waitingBlockedReason))
+              :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedBlocked
+          waitingBlockedEvent =
+            PrReviewIndexedEvent "PrReview/WaitingMergeability" "PrReview/Blocked" (WatcherBlocked waitingBlockedReason)
+              :: PrReviewIndexedEvent PrReviewIndexedWaitingForMergeability PrReviewIndexedBlocked
+          mergingStateResult = workflowApplyEvent @MoifoldSpec waitingState (PrReviewMergeabilityClean commit)
+      case mergingStateResult of
+        Left failure -> assert "indexed workflow PR-review mergeability clean reaches merging state for terminal coverage" False <* putStrLn ("FAIL merging state: " <> Text.unpack failure)
+        Right (mergingState, _mergeEffects) -> do
+          let mergePrefix = slice.prReviewMergeabilityGoldenPrefix <> [PrReviewMergeabilityClean commit]
+              indexedMergePrefix =
+                slice.prReviewMergeabilityGoldenIndexedPrefix <> [indexedPrReviewMergeabilityCleanEvent commit]
+              mergingBlockedObservation =
+                PrReviewIndexedObservation
+                  "PrReview/Merging"
+                  "PrReview/Blocked"
+                  (DaemonPrReviewObservation (ObservedPrReviewBlocked mergingBlockedReason))
+                  :: PrReviewIndexedObservation PrReviewIndexedMerging PrReviewIndexedBlocked
+              mergingBlockedEvent =
+                PrReviewIndexedEvent "PrReview/Merging" "PrReview/Blocked" (WatcherBlocked mergingBlockedReason)
+                  :: PrReviewIndexedEvent PrReviewIndexedMerging PrReviewIndexedBlocked
+              completedObservation =
+                PrReviewIndexedObservation
+                  "PrReview/Merging"
+                  "PrReview/Complete"
+                  (DaemonPrReviewObservation (ObservedMergeCompleted mergeCommit))
+                  :: PrReviewIndexedObservation PrReviewIndexedMerging PrReviewIndexedComplete
+              completedEvent =
+                PrReviewIndexedEvent "PrReview/Merging" "PrReview/Complete" (PrReviewMergeCompleted mergeCommit)
+                  :: PrReviewIndexedEvent PrReviewIndexedMerging PrReviewIndexedComplete
+              completeWriteShape stateValue =
+                compatibilityStateWrites "/tmp/state" stateValue
+                  == [ CompatibilityWrite
+                         "/tmp/state/watcher-state.json"
+                         (object ["lastTurnStatus" .= ("merged" :: Text), "mergeCommitSha" .= unCommitSha (unMergeCommit mergeCommit)])
+                     ]
+              completePlanCheck planned =
+                planned.plannedPreCommitEffects == []
+                  && planned.plannedPostCommitEffects == [SomeEffect StopDaemon]
+          results <-
+            sequence
+              [ prReviewMergeabilityIndexedSpecMatchesCompatibility
+                  "indexed workflow PR-review mergeability blocked matches compatibility"
+                  waitingState
+                  slice.prReviewMergeabilityGoldenPrefix
+                  slice.prReviewMergeabilityGoldenIndexedPrefix
+                  (ObservedPrReviewBlocked waitingBlockedReason)
+                  waitingBlockedObservation
+                  "PrReview/Blocked"
+                  (WatcherBlocked waitingBlockedReason)
+                  waitingBlockedEvent
+                  blockedPostCommitPlan
+              , prReviewMergeabilityIndexedSpecMatchesCompatibility
+                  "indexed workflow PR-review merging blocked matches compatibility"
+                  mergingState
+                  mergePrefix
+                  indexedMergePrefix
+                  (ObservedPrReviewBlocked mergingBlockedReason)
+                  mergingBlockedObservation
+                  "PrReview/Blocked"
+                  (WatcherBlocked mergingBlockedReason)
+                  mergingBlockedEvent
+                  blockedPostCommitPlan
+              , prReviewMergeabilityIndexedSpecMatchesCompatibility
+                  "indexed workflow PR-review merge completed matches compatibility"
+                  mergingState
+                  mergePrefix
+                  indexedMergePrefix
+                  (ObservedMergeCompleted mergeCommit)
+                  completedObservation
+                  "PrReview/Complete"
+                  (PrReviewMergeCompleted mergeCommit)
+                  completedEvent
+                  completePlanCheck
+              , assert "indexed workflow PR-review merge completed preserves merged compatibility write shape" $
+                  case
+                    ( workflowObserve @MoifoldSpec mergingState (DaemonPrReviewObservation (ObservedMergeCompleted mergeCommit))
+                    , IndexedWorkflow.indexedWorkflowObserve
+                        @PrReviewMergeabilityIndexedSpec
+                        (PrReviewIndexedState mergingState :: PrReviewIndexedState PrReviewIndexedMerging)
+                        completedObservation
+                    )
+                    of
+                    (Right compatibilityObserved, Right indexedObserved) ->
+                      let PrReviewIndexedState indexedState =
+                            IndexedWorkflow.indexedWorkflowObservedState @PrReviewMergeabilityIndexedSpec indexedObserved
+                       in completeWriteShape compatibilityObserved.observedState
+                            && completeWriteShape indexedState
+                            && case indexedState of
+                              SomeWatcherState (CompleteState (PrMerged actualMergeCommit)) -> actualMergeCommit == mergeCommit
+                              _ -> False
+                    _ -> False
+              ]
+          pure (and results)
 
 workflowPrReviewMergeabilityIndexedSpecPreservesMergeEffectOrdering :: IO Bool
 workflowPrReviewMergeabilityIndexedSpecPreservesMergeEffectOrdering = do
@@ -8161,6 +8364,189 @@ workflowPrReviewMergeabilityIndexedSpecRejectsMismatchedCleanCommitLikeFacade = 
               && indexedFailure == facadeFailure
               && indexedPlanFailure == facadeFailure
           _ -> False
+
+workflowPrReviewMergeabilityIndexedSpecRejectsInvalidTerminalObservationsLikeCompatibility :: IO Bool
+workflowPrReviewMergeabilityIndexedSpecRejectsInvalidTerminalObservationsLikeCompatibility = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed workflow PR-review mergeability golden lifecycle loads for invalid terminal observations" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      let waitingState = prReviewMergeabilityGoldenState slice
+          commit = prReviewMergeabilityGoldenCommit slice
+          mergeCommit = prReviewMergeabilityGoldenMergeCommit slice
+          waitingIndexedState =
+            PrReviewIndexedState waitingState
+              :: PrReviewIndexedState PrReviewIndexedWaitingForMergeability
+          invalidCompletedObservation =
+            PrReviewIndexedObservation
+              "PrReview/WaitingMergeability"
+              "PrReview/Complete"
+              (DaemonPrReviewObservation (ObservedMergeCompleted mergeCommit))
+              :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedComplete
+          checkingState =
+            SomeWatcherState
+              ( PrCheckingReviews
+                  slice.prReviewMergeabilityGoldenConfig
+                  (WorkerIdle (ThreadId "worker"))
+                  (ReviewerIdle (ThreadId "reviewer"))
+              )
+          invalidWaitingObservation =
+            PrReviewIndexedObservation
+              "PrReview/CheckingReviews"
+              "PrReview/WaitingMergeability"
+              (DaemonPrReviewObservation (ObservedMergeabilityRetry "not waiting"))
+              :: PrReviewIndexedObservation PrReviewIndexedCheckingReviews PrReviewIndexedWaitingForMergeability
+          mergingStateResult = workflowApplyEvent @MoifoldSpec waitingState (PrReviewMergeabilityClean commit)
+      case mergingStateResult of
+        Left failure -> assert "indexed workflow PR-review mergeability clean reaches merging state for invalid coverage" False <* putStrLn ("FAIL merging state: " <> Text.unpack failure)
+        Right (mergingState, _mergeEffects) -> do
+          let invalidCleanObservation =
+                PrReviewIndexedObservation
+                  "PrReview/Merging"
+                  "PrReview/Merging"
+                  (DaemonPrReviewObservation (ObservedMergeabilityClean commit))
+                  :: PrReviewIndexedObservation PrReviewIndexedMerging PrReviewIndexedMerging
+          results <-
+            sequence
+              [ assert "indexed workflow PR-review merge completion outside merging fails like compatibility" $
+                  invalidPrReviewIndexedObservationMatchesCompatibility
+                    waitingState
+                    waitingIndexedState
+                    (ObservedMergeCompleted mergeCommit)
+                    invalidCompletedObservation
+              , assert "indexed workflow PR-review waiting observation outside waiting fails like compatibility" $
+                  invalidPrReviewIndexedObservationMatchesCompatibility
+                    checkingState
+                    (PrReviewIndexedState checkingState :: PrReviewIndexedState PrReviewIndexedCheckingReviews)
+                    (ObservedMergeabilityRetry "not waiting")
+                    invalidWaitingObservation
+              , assert "indexed workflow PR-review mergeability clean outside waiting fails like compatibility" $
+                  invalidPrReviewIndexedObservationMatchesCompatibility
+                    mergingState
+                    (PrReviewIndexedState mergingState :: PrReviewIndexedState PrReviewIndexedMerging)
+                    (ObservedMergeabilityClean commit)
+                    invalidCleanObservation
+              ]
+          pure (and results)
+
+invalidPrReviewIndexedObservationMatchesCompatibility
+  :: forall (source :: Type) (target :: Type).
+     SomeWatcherState
+  -> PrReviewIndexedState source
+  -> PrReviewObservation
+  -> PrReviewIndexedObservation source target
+  -> Bool
+invalidPrReviewIndexedObservationMatchesCompatibility state indexedState observation indexedObservation =
+  case
+    ( prReviewObserve state observation
+    , workflowObserve @MoifoldSpec state daemonObservation
+    , workflowPlanObservation @MoifoldSpec state daemonObservation
+    , IndexedWorkflow.indexedWorkflowObserve @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+    , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+    )
+    of
+    (Left facadeFailure, Left compatibilityFailure, Left compatibilityPlanFailure, Left indexedFailure, Left indexedPlanFailure) ->
+      compatibilityFailure == facadeFailure
+        && compatibilityPlanFailure == facadeFailure
+        && indexedFailure == facadeFailure
+        && indexedPlanFailure == facadeFailure
+    _ -> False
+ where
+  daemonObservation = DaemonPrReviewObservation observation
+
+prReviewMergeabilityIndexedSpecMatchesCompatibility
+  :: forall (source :: Type) (target :: Type).
+     String
+  -> SomeWatcherState
+  -> [WatcherEvent]
+  -> [IndexedWorkflow.SomeIndexedWorkflowEvent PrReviewMergeabilityIndexedSpec]
+  -> PrReviewObservation
+  -> PrReviewIndexedObservation source target
+  -> Text
+  -> WatcherEvent
+  -> PrReviewIndexedEvent source target
+  -> (PlannedTransition MoifoldSpec -> Bool)
+  -> IO Bool
+prReviewMergeabilityIndexedSpecMatchesCompatibility title state replayPrefix indexedReplayPrefix facadeObservation indexedObservation expectedTargetLabel expectedEvent indexedEvent planCheck =
+  assert title $
+    case
+      ( prReviewObserve state facadeObservation
+      , workflowObserve @MoifoldSpec state observation
+      , workflowPlanObservation @MoifoldSpec state observation
+      , IndexedWorkflow.indexedWorkflowObserve @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @PrReviewMergeabilityIndexedSpec indexedState indexedObservation
+      , workflowApplyEvent @MoifoldSpec state expectedEvent
+      , IndexedWorkflow.indexedWorkflowApplyEvent @PrReviewMergeabilityIndexedSpec indexedState indexedEvent
+      , workflowReplayEvents @MoifoldSpec (replayPrefix <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @PrReviewMergeabilityIndexedSpec
+          (indexedReplayPrefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
+      )
+      of
+      ( Right facadeObserved
+        , Right compatibilityObserved
+        , Right compatibilityPlan
+        , Right indexedObserved
+        , Right indexedPlan
+        , Right (appliedState, appliedEffects)
+        , Right (PrReviewIndexedState indexedAppliedState, PrReviewIndexedEffectPlan indexedAppliedEffects)
+        , Right compatibilityReplay
+        , Right indexedReplay
+        ) ->
+          let PrReviewIndexedState indexedNextState =
+                IndexedWorkflow.indexedWorkflowObservedState @PrReviewMergeabilityIndexedSpec indexedObserved
+              indexedReplayResultValue = prReviewIndexedReplayResult indexedReplay
+              wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+              fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
+              indexedFullPlan =
+                PrReviewIndexedEffectPlan fullCompatibilityPlan
+                  :: PrReviewIndexedEffectPlan source target
+              runtimeConfig = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 900
+              workflowCompiled = WorkflowExecution.compileWorkflowEffectPlanWithMetadata runtimeConfig fullCompatibilityPlan
+              legacyCompiled = compileEffectPlan runtimeConfig fullCompatibilityPlan
+           in facadeObserved.prReviewTickEvent == compatibilityObserved.observedEvent
+                && facadeObserved.prReviewTickEffects == compatibilityObserved.observedEffects
+                && sameWatcherStateShape facadeObserved.prReviewTickState compatibilityObserved.observedState
+                && compatibilityObserved.observedEvent == expectedEvent
+                && prReviewIndexedTransitionEvent indexedPlan == compatibilityPlan.plannedEvent
+                && prReviewIndexedTransitionEvent indexedPlan == expectedEvent
+                && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @PrReviewMergeabilityIndexedSpec wrappedTransition == workflowStateLabel @MoifoldSpec state
+                && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @PrReviewMergeabilityIndexedSpec wrappedTransition == expectedTargetLabel
+                && workflowStateLabel @MoifoldSpec indexedNextState == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+                && sameWatcherStateShape compatibilityObserved.observedState appliedState
+                && sameWatcherStateShape appliedState indexedAppliedState
+                && prReviewIndexedTransitionPreCommitEffects indexedPlan == compatibilityPlan.plannedPreCommitEffects
+                && prReviewIndexedTransitionPostCommitEffects indexedPlan == compatibilityPlan.plannedPostCommitEffects
+                && fullCompatibilityPlan == compatibilityObserved.observedEffects
+                && appliedEffects == fullCompatibilityPlan
+                && indexedAppliedEffects == fullCompatibilityPlan
+                && planCheck compatibilityPlan
+                && IndexedWorkflow.indexedWorkflowPlannedTransitionPreCommitEffectLabels @PrReviewMergeabilityIndexedSpec indexedPlan
+                  == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPreCommitEffects
+                && IndexedWorkflow.indexedWorkflowPlannedTransitionPostCommitEffectLabels @PrReviewMergeabilityIndexedSpec indexedPlan
+                  == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPostCommitEffects
+                && workflowValidateEffects @MoifoldSpec state fullCompatibilityPlan
+                  == IndexedWorkflow.indexedWorkflowValidateEffects @PrReviewMergeabilityIndexedSpec indexedState indexedFullPlan
+                && all
+                  ( \effect ->
+                      workflowEffectAllowed @MoifoldSpec state effect
+                        == IndexedWorkflow.indexedWorkflowEffectAllowed @PrReviewMergeabilityIndexedSpec indexedState (PrReviewIndexedEffect effect)
+                  )
+                  fullCompatibilityPlan
+                && fmap WorkflowExecution.workflowPlannedAction workflowCompiled.workflowCompiledActions == legacyCompiled.compiledActions
+                && WorkflowExecution.workflowCompiledNextRequestId workflowCompiled == legacyCompiled.compiledNextRequestId
+                && WorkflowExecution.workflowCompiledNextRequestId workflowCompiled == RequestId 900
+                && all ((== Nothing) . appServerRequestId . WorkflowExecution.workflowPlannedAction) workflowCompiled.workflowCompiledActions
+                && WorkflowExecution.dryRunWorkflowCompiledEffectPlan workflowCompiled == dryRunCompiledEffectPlan legacyCompiled
+                && sameWatcherStateShape compatibilityReplay.replayState indexedReplayResultValue.replayState
+                && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
+                && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
+      _ -> False
+ where
+  indexedState =
+    PrReviewIndexedState state
+      :: PrReviewIndexedState source
+  observation = DaemonPrReviewObservation facadeObservation
 
 workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads :: IO Bool
 workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads = do

@@ -7,7 +7,9 @@
 
 module CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
   ( PrReviewMergeabilityIndexedSpec
+  , PrReviewIndexedBlocked
   , PrReviewIndexedCheckingReviews
+  , PrReviewIndexedComplete
   , PrReviewIndexedEffect (..)
   , PrReviewIndexedEffectPlan (..)
   , PrReviewIndexedEvent (..)
@@ -50,6 +52,10 @@ data PrReviewIndexedReviewingClean
 data PrReviewIndexedWaitingForMergeability
 
 data PrReviewIndexedMerging
+
+data PrReviewIndexedBlocked
+
+data PrReviewIndexedComplete
 
 data PrReviewMergeabilityIndexedSpec
 

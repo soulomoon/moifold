@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-002",
+  "roadmap_item_id": "item-010-indexed-pr-review-mergeability-complete",
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed. The diff keeps production changes limited to indexed blocked/complete markers and focused tests proving mergeability retry, recheck, fix-required, blocked waiting/merging, clean merge pre-commit ordering, merge completion, invalid observation failure parity, replay/effect/permission parity, dry-run parity, request-id preservation, merged compatibility writes, and unchanged golden/schema/daemon/action-ordering surfaces."
+}
