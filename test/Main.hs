@@ -6963,8 +6963,12 @@ workflowFacadeExtractionTests = do
       , workflowDocsMigrationIndexedDryRunAndDaemonParity
       , workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermissions
       , workflowEventLogFailureAuditClassifiesRetryRecommendation
+      , workflowDslWorkflowMAccumulationLaws
+      , workflowDslAdvanceBuildsPhaseChangingTransition
       , workflowDslPrReviewFeedbackMatchesStateMachine
       , workflowDslTransitionLowersToPlannedTransition
+      , workflowDslMoifoldProjectionParity
+      , workflowDslDocsMigrationProjectionParity
       , workflowDocsMigrationSpecProvesSecondWorkflow
       , workflowDocsMigrationPermissionAndPartitionContracts
       , workflowDocsMigrationEventCodecFixtureContract
@@ -14852,6 +14856,90 @@ workflowEventLogFailureAuditClassifiesRetryRecommendation = do
       && WorkflowEventLog.workflowAuditFailureClassification audit == Just classification
       && WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == WorkflowEventLog.WorkflowDaemonRetry
 
+workflowDslWorkflowMAccumulationLaws :: IO Bool
+workflowDslWorkflowMAccumulationLaws = do
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      firstEffects =
+        [SomeEffect (RecordIssuePlan issueConfig (PrNumber 1) "first plan")]
+      secondEffects =
+        [SomeEffect (RecordIssuePlan issueConfig (PrNumber 2) "second plan")]
+      pureResult =
+        WorkflowDSL.runWorkflowM
+          (pure ("value" :: Text) :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode Text)
+      sequentialResult =
+        WorkflowDSL.runWorkflowM
+          ( do
+              WorkflowDSL.emit firstEffects
+              WorkflowDSL.emit secondEffects
+              pure ("done" :: Text)
+            :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode Text
+          )
+      applicativeResult =
+        WorkflowDSL.runWorkflowM
+          ( ( (,)
+                <$> (WorkflowDSL.emit firstEffects *> pure ("left" :: Text))
+                <*> (WorkflowDSL.emit secondEffects *> pure ("right" :: Text))
+            )
+              :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode (Text, Text)
+          )
+      monadResult =
+        WorkflowDSL.runWorkflowM
+          ( do
+              WorkflowDSL.emit firstEffects
+              left <- pure ("left" :: Text)
+              WorkflowDSL.emit secondEffects
+              pure (left <> "-right")
+            :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode Text
+          )
+      failedResult =
+        WorkflowDSL.runWorkflowM
+          ( do
+              _ <- WorkflowDSL.failWorkflow "failed before later effects"
+              WorkflowDSL.emit secondEffects
+              pure ("unreachable" :: Text)
+            :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode Text
+          )
+  assert "workflow DSL WorkflowM accumulates effects left-to-right and short-circuits failures" $
+    pureResult == Right ("value", [])
+      && sequentialResult == Right ("done", firstEffects <> secondEffects)
+      && applicativeResult == Right (("left", "right"), firstEffects <> secondEffects)
+      && monadResult == Right ("left-right", firstEffects <> secondEffects)
+      && failedResult == Left "failed before later effects"
+
+workflowDslAdvanceBuildsPhaseChangingTransition :: IO Bool
+workflowDslAdvanceBuildsPhaseChangingTransition = do
+  let repo = RepoName "soulomoon/mlf2"
+      prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
+      workerThread = ThreadId "worker"
+      turnId = TurnId "worker-turn"
+      state = PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle (ThreadId "reviewer"))
+      evidence = reviewEvidenceFromSummaries ("fix review" :| []) (CommitSha "abc123")
+      event = PrReviewFeedbackFound evidence turnId
+      Decision _ effects = step state (ReviewThreadsFound evidence (ActiveTurn workerThread turnId))
+      transitionResult =
+        ( WorkflowDSL.advance
+            event
+            ( do
+                WorkflowDSL.emit effects
+                pure ("phase changed" :: Text)
+              :: WorkflowDSL.WorkflowM MoifoldSpec 'PrReview 'CheckingReviews Text
+            )
+            :: Either Text (WorkflowDSL.Transition MoifoldSpec 'PrReview 'CheckingReviews 'FixingReviews Text)
+        )
+  assert "workflow DSL advance builds a phase-changing transition with value, event, and effects" $
+    case transitionResult of
+      Right transition ->
+        let expected = workflowPlanTransition @MoifoldSpec event effects
+            planned = WorkflowDSL.transitionPlannedTransition transition
+         in WorkflowDSL.transitionValue transition == "phase changed"
+              && WorkflowDSL.transitionEvent transition == event
+              && WorkflowDSL.transitionEffects transition == effects
+              && planned.plannedEvent == expected.plannedEvent
+              && planned.plannedPreCommitEffects == expected.plannedPreCommitEffects
+              && planned.plannedPostCommitEffects == expected.plannedPostCommitEffects
+      Left _ -> False
+
 workflowDslPrReviewFeedbackMatchesStateMachine :: IO Bool
 workflowDslPrReviewFeedbackMatchesStateMachine = do
   let repo = RepoName "soulomoon/mlf2"
@@ -14907,6 +14995,68 @@ workflowDslTransitionLowersToPlannedTransition = do
               && planned.plannedEvent == expected.plannedEvent
               && planned.plannedPreCommitEffects == expected.plannedPreCommitEffects
               && planned.plannedPostCommitEffects == expected.plannedPostCommitEffects
+      Left _ -> False
+
+workflowDslMoifoldProjectionParity :: IO Bool
+workflowDslMoifoldProjectionParity = do
+  let repo = RepoName "soulomoon/mlf2"
+      issueConfig = IssueConfig repo (IssueNumber 42) (BranchName "codex/issue-42")
+      event = IssuePlanCompletedEvent sampleIssuePlanMarkdown Nothing
+      effects =
+        [ SomeEffect SleepUntilNextPoll
+        , SomeEffect (RecordIssuePlan issueConfig (PrNumber 6) sampleIssuePlanMarkdown)
+        ]
+      transitionResult =
+        ( WorkflowDSL.advance
+            event
+            (WorkflowDSL.emit effects :: WorkflowDSL.WorkflowM MoifoldSpec 'IssueImplement 'PlanMode ())
+            :: Either Text (WorkflowDSL.Transition MoifoldSpec 'IssueImplement 'PlanMode 'Implementing ())
+        )
+      moifoldExpected = moifoldPlannedTransitionFromEffects event effects
+      genericExpected = workflowPlanTransition @MoifoldSpec event effects
+  assert "workflow DSL moifold projections match planned transition partitioning" $
+    case transitionResult of
+      Right transition ->
+        let planned = WorkflowDSL.transitionPlannedTransition transition
+         in planned.plannedEvent == moifoldExpected.plannedEvent
+              && planned.plannedPreCommitEffects == moifoldExpected.plannedPreCommitEffects
+              && planned.plannedPostCommitEffects == moifoldExpected.plannedPostCommitEffects
+              && planned.plannedEvent == genericExpected.plannedEvent
+              && planned.plannedPreCommitEffects == genericExpected.plannedPreCommitEffects
+              && planned.plannedPostCommitEffects == genericExpected.plannedPostCommitEffects
+              && WorkflowDSL.transitionPreCommitEffects transition == moifoldExpected.plannedPreCommitEffects
+              && WorkflowDSL.transitionPostCommitEffects transition == moifoldExpected.plannedPostCommitEffects
+              && WorkflowDSL.transitionEffects transition == moifoldExpected.plannedPreCommitEffects <> moifoldExpected.plannedPostCommitEffects
+      Left _ -> False
+
+workflowDslDocsMigrationProjectionParity :: IO Bool
+workflowDslDocsMigrationProjectionParity = do
+  let event = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      effects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      transitionResult =
+        ( WorkflowDSL.advance
+            event
+            ( do
+                WorkflowDSL.emit effects
+                pure ("docs transition" :: Text)
+              :: WorkflowDSL.WorkflowM DocsMigration.DocsMigrationSpec () DocsMigration.DocsMigrationIndexedTurnActive Text
+            )
+            :: Either Text (WorkflowDSL.Transition DocsMigration.DocsMigrationSpec () DocsMigration.DocsMigrationIndexedTurnActive DocsMigration.DocsMigrationIndexedDraftReady Text)
+        )
+      expected = workflowPlanTransition @DocsMigration.DocsMigrationSpec event effects
+  assert "workflow DSL DocsMigration projections match all-post-commit planned transition partitioning" $
+    case transitionResult of
+      Right transition ->
+        WorkflowDSL.transitionValue transition == "docs transition"
+          && WorkflowDSL.transitionEvent transition == expected.plannedEvent
+          && WorkflowDSL.transitionPreCommitEffects transition == expected.plannedPreCommitEffects
+          && WorkflowDSL.transitionPostCommitEffects transition == expected.plannedPostCommitEffects
+          && WorkflowDSL.transitionPreCommitEffects transition == []
+          && WorkflowDSL.transitionPostCommitEffects transition == effects
+          && WorkflowDSL.transitionEffects transition == expected.plannedPreCommitEffects <> expected.plannedPostCommitEffects
       Left _ -> False
 
 workflowDocsMigrationSpecProvesSecondWorkflow :: IO Bool

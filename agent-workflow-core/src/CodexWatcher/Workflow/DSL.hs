@@ -8,6 +8,7 @@ module CodexWatcher.Workflow.DSL
   , WorkflowM (..)
   , advance
   , emit
+  , failWorkflow
   , transitionEffects
   , transitionEvent
   , transitionFromPlan
@@ -51,6 +52,10 @@ data Transition spec domain from to a = Transition
 emit :: WorkflowEffectPlan spec -> WorkflowM spec domain phase ()
 emit effects =
   WorkflowM (Right ((), effects))
+
+failWorkflow :: Text -> WorkflowM spec domain phase a
+failWorkflow reason =
+  WorkflowM (Left reason)
 
 advance
   :: WorkflowSpec spec

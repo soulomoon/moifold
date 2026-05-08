@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-002-workflow-dsl-stabilization",
+  "direction_id": "direction-004-dsl-core-ergonomics",
+  "extracted_item_id": "item-028-dsl-core-ergonomics-laws",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal test watcher-core-test, cabal build all, git diff --check, git diff --cached --check, and manual DSL/package-boundary inspection passed. The round adds pure WorkflowM failure construction plus focused DSL law/parity tests without changing event schemas, golden fixtures, codecs, runtime, adapters, or concrete workflow transitions."
+}
