@@ -75,7 +75,7 @@ compatibility files, event schemas, and lifecycle ownership.
 
 ## Milestones
 
-### 1. [pending] Define Package Identity And Release Contract
+### 1. [in-progress] Define Package Identity And Release Contract
 
 Milestone id: `milestone-001-package-identity-release-contract`
 Depends on: none
@@ -88,10 +88,18 @@ upload authorization rules are recorded and reviewable.
 Parallel lane: default serial
 Coordination notes: this must precede physical package movement so later rounds
 do not infer release policy from layout.
+Progress: round 036 completed the package names and versioning contract in
+`56b5a02`, recording final external candidate names for
+`agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`,
+pre-1.0 versioning policy, module namespace policy, semantic-versioning
+expectations, compatibility analysis for the current internal sublibraries, and
+release-gate limits. Milestone 001 remains in progress until release metadata
+and compatibility/deprecation policy directions are complete.
 
 Candidate directions:
 
 - Direction id: `direction-001-package-names-and-versioning`
+  Status: complete via round 036, merged as `56b5a02`.
   Summary: choose final package names, initial versions, module namespace
   policy, and semantic-versioning expectations for the three packages.
   Why it matters now: package descriptors and docs need stable identity before
