@@ -309,7 +309,7 @@ Candidate directions:
   Boundary notes: do not weaken ownership scans to make package movement pass.
   Extraction notes: prefer recursive source-tree checks over hand-listed files.
 
-### 4. [pending] Publish Public Docs And Examples
+### 4. [in progress] Publish Public Docs And Examples
 
 Milestone id: `milestone-004-public-docs-examples`
 Depends on: `milestone-002-standalone-package-layout`
@@ -322,10 +322,21 @@ reviewable and aligned with implemented APIs.
 Parallel lane: `docs-release`
 Coordination notes: docs may run beside CI validation once package identity and
 layout are stable.
+Progress: round 046 completed package READMEs and Haddock boundary docs in
+`fd5dd4c`, adding package-facing READMEs for `agent-workflow-core`,
+`agent-workflow-codex`, and `agent-workflow-github`, module-level Haddock
+headers for exposed package modules, and `extra-doc-files: README.md` in each
+package descriptor. The approved evidence passed Haddock generation, package
+validation, build, `watcher-core-test`, whitespace checks, README module-list
+checks, Haddock header checks, descriptor-scope inspection, staged-path scope
+scan, and overclaim/non-goal scans, with no package upload or publication
+claim. Milestone 004 remains in progress because examples or consumer guides
+and changelog or release-note work are still pending.
 
 Candidate directions:
 
 - Direction id: `direction-011-package-readmes-and-haddock`
+  Status: complete via round 046, merged as `fd5dd4c`.
   Summary: create package-facing READMEs and Haddock/module documentation for
   the public API surfaces.
   Why it matters now: external package candidates need docs that explain what
