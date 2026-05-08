@@ -129,13 +129,13 @@ explicitly changes them.
     Merge after: item-016-indexed-issue-planning-terminal-and-retry-daemon
     Completion notes: Round 017 inspected current `IssueImplement` policy, daemon, automatic-loop, and test surfaces and authored `rev-004` as an artifact-only IssueImplement indexed adoption plan. Indexed IssueImplement implementation remains deferred until this revision is approved.
 
-12. [pending] Port IssueImplement policy transitions to the indexed API
+12. [done] Port IssueImplement policy transitions to the indexed API
     Item id: item-018-indexed-issue-implementation-policy
     Depends on: item-017-indexed-issue-implementation-next-domain-plan
     Parallel safe: no
     Parallel group: none
     Merge after: item-017-indexed-issue-implementation-next-domain-plan
-    Completion notes: Add a moifold-owned indexed IssueImplement adapter, likely `CodexWatcher.Workflow.Moifold.IssueImplement.Indexed`, covering the full compatibility policy surface without changing live daemon routing. Cover `ObservedPlanTurnStarted`, `ObservedPlanCompleted`, `ObservedIssueAttemptBranchAdvanced`, `ObservedIssueWorkerThreadRefreshed`, `ObservedPullRequestCreated`, `ObservedPullRequestReused`, `ObservedPullRequestBodyUpdated`, `ObservedImplementationTurnStarted`, `ObservedImplementationIncomplete`, `ObservedImplementationBlocked`, `ObservedReviewHandoffInitialized`, `ObservedReviewHandoffStarted`, `ObservedImplementationCompleted`, `ObservedIssueReviewerThreadReady`, `ObservedPullRequestMerged`, `ObservedPostMergeReviewStarted`, `ObservedPostMergeReviewerOutcome`, `ObservedIssueClosed`, and `ObservedIssueImplementBlocked`. Prove indexed-vs-compatibility parity for source labels, target labels, final state labels, event labels, pre/post effect plans, replay effects, effect validation, effect permission, invalid observations, compatibility writes, and request-id/action-ordering behavior. Do not route live daemon paths in this item.
+    Completion notes: Round 018 approved and merged the moifold-owned indexed IssueImplement policy adapter in commit `9f34a40`, exposing `CodexWatcher.Workflow.Moifold.IssueImplement.Indexed` while keeping live daemon routing unchanged. Reviewer evidence covered the accepted observation/source-state matrix, invalid and blocking cases, ignored merged-PR replay/compatibility alignment, waiting-for-merge reviewer-present versus pending-reviewer projection, indexed-vs-compatibility parity for labels, events, effects, replay, validation, permissions, compatibility writes, dry-run text, request-id progression, and action ordering, plus unchanged `agent-workflow-core` ownership. Verification passed the focused indexed IssueImplement watcher-core test, full `cabal test watcher-core-test`, `cabal build all`, and `git diff --check`; staged whitespace check was not applicable because no files were staged.
 
 13. [pending] Route IssueImplement plan-mode and PR setup daemon observations through indexed projection
     Item id: item-019-indexed-issue-implementation-plan-and-pr-setup-daemon
