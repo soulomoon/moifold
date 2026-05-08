@@ -187,7 +187,7 @@ Candidate directions:
   Boundary notes: do not alter event schemas or effect ordering.
   Extraction notes: reviewer must compare old and DSL transition outputs.
 
-### 3. [pending] Harden Generic Event-Log, Transaction, and Daemon Contracts
+### 3. [complete] Harden Generic Event-Log, Transaction, and Daemon Contracts
 
 Milestone id: `milestone-003-core-runtime-contracts`
 Depends on: `milestone-001-workflow-spec-contract`
@@ -207,7 +207,14 @@ action partitioning, and dry-run versus execute parity. It also tightened the
 moifold and DocsMigration transaction path tests without changing production
 code, event schemas, golden fixtures, package ownership, adapter APIs,
 compatibility facades, roadmap sequencing, or concrete daemon/runtime
-ownership. The milestone remains pending on direction 007 daemon-boundary work.
+ownership. Round 031 completed the daemon-core boundary slice in `f36a9cc`,
+adding an ownership-neutral daemon failure projection to
+`agent-workflow-core`, routing the moifold compatibility wrapper through it,
+and strengthening focused daemon projection tests plus recursive source scans
+that keep child-daemon lifecycle, runtime ownership, filesystem/process
+behavior, healthcheck, repair, and concrete watcher event/state policy in
+moifold. With directions 006 and 007 complete, the milestone completion signal
+is satisfied for the current generic runtime-contract surface.
 
 Candidate directions:
 
@@ -223,6 +230,7 @@ Candidate directions:
   Extraction notes: include both dry-run and execute-mode fake interpreters.
 
 - Direction id: `direction-007-daemon-core-boundary`
+  Status: complete via round 031, merged as `f36a9cc`.
   Summary: identify any reusable daemon tick result or ownership-neutral
   surface that can move to core, and leave concrete child ownership in moifold.
   Why it matters now: the framework docs call for daemon contracts, but round
