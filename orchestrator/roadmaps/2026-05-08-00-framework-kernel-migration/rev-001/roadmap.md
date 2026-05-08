@@ -295,7 +295,7 @@ Candidate directions:
   modules.
   Extraction notes: preserve command rendering and healthcheck/parser parity.
 
-### 5. [pending] Prepare External Extraction Readiness
+### 5. [complete] Prepare External Extraction Readiness
 
 Milestone id: `milestone-005-extraction-readiness`
 Depends on: `milestone-002-workflow-dsl-stabilization`,
@@ -317,9 +317,18 @@ adding the implemented internal API-freeze page and aligning framework docs for
 adapter, and the GitHub adapter with the current source-backed surfaces. The
 docs explicitly keep moifold issue/PR lifecycle policy, runtime ownership,
 healthcheck, repair, compatibility files, publication, and deprecation policy
-outside the reusable framework contract. The milestone remains pending on
-direction 011, the package-readiness report and any justified Cabal or
-package-boundary cleanup.
+outside the reusable framework contract. Round 035 completed
+`direction-011-package-readiness-report` in `61e6a2b`, adding a source-backed
+package extraction readiness report and README link that record package
+verdicts, import-graph and negative-edge evidence, Cabal dependency ownership,
+recursive package-boundary checklist coverage, compatibility-facade and
+deprecation-readiness mapping, remaining moifold-owned blockers, and validation
+commands. The report also confirms no Cabal, test, source, event-schema,
+golden-fixture, publication, or compatibility-facade cleanup was required. With
+directions 010 and 011 complete, and the existing DSL/spec docs plus
+DocsMigration and moifold parity tests serving as current example-workflow
+evidence, the milestone completion signal is satisfied without changing
+roadmap sequencing or package publication policy.
 
 Candidate directions:
 
@@ -337,7 +346,7 @@ Candidate directions:
   improve navigation.
 
 - Direction id: `direction-011-package-readiness-report`
-  Status: pending.
+  Status: complete via round 035, merged as `61e6a2b`.
   Summary: produce a concrete extraction readiness report and any required
   Cabal/package-boundary cleanup.
   Why it matters now: publishing should follow a checklist, not optimism.
