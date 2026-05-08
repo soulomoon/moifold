@@ -115,13 +115,13 @@ revision explicitly changes them.
    Merge after: item-014-indexed-issue-planning-daemon-start
    Completion notes: Round 015 approved and merged the active-turn `ObservedPlanningIssuesRequested` and normalized `ObservedPlanningGraphUpdated` daemon routes through the moifold-owned indexed issue-planning adapter in commit `98441ab`, then projected back to the existing daemon transaction surface. Reviewer evidence covered issue creation command plans, graph update recording, `planning-state.json` compatibility writes, dry-run and execute parity, action ordering, request-id behavior, wrong-source rejection, invalid graph blocked-route behavior, unchanged compatibility routing for item-016 terminal/retry observations, and package-boundary preservation, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and clean staged whitespace when committed.
 
-10. [pending] Route issue-planning terminal and retry daemon observations through the indexed adapter
+10. [done] Route issue-planning terminal and retry daemon observations through the indexed adapter
     Item id: item-016-indexed-issue-planning-terminal-and-retry-daemon
     Depends on: item-015-indexed-issue-planning-daemon-graph-and-requests
     Parallel safe: no
     Parallel group: none
     Merge after: item-015-indexed-issue-planning-daemon-graph-and-requests
-    Completion notes: Route retry, blocked, scope-complete, ready-issues-fixed, and completed planning observations through the indexed path. Preserve systemError retry/block behavior, missing active turn recovery, completion boundaries, `issuePlanningCompletionEvent`, ready-issues fanout boundaries, fanout completion boundary, `DaemonObservedTickResult`, detailed transaction failures, dry-run and execute parity, compatibility writes, action ordering, request-id progression, replay effects, effect validation, effect permissions, and invalid-observation failures.
+    Completion notes: Round 016 approved and merged the remaining issue-planning ready-issues-fixed, scope-completed, retry, turn-completed, and blocked daemon/fanout observations through the moifold-owned indexed issue-planning adapter in commit `f716838`, then projected back to the existing daemon transaction surfaces. Reviewer evidence covered systemError retry/block behavior, missing active turn recovery, completion and fanout boundaries, `issuePlanningCompletionEvent` preservation, `DaemonObservedTickResult`, detailed transaction failures, dry-run and execute parity, compatibility writes, action ordering, request-id progression, replay/effect validation/effect permission parity, invalid-observation failures, unchanged golden surfaces, and package-boundary preservation, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, `git diff --cached --check`, and an `agent-workflow-core` boundary scan.
 
 11. [pending] Prepare the issue-implementation indexed adoption plan
     Item id: item-017-indexed-issue-implementation-next-domain-plan
