@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-004-adapter-api-stabilization",
+  "direction_id": "direction-009-github-adapter-api",
+  "extracted_item_id": "item-033-github-adapter-api",
+  "roadmap_item_id": "item-033-github-adapter-api",
+  "decision": "approved",
+  "evidence_summary": "Baseline checks passed; GitHub adapter parser, command-rendering parity, healthcheck metadata, facade, and recursive package-boundary evidence match the selected round scope."
+}

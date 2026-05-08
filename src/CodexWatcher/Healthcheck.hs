@@ -34,7 +34,8 @@ import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), PrNumber (..), Re
 import CodexWatcher.Core.State (someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
-import CodexWatcher.Workflow.GitHub.Remote (RemotePullRequest (..), parseGhPrView, parseGitBranch, parseGitSha, parseLsRemoteBranch, remotePullRequestIsMerged)
+import CodexWatcher.Workflow.GitHub.Command qualified as GitHubCommand
+import CodexWatcher.Workflow.GitHub.Remote (parseGhPrView, parseGitBranch, parseGitSha, parseLsRemoteBranch, remotePullRequestIsMerged)
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad (filterM)
@@ -341,7 +342,7 @@ checkRemotePr SPrReview config =
           ( GhPrView
               (RepoName repo)
               (PrNumber prNumber')
-              ["state", "mergedAt", "mergeCommit", "url", "headRefOid"]
+              GitHubCommand.ghPrViewMergeMetadataFields
           )
       if not report.ok
         then pure RemotePrReport {skipped = False, ok = False, errorMessage = Just (commandText report), raw = Null, merged = False}
@@ -351,7 +352,7 @@ checkRemotePr SPrReview config =
             Right value ->
               case parseGhPrView report.stdout of
                 Left error' -> RemotePrReport {skipped = False, ok = False, errorMessage = Just error', raw = value, merged = False}
-                Right remote -> RemotePrReport {skipped = False, ok = True, errorMessage = Nothing, raw = value, merged = healthcheckRemotePrMerged remote}
+                Right remote -> RemotePrReport {skipped = False, ok = True, errorMessage = Nothing, raw = value, merged = remotePullRequestIsMerged remote}
     _ -> pure (skippedRemotePr "missing repoFullName or prNumber")
 checkRemotePr _ _ =
   pure (skippedRemotePr "not a PR watcher")
@@ -530,11 +531,6 @@ skippedAppServerThread reason' maybeThreadId =
     , latestTurnId = Nothing
     , latestTurnStatus = Nothing
     }
-
-healthcheckRemotePrMerged :: RemotePullRequest -> Bool
-healthcheckRemotePrMerged remote =
-  remotePullRequestIsMerged remote
-    || maybe False (not . Text.null) remote.remotePullRequestMergedAt
 
 lastMaybe :: [a] -> Maybe a
 lastMaybe [] = Nothing

@@ -13,7 +13,9 @@ module RuntimeSpec
   , prop_runtimeGhPrCommentReviewFindingsUsesPrComment
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesCurrentCli
+  , prop_runtimeGhPrMergeUsesAdapterFlags
   , prop_runtimeGhPrViewUsesStructuredFields
+  , prop_runtimeGhReviewThreadCommandsUseGraphql
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
   , prop_runtimeKillZeroOnlyChecksPid
@@ -304,6 +306,43 @@ prop_runtimeGhReplyReviewThreadUsesGraphqlMutation =
              ]
         && spec.cwd == Nothing
         && spec.stdin == ""
+
+prop_runtimeGhReviewThreadCommandsUseGraphql :: Bool
+prop_runtimeGhReviewThreadCommandsUseGraphql =
+  let repo = RepoName "soulomoon/mlf2"
+      pr = PrNumber 6
+      thread = ReviewThreadId "PRRT_test"
+      reviewSpec = renderRuntimeCommand (GhReviewThreads (PrConfig repo pr (BranchName "codex/example")))
+      resolveSpec = renderRuntimeCommand (GhResolveReviewThread thread)
+      reviewQuery = Text.pack (reviewSpec.args !! 3)
+      resolveQuery = Text.pack (resolveSpec.args !! 3)
+   in reviewSpec.command == "gh"
+        && take 2 reviewSpec.args == ["api", "graphql"]
+        && "query($owner:String!,$name:String!,$number:Int!)" `Text.isInfixOf` reviewQuery
+        && "reviewThreads(first:100)" `Text.isInfixOf` reviewQuery
+        && "comments(first:20)" `Text.isInfixOf` reviewQuery
+        && "owner=soulomoon" `elem` reviewSpec.args
+        && "name=mlf2" `elem` reviewSpec.args
+        && "number=6" `elem` reviewSpec.args
+        && reviewSpec.cwd == Nothing
+        && reviewSpec.stdin == ""
+        && resolveSpec.command == "gh"
+        && take 2 resolveSpec.args == ["api", "graphql"]
+        && "resolveReviewThread" `Text.isInfixOf` resolveQuery
+        && "threadId=PRRT_test" `elem` resolveSpec.args
+        && resolveSpec.cwd == Nothing
+        && resolveSpec.stdin == ""
+
+prop_runtimeGhPrMergeUsesAdapterFlags :: Bool
+prop_runtimeGhPrMergeUsesAdapterFlags =
+  let repo = RepoName "soulomoon/mlf2"
+      pr = PrNumber 6
+      squashSpec = renderRuntimeCommand (GhPrMerge repo pr "squash")
+      rebaseSpec = renderRuntimeCommand (GhPrMerge repo pr "rebase")
+      defaultSpec = renderRuntimeCommand (GhPrMerge repo pr "merge")
+   in squashSpec.args == ["pr", "merge", "6", "--repo", "soulomoon/mlf2", "--squash"]
+        && rebaseSpec.args == ["pr", "merge", "6", "--repo", "soulomoon/mlf2", "--rebase"]
+        && defaultSpec.args == ["pr", "merge", "6", "--repo", "soulomoon/mlf2", "--merge"]
 
 prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge :: PrNumber -> CleanReviewEvidence -> Bool
 prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge prNumber evidence =

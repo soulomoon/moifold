@@ -215,6 +215,7 @@ remotePullRequestIsOpen pullRequest =
 remotePullRequestIsMerged :: RemotePullRequest -> Bool
 remotePullRequestIsMerged pullRequest =
   pullRequest.remotePullRequestState == RemotePullRequestMerged
+    || maybe False (not . Text.null . Text.strip) pullRequest.remotePullRequestMergedAt
 
 classifyRemotePullRequestMergeState :: Maybe Text -> RemotePullRequestMergeStateStatus
 classifyRemotePullRequestMergeState Nothing =

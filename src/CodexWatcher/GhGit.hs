@@ -48,6 +48,7 @@ import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (parseCommandJson)
 import CodexWatcher.Core.Ids (BranchName, IssueNumber, PrNumber, RepoName)
 import CodexWatcher.Domain.PrReview.Types (PrConfig)
+import CodexWatcher.Workflow.GitHub.Command qualified as GitHubCommand
 import CodexWatcher.Workflow.GitHub.Remote
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -59,7 +60,7 @@ runGhIssueListOpen interpreter repo =
 runGhIssueView :: Monad m => RuntimeInterpreter m -> RepoName -> IssueNumber -> m (Either Text RemoteIssue)
 runGhIssueView interpreter repo issueNumber =
   parseCommandJson parseGhIssueView
-    <$> interpreter.runtimeRunCommand (GhIssueView repo issueNumber ["state", "closed", "url"])
+    <$> interpreter.runtimeRunCommand (GhIssueView repo issueNumber GitHubCommand.ghIssueViewStateFields)
 
 runGhPrListOpen :: Monad m => RuntimeInterpreter m -> RepoName -> m (Either Text [GhPullRequest])
 runGhPrListOpen interpreter repo =
@@ -81,7 +82,7 @@ runGhPrChecks interpreter repo prNumber = do
 runGhPrView :: Monad m => RuntimeInterpreter m -> RepoName -> PrNumber -> m (Either Text RemotePullRequest)
 runGhPrView interpreter repo prNumber =
   parseCommandJson parseGhPrView
-    <$> interpreter.runtimeRunCommand (GhPrView repo prNumber ["state", "mergedAt", "mergeCommit", "url", "headRefOid", "mergeStateStatus", "reviewDecision"])
+    <$> interpreter.runtimeRunCommand (GhPrView repo prNumber GitHubCommand.ghPrViewRemoteFields)
 
 runGhReviewThreads :: Monad m => RuntimeInterpreter m -> PrConfig -> m (Either Text ReviewThreadsReport)
 runGhReviewThreads interpreter prConfig =

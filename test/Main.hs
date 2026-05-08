@@ -250,6 +250,7 @@ import GhGitSpec
   ( prop_ghGitParsesGitOutputs
   , prop_ghGitParsesIssueAndPrLists
   , prop_ghGitParsesPrCreateAndChecks
+  , prop_ghGitParsesRemotePrMetadataVariants
   , prop_ghGitParsesRemoteIssueView
   , prop_ghGitParsesRemotePrView
   , prop_ghGitParsesReviewThreadsGraphql
@@ -267,7 +268,9 @@ import RuntimeSpec
   , prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
   , prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
   , prop_runtimeGhPrChecksUsesCurrentCli
+  , prop_runtimeGhPrMergeUsesAdapterFlags
   , prop_runtimeGhPrViewUsesStructuredFields
+  , prop_runtimeGhReviewThreadCommandsUseGraphql
   , prop_runtimeGitPushDryRunNeverForces
   , prop_runtimeGitPushNeverForces
   , prop_runtimeKillZeroOnlyChecksPid
@@ -7676,7 +7679,14 @@ codexBoundaryForbiddenImportModules =
 workflowGithubCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowGithubCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
-  githubSource <- sourceTextUnder ("agent-workflow-github" </> "src")
+  importViolations <-
+    sourceImportViolationsUnder
+      ("agent-workflow-github" </> "src")
+      githubForbiddenImportModules
+  ownershipViolations <-
+    sourceTextNeedleViolationsUnder
+      ("agent-workflow-github" </> "src")
+      githubForbiddenOwnershipTokens
   let githubSection = cabalComponentSection "library agent-workflow-github" cabalSource
       forbiddenPackageNeedles =
         [ "bytestring"
@@ -7689,23 +7699,7 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
         , "unix"
         , "websockets"
         , "moifold,"
-        , "moifold:agent-workflow-core"
-        , "moifold:agent-workflow-codex"
-        ]
-      forbiddenImportNeedles =
-        [ "CodexWatcher.AppServer"
-        , "CodexWatcher.Core."
-        , "CodexWatcher.Core.State"
-        , "CodexWatcher.Domain."
-        , "CodexWatcher.Effects"
-        , "CodexWatcher.EventLog"
-        , "CodexWatcher.GhGit"
-        , "CodexWatcher.Json"
-        , "CodexWatcher.Runtime"
-        , "CodexWatcher.StateMachine"
-        , "CodexWatcher.Workflow.Agent"
-        , "CodexWatcher.Workflow.Observation"
-        , "CodexWatcher.Workflow.Types"
+        , "moifold:"
         ]
       exposesGithubModules =
         all
@@ -7722,13 +7716,81 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
           , "text >=2.0 && <3"
           ]
           && not (any (`Text.isInfixOf` githubSection) forbiddenPackageNeedles)
-      sourceImportsStayInAdapter =
-        not (any (`Text.isInfixOf` githubSource) forbiddenImportNeedles)
       moifoldDependsOnGithub =
         "moifold:agent-workflow-github" `Text.isInfixOf` cabalSource
-  assert
-    "workflow GitHub sublibrary has no moifold state-machine dependencies"
-    (exposesGithubModules && dependsOnlyOnGithubDeps && sourceImportsStayInAdapter && moifoldDependsOnGithub)
+  cabalOk <-
+    assert
+      "workflow GitHub sublibrary exposes only adapter modules and dependencies"
+      (exposesGithubModules && dependsOnlyOnGithubDeps && moifoldDependsOnGithub)
+  importsOk <-
+    assertNoTextMatches
+      "workflow GitHub source has no moifold state-machine, daemon, lifecycle, runtime, or compatibility imports"
+      importViolations
+  ownershipOk <-
+    assertNoTextMatches
+      "workflow GitHub source has no moifold lifecycle ownership tokens"
+      ownershipViolations
+  pure (cabalOk && importsOk && ownershipOk)
+
+githubForbiddenImportModules :: [Text]
+githubForbiddenImportModules =
+  [ "CodexWatcher.AppServer"
+  , "CodexWatcher.AppServerClient"
+  , "CodexWatcher.AppServerProtocol"
+  , "CodexWatcher.ChildDaemon"
+  , "CodexWatcher.Cli"
+  , "CodexWatcher.Core."
+  , "CodexWatcher.Daemon"
+  , "CodexWatcher.DaemonLoop"
+  , "CodexWatcher.Domain"
+  , "CodexWatcher.EffectInterpreter"
+  , "CodexWatcher.Effects"
+  , "CodexWatcher.EventLog"
+  , "CodexWatcher.EventLogRepair"
+  , "CodexWatcher.GhGit"
+  , "CodexWatcher.Healthcheck"
+  , "CodexWatcher.Json"
+  , "CodexWatcher.Logging"
+  , "CodexWatcher.Observation"
+  , "CodexWatcher.Runtime"
+  , "CodexWatcher.StateMachine"
+  , "CodexWatcher.Supervisor"
+  , "CodexWatcher.Turn"
+  , "CodexWatcher.TurnOutput"
+  , "CodexWatcher.WatcherLiveness"
+  , "CodexWatcher.WatcherRuntimeStatus"
+  , "CodexWatcher.Workflow.Agent"
+  , "CodexWatcher.Workflow.Daemon"
+  , "CodexWatcher.Workflow.EventLog"
+  , "CodexWatcher.Workflow.Execution"
+  , "CodexWatcher.Workflow.Moifold"
+  , "CodexWatcher.Workflow.Observation"
+  , "CodexWatcher.Workflow.Permission"
+  , "CodexWatcher.Workflow.Transaction"
+  , "CodexWatcher.Workflow.Types"
+  ]
+
+githubForbiddenOwnershipTokens :: [Text]
+githubForbiddenOwnershipTokens =
+  [ "WatcherEvent"
+  , "SomeWatcherState"
+  , "RuntimeCommand"
+  , "RuntimeInterpreter"
+  , "CommandReport"
+  , "IssueConfig"
+  , "PrConfig"
+  , "ReviewEvidence"
+  , "CleanReviewEvidence"
+  , "Healthcheck"
+  , "EventLogRepair"
+  , "runtime-owner"
+  , "daemon-state.json"
+  , "issue-state.json"
+  , "planning-state.json"
+  , "watcher-state.json"
+  , "block-state.json"
+  , "app-server"
+  ]
 
 workflowMoifoldCabalLibraryDoesNotReexportAdapters :: IO Bool
 workflowMoifoldCabalLibraryDoesNotReexportAdapters = do
@@ -7777,10 +7839,12 @@ workflowGithubCommandFacadeMatchesRuntimeRender = do
         [ (renderRuntimeCommand GhAuthStatus, WorkflowGitHubCommand.ghAuthStatusCommand)
         , (renderRuntimeCommand GhApiUser, WorkflowGitHubCommand.ghApiUserCommand)
         , (renderRuntimeCommand (GhIssueListOpen repo), WorkflowGitHubCommand.ghIssueListOpenCommand repo)
-        , (renderRuntimeCommand (GhIssueView repo issue ["state", "closed", "url"]), WorkflowGitHubCommand.ghIssueViewCommand repo issue ["state", "closed", "url"])
+        , (renderRuntimeCommand (GhIssueView repo issue WorkflowGitHubCommand.ghIssueViewStateFields), WorkflowGitHubCommand.ghIssueViewCommand repo issue WorkflowGitHubCommand.ghIssueViewStateFields)
         , (renderRuntimeCommand (GhPrListOpen repo), WorkflowGitHubCommand.ghPrListOpenCommand repo)
         , (renderRuntimeCommand (GhPrListByHead repo branch "all"), WorkflowGitHubCommand.ghPrListByHeadCommand repo branch "all")
         , (renderRuntimeCommand (GhPrView repo pr ["state", "url"]), WorkflowGitHubCommand.ghPrViewCommand repo pr ["state", "url"])
+        , (renderRuntimeCommand (GhPrView repo pr WorkflowGitHubCommand.ghPrViewRemoteFields), WorkflowGitHubCommand.ghPrViewCommand repo pr WorkflowGitHubCommand.ghPrViewRemoteFields)
+        , (renderRuntimeCommand (GhPrView repo pr WorkflowGitHubCommand.ghPrViewMergeMetadataFields), WorkflowGitHubCommand.ghPrViewCommand repo pr WorkflowGitHubCommand.ghPrViewMergeMetadataFields)
         , (renderRuntimeCommand (GhPrChecks repo pr), WorkflowGitHubCommand.ghPrChecksCommand repo pr)
         , (renderRuntimeCommand (GhReviewThreads prConfig), WorkflowGitHubCommand.ghReviewThreadsCommand repo pr)
         , (renderRuntimeCommand (GhResolveReviewThread thread), WorkflowGitHubCommand.ghResolveReviewThreadCommand thread)
@@ -8089,6 +8153,32 @@ sourceImportViolationsIn path forbiddenModules source =
                 <> " matches "
                 <> forbiddenModule
             ]
+
+sourceTextNeedleViolationsUnder :: FilePath -> [Text] -> IO [Text]
+sourceTextNeedleViolationsUnder root forbiddenNeedles = do
+  files <- sourceFilesUnder root
+  fmap concat $
+    traverse
+      ( \path -> do
+          source <- Text.pack <$> readFile path
+          pure (sourceTextNeedleViolationsIn path forbiddenNeedles source)
+      )
+      files
+
+sourceTextNeedleViolationsIn :: FilePath -> [Text] -> Text -> [Text]
+sourceTextNeedleViolationsIn path forbiddenNeedles source =
+  concatMap lineViolation (zip [(1 :: Int) ..] (Text.lines source))
+ where
+  pathText = Text.pack path
+  lineViolation (lineNumber, line) =
+    [ pathText
+        <> ":"
+        <> Text.pack (show lineNumber)
+        <> ": contains "
+        <> needle
+    | needle <- forbiddenNeedles
+    , needle `Text.isInfixOf` line
+    ]
 
 sourceImportedModule :: Text -> Maybe Text
 sourceImportedModule line
@@ -16383,10 +16473,13 @@ main = do
       , quickCheckResult prop_runtimeGhReplyReviewThreadUsesGraphqlMutation
       , quickCheckResult prop_runtimeGhPrCommentReviewFindingsUsesPrComment
       , quickCheckResult prop_runtimeGhPrCleanReviewAndMergeCommentsBeforeMerge
+      , quickCheckResult prop_runtimeGhReviewThreadCommandsUseGraphql
+      , quickCheckResult prop_runtimeGhPrMergeUsesAdapterFlags
       , quickCheckResult prop_runtimeKillZeroOnlyChecksPid
       , quickCheckResult prop_ghGitParsesIssueAndPrLists
       , quickCheckResult prop_ghGitParsesRemoteIssueView
       , quickCheckResult prop_ghGitParsesRemotePrView
+      , quickCheckResult prop_ghGitParsesRemotePrMetadataVariants
       , quickCheckResult prop_ghGitParsesPrCreateAndChecks
       , quickCheckResult prop_ghGitParsesReviewThreadsGraphql
       , quickCheckResult prop_ghGitParsesGitOutputs

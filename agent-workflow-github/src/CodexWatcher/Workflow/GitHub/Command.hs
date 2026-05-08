@@ -3,6 +3,13 @@
 
 module CodexWatcher.Workflow.GitHub.Command
   ( GitHubCommandSpec (..)
+  , ghIssueListOpenFields
+  , ghIssueViewStateFields
+  , ghPrChecksFields
+  , ghPrListByHeadFields
+  , ghPrListOpenFields
+  , ghPrViewMergeMetadataFields
+  , ghPrViewRemoteFields
   , ghApiUserCommand
   , ghAuthStatusCommand
   , ghIssueListOpenCommand
@@ -42,6 +49,34 @@ data GitHubCommandSpec = GitHubCommandSpec
   }
   deriving stock (Eq, Show)
 
+ghIssueListOpenFields :: [Text]
+ghIssueListOpenFields =
+  ["number", "title", "labels", "assignees"]
+
+ghIssueViewStateFields :: [Text]
+ghIssueViewStateFields =
+  ["state", "closed", "url"]
+
+ghPrListOpenFields :: [Text]
+ghPrListOpenFields =
+  ["number", "title", "headRefName", "headRefOid", "body"]
+
+ghPrListByHeadFields :: [Text]
+ghPrListByHeadFields =
+  ghPrListOpenFields <> ["state"]
+
+ghPrViewMergeMetadataFields :: [Text]
+ghPrViewMergeMetadataFields =
+  ["state", "mergedAt", "mergeCommit", "url", "headRefOid"]
+
+ghPrViewRemoteFields :: [Text]
+ghPrViewRemoteFields =
+  ghPrViewMergeMetadataFields <> ["mergeStateStatus", "reviewDecision"]
+
+ghPrChecksFields :: [Text]
+ghPrChecksFields =
+  ["name", "state", "bucket"]
+
 ghAuthStatusCommand :: GitHubCommandSpec
 ghAuthStatusCommand =
   GitHubCommandSpec "gh" ["auth", "status"] Nothing ""
@@ -54,7 +89,7 @@ ghIssueListOpenCommand :: RepoName -> GitHubCommandSpec
 ghIssueListOpenCommand repo =
   GitHubCommandSpec
     "gh"
-    ["issue", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,labels,assignees"]
+    ["issue", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", fieldsArg ghIssueListOpenFields]
     Nothing
     ""
 
@@ -68,7 +103,7 @@ ghIssueViewCommand repo issueNumber fields =
     , "--repo"
     , Text.unpack (unRepoName repo)
     , "--json"
-    , Text.unpack (Text.intercalate "," fields)
+    , fieldsArg fields
     ]
     Nothing
     ""
@@ -77,7 +112,7 @@ ghPrListOpenCommand :: RepoName -> GitHubCommandSpec
 ghPrListOpenCommand repo =
   GitHubCommandSpec
     "gh"
-    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", "number,title,headRefName,headRefOid,body"]
+    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--state", "open", "--json", fieldsArg ghPrListOpenFields]
     Nothing
     ""
 
@@ -85,7 +120,7 @@ ghPrListByHeadCommand :: RepoName -> BranchName -> Text -> GitHubCommandSpec
 ghPrListByHeadCommand repo branch state =
   GitHubCommandSpec
     "gh"
-    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--head", Text.unpack (unBranchName branch), "--state", Text.unpack state, "--json", "number,title,headRefName,headRefOid,body,state"]
+    ["pr", "list", "--repo", Text.unpack (unRepoName repo), "--head", Text.unpack (unBranchName branch), "--state", Text.unpack state, "--json", fieldsArg ghPrListByHeadFields]
     Nothing
     ""
 
@@ -99,7 +134,7 @@ ghPrViewCommand repo prNumber fields =
     , "--repo"
     , Text.unpack (unRepoName repo)
     , "--json"
-    , Text.unpack (Text.intercalate "," fields)
+    , fieldsArg fields
     ]
     Nothing
     ""
@@ -114,7 +149,7 @@ ghPrChecksCommand repo prNumber =
     , "--repo"
     , Text.unpack (unRepoName repo)
     , "--json"
-    , "name,state,bucket"
+    , fieldsArg ghPrChecksFields
     ]
     Nothing
     ""
@@ -212,6 +247,10 @@ repoOwnerName repo =
     (owner, rest)
       | Text.null rest -> (owner, "")
       | otherwise -> (owner, Text.drop 1 rest)
+
+fieldsArg :: [Text] -> String
+fieldsArg =
+  Text.unpack . Text.intercalate ","
 
 mergeFlag :: Text -> String
 mergeFlag "squash" = "--squash"
