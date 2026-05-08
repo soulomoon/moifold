@@ -22,13 +22,13 @@ filesystem writes, app-server startup, GitHub command execution, or concrete
 
 ## Items
 
-1. [pending] Port PR-review checking and verification observations to the indexed API
+1. [done] Port PR-review checking and verification observations to the indexed API
    Item id: item-007-indexed-pr-review-checking
    Depends on: none
    Parallel safe: no
    Parallel group: none
    Merge after: none
-   Completion notes: Extend the indexed PR-review adapter to cover the checking and verification observation transitions currently exercised by `ReviewThreadsFound`, `NoReviewThreadsFound`, `PrReviewFeedbackFound`, and `PrReviewFixVerificationStarted`. Prove parity for emitted `WatcherEvent` values, source and target state labels, next states, pre/post effect plans, replay, permission acceptance, and observed-effect ordering.
+   Completion notes: Round 007 approved and merged the indexed PR-review checking adapter for `ReviewThreadsFound`, `NoReviewThreadsFound`, `PrReviewFeedbackFound`, and `PrReviewFixVerificationStarted`. Reviewer evidence covered unresolved and clean thread parity, feedback observations, verification start, replay/effect/permission parity, invalid observation failures, schema/golden/daemon/dry-run/action-ordering preservation, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
 2. [pending] Port PR-review worker outcome transitions to the indexed API
    Item id: item-008-indexed-pr-review-worker-outcomes
