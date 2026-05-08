@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-003",
+  "roadmap_item_id": "item-013-indexed-issue-planning-policy",
+  "decision": "approved",
+  "evidence_summary": "Approved after verifying the moifold-owned indexed issue-planning adapter delegates through MoifoldSpec, focused indexed/issue-planning parity tests cover the required observations and contracts, no live daemon/schema/core ownership changes were introduced, and all required cabal and diff checks passed."
+}

@@ -83,6 +83,21 @@ import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
 import CodexWatcher.Workflow.GitHub.Command qualified as WorkflowGitHubCommand
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
+import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
+  ( IssuePlanningIndexedActiveTurn
+  , IssuePlanningIndexedBlocked
+  , IssuePlanningIndexedComplete
+  , IssuePlanningIndexedEffect (..)
+  , IssuePlanningIndexedEffectPlan (..)
+  , IssuePlanningIndexedEvent (..)
+  , IssuePlanningIndexedInitialized
+  , IssuePlanningIndexedObservation (..)
+  , IssuePlanningIndexedReplayResult (..)
+  , IssuePlanningIndexedSpec
+  , IssuePlanningIndexedState (..)
+  , IssuePlanningIndexedWaitingReadyIssues
+  , issuePlanningIndexedTransitionToCompatibility
+  )
 import CodexWatcher.Workflow.Moifold.PrReview qualified as WorkflowPrReview
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
 import CodexWatcher.Workflow.Moifold.PrReview.Checking.Indexed
@@ -6276,6 +6291,9 @@ workflowFacadeExtractionTests = do
       , workflowAgentObservationKernelMatchesPrReviewClassifiers
       , workflowPlanObservationLawHoldsForPrReviewAgentObservation
       , workflowIndexedSpecExistentialsPreserveLabels
+      , workflowIssuePlanningIndexedSpecMatchesPolicyTransitions
+      , workflowIssuePlanningIndexedSpecPreservesGraphValidation
+      , workflowIssuePlanningIndexedSpecRejectsInvalidObservationsLikeCompatibility
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForFeedbackSources
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForVerificationStart
@@ -7946,6 +7964,476 @@ workflowIndexedSpecExistentialsPreserveLabels = do
             && IndexedWorkflow.indexedWorkflowPlannedTransitionSourceLabel @IndexedTestSpec planned == "queued"
             && IndexedWorkflow.indexedWorkflowPlannedTransitionTargetLabel @IndexedTestSpec planned == "done"
         Left _failure -> False
+
+workflowIssuePlanningIndexedSpecMatchesPolicyTransitions :: IO Bool
+workflowIssuePlanningIndexedSpecMatchesPolicyTransitions = do
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      readyState = SomeWatcherState (PlanningReady config)
+      readyPrefix = [IssuePlanningInitialized config]
+      readyIndexedPrefix = [issuePlanningIndexedInitializedEvent config]
+      activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+      activePrefix = readyPrefix <> [IssuePlanningTurnStarted threadId turnId]
+      activeIndexedPrefix = readyIndexedPrefix <> [issuePlanningIndexedTurnStartedEvent threadId turnId]
+      requestOne = IssueCreationRequest "split parser work" "Implement parser support." (Just (IssueNumber 12))
+      requestTwo = IssueCreationRequest "split runtime work" "Implement runtime support." (Just (IssueNumber 12))
+      validGraph =
+        PlanningGraph
+          [IssueNumber 15]
+          [BlockedPlanningIssue (IssueNumber 12) [IssueNumber 15, IssueNumber 16] "split work"]
+          [ IssueDependency (IssueNumber 12) [IssueNumber 15, IssueNumber 16]
+          , IssueDependency (IssueNumber 16) [IssueNumber 15]
+          ]
+      waitingState = SomeWatcherState (PlanningWaitingForReadyIssues config validGraph)
+      waitingPrefix = activePrefix <> [IssuePlanningGraphUpdated validGraph]
+      waitingIndexedPrefix = activeIndexedPrefix <> [issuePlanningIndexedGraphUpdatedEvent validGraph]
+      retryReason = BlockedReason "planner requested another pass"
+      blockedReason = BlockedReason "planner could not continue"
+  results <-
+    sequence
+      [ issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning turn start matches compatibility"
+          readyState
+          readyPrefix
+          readyIndexedPrefix
+          (ObservedPlanningTurnStarted threadId turnId)
+          ( IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/PlanMode" (DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId turnId))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
+          )
+          (IssuePlanningTurnStarted threadId turnId)
+          ( IssuePlanningIndexedEvent "IssuePlanning/Initialized" "IssuePlanning/PlanMode" (IssuePlanningTurnStarted threadId turnId)
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
+          )
+          "IssuePlanning/PlanMode"
+          ( \planned ->
+              planned.plannedPreCommitEffects == [SomeEffect (StartPlannerTurn threadId)]
+                && null planned.plannedPostCommitEffects
+          )
+          ( \compiled ->
+              fmap (appServerRequestId . WorkflowExecution.workflowPlannedAction) compiled.workflowCompiledActions == [Just 900]
+                && compiled.workflowCompiledNextRequestId == RequestId 901
+          )
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning issue requests match compatibility"
+          activeState
+          activePrefix
+          activeIndexedPrefix
+          (ObservedPlanningIssuesRequested (requestOne :| [requestTwo]))
+          ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested (requestOne :| [requestTwo])))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedInitialized
+          )
+          (IssuePlanningIssuesRequested (requestOne :| [requestTwo]))
+          ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (IssuePlanningIssuesRequested (requestOne :| [requestTwo]))
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedInitialized
+          )
+          "IssuePlanning/Initialized"
+          ( \planned ->
+              fmap effectTag (planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects) == [CreateIssueTag, CreateIssueTag, SleepUntilNextPollTag]
+                && planned.plannedPreCommitEffects == [SomeEffect (CreateIssue config.plannerRepo requestOne), SomeEffect (CreateIssue config.plannerRepo requestTwo)]
+                && planned.plannedPostCommitEffects == [SomeEffect SleepUntilNextPoll]
+          )
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning graph update matches compatibility"
+          activeState
+          activePrefix
+          activeIndexedPrefix
+          (ObservedPlanningGraphUpdated validGraph)
+          ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated validGraph))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
+          )
+          (IssuePlanningGraphUpdated validGraph)
+          ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (IssuePlanningGraphUpdated validGraph)
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
+          )
+          "IssuePlanning/Initialized"
+          ( \planned ->
+              null planned.plannedPreCommitEffects
+                && planned.plannedPostCommitEffects == [SomeEffect (RecordPlanningGraph validGraph), SomeEffect SleepUntilNextPoll]
+          )
+          requestIdStable
+          (compatibilityWritesContainPlanningGraph validGraph)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning ready issues fixed matches compatibility"
+          waitingState
+          waitingPrefix
+          waitingIndexedPrefix
+          ObservedPlanningReadyIssuesFixed
+          ( IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed)
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedInitialized
+          )
+          IssuePlanningReadyIssuesFixed
+          ( IssuePlanningIndexedEvent "IssuePlanning/Initialized" "IssuePlanning/Initialized" IssuePlanningReadyIssuesFixed
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedInitialized
+          )
+          "IssuePlanning/Initialized"
+          sleepPostCommitPlan
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning scope completed matches compatibility"
+          readyState
+          readyPrefix
+          readyIndexedPrefix
+          ObservedPlanningScopeCompleted
+          ( IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Complete" (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted)
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedComplete
+          )
+          IssuePlanningScopeCompleted
+          ( IssuePlanningIndexedEvent "IssuePlanning/Initialized" "IssuePlanning/Complete" IssuePlanningScopeCompleted
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedInitialized IssuePlanningIndexedComplete
+          )
+          "IssuePlanning/Complete"
+          ( \planned ->
+              null planned.plannedPreCommitEffects
+                && planned.plannedPostCommitEffects == [SomeEffect StopDaemon]
+          )
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning retry matches compatibility"
+          activeState
+          activePrefix
+          activeIndexedPrefix
+          (ObservedPlanningTurnRetryRequested retryReason)
+          ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested retryReason))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedInitialized
+          )
+          (IssuePlanningTurnRetryRequested retryReason)
+          ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (IssuePlanningTurnRetryRequested retryReason)
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedInitialized
+          )
+          "IssuePlanning/Initialized"
+          sleepPostCommitPlan
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning turn completed matches compatibility"
+          activeState
+          activePrefix
+          activeIndexedPrefix
+          ObservedPlanningTurnCompleted
+          ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Complete" (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted)
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedComplete
+          )
+          IssuePlanningTurnCompleted
+          ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Complete" IssuePlanningTurnCompleted
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedComplete
+          )
+          "IssuePlanning/Complete"
+          ( \planned ->
+              null planned.plannedPreCommitEffects
+                && planned.plannedPostCommitEffects == [SomeEffect StopDaemon]
+          )
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning ready blocked matches compatibility"
+          readyState
+          readyPrefix
+          readyIndexedPrefix
+          (ObservedPlanningBlocked blockedReason)
+          ( IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Blocked" (DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedBlocked
+          )
+          (WatcherBlocked blockedReason)
+          ( IssuePlanningIndexedEvent "IssuePlanning/Initialized" "IssuePlanning/Blocked" (WatcherBlocked blockedReason)
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedInitialized IssuePlanningIndexedBlocked
+          )
+          "IssuePlanning/Blocked"
+          blockedPostCommitPlan
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning active blocked matches compatibility"
+          activeState
+          activePrefix
+          activeIndexedPrefix
+          (ObservedPlanningBlocked blockedReason)
+          ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Blocked" (DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+          )
+          (WatcherBlocked blockedReason)
+          ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Blocked" (WatcherBlocked blockedReason)
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+          )
+          "IssuePlanning/Blocked"
+          blockedPostCommitPlan
+          requestIdStable
+          (const True)
+      , issuePlanningIndexedSpecMatchesCompatibility
+          "indexed workflow issue planning waiting blocked matches compatibility"
+          waitingState
+          waitingPrefix
+          waitingIndexedPrefix
+          (ObservedPlanningBlocked blockedReason)
+          ( IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Blocked" (DaemonIssuePlanningObservation (ObservedPlanningBlocked blockedReason))
+              :: IssuePlanningIndexedObservation IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedBlocked
+          )
+          (WatcherBlocked blockedReason)
+          ( IssuePlanningIndexedEvent "IssuePlanning/Initialized" "IssuePlanning/Blocked" (WatcherBlocked blockedReason)
+              :: IssuePlanningIndexedEvent IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedBlocked
+          )
+          "IssuePlanning/Blocked"
+          blockedPostCommitPlan
+          requestIdStable
+          (const True)
+      ]
+  pure (and results)
+ where
+  requestIdStable compiled =
+    compiled.workflowCompiledNextRequestId == RequestId 900
+      && all ((== Nothing) . appServerRequestId . WorkflowExecution.workflowPlannedAction) compiled.workflowCompiledActions
+
+workflowIssuePlanningIndexedSpecPreservesGraphValidation :: IO Bool
+workflowIssuePlanningIndexedSpecPreservesGraphValidation = do
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+      activePrefix = [IssuePlanningInitialized config, IssuePlanningTurnStarted threadId turnId]
+      activeIndexedPrefix = [issuePlanningIndexedInitializedEvent config, issuePlanningIndexedTurnStartedEvent threadId turnId]
+      invalidCases =
+        [ ( "duplicate ready issue"
+          , PlanningGraph [IssueNumber 15, IssueNumber 15] [] []
+          , "planning graph has duplicate ready issue #15"
+          )
+        , ( "duplicate blocked issue"
+          , PlanningGraph [] [blockedIssue 15, blockedIssue 15] []
+          , "planning graph has duplicate blocked issue #15"
+          )
+        , ( "duplicate dependency entry"
+          , PlanningGraph [] [] [IssueDependency (IssueNumber 15) [IssueNumber 16], IssueDependency (IssueNumber 15) [IssueNumber 17]]
+          , "planning graph has duplicate dependency entry for issue #15"
+          )
+        , ( "ready blocked overlap"
+          , PlanningGraph [IssueNumber 15] [blockedIssue 15] []
+          , "planning graph marks issue #15 as both ready and blocked"
+          )
+        , ( "dependency on ready"
+          , PlanningGraph [IssueNumber 15] [] [IssueDependency (IssueNumber 15) [IssueNumber 16]]
+          , "planning graph marks issue #15 ready while it still depends on #16"
+          )
+        , ( "out of scope"
+          , PlanningGraph [IssueNumber 99] [] []
+          , "planning graph references issue #99 outside configured scope"
+          )
+        ]
+  invalidResults <-
+    traverse
+      ( \(caseName, graph, reason) ->
+          issuePlanningIndexedSpecMatchesCompatibility
+            ("indexed workflow issue planning graph validation " <> caseName <> " matches compatibility")
+            activeState
+            activePrefix
+            activeIndexedPrefix
+            (ObservedPlanningGraphUpdated graph)
+            ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Blocked" (DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated graph))
+                :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+            )
+            (WatcherBlocked (BlockedReason reason))
+            ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Blocked" (WatcherBlocked (BlockedReason reason))
+                :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedBlocked
+            )
+            "IssuePlanning/Blocked"
+            blockedPostCommitPlan
+            (\compiled -> compiled.workflowCompiledNextRequestId == RequestId 900)
+            (const True)
+      )
+      invalidCases
+  successResult <-
+    issuePlanningIndexedSpecMatchesCompatibility
+      "indexed workflow issue planning graph scoped closure success matches compatibility"
+      activeState
+      activePrefix
+      activeIndexedPrefix
+      (ObservedPlanningGraphUpdated scopedClosureGraph)
+      ( IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated scopedClosureGraph))
+          :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
+      )
+      (IssuePlanningGraphUpdated scopedClosureGraph)
+      ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (IssuePlanningGraphUpdated scopedClosureGraph)
+          :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
+      )
+      "IssuePlanning/Initialized"
+      (effectTagPlan [RecordPlanningGraphTag, SleepUntilNextPollTag])
+      (\compiled -> compiled.workflowCompiledNextRequestId == RequestId 900)
+      (compatibilityWritesContainPlanningGraph scopedClosureGraph)
+  pure (and invalidResults && successResult)
+ where
+  blockedIssue issue =
+    BlockedPlanningIssue (IssueNumber issue) [] "blocked"
+  scopedClosureGraph =
+    PlanningGraph
+      [IssueNumber 15]
+      [BlockedPlanningIssue (IssueNumber 12) [IssueNumber 15, IssueNumber 16] "split work"]
+      [ IssueDependency (IssueNumber 12) [IssueNumber 15, IssueNumber 16]
+      , IssueDependency (IssueNumber 16) [IssueNumber 15]
+      ]
+
+workflowIssuePlanningIndexedSpecRejectsInvalidObservationsLikeCompatibility :: IO Bool
+workflowIssuePlanningIndexedSpecRejectsInvalidObservationsLikeCompatibility = do
+  let config = issuePlanningIndexedConfig
+      readyState = SomeWatcherState (PlanningReady config)
+      activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn")))
+      waitingState = SomeWatcherState (PlanningWaitingForReadyIssues config (PlanningGraph [IssueNumber 15] [] []))
+      request = IssueCreationRequest "split work" "Create the split." (Just (IssueNumber 12))
+      graph = PlanningGraph [IssueNumber 15] [] []
+  assert "indexed workflow issue planning rejects invalid observations like compatibility" $
+    and
+      [ invalid readyState (ObservedPlanningIssuesRequested (request :| [])) (IssuePlanningIndexedState readyState :: IssuePlanningIndexedState IssuePlanningIndexedInitialized) (IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested (request :| []))) :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedInitialized)
+      , invalid readyState (ObservedPlanningGraphUpdated graph) (IssuePlanningIndexedState readyState :: IssuePlanningIndexedState IssuePlanningIndexedInitialized) (IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated graph)) :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedInitialized)
+      , invalid readyState ObservedPlanningReadyIssuesFixed (IssuePlanningIndexedState readyState :: IssuePlanningIndexedState IssuePlanningIndexedInitialized) (IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed) :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedInitialized)
+      , invalid activeState ObservedPlanningScopeCompleted (IssuePlanningIndexedState activeState :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn) (IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/PlanMode" (DaemonIssuePlanningObservation ObservedPlanningScopeCompleted) :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedActiveTurn)
+      , invalid readyState (ObservedPlanningTurnRetryRequested (BlockedReason "retry")) (IssuePlanningIndexedState readyState :: IssuePlanningIndexedState IssuePlanningIndexedInitialized) (IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested (BlockedReason "retry"))) :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedInitialized)
+      , invalid readyState ObservedPlanningTurnCompleted (IssuePlanningIndexedState readyState :: IssuePlanningIndexedState IssuePlanningIndexedInitialized) (IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation ObservedPlanningTurnCompleted) :: IssuePlanningIndexedObservation IssuePlanningIndexedInitialized IssuePlanningIndexedInitialized)
+      , invalid activeState (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn-2")) (IssuePlanningIndexedState activeState :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn) (IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/PlanMode" (DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn-2"))) :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedActiveTurn)
+      , invalid waitingState (ObservedPlanningIssuesRequested (request :| [])) (IssuePlanningIndexedState waitingState :: IssuePlanningIndexedState IssuePlanningIndexedWaitingReadyIssues) (IssuePlanningIndexedObservation "IssuePlanning/Initialized" "IssuePlanning/Initialized" (DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested (request :| []))) :: IssuePlanningIndexedObservation IssuePlanningIndexedWaitingReadyIssues IssuePlanningIndexedWaitingReadyIssues)
+      ]
+ where
+  invalid state observation indexedState indexedObservation =
+    case
+      ( workflowObserve @MoifoldSpec state (DaemonIssuePlanningObservation observation)
+      , IndexedWorkflow.indexedWorkflowObserve @IssuePlanningIndexedSpec indexedState indexedObservation
+      )
+      of
+      (Left compatibilityFailure, Left indexedFailure) -> compatibilityFailure == indexedFailure
+      _ -> False
+
+issuePlanningIndexedSpecMatchesCompatibility
+  :: forall (source :: Type) (target :: Type).
+     String
+  -> SomeWatcherState
+  -> [WatcherEvent]
+  -> [IndexedWorkflow.SomeIndexedWorkflowEvent IssuePlanningIndexedSpec]
+  -> IssuePlanningObservation
+  -> IssuePlanningIndexedObservation source target
+  -> WatcherEvent
+  -> IssuePlanningIndexedEvent source target
+  -> Text
+  -> (PlannedTransition MoifoldSpec -> Bool)
+  -> (WorkflowExecution.WorkflowCompiledEffectPlan -> Bool)
+  -> ([CompatibilityWrite] -> Bool)
+  -> IO Bool
+issuePlanningIndexedSpecMatchesCompatibility title state replayPrefix indexedReplayPrefix facadeObservation indexedObservation expectedEvent indexedEvent expectedTargetLabel planCheck compiledCheck writeCheck =
+  assert title $
+    case
+      ( issuePlanningObserve state facadeObservation
+      , workflowObserve @MoifoldSpec state observation
+      , workflowPlanObservation @MoifoldSpec state observation
+      , IndexedWorkflow.indexedWorkflowObserve @IssuePlanningIndexedSpec indexedState indexedObservation
+      , IndexedWorkflow.indexedWorkflowPlanObservation @IssuePlanningIndexedSpec indexedState indexedObservation
+      , workflowApplyEvent @MoifoldSpec state expectedEvent
+      , IndexedWorkflow.indexedWorkflowApplyEvent @IssuePlanningIndexedSpec indexedState indexedEvent
+      , workflowReplayEvents @MoifoldSpec (replayPrefix <> [expectedEvent])
+      , IndexedWorkflow.indexedWorkflowReplayEvents @IssuePlanningIndexedSpec
+          (indexedReplayPrefix <> [IndexedWorkflow.SomeIndexedWorkflowEvent indexedEvent])
+      )
+      of
+      ( Right facadeObserved
+        , Right compatibilityObserved
+        , Right compatibilityPlan
+        , Right indexedObserved
+        , Right indexedPlan
+        , Right (appliedState, appliedEffects)
+        , Right (IssuePlanningIndexedState indexedAppliedState, IssuePlanningIndexedEffectPlan indexedAppliedEffects)
+        , Right compatibilityReplay
+        , Right indexedReplay
+        ) ->
+          let IssuePlanningIndexedState indexedNextState =
+                IndexedWorkflow.indexedWorkflowObservedState @IssuePlanningIndexedSpec indexedObserved
+              indexedReplayResultValue = issuePlanningIndexedReplayResult indexedReplay
+              wrappedTransition = IndexedWorkflow.SomeIndexedPlannedTransition indexedPlan
+              projectedPlan = issuePlanningIndexedTransitionToCompatibility indexedPlan
+              fullCompatibilityPlan = compatibilityPlan.plannedPreCommitEffects <> compatibilityPlan.plannedPostCommitEffects
+              indexedFullPlan =
+                IssuePlanningIndexedEffectPlan fullCompatibilityPlan
+                  :: IssuePlanningIndexedEffectPlan source target
+              runtimeConfig = effectRuntimeConfig issuePlanningIndexedConfig.plannerRepo "/tmp/work" 900
+              workflowCompiled = WorkflowExecution.compileWorkflowEffectPlanWithMetadata runtimeConfig fullCompatibilityPlan
+              legacyCompiled = compileEffectPlan runtimeConfig fullCompatibilityPlan
+              compatibilityWrites = compatibilityStateWrites "/tmp/state" compatibilityObserved.observedState
+              indexedWrites = compatibilityStateWrites "/tmp/state" indexedNextState
+           in facadeObserved.issuePlanningTickEvent == compatibilityObserved.observedEvent
+                && facadeObserved.issuePlanningTickEffects == compatibilityObserved.observedEffects
+                && sameWatcherStateShape facadeObserved.issuePlanningTickState compatibilityObserved.observedState
+                && compatibilityObserved.observedEvent == expectedEvent
+                && projectedPlan.plannedEvent == compatibilityPlan.plannedEvent
+                && projectedPlan.plannedEvent == expectedEvent
+                && IndexedWorkflow.someIndexedWorkflowTransitionSourceLabel @IssuePlanningIndexedSpec wrappedTransition == workflowStateLabel @MoifoldSpec state
+                && IndexedWorkflow.someIndexedWorkflowTransitionTargetLabel @IssuePlanningIndexedSpec wrappedTransition == expectedTargetLabel
+                && workflowStateLabel @MoifoldSpec indexedNextState == workflowStateLabel @MoifoldSpec compatibilityObserved.observedState
+                && sameWatcherStateShape compatibilityObserved.observedState indexedNextState
+                && sameWatcherStateShape compatibilityObserved.observedState appliedState
+                && sameWatcherStateShape appliedState indexedAppliedState
+                && projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+                && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+                && fullCompatibilityPlan == compatibilityObserved.observedEffects
+                && appliedEffects == fullCompatibilityPlan
+                && indexedAppliedEffects == fullCompatibilityPlan
+                && planCheck compatibilityPlan
+                && IndexedWorkflow.indexedWorkflowPlannedTransitionPreCommitEffectLabels @IssuePlanningIndexedSpec indexedPlan
+                  == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPreCommitEffects
+                && IndexedWorkflow.indexedWorkflowPlannedTransitionPostCommitEffectLabels @IssuePlanningIndexedSpec indexedPlan
+                  == fmap (workflowEffectLabel @MoifoldSpec) compatibilityPlan.plannedPostCommitEffects
+                && workflowValidateEffects @MoifoldSpec state fullCompatibilityPlan
+                  == IndexedWorkflow.indexedWorkflowValidateEffects @IssuePlanningIndexedSpec indexedState indexedFullPlan
+                && all
+                  ( \effect ->
+                      workflowEffectAllowed @MoifoldSpec state effect
+                        == IndexedWorkflow.indexedWorkflowEffectAllowed @IssuePlanningIndexedSpec indexedState (IssuePlanningIndexedEffect effect)
+                  )
+                  fullCompatibilityPlan
+                && fmap WorkflowExecution.workflowPlannedAction workflowCompiled.workflowCompiledActions == legacyCompiled.compiledActions
+                && WorkflowExecution.dryRunWorkflowCompiledEffectPlan workflowCompiled == dryRunCompiledEffectPlan legacyCompiled
+                && compiledCheck workflowCompiled
+                && sameWatcherStateShape compatibilityReplay.replayState indexedReplayResultValue.replayState
+                && workflowStateLabel @MoifoldSpec compatibilityReplay.replayState == workflowStateLabel @MoifoldSpec indexedReplayResultValue.replayState
+                && compatibilityReplay.replayEffects == indexedReplayResultValue.replayEffects
+                && compatibilityWrites == indexedWrites
+                && writeCheck indexedWrites
+      _ -> False
+ where
+  indexedState =
+    IssuePlanningIndexedState state
+      :: IssuePlanningIndexedState source
+  observation = DaemonIssuePlanningObservation facadeObservation
+
+issuePlanningIndexedReplayResult :: IndexedWorkflow.SomeIndexedWorkflowReplayResult IssuePlanningIndexedSpec -> EventReplayResult
+issuePlanningIndexedReplayResult (IndexedWorkflow.SomeIndexedWorkflowReplayResult (IssuePlanningIndexedReplayResult replay)) =
+  replay
+
+issuePlanningIndexedConfig :: PlannerConfig
+issuePlanningIndexedConfig =
+  PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 4) [IssueNumber 12]
+
+issuePlanningIndexedInitializedEvent :: PlannerConfig -> IndexedWorkflow.SomeIndexedWorkflowEvent IssuePlanningIndexedSpec
+issuePlanningIndexedInitializedEvent config =
+  IndexedWorkflow.SomeIndexedWorkflowEvent
+    ( IssuePlanningIndexedEvent "IssuePlanning/Uninitialized" "IssuePlanning/Initialized" (IssuePlanningInitialized config)
+        :: IssuePlanningIndexedEvent IssuePlanningIndexedInitialized IssuePlanningIndexedInitialized
+    )
+
+issuePlanningIndexedTurnStartedEvent :: ThreadId -> TurnId -> IndexedWorkflow.SomeIndexedWorkflowEvent IssuePlanningIndexedSpec
+issuePlanningIndexedTurnStartedEvent threadId turnId =
+  IndexedWorkflow.SomeIndexedWorkflowEvent
+    ( IssuePlanningIndexedEvent "IssuePlanning/Initialized" "IssuePlanning/PlanMode" (IssuePlanningTurnStarted threadId turnId)
+        :: IssuePlanningIndexedEvent IssuePlanningIndexedInitialized IssuePlanningIndexedActiveTurn
+    )
+
+issuePlanningIndexedGraphUpdatedEvent :: PlanningGraph -> IndexedWorkflow.SomeIndexedWorkflowEvent IssuePlanningIndexedSpec
+issuePlanningIndexedGraphUpdatedEvent graph =
+  IndexedWorkflow.SomeIndexedWorkflowEvent
+    ( IssuePlanningIndexedEvent "IssuePlanning/PlanMode" "IssuePlanning/Initialized" (IssuePlanningGraphUpdated graph)
+        :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
+    )
+
+compatibilityWritesContainPlanningGraph :: PlanningGraph -> [CompatibilityWrite] -> Bool
+compatibilityWritesContainPlanningGraph graph writes =
+  CompatibilityWrite "/tmp/state/planning-state.json" (toJSON graph) `elem` writes
 
 data PrReviewMergeabilityGoldenSlice = PrReviewMergeabilityGoldenSlice
   { prReviewMergeabilityGoldenPrefix :: [WatcherEvent]
