@@ -64,7 +64,7 @@ issue/PR workflows behaviorally unchanged.
 
 ## Milestones
 
-### 1. [pending] Consolidate the WorkflowSpec Contract
+### 1. [in-progress] Consolidate the WorkflowSpec Contract
 
 Milestone id: `milestone-001-workflow-spec-contract`
 Depends on: none
@@ -78,10 +78,14 @@ moifold and DocsMigration users.
 Parallel lane: default serial
 Coordination notes: This milestone should happen before major DSL or external
 package work because it defines the contract those layers consume.
+Progress: round 025 completed the initial spec inventory and law baseline in
+`d07df4c` without changing runtime behavior, event codecs, golden fixtures,
+public API shape, or roadmap coordination semantics.
 
 Candidate directions:
 
 - Direction id: `direction-001-spec-inventory-and-laws`
+  Status: complete via round 025, merged as `d07df4c`.
   Summary: inventory current spec users, law tests, and compatibility adapters.
   Why it matters now: the previous roadmap proved indexed routing but left two
   spec surfaces that can drift.
@@ -97,7 +101,8 @@ Candidate directions:
   that reduces duplication between `WorkflowSpec` and `IndexedWorkflowSpec`.
   Why it matters now: future package extraction needs one defensible kernel
   vocabulary.
-  Preconditions: inventory/law gaps known.
+  Preconditions: round 025 inventory/law baseline merged; remaining API gaps
+  should be addressed additively against that baseline.
   Parallel hints: serial; touches core API and moifold adapters.
   Boundary notes: keep existing modules available as compatibility imports.
   Extraction notes: prefer an additive bridge and migration tests over a
