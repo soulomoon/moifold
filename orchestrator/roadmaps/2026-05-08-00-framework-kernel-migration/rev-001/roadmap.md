@@ -80,7 +80,11 @@ Coordination notes: This milestone should happen before major DSL or external
 package work because it defines the contract those layers consume.
 Progress: round 025 completed the initial spec inventory and law baseline in
 `d07df4c` without changing runtime behavior, event codecs, golden fixtures,
-public API shape, or roadmap coordination semantics.
+public API shape, or roadmap coordination semantics. Round 026 completed the
+first additive indexed compatibility bridge in `a4962d7`, migrating
+DocsMigration and the representative PR-review checking adapter through the
+bridge with focused parity/source-scan coverage and no event, fixture, daemon,
+runtime, roadmap sequencing, or compatibility facade changes.
 
 Candidate directions:
 
@@ -97,6 +101,7 @@ Candidate directions:
   if API gaps are not already obvious.
 
 - Direction id: `direction-002-indexed-contract-unification`
+  Status: complete via round 026, merged as `a4962d7`.
   Summary: introduce the next indexed contract shape or compatibility bridge
   that reduces duplication between `WorkflowSpec` and `IndexedWorkflowSpec`.
   Why it matters now: future package extraction needs one defensible kernel
@@ -113,7 +118,9 @@ Candidate directions:
   determinism, and permission soundness across at least one moifold workflow and
   DocsMigration.
   Why it matters now: the framework docs name these as spec obligations.
-  Preconditions: current spec law inventory exists.
+  Preconditions: current spec law inventory exists; the additive indexed bridge
+  from round 026 is available for any helper/API assertions that build on the
+  unified spec vocabulary.
   Parallel hints: can run after additive API shape is present.
   Boundary notes: tests should catch semantic drift without changing runtime
   behavior.
