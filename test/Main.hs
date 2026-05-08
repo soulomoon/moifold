@@ -6984,6 +6984,7 @@ workflowFacadeExtractionTests = do
       , workflowDocsMigrationAgentRoleClassifiesCompleteOutput
       , workflowDocsMigrationUsesCoreExecutionContracts
       , workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults
+      , workflowDaemonCoreProjectsObservedFailureBoundary
       , workflowTransactionDetailedFailuresRecordCommitBoundary
       , workflowExecutionMetadataCoversCurrentEffects
       , workflowExecutionCapabilityMetadataCoversCurrentEffects
@@ -7395,7 +7396,11 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         , "moifold:agent-workflow-github"
         ]
       forbiddenConcreteTypes =
-        [ "SomeWatcherState"
+        [ "ChildDaemon"
+        , "Healthcheck"
+        , "EventLogRepair"
+        , "WatcherRuntimeStatus"
+        , "SomeWatcherState"
         , "WatcherState"
         , "WatcherEvent"
         , "DaemonObservation"
@@ -7413,15 +7418,37 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
         , "DaemonTickResult"
         , "runDaemonTickWithEvents"
         , "runObservedDaemonTickWithEvents"
+        , "DaemonObservedTickResult"
+        , "DaemonObservedTransactionFailure"
+        , "CompatibilityWrite"
+        , "PidFile"
+        , "RuntimeOwner"
+        , "RuntimeLease"
+        , "FilePath"
+        , "IO"
         , "ActionExecutionReport"
         , "CommandReport"
         , "PlannedAction"
+        ]
+      forbiddenConcreteNeedles =
+        [ "runtime-owner"
+        , "pid-file"
+        , "pidFile"
+        , ".lock"
+        , "readFile"
+        , "writeFile"
+        , "createDirectory"
+        , "System.Directory"
+        , "System.FilePath"
+        , "System.Process"
         ]
       coreSourceTokens = sourceIdentifierTokens coreSources
       forbiddenPackageMatches =
         filter (`Text.isInfixOf` coreSection) forbiddenPackageNeedles
       forbiddenConcreteTokenMatches =
         filter (`elem` coreSourceTokens) forbiddenConcreteTypes
+      forbiddenConcreteNeedleMatches =
+        filter (`Text.isInfixOf` coreSources) forbiddenConcreteNeedles
       coreDependencyPackages = cabalBuildDependsPackages coreSection
       unapprovedCoreDependencyMatches =
         filter (`notElem` ["base", "bytestring", "text"]) coreDependencyPackages
@@ -7460,6 +7487,10 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
     assertNoTextMatches
       "workflow core source excludes concrete lifecycle action and event tokens"
       forbiddenConcreteTokenMatches
+  ownershipNeedleOk <-
+    assertNoTextMatches
+      "workflow core source excludes concrete daemon ownership text"
+      forbiddenConcreteNeedleMatches
   exposedOk <-
     assert
       "workflow core sublibrary exposes generic core modules"
@@ -7472,7 +7503,7 @@ workflowCoreCabalSublibraryKeepsPackageBoundary = do
     assert
       "main moifold library depends on workflow core"
       moifoldDependsOnCore
-  pure (packageOk && approvedDependencyOk && importOk && tokenOk && exposedOk && coreDepsOk && mainDependsOk)
+  pure (packageOk && approvedDependencyOk && importOk && tokenOk && ownershipNeedleOk && exposedOk && coreDepsOk && mainDependsOk)
 
 coreBoundaryForbiddenImportModules :: [Text]
 coreBoundaryForbiddenImportModules =
@@ -7503,6 +7534,8 @@ coreBoundaryForbiddenImportModules =
   , "CodexWatcher.Daemon"
   , "CodexWatcher.DaemonLoop"
   , "CodexWatcher.ChildDaemon"
+  , "CodexWatcher.Healthcheck"
+  , "CodexWatcher.EventLogRepair"
   , "CodexWatcher.RunnerGuard"
   , "CodexWatcher.WatcherRuntimeStatus"
   , "CodexWatcher.Supervisor"
@@ -15468,6 +15501,8 @@ workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults = do
                     && WorkflowDaemon.workflowObservedDaemonCommittedEvents coreTick == []
                     && WorkflowDaemon.workflowObservedDaemonCommittedEvents coreTick == tick.daemonObservedCommittedEvents
                     && WorkflowDaemon.workflowObservedDaemonActionReports coreTick == tick.daemonObservedActionReports
+                    && WorkflowDaemon.workflowObservedDaemonPreCommitReports coreTick == WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit
+                    && WorkflowDaemon.workflowObservedDaemonPostCommitReports coreTick == WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit
                     && WorkflowEventLog.workflowAuditCommittedEventLabel (WorkflowDaemon.workflowObservedDaemonAudit coreTick) == Nothing
             Left _ -> False
       , assert "workflow daemon core projects docs-migration execute tick result" $
@@ -15477,10 +15512,81 @@ workflowDaemonCoreProjectsMoifoldAndDocsMigrationResults = do
                in WorkflowDaemon.workflowObservedDaemonEvent coreTick == docsExpectedEvent
                     && WorkflowDaemon.workflowObservedDaemonCommittedEvents coreTick == [docsExpectedEvent]
                     && WorkflowDaemon.workflowObservedDaemonActionReports coreTick == tick.docsMigrationDaemonActionReports
+                    && WorkflowDaemon.workflowObservedDaemonPreCommitReports coreTick == WorkflowEventLog.workflowAuditPreCommitReports tick.docsMigrationDaemonAudit
+                    && WorkflowDaemon.workflowObservedDaemonPostCommitReports coreTick == WorkflowEventLog.workflowAuditPostCommitReports tick.docsMigrationDaemonAudit
                     && WorkflowEventLog.workflowAuditCommittedEventLabel (WorkflowDaemon.workflowObservedDaemonAudit coreTick) == Just "docs-migration-draft-produced"
             Left _ -> False
       ]
   pure (and results)
+
+workflowDaemonCoreProjectsObservedFailureBoundary :: IO Bool
+workflowDaemonCoreProjectsObservedFailureBoundary = do
+  preCommitFailure <-
+    WorkflowTransaction.runWorkflowObservedExecuteTransactionDetailed
+      @DocsMigration.DocsMigrationSpec
+      (docsMigrationFailureHooks FailPreCommit)
+      events
+      observation
+  postCommitCallbackFailure <-
+    WorkflowTransaction.runWorkflowObservedExecuteTransactionDetailed
+      @DocsMigration.DocsMigrationSpec
+      (docsMigrationFailureHooks FailPostCommitCallback)
+      events
+      observation
+  results <-
+    sequence
+      [ assert "workflow daemon core projects retryable pre-commit failure" $
+          case preCommitFailure of
+            Left failure ->
+              let coreFailure = WorkflowDaemon.workflowObservedDaemonTickFailure failure
+               in WorkflowDaemon.workflowObservedDaemonFailureStage coreFailure == WorkflowTransaction.WorkflowTransactionPreCommitActionFailure
+                    && WorkflowDaemon.workflowObservedDaemonFailureCommittedEvents coreFailure == []
+                    && WorkflowDaemon.workflowObservedDaemonFailurePreCommitReports coreFailure == []
+                    && WorkflowDaemon.workflowObservedDaemonFailurePostCommitReports coreFailure == []
+                    && WorkflowDaemon.workflowObservedDaemonFailureReason coreFailure == "pre failed"
+                    && failureAuditMatches coreFailure Nothing WorkflowEventLog.WorkflowDaemonRetry
+            Right _ -> False
+      , assert "workflow daemon core projects committed stop failure" $
+          case postCommitCallbackFailure of
+            Left failure ->
+              let coreFailure = WorkflowDaemon.workflowObservedDaemonTickFailure failure
+               in WorkflowDaemon.workflowObservedDaemonFailureStage coreFailure == WorkflowTransaction.WorkflowTransactionPostCommitCallbackFailure
+                    && WorkflowDaemon.workflowObservedDaemonFailureCommittedEvents coreFailure == [expectedEvent]
+                    && WorkflowDaemon.workflowObservedDaemonFailureFinalState coreFailure == Just expectedState
+                    && WorkflowDaemon.workflowObservedDaemonFailurePreCommitReports coreFailure == ["pre-action"]
+                    && WorkflowDaemon.workflowObservedDaemonFailurePostCommitReports coreFailure == []
+                    && WorkflowDaemon.workflowObservedDaemonFailureReason coreFailure == "after commit failed"
+                    && failureAuditMatches coreFailure (Just "docs-migration-draft-produced") WorkflowEventLog.WorkflowDaemonStop
+            Right _ -> False
+      ]
+  pure (and results)
+ where
+  config =
+    DocsMigration.DocsMigrationConfig
+      { DocsMigration.docsMigrationSource = "docs/source.md"
+      , DocsMigration.docsMigrationTarget = "docs/target.md"
+      , DocsMigration.docsMigrationGoal = "migrate framework notes"
+      }
+  events =
+    [ DocsMigration.DocsMigrationInitialized config
+    , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+    ]
+  output = DocsMigration.DocsMigrationOutput "draft markdown" "draft ready"
+  observation =
+    DocsMigration.DocsMigrationAgentReturned
+      (WorkflowAgent.ClassifiedAgentOutput WorkflowAgent.AgentComplete output)
+  expectedEvent =
+    DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+  expectedState =
+    DocsMigration.DocsMigrationDraftReady config "draft markdown"
+
+  failureAuditMatches coreFailure expectedCommitted expectedRecommendation =
+    case WorkflowDaemon.workflowObservedDaemonFailureAudit coreFailure of
+      Just audit ->
+        WorkflowEventLog.workflowAuditCommittedEventLabel audit == expectedCommitted
+          && WorkflowEventLog.workflowAuditFailureClassification audit == Just (WorkflowDaemon.workflowObservedDaemonFailureReason coreFailure)
+          && WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == expectedRecommendation
+      Nothing -> False
 
 data WorkflowTransactionFailureMode
   = NoTransactionFailure

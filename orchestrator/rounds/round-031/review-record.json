@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-003-core-runtime-contracts",
+  "direction_id": "direction-007-daemon-core-boundary",
+  "extracted_item_id": "item-031-daemon-core-boundary",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, git diff --check, git diff --cached --check, direct core ownership scans, and cabal boundary inspection all passed. The new daemon failure projection is generic, while concrete daemon wrappers, WatcherEvent, SomeWatcherState, compatibility writes, runtime/filesystem/process behavior, healthcheck, repair, and child-daemon ownership remain in moifold."
+}

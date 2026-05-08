@@ -808,16 +808,18 @@ daemonFailureFromObservedTransactionFailure
   :: WorkflowObservedTransactionFailure MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport DaemonFailure
   -> DaemonFailure
 daemonFailureFromObservedTransactionFailure failure =
+  let coreFailure = WorkflowDaemon.workflowObservedDaemonTickFailure failure
+   in
   DaemonObservedTransactionFailed
     DaemonObservedTransactionFailure
-      { daemonObservedTransactionFailureStage = failure.workflowTransactionFailureStage
-      , daemonObservedTransactionFailureReason = failure.workflowTransactionFailureReason
-      , daemonObservedTransactionFailurePlannedEvent = plannedEvent <$> failure.workflowTransactionFailurePlanned
-      , daemonObservedTransactionFailureCommittedEvents = failure.workflowTransactionFailureCommittedEvents
-      , daemonObservedTransactionFailureCompiledEffects = failure.workflowTransactionFailureCompiledEffects
-      , daemonObservedTransactionFailurePreCommitReports = failure.workflowTransactionFailurePreCommitReports
-      , daemonObservedTransactionFailurePostCommitReports = failure.workflowTransactionFailurePostCommitReports
-      , daemonObservedTransactionFailureAudit = failure.workflowTransactionFailureAudit
+      { daemonObservedTransactionFailureStage = coreFailure.workflowObservedDaemonFailureStage
+      , daemonObservedTransactionFailureReason = coreFailure.workflowObservedDaemonFailureReason
+      , daemonObservedTransactionFailurePlannedEvent = plannedEvent <$> coreFailure.workflowObservedDaemonFailurePlanned
+      , daemonObservedTransactionFailureCommittedEvents = coreFailure.workflowObservedDaemonFailureCommittedEvents
+      , daemonObservedTransactionFailureCompiledEffects = coreFailure.workflowObservedDaemonFailureCompiledEffects
+      , daemonObservedTransactionFailurePreCommitReports = coreFailure.workflowObservedDaemonFailurePreCommitReports
+      , daemonObservedTransactionFailurePostCommitReports = coreFailure.workflowObservedDaemonFailurePostCommitReports
+      , daemonObservedTransactionFailureAudit = coreFailure.workflowObservedDaemonFailureAudit
       }
 
 data PreMergeGateResult
