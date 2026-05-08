@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-05-07-00-workflow-kernel-indexing",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-07-00-workflow-kernel-indexing/rev-002",
+  "roadmap_item_id": "item-012-indexed-next-domain-plan",
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only round: baseline build/test and diff checks passed; rev-003 roadmap, verification, and retry artifacts exist; roadmap id is preserved; IssuePlanning is selected; IssueImplement is deferred; item 012 is done; items 013-017 are ordered non-parallel-safe slices with concrete parity surfaces; no production source, tests, golden fixtures, rev-002 files, or implementation-owned state changes were made."
+}
