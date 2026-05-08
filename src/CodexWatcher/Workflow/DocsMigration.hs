@@ -41,6 +41,7 @@ module CodexWatcher.Workflow.DocsMigration
   , docsMigrationEventCodecContract
   , docsMigrationEventLogFixture
   , docsMigrationEventLogFixtureContract
+  , docsMigrationDraftProducedDslTransition
   , dryRunDocsMigrationCompiledEffectPlan
   , executeDocsMigrationCompiledEffectPlan
   , runDocsMigrationObservedDryRun
@@ -66,6 +67,7 @@ import CodexWatcher.Workflow.Codec
   , WorkflowSchemaVersion (..)
   )
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
+import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.EventLog
   ( EventLogFixtureContract (..)
   , WorkflowReplaySummary (..)
@@ -837,12 +839,11 @@ initialDocsMigrationEvent = \case
 applyDocsMigrationEvent :: DocsMigrationState -> DocsMigrationEvent -> Either Text (DocsMigrationState, [DocsMigrationEffect])
 applyDocsMigrationEvent (DocsMigrationReady config) (DocsMigrationTurnStarted threadId turnId) =
   Right (DocsMigrationTurnActive config (TurnRef threadId turnId), [])
-applyDocsMigrationEvent (DocsMigrationTurnActive config _turn) (DocsMigrationDraftProduced draft _summary) =
+applyDocsMigrationEvent (DocsMigrationTurnActive config _turn) (DocsMigrationDraftProduced draft summary) = do
+  transition <- docsMigrationDraftProducedDslTransition config draft summary
   Right
-    ( DocsMigrationDraftReady config draft
-    , [ WriteDocsMigrationDraft config.docsMigrationTarget draft
-      , RunDocsMigrationValidation config.docsMigrationTarget
-      ]
+    ( WorkflowDSL.transitionValue transition
+    , WorkflowDSL.transitionEffects transition
     )
 applyDocsMigrationEvent (DocsMigrationDraftReady config _draft) (DocsMigrationValidationPassed summary) =
   Right (DocsMigrationValidated config summary, [StopDocsMigrationDaemon])
@@ -853,6 +854,22 @@ applyDocsMigrationEvent state (DocsMigrationWorkflowBlocked reason)
   Right (DocsMigrationBlocked reason, [StopDocsMigrationDaemon])
 applyDocsMigrationEvent state event =
   Left ("docs migration event " <> docsMigrationEventLabel event <> " is invalid in " <> docsMigrationStateLabel state)
+
+docsMigrationDraftProducedDslTransition
+  :: DocsMigrationConfig
+  -> Text
+  -> Text
+  -> Either Text (WorkflowDSL.Transition DocsMigrationSpec DocsMigrationIndexedWorkflow DocsMigrationIndexedTurnActive DocsMigrationIndexedDraftReady DocsMigrationState)
+docsMigrationDraftProducedDslTransition config draft summary =
+  WorkflowDSL.advance
+    (DocsMigrationDraftProduced draft summary)
+    ( do
+        WorkflowDSL.emit
+          [ WriteDocsMigrationDraft config.docsMigrationTarget draft
+          , RunDocsMigrationValidation config.docsMigrationTarget
+          ]
+        pure (DocsMigrationDraftReady config draft)
+    )
 
 observeDocsMigration :: DocsMigrationState -> DocsMigrationObservation -> Either Text DocsMigrationTick
 observeDocsMigration state@(DocsMigrationTurnActive _config _turn) (DocsMigrationAgentReturned classified) =

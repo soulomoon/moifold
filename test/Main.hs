@@ -106,6 +106,7 @@ import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , projectIssuePlanningIssuesRequestedObservation
   , projectIssuePlanningReadyIssuesFixedObservation
   , projectIssuePlanningScopeCompletedObservation
+  , projectIssuePlanningTurnCompletedDslTransition
   , projectIssuePlanningTurnCompletedObservation
   , projectIssuePlanningTurnRetryObservation
   , projectIssuePlanningTurnStartedObservation
@@ -6969,6 +6970,8 @@ workflowFacadeExtractionTests = do
       , workflowDslTransitionLowersToPlannedTransition
       , workflowDslMoifoldProjectionParity
       , workflowDslDocsMigrationProjectionParity
+      , workflowDslDocsMigrationDraftProducedPortParity
+      , workflowDslIssuePlanningTurnCompletedPortParity
       , workflowDocsMigrationSpecProvesSecondWorkflow
       , workflowDocsMigrationPermissionAndPartitionContracts
       , workflowDocsMigrationEventCodecFixtureContract
@@ -15058,6 +15061,144 @@ workflowDslDocsMigrationProjectionParity = do
           && WorkflowDSL.transitionPostCommitEffects transition == effects
           && WorkflowDSL.transitionEffects transition == expected.plannedPreCommitEffects <> expected.plannedPostCommitEffects
       Left _ -> False
+
+workflowDslDocsMigrationDraftProducedPortParity :: IO Bool
+workflowDslDocsMigrationDraftProducedPortParity = do
+  let config =
+        DocsMigration.DocsMigrationConfig
+          { DocsMigration.docsMigrationSource = "docs/source.md"
+          , DocsMigration.docsMigrationTarget = "docs/target.md"
+          , DocsMigration.docsMigrationGoal = "migrate framework notes"
+          }
+      activeState =
+        DocsMigration.DocsMigrationTurnActive
+          config
+          (WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn"))
+      event = DocsMigration.DocsMigrationDraftProduced "draft markdown" "draft ready"
+      expectedState = DocsMigration.DocsMigrationDraftReady config "draft markdown"
+      expectedEffects =
+        [ DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidation "docs/target.md"
+        ]
+      expectedActions =
+        [ DocsMigration.WriteDocsMigrationDraftAction "docs/target.md" "draft markdown"
+        , DocsMigration.RunDocsMigrationValidationAction "docs/target.md"
+        ]
+      expectedPlan = workflowPlanTransition @DocsMigration.DocsMigrationSpec event expectedEffects
+      observation =
+        DocsMigration.DocsMigrationAgentReturned
+          ( WorkflowAgent.ClassifiedAgentOutput
+              WorkflowAgent.AgentComplete
+              (DocsMigration.DocsMigrationOutput "draft markdown" "draft ready")
+          )
+      compiled = DocsMigration.compileDocsMigrationEffectPlan (expectedPlan.plannedPreCommitEffects <> expectedPlan.plannedPostCommitEffects)
+      reports = DocsMigration.dryRunDocsMigrationCompiledEffectPlan compiled
+      transitionResult = DocsMigration.docsMigrationDraftProducedDslTransition config "draft markdown" "draft ready"
+      appliedResult = workflowApplyEvent @DocsMigration.DocsMigrationSpec activeState event
+      observedResult = workflowObserve @DocsMigration.DocsMigrationSpec activeState observation
+      replayResult =
+        workflowReplayEvents
+          @DocsMigration.DocsMigrationSpec
+          [ DocsMigration.DocsMigrationInitialized config
+          , DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
+          , event
+          ]
+  assert "workflow DSL DocsMigration draft-produced port preserves transition, replay, permission, and dry-run parity" $
+    case (transitionResult, appliedResult, observedResult, replayResult) of
+      (Right transition, Right (appliedState, appliedEffects), Right observed, Right replay) ->
+        let planned = WorkflowDSL.transitionPlannedTransition transition
+         in WorkflowDSL.transitionEvent transition == event
+              && WorkflowDSL.transitionValue transition == expectedState
+              && WorkflowDSL.transitionPreCommitEffects transition == []
+              && WorkflowDSL.transitionPostCommitEffects transition == expectedEffects
+              && WorkflowDSL.transitionEffects transition == expectedEffects
+              && planned.plannedEvent == expectedPlan.plannedEvent
+              && planned.plannedPreCommitEffects == expectedPlan.plannedPreCommitEffects
+              && planned.plannedPostCommitEffects == expectedPlan.plannedPostCommitEffects
+              && appliedState == expectedState
+              && appliedEffects == expectedEffects
+              && observed.docsMigrationTickEvent == event
+              && observed.docsMigrationTickState == expectedState
+              && observed.docsMigrationTickEffects == expectedEffects
+              && replay.docsMigrationReplayState == expectedState
+              && last replay.docsMigrationReplayEffects == expectedEffects
+              && workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState expectedEffects == Right ()
+              && case workflowEffectAllowed @DocsMigration.DocsMigrationSpec (DocsMigration.DocsMigrationReady config) (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown") of
+                Left reason -> "ready" `Text.isInfixOf` reason
+                Right () -> False
+              && fmap DocsMigration.docsMigrationActionReportAction reports == expectedActions
+              && all ((== DryRunActions) . DocsMigration.docsMigrationActionReportMode) reports
+              && not (any DocsMigration.docsMigrationActionReportExecuted reports)
+      _ -> False
+
+workflowDslIssuePlanningTurnCompletedPortParity :: IO Bool
+workflowDslIssuePlanningTurnCompletedPortParity = do
+  let config = issuePlanningIndexedConfig
+      threadId = ThreadId "planner-thread"
+      turnId = TurnId "planner-turn"
+      activeState = SomeWatcherState (PlanningTurnActive config (ActiveTurn threadId turnId))
+      observation = DaemonIssuePlanningObservation ObservedPlanningTurnCompleted
+      expectedEvent = IssuePlanningTurnCompleted
+      expectedEffects = [SomeEffect StopDaemon]
+      runtimeConfig = effectRuntimeConfig config.plannerRepo "/tmp/work" 1060
+      expectedCompiled = compileEffectPlan runtimeConfig expectedEffects
+      expectedReports = dryRunCompiledEffectPlan expectedCompiled
+      indexedState =
+        IssuePlanningIndexedState activeState
+          :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
+      indexedObservation =
+        IssuePlanningIndexedObservation "IssuePlanning/PlanMode" "IssuePlanning/Complete" observation
+          :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedComplete
+      indexedPlanResult =
+        IndexedWorkflow.indexedWorkflowPlanObservation
+          @IssuePlanningIndexedSpec
+          indexedState
+          indexedObservation
+      compatibilityPlanResult = workflowPlanObservation @MoifoldSpec activeState observation
+      compatibilityObserveResult = workflowObserve @MoifoldSpec activeState observation
+      dslProjectionResult = projectIssuePlanningTurnCompletedDslTransition activeState
+      publicProjectionResult = projectIssuePlanningTurnCompletedObservation activeState
+      replayResult =
+        workflowReplayEvents
+          @MoifoldSpec
+          [ IssuePlanningInitialized config
+          , IssuePlanningTurnStarted threadId turnId
+          , expectedEvent
+          ]
+  assert "workflow DSL issue-planning turn-completed port preserves projection, replay, permission, action, and dry-run parity" $
+    case (indexedPlanResult, compatibilityPlanResult, compatibilityObserveResult, dslProjectionResult, publicProjectionResult, replayResult) of
+      (Right indexedPlan, Right compatibilityPlan, Right observed, Right dslProjection, Right publicProjection, Right replay) ->
+        let indexedCompatibilityPlan = issuePlanningIndexedTransitionToCompatibility indexedPlan
+            dslPlan = dslProjection.issuePlanningIndexedProjectionPlanned
+            publicPlan = publicProjection.issuePlanningIndexedProjectionPlanned
+            compiled =
+              WorkflowExecution.compileWorkflowEffectPlanWithMetadata
+                runtimeConfig
+                dslProjection.issuePlanningIndexedProjectionEffectPlan
+         in publicPlan.plannedEvent == dslPlan.plannedEvent
+              && publicPlan.plannedPreCommitEffects == dslPlan.plannedPreCommitEffects
+              && publicPlan.plannedPostCommitEffects == dslPlan.plannedPostCommitEffects
+              && sameWatcherStateShape publicProjection.issuePlanningIndexedProjectionFinalState dslProjection.issuePlanningIndexedProjectionFinalState
+              && dslPlan.plannedEvent == expectedEvent
+              && dslPlan.plannedEvent == compatibilityPlan.plannedEvent
+              && dslPlan.plannedEvent == indexedCompatibilityPlan.plannedEvent
+              && dslPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+              && dslPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+              && dslPlan.plannedPreCommitEffects == indexedCompatibilityPlan.plannedPreCommitEffects
+              && dslPlan.plannedPostCommitEffects == indexedCompatibilityPlan.plannedPostCommitEffects
+              && dslProjection.issuePlanningIndexedProjectionEffectPlan == expectedEffects
+              && dslProjection.issuePlanningIndexedProjectionSourceLabel == "IssuePlanning/PlanMode"
+              && dslProjection.issuePlanningIndexedProjectionTargetLabel == "IssuePlanning/Complete"
+              && sameWatcherStateShape dslProjection.issuePlanningIndexedProjectionFinalState observed.observedState
+              && workflowStateLabel @MoifoldSpec dslProjection.issuePlanningIndexedProjectionFinalState == "IssuePlanning/Complete"
+              && sameWatcherStateShape replay.replayState dslProjection.issuePlanningIndexedProjectionFinalState
+              && last replay.replayEffects == expectedEffects
+              && workflowValidateEffects @MoifoldSpec activeState expectedEffects == Right ()
+              && all (\effect -> workflowEffectAllowed @MoifoldSpec activeState effect == Right ()) expectedEffects
+              && validatePhaseActionPlan activeState expectedEffects == Right ()
+              && fmap WorkflowExecution.workflowPlannedAction compiled.workflowCompiledActions == expectedCompiled.compiledActions
+              && WorkflowExecution.dryRunWorkflowCompiledEffectPlan compiled == expectedReports
+      _ -> False
 
 workflowDocsMigrationSpecProvesSecondWorkflow :: IO Bool
 workflowDocsMigrationSpecProvesSecondWorkflow = do

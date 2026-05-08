@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-002-workflow-dsl-stabilization",
+  "direction_id": "direction-005-dsl-transition-ports",
+  "extracted_item_id": "item-029-dsl-transition-ports",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after inspecting the integrated DSL transition ports and focused parity tests. cabal build all, cabal test watcher-core-test, git diff --check, git diff --cached --check, worker-plan absence, and agent-workflow-core forbidden-import scans passed."
+}

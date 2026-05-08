@@ -24,6 +24,7 @@ module CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , IssuePlanningIndexedWaitingReadyIssues
   , issuePlanningIndexedSomeEvent
   , issuePlanningIndexedTransitionToCompatibility
+  , projectIssuePlanningTurnCompletedDslTransition
   , projectIssuePlanningBlockedActiveTurnObservation
   , projectIssuePlanningBlockedInitializedObservation
   , projectIssuePlanningBlockedWaitingReadyIssuesObservation
@@ -43,6 +44,7 @@ import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGr
 import CodexWatcher.Domain.IssuePlanning.Watcher qualified as IssuePlanning
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
+import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Observation (DaemonObservation, ObservedPolicyTick (..))
 import CodexWatcher.Workflow.Observation qualified as WorkflowObservation
@@ -307,17 +309,34 @@ projectIssuePlanningTurnCompletedObservation
   :: SomeWatcherState
   -> Either Text IssuePlanningIndexedProjection
 projectIssuePlanningTurnCompletedObservation state =
-  projectIssuePlanningObservation indexedState indexedObservation
+  projectIssuePlanningTurnCompletedDslTransition state
+
+projectIssuePlanningTurnCompletedDslTransition
+  :: SomeWatcherState
+  -> Either Text IssuePlanningIndexedProjection
+projectIssuePlanningTurnCompletedDslTransition state = do
+  observed <- workflowObserve @MoifoldSpec state observation
+  transition <-
+    WorkflowDSL.advance
+      observed.observedEvent
+      ( do
+          WorkflowDSL.emit observed.observedEffects
+          pure observed.observedState
+      )
+  let planned = WorkflowDSL.transitionPlannedTransition transition
+  pure
+    IssuePlanningIndexedProjection
+      { issuePlanningIndexedProjectionPlanned = planned
+      , issuePlanningIndexedProjectionFinalState = WorkflowDSL.transitionValue transition
+      , issuePlanningIndexedProjectionSourceLabel = sourceLabel
+      , issuePlanningIndexedProjectionTargetLabel = targetLabel
+      , issuePlanningIndexedProjectionEffectPlan = WorkflowDSL.transitionEffects transition
+      }
  where
-  indexedState =
-    IssuePlanningIndexedState state
-      :: IssuePlanningIndexedState IssuePlanningIndexedActiveTurn
-  indexedObservation =
-    IssuePlanningIndexedObservation
-      "IssuePlanning/PlanMode"
-      "IssuePlanning/Complete"
-      (WorkflowObservation.DaemonIssuePlanningObservation IssuePlanning.ObservedPlanningTurnCompleted)
-      :: IssuePlanningIndexedObservation IssuePlanningIndexedActiveTurn IssuePlanningIndexedComplete
+  sourceLabel = "IssuePlanning/PlanMode"
+  targetLabel = "IssuePlanning/Complete"
+  observation =
+    WorkflowObservation.DaemonIssuePlanningObservation IssuePlanning.ObservedPlanningTurnCompleted
 
 projectIssuePlanningBlockedInitializedObservation
   :: SomeWatcherState
