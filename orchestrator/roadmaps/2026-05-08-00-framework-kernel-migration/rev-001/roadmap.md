@@ -200,10 +200,19 @@ DocsMigration without importing concrete moifold lifecycle modules.
 Parallel lane: default serial
 Coordination notes: this milestone may overlap conceptually with DSL work, but
 implementation should remain serial unless planner proves non-overlap.
+Progress: round 030 completed the transaction-law coverage slice in `7b0b105`,
+adding focused `watcher-core-test` coverage for generic transaction failure
+stages, commit-boundary audit labels, retry/stop recommendations, pre/post
+action partitioning, and dry-run versus execute parity. It also tightened the
+moifold and DocsMigration transaction path tests without changing production
+code, event schemas, golden fixtures, package ownership, adapter APIs,
+compatibility facades, roadmap sequencing, or concrete daemon/runtime
+ownership. The milestone remains pending on direction 007 daemon-boundary work.
 
 Candidate directions:
 
 - Direction id: `direction-006-transaction-law-coverage`
+  Status: complete via round 030, merged as `7b0b105`.
   Summary: add law and parity tests for transaction failure stages, commit
   boundaries, audit reports, and retryability.
   Why it matters now: event-log and transaction semantics are central framework
