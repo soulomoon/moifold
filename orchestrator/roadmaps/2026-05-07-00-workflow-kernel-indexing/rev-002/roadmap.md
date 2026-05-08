@@ -30,13 +30,13 @@ filesystem writes, app-server startup, GitHub command execution, or concrete
    Merge after: none
    Completion notes: Round 007 approved and merged the indexed PR-review checking adapter for `ReviewThreadsFound`, `NoReviewThreadsFound`, `PrReviewFeedbackFound`, and `PrReviewFixVerificationStarted`. Reviewer evidence covered unresolved and clean thread parity, feedback observations, verification start, replay/effect/permission parity, invalid observation failures, schema/golden/daemon/dry-run/action-ordering preservation, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
-2. [pending] Port PR-review worker outcome transitions to the indexed API
+2. [done] Port PR-review worker outcome transitions to the indexed API
    Item id: item-008-indexed-pr-review-worker-outcomes
    Depends on: item-007-indexed-pr-review-checking
    Parallel safe: no
    Parallel group: none
    Merge after: item-007-indexed-pr-review-checking
-   Completion notes: Cover fix-worker outcomes such as `PrReviewFixCompleted`, `PrReviewFixIncomplete`, and worker-blocked transitions through indexed planning. Preserve existing app-server output classification evidence, effect plans, daemon compatibility fields, and replay behavior.
+   Completion notes: Round 008 approved and merged the indexed PR-review fix-worker outcome adapter for completed, incomplete, and blocked worker observations. Reviewer evidence covered classifier-backed `AgentOutputClass` preservation, invalid observation parity, replay/effect/validation/permission parity, unchanged golden/event/daemon/dry-run/action-ordering surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
 3. [pending] Port PR-review reviewer outcome transitions to the indexed API
    Item id: item-009-indexed-pr-review-reviewer-outcomes
