@@ -54,6 +54,10 @@ Implemented contract:
 - [package-identity-versioning-contract.md](package-identity-versioning-contract.md):
   package-name, initial-version, module-namespace, semantic-versioning, and
   compatibility contract for future external package candidates.
+- [release-metadata-policy.md](release-metadata-policy.md): source-backed
+  license, maintainer, category, synopsis, description, source-repository,
+  changelog, release-note, and metadata truth policy for future external
+  package candidates.
 - [workflow-spec.md](workflow-spec.md): current `WorkflowSpec`,
   `IndexedWorkflowSpec`, existentials, bridges, laws, and deferred richer
   design ideas.

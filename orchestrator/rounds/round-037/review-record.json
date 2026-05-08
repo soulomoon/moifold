@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-001-package-identity-release-contract",
+  "direction_id": "direction-002-release-metadata-policy",
+  "extracted_item_id": "item-037-release-metadata-policy",
+  "roadmap_item_id": "item-037-release-metadata-policy",
+  "decision": "approved",
+  "evidence_summary": "Approved after confirming the release metadata policy and README link are source-backed, preserve package ownership and release-gate limits, avoid Cabal/source/test/fixture/changelog/release-note/package-artifact/layout/upload/publication changes, and pass cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check."
+}
