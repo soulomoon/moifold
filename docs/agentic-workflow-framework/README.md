@@ -58,6 +58,9 @@ Implemented contract:
   license, maintainer, category, synopsis, description, source-repository,
   changelog, release-note, and metadata truth policy for future external
   package candidates.
+- [package-validation.md](package-validation.md): local `cabal check` and
+  source-distribution validation commands, artifact paths, and no-upload
+  boundary for the external package candidates.
 - [compatibility-deprecation-policy.md](compatibility-deprecation-policy.md):
   preferred-import guidance, compatibility facade status, and deprecation and
   removal gates for future external package candidates.

@@ -1,0 +1,12 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-003-release-validation-ci",
+  "direction_id": "direction-008-package-check-and-sdist",
+  "extracted_item_id": "item-043-package-check-and-sdist",
+  "roadmap_item_id": "item-043-package-check-and-sdist",
+  "status": "approved",
+  "decision": "approved",
+  "evidence_summary": "Repeatable workflow package validation script, focused package-validation docs, README index link, implementation notes, independent cabal check and sdist verification for all three package candidates, baseline build/test, whitespace validation, ignored tarball handling, and no-upload command scan all passed; no staged files made cached diff check not applicable."
+}
