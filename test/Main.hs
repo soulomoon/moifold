@@ -6672,6 +6672,7 @@ workflowFacadeExtractionTests = do
       , workflowIssueImplementIndexedSpecCoversInvalidObservationsLikeCompatibility
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPlanPrSetupAndImplementationWorkerProjections
       , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProjections
+      , workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPostMergeReviewProjections
       , workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly
       , workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors
       , workflowPrReviewCheckingIndexedSpecMatchesCompatibilityForReviewThreads
@@ -10942,15 +10943,16 @@ workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
         , "projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation"
         , "projectIssueImplementReviewerThreadReadyPostMergeReviewReadyObservation"
         , "projectIssueImplementPullRequestMergedWaitingForPrMergeObservation"
+        , "projectIssueImplementPostMergeReviewStartedObservation"
+        , "projectIssueImplementPostMergeReviewerOutcomeCleanObservation"
+        , "projectIssueImplementPostMergeReviewerOutcomeReworkObservation"
+        , "projectIssueImplementPostMergeReviewerOutcomeIncompleteObservation"
+        , "projectIssueImplementPostMergeReviewerOutcomeBlockedObservation"
         ]
       forbiddenNeedles =
         [ "projectIssueImplementPullRequestMergedPostMergeReview"
         , "projectIssueImplementPullRequestMergedWaitingForIssueClose"
-        , "projectIssueImplementPostMergeReviewStartedObservation"
-        , "projectIssueImplementPostMergeReviewerOutcome"
         , "projectIssueImplementIssueClosed"
-        , "ObservedPostMergeReviewStarted"
-        , "ObservedPostMergeReviewerOutcome"
         , "ObservedIssueClosed"
         ]
       missingRequired =
@@ -10964,8 +10966,8 @@ workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
         , needle `Text.isInfixOf` source
         ]
   sequenceAnd
-    [ assert "indexed workflow issue implement daemon routes required item-020 and item-021 projectors" (null missingRequired)
-    , assert "indexed workflow issue implement daemon does not route item-022-plus projectors" (null violations)
+    [ assert "indexed workflow issue implement daemon routes required item-020 through item-022 projectors" (null missingRequired)
+    , assert "indexed workflow issue implement daemon does not route item-023-plus projectors" (null violations)
     ]
 
 data IssueImplementDaemonProjectionCase = IssueImplementDaemonProjectionCase
@@ -10986,6 +10988,12 @@ workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProje
 workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchHandoffAndMergeWaitProjections = do
   dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonHandoffAndMergeWaitProjectionCases
   executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonHandoffAndMergeWaitProjectionCases
+  pure (and dryRunResults && and executeResults)
+
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPostMergeReviewProjections :: IO Bool
+workflowIssueImplementIndexedDaemonDryRunAndExecuteMatchPostMergeReviewProjections = do
+  dryRunResults <- traverse (runIssueImplementDaemonProjectionCase DryRunActions) issueImplementDaemonPostMergeReviewProjectionCases
+  executeResults <- traverse (runIssueImplementDaemonProjectionCase ExecuteActions) issueImplementDaemonPostMergeReviewProjectionCases
   pure (and dryRunResults && and executeResults)
 
 runIssueImplementDaemonProjectionCase :: ActionExecutionMode -> IssueImplementDaemonProjectionCase -> IO Bool
@@ -11394,6 +11402,79 @@ issueImplementDaemonHandoffAndMergeWaitProjectionCases =
     SomeWatcherState (IssuePostMergeReviewPendingReviewer issueConfig prNumber (WorkerIdle workerThread))
   postMergeReadyState =
     SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+
+issueImplementDaemonPostMergeReviewProjectionCases :: [IssueImplementDaemonProjectionCase]
+issueImplementDaemonPostMergeReviewProjectionCases =
+  [ IssueImplementDaemonProjectionCase
+      "post-merge final review turn start"
+      postMergeReadyPrefix
+      postMergeReadyState
+      (DaemonIssueImplementObservation (ObservedPostMergeReviewStarted reviewedCommit finalReviewTurn))
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewStartedObservation postMergeReadyState reviewedCommit finalReviewTurn)
+  , IssueImplementDaemonProjectionCase
+      "post-merge clean final review closes issue"
+      postMergeReviewingPrefix
+      postMergeReviewingState
+      (DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewClean cleanEvidence)))
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeCleanObservation postMergeReviewingState cleanEvidence)
+  , IssueImplementDaemonProjectionCase
+      "post-merge rework final review starts follow-up"
+      postMergeReviewingPrefix
+      postMergeReviewingState
+      (DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewRework reviewEvidence)))
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeReworkObservation postMergeReviewingState reviewEvidence)
+  , IssueImplementDaemonProjectionCase
+      "post-merge incomplete final review retries"
+      postMergeReviewingPrefix
+      postMergeReviewingState
+      (DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewIncomplete incompleteReason)))
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeIncompleteObservation postMergeReviewingState incompleteReason)
+  , IssueImplementDaemonProjectionCase
+      "post-merge blocked final review stops"
+      postMergeReviewingPrefix
+      postMergeReviewingState
+      (DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewBlocked blockedReason)))
+      (IssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeBlockedObservation postMergeReviewingState blockedReason)
+  ]
+ where
+  issueConfig = issueImplementIndexedConfig
+  prNumber = PrNumber 7
+  workerThread = ThreadId "worker-thread"
+  reviewerThread = ThreadId "reviewer-thread"
+  planTurn = TurnId "turn-plan"
+  implementationTurn = TurnId "turn-impl"
+  finalReviewTurn = TurnId "turn-final-review"
+  reviewedCommit = CommitSha "0123456789abcdef"
+  incompleteReason = "incomplete"
+  blockedReason = BlockedReason "blocked"
+  cleanEvidence = CleanReviewEvidence reviewedCommit "LGTM"
+  reviewEvidence = reviewEvidenceFromSummaries ("needs follow-up" :| []) reviewedCommit
+  readyToPlanPrefix =
+    [ IssueImplementInitialized issueConfig workerThread
+    , IssuePullRequestReusedEvent prNumber
+    ]
+  inPlanModePrefix =
+    readyToPlanPrefix <> [IssuePlanTurnStartedEvent planTurn]
+  planReadyPrefix =
+    inPlanModePrefix <> [IssuePlanCompletedEvent sampleIssuePlanMarkdown (Just implementationTurn)]
+  implementationReadyPrPrefix =
+    planReadyPrefix <> [IssuePullRequestBodyUpdatedEvent prNumber]
+  implementingPrPrefix =
+    implementationReadyPrPrefix <> [IssueImplementationTurnStartedEvent implementationTurn]
+  handoffReadyPrefix =
+    implementingPrPrefix <> [IssueImplementationCompletedEvent prNumber (Just reviewerThread)]
+  handoffInitializedPrefix =
+    handoffReadyPrefix <> [IssueReviewHandoffInitializedEvent prNumber]
+  waitingMergePrefix =
+    handoffInitializedPrefix <> [IssueReviewHandoffStartedEvent prNumber]
+  postMergeReadyPrefix =
+    waitingMergePrefix <> [IssuePullRequestMergedEvent prNumber]
+  postMergeReviewingPrefix =
+    postMergeReadyPrefix <> [IssuePostMergeReviewStartedEvent reviewedCommit finalReviewTurn]
+  postMergeReadyState =
+    SomeWatcherState (IssuePostMergeReviewReady issueConfig prNumber (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
+  postMergeReviewingState =
+    SomeWatcherState (IssuePostMergeReviewing issueConfig prNumber (WorkerIdle workerThread) reviewedCommit (ReviewerActive (ActiveTurn reviewerThread finalReviewTurn)))
 
 issueImplementIndexedSpecMatchesCompatibility :: IssueImplementIndexedPolicyCase -> IO Bool
 issueImplementIndexedSpecMatchesCompatibility (IssueImplementIndexedPolicyCase title prefix state issueObservation indexedState indexedObservation indexedEvent projection expectedTags) =

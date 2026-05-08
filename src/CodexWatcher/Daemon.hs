@@ -44,7 +44,7 @@ import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.Ids (CommitSha (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
-import CodexWatcher.Domain.IssueImplement.Watcher (IssueImplementObservation (..))
+import CodexWatcher.Domain.IssueImplement.Watcher (IssueFinalReviewOutcome (..), IssueImplementObservation (..))
 import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
 import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
@@ -533,6 +533,37 @@ prepareDaemonObservation state observation =
         WorkflowIssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation
           state
           prNumber
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewReady {}, DaemonIssueImplementObservation (ObservedPostMergeReviewStarted commit turnId)) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewStartedObservation
+          state
+          commit
+          turnId
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewClean evidence))) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeCleanObservation
+          state
+          evidence
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewRework evidence))) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeReworkObservation
+          state
+          evidence
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewIncomplete reason))) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeIncompleteObservation
+          state
+          reason
+      pure (preparedFromIssueImplementProjection projected)
+    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewBlocked reason))) -> do
+      projected <-
+        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeBlockedObservation
+          state
+          reason
       pure (preparedFromIssueImplementProjection projected)
     (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
       projected <-
