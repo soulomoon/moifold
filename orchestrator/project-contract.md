@@ -22,6 +22,10 @@ stable contracts instead of restating them in every role or roadmap file.
   remote metadata, and command rendering helpers; the main moifold library owns
   concrete issue/PR lifecycle policy, daemon ownership, process execution,
   filesystem writes, compatibility snapshots, healthcheck, and repair.
+- External package candidates: package descriptors, release metadata,
+  source-distribution artifacts, public documentation, and release notes must
+  preserve the same ownership split. Moifold may consume external package
+  candidates, but reusable workflow packages must not depend on moifold.
 - Public compatibility facades: keep existing moifold compatibility modules
   available until a round proves safe removal with import, build, and behavior
   coverage. Compatibility files such as `issue-state.json`, `daemon-state.json`,
@@ -40,9 +44,10 @@ stable contracts instead of restating them in every role or roadmap file.
   command rendering, prompt schema, or structured-output requirement may change
   as incidental cleanup.
 - Explicit non-goals that should not be reopened without a new roadmap family:
-  no package publishing yet; no generic prompt runner; no workflow `liftIO`;
-  no YAML-defined state machines; no moving concrete moifold issue/PR lifecycle
-  policy into generic core just to satisfy package shape.
+  no package upload or public release without an explicit release-gate review;
+  no generic prompt runner; no workflow `liftIO`; no YAML-defined state
+  machines; no moving concrete moifold issue/PR lifecycle policy into generic
+  core just to satisfy package shape.
 
 ## Verification Anchors
 
