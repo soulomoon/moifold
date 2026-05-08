@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-004-adapter-api-stabilization",
+  "direction_id": "direction-008-codex-agent-adapter-api",
+  "extracted_item_id": "item-032-codex-agent-adapter-api",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, git diff --check, git diff --cached --check, direct Codex adapter boundary searches, and review of app-server parsing, typed TurnRef helper, classifier/observation coverage, compatibility facade thinness, and package ownership boundaries."
+}

@@ -219,6 +219,8 @@ import AppServerSpec
   , prop_appServerClientParsesThreadStartThreadId
   , prop_appServerClientStartsThreadWithInterpreter
   , prop_appServerClientParsesTurnStartTurnId
+  , prop_appServerClientRejectsMalformedThreadStartThreadId
+  , prop_appServerClientRejectsMalformedTurnStartTurnId
   , prop_appServerClientRejectsMismatchedResponseIds
   , prop_appServerClientRejectsUnsupportedJsonRpcVersion
   , prop_appServerClientSkipsNotifications
@@ -7545,6 +7547,10 @@ workflowCodexCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowCodexCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
   codexSources <- sourceTextUnder ("agent-workflow-codex" </> "src")
+  forbiddenImportViolations <-
+    sourceImportViolationsUnder
+      ("agent-workflow-codex" </> "src")
+      codexBoundaryForbiddenImportModules
   let codexSection = cabalComponentSection "library agent-workflow-codex" cabalSource
       forbiddenPackageNeedles =
         [ "containers"
@@ -7556,18 +7562,44 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
         , "unix"
         , "moifold,"
         ]
-      forbiddenImportNeedles =
-        [ "import CodexWatcher.AppServerClient"
-        , "import CodexWatcher.ActionExecutor"
-        , "import CodexWatcher.Core.Ids"
-        , "import CodexWatcher.Domain."
-        , "import CodexWatcher.Effects"
-        , "import CodexWatcher.EventLog"
-        , "import CodexWatcher.GhGit"
-        , "import CodexWatcher.StateMachine"
-        , "import CodexWatcher.Workflow.Observation"
-        , "import CodexWatcher.Workflow.Types"
+      forbiddenSourceNeedles =
+        [ "CodexWatcher.AppServerClient"
+        , "CodexWatcher.ActionExecutor"
+        , "CodexWatcher.ChildDaemon"
+        , "CodexWatcher.Daemon"
+        , "CodexWatcher.DaemonLoop"
+        , "CodexWatcher.Domain."
+        , "CodexWatcher.Effects"
+        , "CodexWatcher.EventLog"
+        , "CodexWatcher.EventLogRepair"
+        , "CodexWatcher.GhGit"
+        , "CodexWatcher.Healthcheck"
+        , "CodexWatcher.Runtime."
+        , "CodexWatcher.StateMachine"
+        , "CodexWatcher.Workflow.GitHub"
+        , "CodexWatcher.Workflow.Moifold."
+        , "issue-state.json"
+        , "daemon-state.json"
+        , "planning-state.json"
+        , "pr-url"
+        , "block-state"
+        , "repair-state"
+        , "runtime-owner"
         ]
+      forbiddenConcreteTypes =
+        [ "WatcherEvent"
+        , "SomeWatcherState"
+        ]
+      codexSourceTokens = sourceIdentifierTokens codexSources
+      forbiddenPackageMatches =
+        filter (`Text.isInfixOf` codexSection) forbiddenPackageNeedles
+      forbiddenSourceMatches =
+        filter (`Text.isInfixOf` codexSources) forbiddenSourceNeedles
+      forbiddenConcreteTypeMatches =
+        filter (`elem` codexSourceTokens) forbiddenConcreteTypes
+      codexDependencyPackages = cabalBuildDependsPackages codexSection
+      unapprovedCodexDependencyMatches =
+        filter (`notElem` ["aeson", "base", "bytestring", "text", "websockets", "moifold:agent-workflow-core"]) codexDependencyPackages
       exposesCodexModules =
         all
           (`Text.isInfixOf` codexSection)
@@ -7583,23 +7615,63 @@ workflowCodexCabalSublibraryKeepsPackageBoundary = do
           , "CodexWatcher.Workflow.Observation.Agent"
           ]
       dependsOnlyOnCodexDeps =
-        all
-          (`Text.isInfixOf` codexSection)
-          [ "aeson >=2.2 && <3"
-          , "base >=4.18 && <5"
-          , "bytestring >=0.12 && <0.13"
-          , "text >=2.0 && <3"
-          , "websockets >=0.13 && <0.14"
-          , "moifold:agent-workflow-core"
-          ]
-          && not (any (`Text.isInfixOf` codexSection) forbiddenPackageNeedles)
-      sourceImportsStayInAdapter =
-        not (any (`Text.isInfixOf` codexSources) forbiddenImportNeedles)
+        all (`elem` codexDependencyPackages) ["aeson", "base", "bytestring", "text", "websockets", "moifold:agent-workflow-core"]
+          && null unapprovedCodexDependencyMatches
       moifoldDependsOnCodex =
         "moifold:agent-workflow-codex" `Text.isInfixOf` cabalSource
-  assert
-    "workflow Codex sublibrary has no moifold lifecycle dependencies"
-    (exposesCodexModules && dependsOnlyOnCodexDeps && sourceImportsStayInAdapter && moifoldDependsOnCodex)
+  packageOk <-
+    assertNoTextMatches
+      "workflow Codex sublibrary excludes forbidden package dependencies"
+      forbiddenPackageMatches
+  approvedDependencyOk <-
+    assertNoTextMatches
+      "workflow Codex sublibrary excludes unapproved package dependencies"
+      unapprovedCodexDependencyMatches
+  importOk <-
+    assertNoTextMatches
+      "workflow Codex source excludes moifold lifecycle imports"
+      forbiddenImportViolations
+  sourceOk <-
+    assertNoTextMatches
+      "workflow Codex source excludes moifold lifecycle ownership text"
+      forbiddenSourceMatches
+  concreteTypeOk <-
+    assertNoTextMatches
+      "workflow Codex source excludes concrete watcher state and event tokens"
+      forbiddenConcreteTypeMatches
+  exposedOk <-
+    assert
+      "workflow Codex sublibrary exposes adapter API modules"
+      exposesCodexModules
+  codexDepsOk <-
+    assert
+      "workflow Codex sublibrary keeps the approved adapter dependency set"
+      dependsOnlyOnCodexDeps
+  mainDependsOk <-
+    assert
+      "main moifold library depends on workflow Codex adapter"
+      moifoldDependsOnCodex
+  pure (packageOk && approvedDependencyOk && importOk && sourceOk && concreteTypeOk && exposedOk && codexDepsOk && mainDependsOk)
+
+codexBoundaryForbiddenImportModules :: [Text]
+codexBoundaryForbiddenImportModules =
+  [ "CodexWatcher.AppServerClient"
+  , "CodexWatcher.ActionExecutor"
+  , "CodexWatcher.ChildDaemon"
+  , "CodexWatcher.Daemon"
+  , "CodexWatcher.DaemonLoop"
+  , "CodexWatcher.Domain."
+  , "CodexWatcher.Effects"
+  , "CodexWatcher.EventLog"
+  , "CodexWatcher.EventLogRepair"
+  , "CodexWatcher.GhGit"
+  , "CodexWatcher.Healthcheck"
+  , "CodexWatcher.Runtime."
+  , "CodexWatcher.StateMachine"
+  , "CodexWatcher.Workflow.GitHub"
+  , "CodexWatcher.Workflow.Moifold."
+  , "CodexWatcher.Workflow.Types"
+  ]
 
 workflowGithubCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowGithubCabalSublibraryKeepsPackageBoundary = do
@@ -7969,7 +8041,7 @@ isIndentedCabalField line =
 
 isCabalDependencyPackageChar :: Char -> Bool
 isCabalDependencyPackageChar character =
-  isAlphaNum character || character == '-' || character == '_'
+  isAlphaNum character || character == '-' || character == '_' || character == ':'
 
 assertNoTextMatches :: String -> [Text] -> IO Bool
 assertNoTextMatches assertionName matches = do
@@ -8488,9 +8560,18 @@ workflowAgentCodexParsesTurnLifecycle = do
       [ assert "workflow Codex adapter parses turn start" $
           WorkflowAgentCodex.parseAgentTurnStart plan startValue
             == Right (WorkflowAgent.AgentTurnStart WorkflowAgent.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
+      , assert "workflow Codex adapter exposes typed turn refs from starts" $
+          case WorkflowAgentCodex.parseAgentTurnStart plan startValue of
+            Right started ->
+              (WorkflowAgent.agentTurnStartRef started :: WorkflowAgent.TurnRef WorkflowAgent.PrReviewWorkerAgent ())
+                == WorkflowAgent.TurnRef (ThreadId "thread-1") (TurnId "turn-1")
+            Left _ -> False
       , assert "workflow Codex adapter cached start response is used" $
           startedViaInterpreter
             == Right (WorkflowAgent.AgentTurnStart WorkflowAgent.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
+      , assert "workflow Codex adapter renders typed thread read request" $
+          WorkflowAgentCodexProtocol.agentThreadReadRequest (RequestId 441) turnRef
+            == threadReadRequest (RequestId 441) (ThreadId "thread-1") True
       , assert "workflow Codex adapter parses thread read turn" $
           case readViaInterpreter of
             Right readResult ->
@@ -16328,7 +16409,9 @@ main = do
       , quickCheckResult prop_appServerClientRejectsUnsupportedJsonRpcVersion
       , quickCheckResult prop_appServerClientParsesThreadReadTurns
       , quickCheckResult prop_appServerClientParsesTurnStartTurnId
+      , quickCheckResult prop_appServerClientRejectsMalformedTurnStartTurnId
       , quickCheckResult prop_appServerClientParsesThreadStartThreadId
+      , quickCheckResult prop_appServerClientRejectsMalformedThreadStartThreadId
       , quickCheckResult prop_appServerClientStartsThreadWithInterpreter
       , quickCheckResult prop_appServerClientParsesNestedThreadReadTurns
       , quickCheckResult prop_turnClassifierCompletionStates

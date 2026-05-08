@@ -33,6 +33,7 @@ module CodexWatcher.Workflow.Agent.Types
   , prReviewVerificationReviewerAgentRoleId
   , prReviewWorkerAgentRoleId
   , reviewerAgentRoleId
+  , agentTurnStartRef
   ) where
 
 import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
@@ -103,6 +104,13 @@ data TurnRef agentRole output = TurnRef
   , turnRefTurnId :: TurnId
   }
   deriving stock (Eq, Show)
+
+agentTurnStartRef :: AgentTurnStart -> TurnRef agentRole output
+agentTurnStartRef turnStart =
+  TurnRef
+    { turnRefThreadId = turnStart.agentTurnStartThreadId
+    , turnRefTurnId = turnStart.agentTurnStartTurnId
+    }
 
 data AgentRetryReason
   = RetryMalformedOutput

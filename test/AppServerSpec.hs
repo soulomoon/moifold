@@ -12,6 +12,8 @@ module AppServerSpec
   , prop_appServerClientParsesThreadStartThreadId
   , prop_appServerClientStartsThreadWithInterpreter
   , prop_appServerClientParsesTurnStartTurnId
+  , prop_appServerClientRejectsMalformedThreadStartThreadId
+  , prop_appServerClientRejectsMalformedTurnStartTurnId
   , prop_appServerClientRejectsMismatchedResponseIds
   , prop_appServerClientRejectsUnsupportedJsonRpcVersion
   , prop_appServerClientSkipsNotifications
@@ -261,10 +263,22 @@ prop_appServerClientParsesTurnStartTurnId =
   parseTurnStartTurnId (object ["turn" .= object ["id" .= ("turn-created" :: Text)]])
     == Right (TurnId "turn-created")
 
+prop_appServerClientRejectsMalformedTurnStartTurnId :: Bool
+prop_appServerClientRejectsMalformedTurnStartTurnId =
+  case parseTurnStartTurnId (object ["turn" .= object ["status" .= ("completed" :: Text)]]) of
+    Left AppServerDecodeFailure {} -> True
+    _ -> False
+
 prop_appServerClientParsesThreadStartThreadId :: Bool
 prop_appServerClientParsesThreadStartThreadId =
   parseThreadStartThreadId (object ["thread" .= object ["id" .= ("thread-created" :: Text)]])
     == Right (ThreadId "thread-created")
+
+prop_appServerClientRejectsMalformedThreadStartThreadId :: Bool
+prop_appServerClientRejectsMalformedThreadStartThreadId =
+  case parseThreadStartThreadId (object ["thread" .= object ["status" .= ("created" :: Text)]]) of
+    Left AppServerDecodeFailure {} -> True
+    _ -> False
 
 prop_appServerClientStartsThreadWithInterpreter :: Bool
 prop_appServerClientStartsThreadWithInterpreter =
