@@ -147,7 +147,7 @@ Candidate directions:
   Extraction notes: map `CodexWatcher.AppServerClient` and other wrappers to
   preferred package imports and future removal evidence.
 
-### 2. [pending] Build Standalone Package Layout
+### 2. [in-progress] Build Standalone Package Layout
 
 Milestone id: `milestone-002-standalone-package-layout`
 Depends on: `milestone-001-package-identity-release-contract`
@@ -159,10 +159,17 @@ boundary assertions and current behavior still pass.
 Parallel lane: default serial
 Coordination notes: keep changes vertical and package-owned. Core should move
 before adapters when dependency order matters.
+Progress: round 039 completed the core package layout in `68f2195`, adding the
+standalone `agent-workflow-core` package descriptor, local project wiring, and
+boundary assertions while preserving the existing core source layout and
+leaving adapter descriptors and moifold consumer rewiring for directions 005,
+006, and 007. Milestone 002 remains in progress because Codex package layout,
+GitHub package layout, and moifold local consumer wiring are still pending.
 
 Candidate directions:
 
 - Direction id: `direction-004-core-package-layout`
+  Status: complete via round 039, merged as `68f2195`.
   Summary: create or validate the standalone `agent-workflow-core` package
   descriptor and source layout.
   Why it matters now: Codex adapter and moifold consumer wiring depend on the
