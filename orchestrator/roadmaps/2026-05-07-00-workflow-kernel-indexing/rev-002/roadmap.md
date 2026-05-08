@@ -54,13 +54,13 @@ filesystem writes, app-server startup, GitHub command execution, or concrete
    Merge after: item-009-indexed-pr-review-reviewer-outcomes
    Completion notes: Round 010 approved and merged the indexed PR-review mergeability terminal coverage for retry, recheck, fix-required, blocked, clean merge, and merge-completed observations. Reviewer evidence covered indexed blocked/complete markers, invalid observation failure parity, replay/effect/permission parity, dry-run parity, request-id preservation, clean merge pre-commit ordering, merged compatibility writes, unchanged golden/schema/daemon/action-ordering surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
-5. [pending] Route one live PR-review daemon observation path through the indexed adapter
+5. [done] Route one live PR-review daemon observation path through the indexed adapter
    Item id: item-011-indexed-pr-review-daemon-path
    Depends on: item-010-indexed-pr-review-mergeability-complete
    Parallel safe: no
    Parallel group: none
    Merge after: item-010-indexed-pr-review-mergeability-complete
-   Completion notes: Replace one compatibility-only PR-review observation call site in daemon-facing policy with the indexed adapter while projecting back to existing moifold types. Prove daemon tick results, transaction failure reporting, dry-run output, and action ordering remain unchanged.
+   Completion notes: Round 011 approved and merged the live `PrWaitingForMergeability` plus `ObservedMergeabilityClean` daemon path through the indexed PR-review mergeability adapter while projecting back to existing moifold daemon transaction surfaces. Reviewer evidence covered unchanged daemon tick results and failure reporting, dry-run and execute parity, pre-commit merge failure handling, invalid observation parity, compatibility writes, action ordering, request-id stability, unchanged event schema/golden/facade surfaces, plus passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
 6. [pending] Prepare the next-domain indexed adoption plan
    Item id: item-012-indexed-next-domain-plan
