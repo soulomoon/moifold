@@ -11,6 +11,8 @@ module CodexWatcher.Workflow.Transaction.Core
   , WorkflowObservedTransactionFailure (..)
   , WorkflowObservedTransactionResult (..)
   , WorkflowTransactionFailureStage (..)
+  , runWorkflowPreparedDryRunTransaction
+  , runWorkflowPreparedExecuteTransactionDetailed
   , runWorkflowObservedDryRunTransaction
   , runWorkflowObservedExecuteTransaction
   , runWorkflowObservedExecuteTransactionDetailed
@@ -75,13 +77,28 @@ runWorkflowObservedDryRunTransaction hooks events observation = do
   priorReplay <- mapWorkflowError (workflowReplayEvents @spec events)
   observed <- mapWorkflowError (workflowObserve @spec (workflowReplayState @spec priorReplay) observation)
   let planned = workflowObservedTransition @spec observed
-      effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+      finalState = workflowObservedState @spec observed
+  runWorkflowPreparedDryRunTransaction hooks priorReplay observation planned finalState
+ where
+  mapWorkflowError :: Either (WorkflowError spec) a -> Either failure a
+  mapWorkflowError = mapTransactionError hooks.workflowTransactionMapError
+
+runWorkflowPreparedDryRunTransaction
+  :: forall spec m compiled action report failure auditFailure.
+     (WorkflowSpec spec, Semigroup (WorkflowEffectPlan spec))
+  => WorkflowObservedTransactionHooks m spec compiled action report failure
+  -> WorkflowReplayResult spec
+  -> WorkflowObservation spec
+  -> PlannedTransition spec
+  -> WorkflowState spec
+  -> Either failure (WorkflowObservedTransactionResult spec compiled report auditFailure)
+runWorkflowPreparedDryRunTransaction hooks priorReplay observation planned finalState = do
+  let effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
   mapWorkflowError (workflowValidateEffects @spec (workflowReplayState @spec priorReplay) effects)
   let compiled = hooks.workflowTransactionCompileEffects effects
       (preActions, postActions) = hooks.workflowTransactionPartitionActions compiled
       preReports = hooks.workflowTransactionDryRunActions preActions
       postReports = hooks.workflowTransactionDryRunActions postActions
-      finalState = workflowObservedState @spec observed
       audit =
         workflowDryRunAudit @spec
           (workflowReplayState @spec priorReplay)
@@ -181,115 +198,7 @@ runWorkflowObservedExecuteTransactionDetailed hooks events observation =
     Left failure ->
       pure (Left failure)
     Right (priorReplay, planned, compiled, preActions, postActions) -> do
-      preReportsResult <- hooks.workflowTransactionExecuteActions preActions
-      case preReportsResult of
-        Left failure ->
-          pure $
-            Left $
-              transactionFailure
-                hooks
-                WorkflowTransactionPreCommitActionFailure
-                failure
-                priorReplay
-                observation
-                (Just planned)
-                Nothing
-                []
-                (Just compiled)
-                []
-                []
-        Right preReports -> do
-          commitResult <- commitWorkflowEvent hooks.workflowTransactionCommitEvent planned.plannedEvent
-          case commitResult of
-            Left failure ->
-              pure $
-                Left $
-                  transactionFailure
-                    hooks
-                    WorkflowTransactionEventCommitFailure
-                    failure
-                    priorReplay
-                    observation
-                    (Just planned)
-                    Nothing
-                    []
-                    (Just compiled)
-                    preReports
-                    []
-            Right () ->
-              case workflowReplayEvents @spec (events <> [planned.plannedEvent]) of
-                Left errorValue -> do
-                  let failure = hooks.workflowTransactionMapError errorValue
-                  pure $
-                    Left $
-                      transactionFailure
-                        hooks
-                        WorkflowTransactionPostCommitReplayFailure
-                        failure
-                        priorReplay
-                        observation
-                        (Just planned)
-                        Nothing
-                        [planned.plannedEvent]
-                        (Just compiled)
-                        preReports
-                        []
-                Right finalReplay -> do
-                  let finalState = workflowReplayState @spec finalReplay
-                  afterCommitResult <- hooks.workflowTransactionAfterCommit finalState
-                  case afterCommitResult of
-                    Left failure ->
-                      pure $
-                        Left $
-                          transactionFailure
-                            hooks
-                            WorkflowTransactionPostCommitCallbackFailure
-                            failure
-                            priorReplay
-                            observation
-                            (Just planned)
-                            (Just finalState)
-                            [planned.plannedEvent]
-                            (Just compiled)
-                            preReports
-                            []
-                    Right () -> do
-                      postReportsResult <- hooks.workflowTransactionExecuteActions postActions
-                      pure case postReportsResult of
-                        Left failure ->
-                          Left $
-                            transactionFailure
-                              hooks
-                              WorkflowTransactionPostCommitActionFailure
-                              failure
-                              priorReplay
-                              observation
-                              (Just planned)
-                              (Just finalState)
-                              [planned.plannedEvent]
-                              (Just compiled)
-                              preReports
-                              []
-                        Right postReports ->
-                          let audit =
-                                workflowSuccessAudit @spec
-                                  (workflowReplayState @spec priorReplay)
-                                  observation
-                                  planned
-                                  finalState
-                                  preReports
-                                  postReports
-                           in Right
-                                WorkflowObservedTransactionResult
-                                  { workflowTransactionPriorReplay = priorReplay
-                                  , workflowTransactionPlanned = planned
-                                  , workflowTransactionFinalState = finalState
-                                  , workflowTransactionCommittedEvents = [planned.plannedEvent]
-                                  , workflowTransactionCompiledEffects = compiled
-                                  , workflowTransactionPreCommitReports = preReports
-                                  , workflowTransactionPostCommitReports = postReports
-                                  , workflowTransactionAudit = audit
-                                  }
+      runPreparedExecuteAfterValidation hooks events observation priorReplay planned compiled preActions postActions
  where
   prepareDetailed = do
     priorReplay <- mapPrepareError Nothing (workflowReplayEvents @spec events)
@@ -311,6 +220,161 @@ runWorkflowObservedExecuteTransactionDetailed hooks events observation =
           . hooks.workflowTransactionMapError
       )
       Right
+
+runWorkflowPreparedExecuteTransactionDetailed
+  :: forall spec m compiled action report failure.
+     (Monad m, WorkflowSpec spec, Semigroup (WorkflowEffectPlan spec))
+  => WorkflowObservedTransactionHooks m spec compiled action report failure
+  -> [WorkflowEvent spec]
+  -> WorkflowReplayResult spec
+  -> WorkflowObservation spec
+  -> PlannedTransition spec
+  -> m (Either (WorkflowObservedTransactionFailure spec compiled report failure) (WorkflowObservedTransactionResult spec compiled report failure))
+runWorkflowPreparedExecuteTransactionDetailed hooks events priorReplay observation planned =
+  case prepareDetailed of
+    Left failure -> pure (Left failure)
+    Right (compiled, preActions, postActions) ->
+      runPreparedExecuteAfterValidation hooks events observation priorReplay planned compiled preActions postActions
+ where
+  prepareDetailed = do
+    let effects = planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects
+    mapPrepareError (workflowValidateEffects @spec (workflowReplayState @spec priorReplay) effects)
+    let compiled = hooks.workflowTransactionCompileEffects effects
+        (preActions, postActions) = hooks.workflowTransactionPartitionActions compiled
+    pure (compiled, preActions, postActions)
+  mapPrepareError
+    :: Either (WorkflowError spec) a
+    -> Either (WorkflowObservedTransactionFailure spec compiled report failure) a
+  mapPrepareError =
+    either
+      ( Left
+          . prepareFailure hooks (Just priorReplay) observation
+          . hooks.workflowTransactionMapError
+      )
+      Right
+
+runPreparedExecuteAfterValidation
+  :: forall spec m compiled action report failure.
+     (Monad m, WorkflowSpec spec)
+  => WorkflowObservedTransactionHooks m spec compiled action report failure
+  -> [WorkflowEvent spec]
+  -> WorkflowObservation spec
+  -> WorkflowReplayResult spec
+  -> PlannedTransition spec
+  -> compiled
+  -> [action]
+  -> [action]
+  -> m (Either (WorkflowObservedTransactionFailure spec compiled report failure) (WorkflowObservedTransactionResult spec compiled report failure))
+runPreparedExecuteAfterValidation hooks events observation priorReplay planned compiled preActions postActions = do
+  preReportsResult <- hooks.workflowTransactionExecuteActions preActions
+  case preReportsResult of
+    Left failure ->
+      pure $
+        Left $
+          transactionFailure
+            hooks
+            WorkflowTransactionPreCommitActionFailure
+            failure
+            priorReplay
+            observation
+            (Just planned)
+            Nothing
+            []
+            (Just compiled)
+            []
+            []
+    Right preReports -> do
+      commitResult <- commitWorkflowEvent hooks.workflowTransactionCommitEvent planned.plannedEvent
+      case commitResult of
+        Left failure ->
+          pure $
+            Left $
+              transactionFailure
+                hooks
+                WorkflowTransactionEventCommitFailure
+                failure
+                priorReplay
+                observation
+                (Just planned)
+                Nothing
+                []
+                (Just compiled)
+                preReports
+                []
+        Right () ->
+          case workflowReplayEvents @spec (events <> [planned.plannedEvent]) of
+            Left errorValue -> do
+              let failure = hooks.workflowTransactionMapError errorValue
+              pure $
+                Left $
+                  transactionFailure
+                    hooks
+                    WorkflowTransactionPostCommitReplayFailure
+                    failure
+                    priorReplay
+                    observation
+                    (Just planned)
+                    Nothing
+                    [planned.plannedEvent]
+                    (Just compiled)
+                    preReports
+                    []
+            Right finalReplay -> do
+              let finalState = workflowReplayState @spec finalReplay
+              afterCommitResult <- hooks.workflowTransactionAfterCommit finalState
+              case afterCommitResult of
+                Left failure ->
+                  pure $
+                    Left $
+                      transactionFailure
+                        hooks
+                        WorkflowTransactionPostCommitCallbackFailure
+                        failure
+                        priorReplay
+                        observation
+                        (Just planned)
+                        (Just finalState)
+                        [planned.plannedEvent]
+                        (Just compiled)
+                        preReports
+                        []
+                Right () -> do
+                  postReportsResult <- hooks.workflowTransactionExecuteActions postActions
+                  pure case postReportsResult of
+                    Left failure ->
+                      Left $
+                        transactionFailure
+                          hooks
+                          WorkflowTransactionPostCommitActionFailure
+                          failure
+                          priorReplay
+                          observation
+                          (Just planned)
+                          (Just finalState)
+                          [planned.plannedEvent]
+                          (Just compiled)
+                          preReports
+                          []
+                    Right postReports ->
+                      let audit =
+                            workflowSuccessAudit @spec
+                              (workflowReplayState @spec priorReplay)
+                              observation
+                              planned
+                              finalState
+                              preReports
+                              postReports
+                       in Right
+                            WorkflowObservedTransactionResult
+                              { workflowTransactionPriorReplay = priorReplay
+                              , workflowTransactionPlanned = planned
+                              , workflowTransactionFinalState = finalState
+                              , workflowTransactionCommittedEvents = [planned.plannedEvent]
+                              , workflowTransactionCompiledEffects = compiled
+                              , workflowTransactionPreCommitReports = preReports
+                              , workflowTransactionPostCommitReports = postReports
+                              , workflowTransactionAudit = audit
+                              }
 
 transactionFailure
   :: forall spec m compiled action report failure.

@@ -43,8 +43,9 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.Ids (CommitSha (..))
-import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
+import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
@@ -60,10 +61,11 @@ import CodexWatcher.Workflow.Transaction.Core
   , WorkflowObservedTransactionFailure (..)
   , WorkflowObservedTransactionResult (..)
   , WorkflowTransactionFailureStage (..)
-  , runWorkflowObservedDryRunTransaction
-  , runWorkflowObservedExecuteTransactionDetailed
+  , runWorkflowPreparedDryRunTransaction
+  , runWorkflowPreparedExecuteTransactionDetailed
   )
-import CodexWatcher.Workflow.Types (MoifoldSpec)
+import CodexWatcher.Workflow.Types (MoifoldSpec, legacyObservedPlannedTransition)
+import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed qualified as WorkflowPrReviewMergeabilityIndexed
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.Text (Text)
@@ -116,6 +118,11 @@ data DaemonObservedTickResult = DaemonObservedTickResult
   , daemonObservedAudit :: WorkflowEventLog.WorkflowTickAudit MoifoldSpec ActionExecutionReport
   }
   deriving stock (Show, Generic)
+
+data PreparedDaemonObservation = PreparedDaemonObservation
+  { preparedDaemonObservationPlanned :: PlannedTransition MoifoldSpec
+  , preparedDaemonObservationFinalState :: SomeWatcherState
+  }
 
 runDaemonTickFromFile :: ActionExecutor IO -> DaemonOptions -> EffectPlan -> IO (Either DaemonFailure DaemonTickResult)
 runDaemonTickFromFile executor options nextEffects = do
@@ -216,7 +223,7 @@ runObservedDaemonTickWithEvents executor options events observation =
             , "phase" .= Text.pack (show (somePhase replay.replayState))
             ]
         )
-      case observeDaemonState replay.replayState observation of
+      case prepareDaemonObservation replay.replayState observation of
         Left reason -> do
           Log.logWatcher
             executor.actionLogger
@@ -229,10 +236,10 @@ runObservedDaemonTickWithEvents executor options events observation =
                 ]
             )
           pure (Left (DaemonObservationRejected reason))
-        Right observed -> do
+        Right prepared -> do
           case options.daemonExecutionMode of
-            DryRunActions -> runObservedDaemonDryRun executor options events replay observation observed
-            ExecuteActions -> runObservedDaemonExecute executor options events replay observation observed
+            DryRunActions -> runObservedDaemonDryRun executor options events replay observation prepared
+            ExecuteActions -> runObservedDaemonExecute executor options events replay observation prepared
 
 replayDaemonEventLog :: FilePath -> IO (Either DaemonFailure EventReplayResult)
 replayDaemonEventLog path = do
@@ -291,6 +298,33 @@ replayEventLogFromEvents events =
     Left failure -> Left (DaemonReplayFailed failure)
     Right replay -> Right replay
 
+prepareDaemonObservation
+  :: SomeWatcherState
+  -> DaemonObservation
+  -> Either Text PreparedDaemonObservation
+prepareDaemonObservation state observation =
+  case (state, observation) of
+    (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
+      projected <-
+        WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation
+          state
+          commit
+      pure
+        PreparedDaemonObservation
+          { preparedDaemonObservationPlanned =
+              projected.prReviewMergeabilityIndexedProjectionPlanned
+          , preparedDaemonObservationFinalState =
+              projected.prReviewMergeabilityIndexedProjectionFinalState
+          }
+    _ -> do
+      observed <- observeDaemonState state observation
+      pure
+        PreparedDaemonObservation
+          { preparedDaemonObservationPlanned =
+              legacyObservedPlannedTransition observed
+          , preparedDaemonObservationFinalState = observed.observedState
+          }
+
 runObservedDaemonDryRun
   :: Monad m
   => ActionExecutor m
@@ -298,12 +332,17 @@ runObservedDaemonDryRun
   -> [WatcherEvent]
   -> EventReplayResult
   -> DaemonObservation
-  -> ObservedPolicyTick
+  -> PreparedDaemonObservation
   -> m (Either DaemonFailure DaemonObservedTickResult)
-runObservedDaemonDryRun executor options events _replay observation _observed =
+runObservedDaemonDryRun executor options _events replay observation prepared =
   pure $
     observedTransactionResultToDaemon options
-      <$> runWorkflowObservedDryRunTransaction @MoifoldSpec (moifoldObservedTransactionHooks executor options) events observation
+      <$> runWorkflowPreparedDryRunTransaction @MoifoldSpec
+        (moifoldObservedTransactionHooks executor options)
+        replay
+        observation
+        prepared.preparedDaemonObservationPlanned
+        prepared.preparedDaemonObservationFinalState
 
 runObservedDaemonExecute
   :: Monad m
@@ -312,14 +351,16 @@ runObservedDaemonExecute
   -> [WatcherEvent]
   -> EventReplayResult
   -> DaemonObservation
-  -> ObservedPolicyTick
+  -> PreparedDaemonObservation
   -> m (Either DaemonFailure DaemonObservedTickResult)
-runObservedDaemonExecute executor options events _replay observation _observed = do
+runObservedDaemonExecute executor options events replay observation prepared = do
   result <-
-    runWorkflowObservedExecuteTransactionDetailed @MoifoldSpec
+    runWorkflowPreparedExecuteTransactionDetailed @MoifoldSpec
       (moifoldObservedTransactionHooks executor options)
       events
+      replay
       observation
+      prepared.preparedDaemonObservationPlanned
   pure case result of
     Left failure -> Left (daemonFailureFromObservedTransactionFailure failure)
     Right success -> Right (observedDetailedTransactionResultToDaemon options observation success)

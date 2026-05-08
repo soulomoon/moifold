@@ -113,7 +113,9 @@ import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
   , PrReviewIndexedState (..)
   , PrReviewIndexedUninitialized
   , PrReviewIndexedWaitingForMergeability
+  , PrReviewMergeabilityIndexedProjection (..)
   , PrReviewMergeabilityIndexedSpec
+  , projectPrReviewMergeabilityCleanObservation
   )
 import CodexWatcher.Workflow.Moifold.PrReview.Mergeability qualified as WorkflowPrReviewMergeability
 import CodexWatcher.Workflow.Moifold.PrReview.Reviewer.Indexed
@@ -6290,6 +6292,10 @@ workflowFacadeExtractionTests = do
       , workflowPrReviewMergeabilityIndexedSpecPreservesMergeEffectOrdering
       , workflowPrReviewMergeabilityIndexedSpecRejectsMismatchedCleanCommitLikeFacade
       , workflowPrReviewMergeabilityIndexedSpecRejectsInvalidTerminalObservationsLikeCompatibility
+      , workflowPrReviewMergeabilityIndexedDaemonDryRunMatchesCompatibility
+      , workflowPrReviewMergeabilityIndexedDaemonExecuteMatchesCompatibility
+      , workflowPrReviewMergeabilityIndexedDaemonFailureMatchesCompatibility
+      , workflowPrReviewMergeabilityIndexedDaemonRejectsInvalidObservations
       , workflowPlannedTransitionPreservesObservedEffects
       , workflowPlannedTransitionPartitionsPostCommitEffects
       , workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect
@@ -8453,6 +8459,281 @@ invalidPrReviewIndexedObservationMatchesCompatibility state indexedState observa
     _ -> False
  where
   daemonObservation = DaemonPrReviewObservation observation
+
+workflowPrReviewMergeabilityIndexedDaemonDryRunMatchesCompatibility :: IO Bool
+workflowPrReviewMergeabilityIndexedDaemonDryRunMatchesCompatibility = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed daemon PR-review mergeability golden lifecycle loads for dry-run parity" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      (executor, getCalls) <- fakeActionExecutor
+      let state = slice.prReviewMergeabilityGoldenState
+          commit = slice.prReviewMergeabilityGoldenCommit
+          prConfig = slice.prReviewMergeabilityGoldenConfig
+          cleanEvidence = slice.prReviewMergeabilityGoldenEvidence
+          observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+          runtimeConfig = effectRuntimeConfig prConfig.prRepo "/tmp/work" 880
+          options =
+            DaemonOptions
+              { daemonEventLogPath = "/tmp/events.jsonl"
+              , daemonRuntimeConfig = runtimeConfig
+              , daemonExecutionMode = DryRunActions
+              }
+          expectedEffects = [SomeEffect (MergePullRequest prConfig.prNumber cleanEvidence)]
+          expectedCompiled = compileEffectPlan runtimeConfig expectedEffects
+          expectedAction = PlannedCommand (GhPrCleanReviewAndMerge prConfig.prRepo prConfig.prNumber cleanEvidence runtimeConfig.effectRuntimeMergeMethod)
+          expectedReports =
+            [ ActionExecutionReport
+                { actionExecutionMode = DryRunActions
+                , actionExecutionAction = expectedAction
+                , actionExecutionResult = DryRunActionResult
+                , actionExecutionOutcome = ActionSucceeded
+                }
+            ]
+      result <- runObservedDaemonTickWithEvents executor options slice.prReviewMergeabilityGoldenPrefix observation
+      calls <- getCalls
+      case
+        ( result
+        , workflowPlanObservation @MoifoldSpec state observation
+        , projectPrReviewMergeabilityCleanObservation state commit
+        )
+        of
+        (Right tick, Right compatibilityPlan, Right indexedProjection) -> do
+          let audit = tick.daemonObservedAudit
+              projectedPlan = indexedProjection.prReviewMergeabilityIndexedProjectionPlanned
+              projectedEffects = indexedProjection.prReviewMergeabilityIndexedProjectionEffectPlan
+          results <-
+            sequence
+              [ assert "indexed daemon dry-run exposes compatibility event" $
+                  tick.daemonObservedEvent == PrReviewMergeabilityClean commit
+                    && tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                    && tick.daemonObservedEvent == projectedPlan.plannedEvent
+              , assert "indexed daemon dry-run exposes compatibility state and replay" $
+                  sameWatcherStateShape tick.daemonObservedState indexedProjection.prReviewMergeabilityIndexedProjectionFinalState
+                    && workflowStateLabel @MoifoldSpec tick.daemonObservedState == "PrReview/Merging"
+                    && sameWatcherStateShape tick.daemonObservedReplayResult.replayState state
+              , assert "indexed daemon dry-run keeps labels and effect plan compatible" $
+                  indexedProjection.prReviewMergeabilityIndexedProjectionSourceLabel == workflowStateLabel @MoifoldSpec state
+                    && indexedProjection.prReviewMergeabilityIndexedProjectionTargetLabel == "PrReview/Merging"
+                    && projectedPlan.plannedPreCommitEffects == compatibilityPlan.plannedPreCommitEffects
+                    && projectedPlan.plannedPostCommitEffects == compatibilityPlan.plannedPostCommitEffects
+                    && projectedEffects == expectedEffects
+                    && workflowValidateEffects @MoifoldSpec state projectedEffects == Right ()
+                    && all (isRightUnit . workflowEffectAllowed @MoifoldSpec state) projectedEffects
+              , assert "indexed daemon dry-run keeps merge as the only pre-commit command" $
+                  tick.daemonObservedCompiledEffects == expectedCompiled
+                    && tick.daemonObservedCompiledEffects.compiledNextRequestId == runtimeConfig.effectRuntimeNextRequestId
+                    && tick.daemonObservedActionReports == expectedReports
+              , assert "indexed daemon dry-run keeps dry-run surfaces stable" $
+                  tick.daemonObservedCommittedEvents == []
+                    && tick.daemonObservedCompatibilityWrites
+                      == compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
+                    && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
+                    && WorkflowEventLog.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
+                    && WorkflowEventLog.workflowAuditFinalStateLabel audit == Just "PrReview/Merging"
+                    && WorkflowEventLog.workflowAuditPreCommitReports audit == expectedReports
+                    && WorkflowEventLog.workflowAuditPostCommitReports audit == []
+              , assert "indexed daemon dry-run performs no runtime calls" (null calls)
+              ]
+          pure (and results)
+        (Left failure, _, _) -> do
+          putStrLn ("FAIL indexed daemon dry-run mergeability clean: " <> Text.unpack (formatDaemonFailure failure))
+          pure False
+        _ ->
+          assert "indexed daemon dry-run mergeability clean prepares compatibility and indexed plans" False
+
+workflowPrReviewMergeabilityIndexedDaemonExecuteMatchesCompatibility :: IO Bool
+workflowPrReviewMergeabilityIndexedDaemonExecuteMatchesCompatibility = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed daemon PR-review mergeability golden lifecycle loads for execute parity" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      (executor, getCalls) <- fakeActionExecutor
+      let state = slice.prReviewMergeabilityGoldenState
+          commit = slice.prReviewMergeabilityGoldenCommit
+          prConfig = slice.prReviewMergeabilityGoldenConfig
+          cleanEvidence = slice.prReviewMergeabilityGoldenEvidence
+          observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+          runtimeConfig = effectRuntimeConfig prConfig.prRepo "/tmp/work" 881
+          options =
+            DaemonOptions
+              { daemonEventLogPath = "/tmp/events.jsonl"
+              , daemonRuntimeConfig = runtimeConfig
+              , daemonExecutionMode = ExecuteActions
+              }
+          expectedEvent = PrReviewMergeabilityClean commit
+          expectedCommand = GhPrCleanReviewAndMerge prConfig.prRepo prConfig.prNumber cleanEvidence runtimeConfig.effectRuntimeMergeMethod
+          expectedCompiled = compileEffectPlan runtimeConfig [SomeEffect (MergePullRequest prConfig.prNumber cleanEvidence)]
+      result <- runObservedDaemonTickWithEvents executor options slice.prReviewMergeabilityGoldenPrefix observation
+      calls <- getCalls
+      case
+        ( result
+        , workflowPlanObservation @MoifoldSpec state observation
+        , projectPrReviewMergeabilityCleanObservation state commit
+        )
+        of
+        (Right tick, Right compatibilityPlan, Right indexedProjection) -> do
+          let expectedWrites =
+                compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
+          results <-
+            sequence
+              [ assert "indexed daemon execute emits and commits compatibility mergeability event" $
+                  tick.daemonObservedEvent == expectedEvent
+                    && tick.daemonObservedEvent == compatibilityPlan.plannedEvent
+                    && tick.daemonObservedCommittedEvents == [expectedEvent]
+              , assert "indexed daemon execute reaches the same merging state" $
+                  sameWatcherStateShape tick.daemonObservedState indexedProjection.prReviewMergeabilityIndexedProjectionFinalState
+                    && workflowStateLabel @MoifoldSpec tick.daemonObservedState == "PrReview/Merging"
+              , assert "indexed daemon execute keeps merge action pre-commit before append" $
+                  tick.daemonObservedCompiledEffects == expectedCompiled
+                    && tick.daemonObservedCompiledEffects.compiledNextRequestId == runtimeConfig.effectRuntimeNextRequestId
+                    && callBefore (FakeCommand expectedCommand) (FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)) calls
+              , assert "indexed daemon execute writes compatibility after event append" $
+                  tick.daemonObservedCompatibilityWrites == expectedWrites
+                    && length [() | FakeWriteJson {} <- calls] == length expectedWrites
+                    && all (\write -> FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write) `elem` calls) expectedWrites
+              , assert "indexed daemon execute keeps audit and post-commit surfaces stable" $
+                  WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "pr_review_mergeability_clean"
+                    && WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
+                    && WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit == []
+                    && not (any isFakeAppServer calls)
+              ]
+          pure (and results)
+        (Left failure, _, _) -> do
+          putStrLn ("FAIL indexed daemon execute mergeability clean: " <> Text.unpack (formatDaemonFailure failure))
+          pure False
+        _ ->
+          assert "indexed daemon execute mergeability clean prepares compatibility and indexed plans" False
+ where
+  isFakeAppServer = \case
+    FakeAppServer {} -> True
+    _ -> False
+
+workflowPrReviewMergeabilityIndexedDaemonFailureMatchesCompatibility :: IO Bool
+workflowPrReviewMergeabilityIndexedDaemonFailureMatchesCompatibility = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed daemon PR-review mergeability golden lifecycle loads for failure parity" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      let state = slice.prReviewMergeabilityGoldenState
+          commit = slice.prReviewMergeabilityGoldenCommit
+          prConfig = slice.prReviewMergeabilityGoldenConfig
+          cleanEvidence = slice.prReviewMergeabilityGoldenEvidence
+          observation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+          runtimeConfig = effectRuntimeConfig prConfig.prRepo "/tmp/work" 882
+          options =
+            DaemonOptions
+              { daemonEventLogPath = "/tmp/events.jsonl"
+              , daemonRuntimeConfig = runtimeConfig
+              , daemonExecutionMode = ExecuteActions
+              }
+          expectedEvent = PrReviewMergeabilityClean commit
+          expectedEffects = [SomeEffect (MergePullRequest prConfig.prNumber cleanEvidence)]
+          expectedCompiled = WorkflowExecution.compileWorkflowEffectPlanWithMetadata runtimeConfig expectedEffects
+      (executor, getCalls) <-
+        fakeActionExecutorWith
+          ( \case
+              GhPrCleanReviewAndMerge {} -> failedCommandReport "merge failed"
+              command -> defaultFakeCommand command
+          )
+          defaultFakeAppServer
+      result <- runObservedDaemonTickWithEvents executor options slice.prReviewMergeabilityGoldenPrefix observation
+      calls <- getCalls
+      case result of
+        Left (DaemonObservedTransactionFailed failure) -> do
+          let audit = failure.daemonObservedTransactionFailureAudit
+              formatted = formatDaemonFailure (DaemonObservedTransactionFailed failure)
+          results <-
+            sequence
+              [ assert "indexed daemon merge failure keeps detailed pre-commit stage" $
+                  failure.daemonObservedTransactionFailureStage == WorkflowTransaction.WorkflowTransactionPreCommitActionFailure
+                    && failure.daemonObservedTransactionFailurePlannedEvent == Just expectedEvent
+                    && failure.daemonObservedTransactionFailureCommittedEvents == []
+                    && failure.daemonObservedTransactionFailureCompiledEffects == Just expectedCompiled
+                    && failure.daemonObservedTransactionFailurePreCommitReports == []
+                    && failure.daemonObservedTransactionFailurePostCommitReports == []
+              , assert "indexed daemon merge failure reports existing daemon action failure" $
+                  case failure.daemonObservedTransactionFailureReason of
+                    DaemonActionFailed (PlannedCommand GhPrCleanReviewAndMerge {}) _report -> True
+                    _ -> False
+              , assert "indexed daemon merge failure keeps failure audit shape" $
+                  (WorkflowEventLog.workflowAuditPriorStateLabel <$> audit) == Just (workflowStateLabel @MoifoldSpec state)
+                    && (WorkflowEventLog.workflowAuditCommittedEventLabel <$> audit) == Just Nothing
+                    && (WorkflowEventLog.workflowAuditFinalStateLabel <$> audit) == Just Nothing
+                    && (WorkflowEventLog.workflowAuditNextDaemonRecommendation <$> audit) == Just WorkflowEventLog.WorkflowDaemonStop
+              , assert "indexed daemon merge failure does not append or write compatibility" $
+                  not (any isAppend calls)
+                    && not (any isWrite calls)
+              , assert "indexed daemon merge failure preserves formatted failure shape" $
+                  "observed transaction failed during WorkflowTransactionPreCommitActionFailure" `Text.isInfixOf` formatted
+                    && "committed events: 0" `Text.isInfixOf` formatted
+              ]
+          pure (and results)
+        other -> do
+          putStrLn ("FAIL indexed daemon merge failure result: " <> show other)
+          pure False
+ where
+  isAppend = \case
+    FakeAppendJsonLine {} -> True
+    _ -> False
+  isWrite = \case
+    FakeWriteJson {} -> True
+    _ -> False
+
+workflowPrReviewMergeabilityIndexedDaemonRejectsInvalidObservations :: IO Bool
+workflowPrReviewMergeabilityIndexedDaemonRejectsInvalidObservations = do
+  loaded <- loadPrReviewMergeabilityGoldenSlice
+  case loaded of
+    Left failure -> assert "indexed daemon PR-review mergeability golden lifecycle loads for invalid parity" False <* putStrLn ("FAIL golden lifecycle: " <> failure)
+    Right slice -> do
+      (mismatchExecutor, getMismatchCalls) <- fakeActionExecutor
+      (wrongStateExecutor, getWrongStateCalls) <- fakeActionExecutor
+      let state = slice.prReviewMergeabilityGoldenState
+          commit = slice.prReviewMergeabilityGoldenCommit
+          mismatchedCommit = CommitSha "not-the-reviewed-commit"
+          prConfig = slice.prReviewMergeabilityGoldenConfig
+          runtimeConfig = effectRuntimeConfig prConfig.prRepo "/tmp/work" 883
+          options =
+            DaemonOptions
+              { daemonEventLogPath = "/tmp/events.jsonl"
+              , daemonRuntimeConfig = runtimeConfig
+              , daemonExecutionMode = DryRunActions
+              }
+          mismatchedObservation = DaemonPrReviewObservation (ObservedMergeabilityClean mismatchedCommit)
+          wrongStateEvents = slice.prReviewMergeabilityGoldenPrefix <> [PrReviewMergeabilityClean commit]
+          wrongStateObservation = DaemonPrReviewObservation (ObservedMergeabilityClean commit)
+          expectedMismatchFailure = "mergeability clean commit does not match reviewed commit"
+      mismatchResult <- runObservedDaemonTickWithEvents mismatchExecutor options slice.prReviewMergeabilityGoldenPrefix mismatchedObservation
+      wrongStateResult <- runObservedDaemonTickWithEvents wrongStateExecutor options wrongStateEvents wrongStateObservation
+      mismatchCalls <- getMismatchCalls
+      wrongStateCalls <- getWrongStateCalls
+      let directWrongState =
+            case workflowReplayEvents @MoifoldSpec wrongStateEvents of
+              Right replay -> workflowPlanObservation @MoifoldSpec replay.replayState wrongStateObservation
+              Left failure -> Left failure
+      results <-
+        sequence
+          [ assert "indexed daemon clean rejects mismatched commit like compatibility" $
+              case mismatchResult of
+                Left (DaemonObservationRejected daemonFailure) ->
+                  daemonFailure == expectedMismatchFailure
+                    && case workflowPlanObservation @MoifoldSpec state mismatchedObservation of
+                      Left compatibilityFailure -> compatibilityFailure == expectedMismatchFailure
+                      Right _ -> False
+                    && case projectPrReviewMergeabilityCleanObservation state mismatchedCommit of
+                      Left indexedFailure -> indexedFailure == expectedMismatchFailure
+                      Right _ -> False
+                    && null mismatchCalls
+                _ -> False
+          , assert "indexed daemon clean rejects wrong state like compatibility" $
+              case (wrongStateResult, directWrongState) of
+                (Left (DaemonObservationRejected daemonFailure), Left compatibilityFailure) ->
+                  daemonFailure == compatibilityFailure
+                    && not (Text.null daemonFailure)
+                    && null wrongStateCalls
+                _ -> False
+          ]
+      pure (and results)
 
 prReviewMergeabilityIndexedSpecMatchesCompatibility
   :: forall (source :: Type) (target :: Type).

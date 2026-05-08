@@ -23,13 +23,17 @@ module CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
   , PrReviewIndexedTick (..)
   , PrReviewIndexedUninitialized
   , PrReviewIndexedWaitingForMergeability
+  , PrReviewMergeabilityIndexedProjection (..)
+  , projectPrReviewMergeabilityCleanObservation
   ) where
 
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent)
+import CodexWatcher.Core.Ids (CommitSha)
 import CodexWatcher.Core.State (SomeWatcherState)
+import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
-import CodexWatcher.Workflow.Observation (DaemonObservation, ObservedPolicyTick (..))
+import CodexWatcher.Workflow.Observation (DaemonObservation (..), ObservedPolicyTick (..))
 import CodexWatcher.Workflow.Types
   ( MoifoldSpec
   , PlannedTransition (..)
@@ -79,6 +83,14 @@ data PrReviewIndexedTick source target =
 
 newtype PrReviewIndexedReplayResult state =
   PrReviewIndexedReplayResult EventReplayResult
+
+data PrReviewMergeabilityIndexedProjection = PrReviewMergeabilityIndexedProjection
+  { prReviewMergeabilityIndexedProjectionPlanned :: PlannedTransition MoifoldSpec
+  , prReviewMergeabilityIndexedProjectionFinalState :: SomeWatcherState
+  , prReviewMergeabilityIndexedProjectionSourceLabel :: Text
+  , prReviewMergeabilityIndexedProjectionTargetLabel :: Text
+  , prReviewMergeabilityIndexedProjectionEffectPlan :: EffectPlan
+  }
 
 type instance IndexedWorkflow.WorkflowIndex PrReviewMergeabilityIndexedSpec = PrReviewIndexedPoint
 
@@ -165,3 +177,64 @@ prReviewIndexedPlannedTransitionFromCompatibility sourceLabel targetLabel planne
 prReviewIndexedSomeEvent :: IndexedWorkflow.SomeIndexedWorkflowEvent PrReviewMergeabilityIndexedSpec -> WatcherEvent
 prReviewIndexedSomeEvent (IndexedWorkflow.SomeIndexedWorkflowEvent (PrReviewIndexedEvent _sourceLabel _targetLabel event)) =
   event
+
+projectPrReviewMergeabilityCleanObservation
+  :: SomeWatcherState
+  -> CommitSha
+  -> Either Text PrReviewMergeabilityIndexedProjection
+projectPrReviewMergeabilityCleanObservation state commit = do
+  observed <-
+    IndexedWorkflow.indexedWorkflowObserve
+      @PrReviewMergeabilityIndexedSpec
+      indexedState
+      indexedObservation
+  planned <-
+    IndexedWorkflow.indexedWorkflowPlanObservation
+      @PrReviewMergeabilityIndexedSpec
+      indexedState
+      indexedObservation
+  let PrReviewIndexedState finalState =
+        IndexedWorkflow.indexedWorkflowObservedState @PrReviewMergeabilityIndexedSpec observed
+      projectedPlan = prReviewIndexedTransitionToCompatibility planned
+  pure
+    PrReviewMergeabilityIndexedProjection
+      { prReviewMergeabilityIndexedProjectionPlanned = projectedPlan
+      , prReviewMergeabilityIndexedProjectionFinalState = finalState
+      , prReviewMergeabilityIndexedProjectionSourceLabel =
+          IndexedWorkflow.indexedWorkflowPlannedTransitionSourceLabel
+            @PrReviewMergeabilityIndexedSpec
+            planned
+      , prReviewMergeabilityIndexedProjectionTargetLabel =
+          IndexedWorkflow.indexedWorkflowPlannedTransitionTargetLabel
+            @PrReviewMergeabilityIndexedSpec
+            planned
+      , prReviewMergeabilityIndexedProjectionEffectPlan =
+          projectedPlan.plannedPreCommitEffects <> projectedPlan.plannedPostCommitEffects
+      }
+ where
+  indexedState =
+    PrReviewIndexedState state
+      :: PrReviewIndexedState PrReviewIndexedWaitingForMergeability
+  indexedObservation =
+    PrReviewIndexedObservation
+      "PrReview/WaitingMergeability"
+      "PrReview/Merging"
+      (DaemonPrReviewObservation (ObservedMergeabilityClean commit))
+      :: PrReviewIndexedObservation PrReviewIndexedWaitingForMergeability PrReviewIndexedMerging
+
+prReviewIndexedTransitionToCompatibility
+  :: IndexedWorkflow.IndexedPlannedTransition PrReviewMergeabilityIndexedSpec source target
+  -> PlannedTransition MoifoldSpec
+prReviewIndexedTransitionToCompatibility transition =
+  PlannedTransition
+    { plannedEvent = event
+    , plannedPreCommitEffects = preCommitEffects
+    , plannedPostCommitEffects = postCommitEffects
+    }
+ where
+  PrReviewIndexedEvent _sourceLabel _targetLabel event =
+    IndexedWorkflow.indexedPlannedEvent transition
+  PrReviewIndexedEffectPlan preCommitEffects =
+    IndexedWorkflow.indexedPlannedPreCommitEffects transition
+  PrReviewIndexedEffectPlan postCommitEffects =
+    IndexedWorkflow.indexedPlannedPostCommitEffects transition
