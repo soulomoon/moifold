@@ -306,79 +306,71 @@ instance IndexedWorkflow.IndexedWorkflowSpec DocsMigrationSpec where
   type IndexedWorkflowReplayResult DocsMigrationSpec state = DocsMigrationIndexedReplayResult state
   type IndexedWorkflowError DocsMigrationSpec = Text
 
-  indexedWorkflowInitialEvent (DocsMigrationIndexedEvent _sourceLabel _targetLabel event) =
-    case workflowInitialEvent @DocsMigrationSpec event of
-      Right (state, effects) -> Right (DocsMigrationIndexedState state, DocsMigrationIndexedEffectPlan effects)
-      Left failure -> Left failure
-  indexedWorkflowApplyEvent (DocsMigrationIndexedState state) (DocsMigrationIndexedEvent _sourceLabel _targetLabel event) =
-    case workflowApplyEvent @DocsMigrationSpec state event of
-      Right (nextState, effects) -> Right (DocsMigrationIndexedState nextState, DocsMigrationIndexedEffectPlan effects)
-      Left failure -> Left failure
-  indexedWorkflowObserve (DocsMigrationIndexedState state) (DocsMigrationIndexedObservation sourceLabel targetLabel observation) =
-    case workflowObserve @DocsMigrationSpec state observation of
-      Right observed -> Right (DocsMigrationIndexedObservedTick sourceLabel targetLabel observed)
-      Left failure -> Left failure
-  indexedWorkflowObservedTransition (DocsMigrationIndexedObservedTick sourceLabel targetLabel observed) =
-    docsMigrationIndexedPlannedTransitionFromCompatibility
-      sourceLabel
-      targetLabel
-      (docsMigrationObservedTransition observed)
-  indexedWorkflowObservedState (DocsMigrationIndexedObservedTick _sourceLabel _targetLabel observed) =
-    DocsMigrationIndexedState observed.docsMigrationTickState
-  indexedWorkflowPlanTransition (DocsMigrationIndexedEvent sourceLabel targetLabel event) (DocsMigrationIndexedEffectPlan effects) =
-    docsMigrationIndexedPlannedTransitionFromCompatibility
-      sourceLabel
-      targetLabel
-      (docsMigrationPlannedTransitionFromEffects event effects)
-  indexedWorkflowReplayEvents events =
-    case replayDocsMigrationEvents (docsMigrationIndexedSomeEvent <$> events) of
-      Right replay -> Right (docsMigrationIndexedSomeReplayResult replay)
-      Left failure -> Left failure
-  indexedWorkflowReplayState (DocsMigrationIndexedReplayResult replay) =
-    DocsMigrationIndexedState replay.docsMigrationReplayState
-  indexedWorkflowValidateEffects (DocsMigrationIndexedState state) (DocsMigrationIndexedEffectPlan effects) =
-    workflowValidateEffects @DocsMigrationSpec state effects
-  indexedWorkflowEffectPlanEffects (DocsMigrationIndexedEffectPlan effects) =
-    DocsMigrationIndexedEffect <$> effects
-  indexedWorkflowEffectAllowed (DocsMigrationIndexedState state) (DocsMigrationIndexedEffect effect) =
-    workflowEffectAllowed @DocsMigrationSpec state effect
-  indexedWorkflowIsTerminal (DocsMigrationIndexedState state) =
-    workflowIsTerminal @DocsMigrationSpec state
-  indexedWorkflowStateLabel (DocsMigrationIndexedState state) =
-    workflowStateLabel @DocsMigrationSpec state
-  indexedWorkflowEventLabel (DocsMigrationIndexedEvent _sourceLabel _targetLabel event) =
-    workflowEventLabel @DocsMigrationSpec event
-  indexedWorkflowEventSourceLabel (DocsMigrationIndexedEvent sourceLabel _targetLabel _event) =
-    sourceLabel
-  indexedWorkflowEventTargetLabel (DocsMigrationIndexedEvent _sourceLabel targetLabel _event) =
-    targetLabel
-  indexedWorkflowObservationLabel (DocsMigrationIndexedObservation _sourceLabel _targetLabel observation) =
-    workflowObservationLabel @DocsMigrationSpec observation
-  indexedWorkflowObservationSourceLabel (DocsMigrationIndexedObservation sourceLabel _targetLabel _observation) =
-    sourceLabel
-  indexedWorkflowObservationTargetLabel (DocsMigrationIndexedObservation _sourceLabel targetLabel _observation) =
-    targetLabel
-  indexedWorkflowEffectLabel (DocsMigrationIndexedEffect effect) =
-    workflowEffectLabel @DocsMigrationSpec effect
+  indexedWorkflowInitialEvent =
+    IndexedWorkflow.workflowSpecBridgeInitialEvent docsMigrationIndexedBridge
+  indexedWorkflowApplyEvent =
+    IndexedWorkflow.workflowSpecBridgeApplyEvent docsMigrationIndexedBridge
+  indexedWorkflowObserve =
+    IndexedWorkflow.workflowSpecBridgeObserve docsMigrationIndexedBridge
+  indexedWorkflowObservedTransition =
+    IndexedWorkflow.workflowSpecBridgeObservedTransition docsMigrationIndexedBridge
+  indexedWorkflowObservedState =
+    IndexedWorkflow.workflowSpecBridgeObservedState docsMigrationIndexedBridge
+  indexedWorkflowPlanTransition =
+    IndexedWorkflow.workflowSpecBridgePlanTransition docsMigrationIndexedBridge
+  indexedWorkflowReplayEvents =
+    IndexedWorkflow.workflowSpecBridgeReplayEvents docsMigrationIndexedBridge
+  indexedWorkflowReplayState =
+    IndexedWorkflow.workflowSpecBridgeReplayState docsMigrationIndexedBridge
+  indexedWorkflowValidateEffects =
+    IndexedWorkflow.workflowSpecBridgeValidateEffects docsMigrationIndexedBridge
+  indexedWorkflowEffectPlanEffects =
+    IndexedWorkflow.workflowSpecBridgeEffectPlanEffects docsMigrationIndexedBridge
+  indexedWorkflowEffectAllowed =
+    IndexedWorkflow.workflowSpecBridgeEffectAllowed docsMigrationIndexedBridge
+  indexedWorkflowIsTerminal =
+    IndexedWorkflow.workflowSpecBridgeIsTerminal docsMigrationIndexedBridge
+  indexedWorkflowStateLabel =
+    IndexedWorkflow.workflowSpecBridgeStateLabel docsMigrationIndexedBridge
+  indexedWorkflowEventLabel =
+    IndexedWorkflow.workflowSpecBridgeEventLabel docsMigrationIndexedBridge
+  indexedWorkflowEventSourceLabel =
+    IndexedWorkflow.workflowSpecBridgeEventSourceLabel docsMigrationIndexedBridge
+  indexedWorkflowEventTargetLabel =
+    IndexedWorkflow.workflowSpecBridgeEventTargetLabel docsMigrationIndexedBridge
+  indexedWorkflowObservationLabel =
+    IndexedWorkflow.workflowSpecBridgeObservationLabel docsMigrationIndexedBridge
+  indexedWorkflowObservationSourceLabel =
+    IndexedWorkflow.workflowSpecBridgeObservationSourceLabel docsMigrationIndexedBridge
+  indexedWorkflowObservationTargetLabel =
+    IndexedWorkflow.workflowSpecBridgeObservationTargetLabel docsMigrationIndexedBridge
+  indexedWorkflowEffectLabel =
+    IndexedWorkflow.workflowSpecBridgeEffectLabel docsMigrationIndexedBridge
 
-docsMigrationIndexedPlannedTransitionFromCompatibility
-  :: Text
-  -> Text
-  -> PlannedTransition DocsMigrationSpec
-  -> IndexedWorkflow.IndexedPlannedTransition DocsMigrationSpec source target
-docsMigrationIndexedPlannedTransitionFromCompatibility sourceLabel targetLabel planned =
-  IndexedWorkflow.IndexedPlannedTransition
-    { IndexedWorkflow.indexedPlannedEvent =
-        DocsMigrationIndexedEvent sourceLabel targetLabel planned.plannedEvent
-    , IndexedWorkflow.indexedPlannedPreCommitEffects =
-        DocsMigrationIndexedEffectPlan planned.plannedPreCommitEffects
-    , IndexedWorkflow.indexedPlannedPostCommitEffects =
-        DocsMigrationIndexedEffectPlan planned.plannedPostCommitEffects
+docsMigrationIndexedBridge :: IndexedWorkflow.WorkflowSpecIndexedBridge DocsMigrationSpec DocsMigrationSpec
+docsMigrationIndexedBridge =
+  IndexedWorkflow.WorkflowSpecIndexedBridge
+    { IndexedWorkflow.workflowSpecBridgeWrapState = DocsMigrationIndexedState
+    , IndexedWorkflow.workflowSpecBridgeUnwrapState = \(DocsMigrationIndexedState state) -> state
+    , IndexedWorkflow.workflowSpecBridgeWrapEvent = DocsMigrationIndexedEvent
+    , IndexedWorkflow.workflowSpecBridgeUnwrapEvent = \(DocsMigrationIndexedEvent _sourceLabel _targetLabel event) -> event
+    , IndexedWorkflow.workflowSpecBridgeWrapObservation = DocsMigrationIndexedObservation
+    , IndexedWorkflow.workflowSpecBridgeUnwrapObservation = \(DocsMigrationIndexedObservation _sourceLabel _targetLabel observation) -> observation
+    , IndexedWorkflow.workflowSpecBridgeWrapObservedTick = DocsMigrationIndexedObservedTick
+    , IndexedWorkflow.workflowSpecBridgeUnwrapObservedTick = \(DocsMigrationIndexedObservedTick _sourceLabel _targetLabel tick) -> tick
+    , IndexedWorkflow.workflowSpecBridgeWrapEffect = DocsMigrationIndexedEffect
+    , IndexedWorkflow.workflowSpecBridgeUnwrapEffect = \(DocsMigrationIndexedEffect effect) -> effect
+    , IndexedWorkflow.workflowSpecBridgeWrapEffectPlan = DocsMigrationIndexedEffectPlan
+    , IndexedWorkflow.workflowSpecBridgeUnwrapEffectPlan = \(DocsMigrationIndexedEffectPlan effects) -> effects
+    , IndexedWorkflow.workflowSpecBridgeWrapReplayResult = docsMigrationIndexedSomeReplayResult
+    , IndexedWorkflow.workflowSpecBridgeUnwrapReplayResult = \(DocsMigrationIndexedReplayResult replay) -> replay
+    , IndexedWorkflow.workflowSpecBridgeEventSourceLabel = \(DocsMigrationIndexedEvent sourceLabel _targetLabel _event) -> sourceLabel
+    , IndexedWorkflow.workflowSpecBridgeEventTargetLabel = \(DocsMigrationIndexedEvent _sourceLabel targetLabel _event) -> targetLabel
+    , IndexedWorkflow.workflowSpecBridgeObservationSourceLabel = \(DocsMigrationIndexedObservation sourceLabel _targetLabel _observation) -> sourceLabel
+    , IndexedWorkflow.workflowSpecBridgeObservationTargetLabel = \(DocsMigrationIndexedObservation _sourceLabel targetLabel _observation) -> targetLabel
+    , IndexedWorkflow.workflowSpecBridgeObservedTickSourceLabel = \(DocsMigrationIndexedObservedTick sourceLabel _targetLabel _tick) -> sourceLabel
+    , IndexedWorkflow.workflowSpecBridgeObservedTickTargetLabel = \(DocsMigrationIndexedObservedTick _sourceLabel targetLabel _tick) -> targetLabel
     }
-
-docsMigrationIndexedSomeEvent :: IndexedWorkflow.SomeIndexedWorkflowEvent DocsMigrationSpec -> DocsMigrationEvent
-docsMigrationIndexedSomeEvent (IndexedWorkflow.SomeIndexedWorkflowEvent (DocsMigrationIndexedEvent _sourceLabel _targetLabel event)) =
-  event
 
 docsMigrationIndexedSomeReplayResult
   :: DocsMigrationReplayResult

@@ -6874,6 +6874,7 @@ workflowFacadeExtractionTests = do
       [ workflowFacadeReplayMatchesEventLog
       , workflowSpecModuleKeepsCoreBoundary
       , workflowIndexedSpecModuleKeepsCoreBoundary
+      , workflowSpecIndexedBridgeSourceScans
       , workflowSpecInventoryCoversCurrentSpecSurfaces
       , workflowCoreCabalSublibraryKeepsPackageBoundary
       , workflowCodexCabalSublibraryKeepsPackageBoundary
@@ -7026,6 +7027,9 @@ workflowIndexedSpecModuleKeepsCoreBoundary = do
           && "SomeIndexedWorkflowObservation" `Text.isInfixOf` source
           && "SomeIndexedWorkflowEffectPlan" `Text.isInfixOf` source
           && "SomeIndexedPlannedTransition" `Text.isInfixOf` source
+          && "data WorkflowSpecIndexedBridge" `Text.isInfixOf` source
+          && "workflowSpecBridgeReplayEvents" `Text.isInfixOf` source
+          && "workflowSpecBridgeEffectAllowed" `Text.isInfixOf` source
           && "indexedWorkflowPlanObservation" `Text.isInfixOf` source
   importsOk <-
     assertNoTextMatches
@@ -7036,6 +7040,78 @@ workflowIndexedSpecModuleKeepsCoreBoundary = do
       "indexed workflow spec module exposes indexed class, transitions, and existentials"
       keepsCoreDefinitions
   pure (importsOk && definitionsOk)
+
+workflowSpecIndexedBridgeSourceScans :: IO Bool
+workflowSpecIndexedBridgeSourceScans = do
+  indexedSpecSource <-
+    Text.pack
+      <$> readFile
+        ( "agent-workflow-core"
+            </> "src"
+            </> "CodexWatcher"
+            </> "Workflow"
+            </> "Indexed"
+            </> "Spec.hs"
+        )
+  docsMigrationSource <-
+    Text.pack
+      <$> readFile ("src" </> "CodexWatcher" </> "Workflow" </> "DocsMigration.hs")
+  prReviewCheckingSource <-
+    Text.pack
+      <$> readFile
+        ( "src"
+            </> "CodexWatcher"
+            </> "Workflow"
+            </> "Moifold"
+            </> "PrReview"
+            </> "Checking"
+            </> "Indexed.hs"
+        )
+  let forbiddenImports =
+        sourceImportViolationsIn
+          ("agent-workflow-core" </> "src" </> "CodexWatcher" </> "Workflow" </> "Indexed" </> "Spec.hs")
+          coreBoundaryForbiddenImportModules
+          indexedSpecSource
+  importsOk <-
+    assertNoTextMatches
+      "workflow indexed bridge keeps generic core imports"
+      forbiddenImports
+  results <-
+    sequence
+      [ assert "workflow indexed bridge exposes generic delegate hooks" $
+          all
+            (`Text.isInfixOf` indexedSpecSource)
+            [ "WorkflowSpecIndexedBridge"
+            , "workflowSpecBridgeInitialEvent"
+            , "workflowSpecBridgeApplyEvent"
+            , "workflowSpecBridgeObserve"
+            , "workflowSpecBridgeObservedTransition"
+            , "workflowSpecBridgePlanTransition"
+            , "workflowSpecBridgeReplayEvents"
+            , "workflowSpecBridgeValidateEffects"
+            , "workflowSpecBridgeEffectAllowed"
+            , "workflowSpecBridgeEffectLabel"
+            ]
+      , assert "workflow indexed bridge migrates DocsMigration indexed hooks" $
+          all
+            (`Text.isInfixOf` docsMigrationSource)
+            [ "docsMigrationIndexedBridge"
+            , "workflowSpecBridgePlanTransition docsMigrationIndexedBridge"
+            , "workflowSpecBridgeReplayEvents docsMigrationIndexedBridge"
+            , "workflowSpecBridgeValidateEffects docsMigrationIndexedBridge"
+            , "workflowSpecBridgeEffectAllowed docsMigrationIndexedBridge"
+            ]
+      , assert "workflow indexed bridge migrates representative moifold PR-review checking adapter" $
+          all
+            (`Text.isInfixOf` prReviewCheckingSource)
+            [ "prReviewCheckingIndexedBridge"
+            , "WorkflowSpecIndexedBridge MoifoldSpec PrReviewCheckingIndexedSpec"
+            , "workflowSpecBridgePlanTransition prReviewCheckingIndexedBridge"
+            , "workflowSpecBridgeReplayEvents prReviewCheckingIndexedBridge"
+            , "workflowSpecBridgeEffectAllowed prReviewCheckingIndexedBridge"
+            ]
+      ]
+  pure (importsOk && and results)
 
 workflowSpecInventoryCoversCurrentSpecSurfaces :: IO Bool
 workflowSpecInventoryCoversCurrentSpecSurfaces = do
@@ -7138,6 +7214,8 @@ workflowSpecInventoryCoversCurrentSpecSurfaces = do
             , "SomeIndexedWorkflowReplayResult"
             , "someIndexedWorkflowReplayStateLabel"
             , "withSomeIndexedPlannedTransition"
+            , "WorkflowSpecIndexedBridge"
+            , "workflowSpecBridgePlanTransition"
             ]
       , assert "workflow spec inventory covers moifold and docs-migration instances" $
           all
@@ -7154,9 +7232,10 @@ workflowSpecInventoryCoversCurrentSpecSurfaces = do
               [ "data DocsMigrationSpec"
               , "instance WorkflowSpec DocsMigrationSpec"
               , "instance IndexedWorkflow.IndexedWorkflowSpec DocsMigrationSpec"
+              , "docsMigrationIndexedBridge"
               , "docsMigrationIndexedSomeReplayResult"
-              , "indexedWorkflowReplayEvents events"
-              , "indexedWorkflowEffectAllowed (DocsMigrationIndexedState state)"
+              , "workflowSpecBridgeReplayEvents docsMigrationIndexedBridge"
+              , "workflowSpecBridgeEffectAllowed docsMigrationIndexedBridge"
               , "indexedWorkflowEventSourceLabel"
               , "indexedWorkflowObservationTargetLabel"
               ]
@@ -7170,7 +7249,7 @@ workflowSpecInventoryCoversCurrentSpecSurfaces = do
   pure (and results)
  where
   indexedAdapterNeedles =
-    [ "indexedWorkflowReplayEvents events"
+    [ "indexedWorkflowReplayEvents"
     , "indexedWorkflowValidateEffects"
     , "indexedWorkflowEffectAllowed"
     , "indexedWorkflowIsTerminal"

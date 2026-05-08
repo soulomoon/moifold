@@ -17,6 +17,7 @@ module CodexWatcher.Workflow.Indexed.Spec
   , SomeIndexedWorkflowObservedTick (..)
   , SomeIndexedWorkflowReplayResult (..)
   , SomeIndexedWorkflowState (..)
+  , WorkflowSpecIndexedBridge (..)
   , indexedWorkflowEffectPlanEffectLabels
   , indexedWorkflowPlanObservation
   , indexedWorkflowPlannedTransitionEventLabel
@@ -49,9 +50,26 @@ module CodexWatcher.Workflow.Indexed.Spec
   , withSomeIndexedWorkflowObservedTick
   , withSomeIndexedWorkflowReplayResult
   , withSomeIndexedWorkflowState
+  , workflowSpecBridgeApplyEvent
+  , workflowSpecBridgeEffectAllowed
+  , workflowSpecBridgeEffectLabel
+  , workflowSpecBridgeEffectPlanEffects
+  , workflowSpecBridgeInitialEvent
+  , workflowSpecBridgeIsTerminal
+  , workflowSpecBridgeObservationLabel
+  , workflowSpecBridgeObserve
+  , workflowSpecBridgeObservedState
+  , workflowSpecBridgeObservedTransition
+  , workflowSpecBridgePlanTransition
+  , workflowSpecBridgeReplayEvents
+  , workflowSpecBridgeReplayState
+  , workflowSpecBridgeStateLabel
+  , workflowSpecBridgeEventLabel
+  , workflowSpecBridgeValidateEffects
   , WorkflowIndex
   ) where
 
+import CodexWatcher.Workflow.Spec (PlannedTransition (..), WorkflowSpec (..))
 import Data.Kind (Type)
 import Data.Text (Text)
 
@@ -202,6 +220,215 @@ data SomeIndexedWorkflowObservedTick spec where
 
 data SomeIndexedWorkflowReplayResult spec where
   SomeIndexedWorkflowReplayResult :: IndexedWorkflowReplayResult spec state -> SomeIndexedWorkflowReplayResult spec
+
+data WorkflowSpecIndexedBridge workflow indexed where
+  WorkflowSpecIndexedBridge
+    :: ( WorkflowSpec workflow
+       , IndexedWorkflowSpec indexed
+       , IndexedWorkflowError indexed ~ WorkflowError workflow
+       )
+    => { workflowSpecBridgeWrapState :: forall state. WorkflowState workflow -> IndexedWorkflowState indexed state
+       , workflowSpecBridgeUnwrapState :: forall state. IndexedWorkflowState indexed state -> WorkflowState workflow
+       , workflowSpecBridgeWrapEvent :: forall source target. Text -> Text -> WorkflowEvent workflow -> IndexedWorkflowEvent indexed source target
+       , workflowSpecBridgeUnwrapEvent :: forall source target. IndexedWorkflowEvent indexed source target -> WorkflowEvent workflow
+       , workflowSpecBridgeWrapObservation :: forall source target. Text -> Text -> WorkflowObservation workflow -> IndexedWorkflowObservation indexed source target
+       , workflowSpecBridgeUnwrapObservation :: forall source target. IndexedWorkflowObservation indexed source target -> WorkflowObservation workflow
+       , workflowSpecBridgeWrapObservedTick :: forall source target. Text -> Text -> WorkflowObservedTick workflow -> IndexedWorkflowObservedTick indexed source target
+       , workflowSpecBridgeUnwrapObservedTick :: forall source target. IndexedWorkflowObservedTick indexed source target -> WorkflowObservedTick workflow
+       , workflowSpecBridgeWrapEffect :: forall source target. WorkflowEffect workflow -> IndexedWorkflowEffect indexed source target
+       , workflowSpecBridgeUnwrapEffect :: forall source target. IndexedWorkflowEffect indexed source target -> WorkflowEffect workflow
+       , workflowSpecBridgeWrapEffectPlan :: forall source target. WorkflowEffectPlan workflow -> IndexedWorkflowEffectPlan indexed source target
+       , workflowSpecBridgeUnwrapEffectPlan :: forall source target. IndexedWorkflowEffectPlan indexed source target -> WorkflowEffectPlan workflow
+       , workflowSpecBridgeWrapReplayResult :: WorkflowReplayResult workflow -> SomeIndexedWorkflowReplayResult indexed
+       , workflowSpecBridgeUnwrapReplayResult :: forall state. IndexedWorkflowReplayResult indexed state -> WorkflowReplayResult workflow
+       , workflowSpecBridgeEventSourceLabel :: forall source target. IndexedWorkflowEvent indexed source target -> Text
+       , workflowSpecBridgeEventTargetLabel :: forall source target. IndexedWorkflowEvent indexed source target -> Text
+       , workflowSpecBridgeObservationSourceLabel :: forall source target. IndexedWorkflowObservation indexed source target -> Text
+       , workflowSpecBridgeObservationTargetLabel :: forall source target. IndexedWorkflowObservation indexed source target -> Text
+       , workflowSpecBridgeObservedTickSourceLabel :: forall source target. IndexedWorkflowObservedTick indexed source target -> Text
+       , workflowSpecBridgeObservedTickTargetLabel :: forall source target. IndexedWorkflowObservedTick indexed source target -> Text
+       }
+    -> WorkflowSpecIndexedBridge workflow indexed
+
+workflowSpecBridgeInitialEvent
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowEvent indexed source target
+  -> Either (IndexedWorkflowError indexed) (IndexedWorkflowState indexed target, IndexedWorkflowEffectPlan indexed source target)
+workflowSpecBridgeInitialEvent bridge@WorkflowSpecIndexedBridge {} event =
+  case workflowInitialEvent @workflow (workflowSpecBridgeUnwrapEvent bridge event) of
+    Right (state, effects) ->
+      Right (workflowSpecBridgeWrapState bridge state, workflowSpecBridgeWrapEffectPlan bridge effects)
+    Left failure -> Left failure
+
+workflowSpecBridgeApplyEvent
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowState indexed source
+  -> IndexedWorkflowEvent indexed source target
+  -> Either (IndexedWorkflowError indexed) (IndexedWorkflowState indexed target, IndexedWorkflowEffectPlan indexed source target)
+workflowSpecBridgeApplyEvent bridge@WorkflowSpecIndexedBridge {} state event =
+  case workflowApplyEvent @workflow (workflowSpecBridgeUnwrapState bridge state) (workflowSpecBridgeUnwrapEvent bridge event) of
+    Right (nextState, effects) ->
+      Right (workflowSpecBridgeWrapState bridge nextState, workflowSpecBridgeWrapEffectPlan bridge effects)
+    Left failure -> Left failure
+
+workflowSpecBridgeObserve
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowState indexed source
+  -> IndexedWorkflowObservation indexed source target
+  -> Either (IndexedWorkflowError indexed) (IndexedWorkflowObservedTick indexed source target)
+workflowSpecBridgeObserve bridge@WorkflowSpecIndexedBridge {} state observation =
+  case workflowObserve @workflow (workflowSpecBridgeUnwrapState bridge state) (workflowSpecBridgeUnwrapObservation bridge observation) of
+    Right observed ->
+      Right
+        ( workflowSpecBridgeWrapObservedTick
+            bridge
+            (workflowSpecBridgeObservationSourceLabel bridge observation)
+            (workflowSpecBridgeObservationTargetLabel bridge observation)
+            observed
+        )
+    Left failure -> Left failure
+
+workflowSpecBridgeObservedTransition
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowObservedTick indexed source target
+  -> IndexedPlannedTransition indexed source target
+workflowSpecBridgeObservedTransition bridge@WorkflowSpecIndexedBridge {} observed =
+  workflowSpecBridgePlannedTransition
+    bridge
+    (workflowSpecBridgeObservedTickSourceLabel bridge observed)
+    (workflowSpecBridgeObservedTickTargetLabel bridge observed)
+    (workflowObservedTransition @workflow (workflowSpecBridgeUnwrapObservedTick bridge observed))
+
+workflowSpecBridgeObservedState
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowObservedTick indexed source target
+  -> IndexedWorkflowState indexed target
+workflowSpecBridgeObservedState bridge@WorkflowSpecIndexedBridge {} observed =
+  workflowSpecBridgeWrapState bridge (workflowObservedState @workflow (workflowSpecBridgeUnwrapObservedTick bridge observed))
+
+workflowSpecBridgePlanTransition
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowEvent indexed source target
+  -> IndexedWorkflowEffectPlan indexed source target
+  -> IndexedPlannedTransition indexed source target
+workflowSpecBridgePlanTransition bridge@WorkflowSpecIndexedBridge {} event effects =
+  workflowSpecBridgePlannedTransition
+    bridge
+    (workflowSpecBridgeEventSourceLabel bridge event)
+    (workflowSpecBridgeEventTargetLabel bridge event)
+    (workflowPlanTransition @workflow (workflowSpecBridgeUnwrapEvent bridge event) (workflowSpecBridgeUnwrapEffectPlan bridge effects))
+
+workflowSpecBridgeReplayEvents
+  :: forall workflow indexed.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> [SomeIndexedWorkflowEvent indexed]
+  -> Either (IndexedWorkflowError indexed) (SomeIndexedWorkflowReplayResult indexed)
+workflowSpecBridgeReplayEvents bridge@WorkflowSpecIndexedBridge {} events =
+  case workflowReplayEvents @workflow (workflowSpecBridgeSomeEvents bridge events) of
+    Right replay -> Right (workflowSpecBridgeWrapReplayResult bridge replay)
+    Left failure -> Left failure
+
+workflowSpecBridgeReplayState
+  :: forall workflow indexed state.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowReplayResult indexed state
+  -> IndexedWorkflowState indexed state
+workflowSpecBridgeReplayState bridge@WorkflowSpecIndexedBridge {} replay =
+  workflowSpecBridgeWrapState bridge (workflowReplayState @workflow (workflowSpecBridgeUnwrapReplayResult bridge replay))
+
+workflowSpecBridgeValidateEffects
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowState indexed source
+  -> IndexedWorkflowEffectPlan indexed source target
+  -> Either (IndexedWorkflowError indexed) ()
+workflowSpecBridgeValidateEffects bridge@WorkflowSpecIndexedBridge {} state effects =
+  workflowValidateEffects @workflow (workflowSpecBridgeUnwrapState bridge state) (workflowSpecBridgeUnwrapEffectPlan bridge effects)
+
+workflowSpecBridgeEffectPlanEffects
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowEffectPlan indexed source target
+  -> [IndexedWorkflowEffect indexed source target]
+workflowSpecBridgeEffectPlanEffects bridge@WorkflowSpecIndexedBridge {} effects =
+  workflowSpecBridgeWrapEffect bridge <$> workflowEffectPlanEffects @workflow (workflowSpecBridgeUnwrapEffectPlan bridge effects)
+
+workflowSpecBridgeEffectAllowed
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowState indexed source
+  -> IndexedWorkflowEffect indexed source target
+  -> Either Text ()
+workflowSpecBridgeEffectAllowed bridge@WorkflowSpecIndexedBridge {} state effect =
+  workflowEffectAllowed @workflow (workflowSpecBridgeUnwrapState bridge state) (workflowSpecBridgeUnwrapEffect bridge effect)
+
+workflowSpecBridgeIsTerminal
+  :: forall workflow indexed state.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowState indexed state
+  -> Bool
+workflowSpecBridgeIsTerminal bridge@WorkflowSpecIndexedBridge {} state =
+  workflowIsTerminal @workflow (workflowSpecBridgeUnwrapState bridge state)
+
+workflowSpecBridgeStateLabel
+  :: forall workflow indexed state.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowState indexed state
+  -> Text
+workflowSpecBridgeStateLabel bridge@WorkflowSpecIndexedBridge {} state =
+  workflowStateLabel @workflow (workflowSpecBridgeUnwrapState bridge state)
+
+workflowSpecBridgeEventLabel
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowEvent indexed source target
+  -> Text
+workflowSpecBridgeEventLabel bridge@WorkflowSpecIndexedBridge {} event =
+  workflowEventLabel @workflow (workflowSpecBridgeUnwrapEvent bridge event)
+
+workflowSpecBridgeObservationLabel
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowObservation indexed source target
+  -> Text
+workflowSpecBridgeObservationLabel bridge@WorkflowSpecIndexedBridge {} observation =
+  workflowObservationLabel @workflow (workflowSpecBridgeUnwrapObservation bridge observation)
+
+workflowSpecBridgeEffectLabel
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> IndexedWorkflowEffect indexed source target
+  -> Text
+workflowSpecBridgeEffectLabel bridge@WorkflowSpecIndexedBridge {} effect =
+  workflowEffectLabel @workflow (workflowSpecBridgeUnwrapEffect bridge effect)
+
+workflowSpecBridgePlannedTransition
+  :: forall workflow indexed source target.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> Text
+  -> Text
+  -> PlannedTransition workflow
+  -> IndexedPlannedTransition indexed source target
+workflowSpecBridgePlannedTransition bridge@WorkflowSpecIndexedBridge {} sourceLabel targetLabel planned =
+  IndexedPlannedTransition
+    { indexedPlannedEvent = workflowSpecBridgeWrapEvent bridge sourceLabel targetLabel (plannedEvent planned)
+    , indexedPlannedPreCommitEffects = workflowSpecBridgeWrapEffectPlan bridge (plannedPreCommitEffects planned)
+    , indexedPlannedPostCommitEffects = workflowSpecBridgeWrapEffectPlan bridge (plannedPostCommitEffects planned)
+    }
+
+workflowSpecBridgeSomeEvents
+  :: forall workflow indexed.
+     WorkflowSpecIndexedBridge workflow indexed
+  -> [SomeIndexedWorkflowEvent indexed]
+  -> [WorkflowEvent workflow]
+workflowSpecBridgeSomeEvents bridge@WorkflowSpecIndexedBridge {} =
+  fmap $ \(SomeIndexedWorkflowEvent event) -> workflowSpecBridgeUnwrapEvent bridge event
 
 indexedWorkflowPlanObservation
   :: forall spec source target. IndexedWorkflowSpec spec

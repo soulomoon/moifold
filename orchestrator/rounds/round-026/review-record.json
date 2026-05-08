@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-08-00-framework-kernel-migration",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001",
+  "milestone_id": "milestone-001-workflow-spec-contract",
+  "direction_id": "direction-002-indexed-contract-unification",
+  "extracted_item_id": "item-026-indexed-contract-compatibility-bridge",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Focused workflow regression, full watcher-core-test suite, cabal build all, whitespace checks, staged diff guard, module export review, package-boundary import scan, and fixture/roadmap scope checks all passed for the additive WorkflowSpecIndexedBridge round."
+}
