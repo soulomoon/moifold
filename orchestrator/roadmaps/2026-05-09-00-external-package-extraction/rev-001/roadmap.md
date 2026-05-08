@@ -161,10 +161,13 @@ Coordination notes: keep changes vertical and package-owned. Core should move
 before adapters when dependency order matters.
 Progress: round 039 completed the core package layout in `68f2195`, adding the
 standalone `agent-workflow-core` package descriptor, local project wiring, and
-boundary assertions while preserving the existing core source layout and
-leaving adapter descriptors and moifold consumer rewiring for directions 005,
-006, and 007. Milestone 002 remains in progress because Codex package layout,
-GitHub package layout, and moifold local consumer wiring are still pending.
+boundary assertions while preserving the existing core source layout. Round 040
+completed the Codex package layout in `8f81c1e`, adding the standalone
+`agent-workflow-codex` descriptor, local project wiring, and boundary
+assertions while preserving the existing Codex source layout and internal
+sublibrary for current moifold consumers. Milestone 002 remains in progress
+because GitHub package layout and moifold local consumer wiring are still
+pending.
 
 Candidate directions:
 
@@ -183,6 +186,7 @@ Candidate directions:
   boundary tests if the layout changes.
 
 - Direction id: `direction-005-codex-package-layout`
+  Status: complete via round 040, merged as `8f81c1e`.
   Summary: create or validate the standalone `agent-workflow-codex` package
   descriptor and source layout.
   Why it matters now: Codex transport and protocol ownership must be real
