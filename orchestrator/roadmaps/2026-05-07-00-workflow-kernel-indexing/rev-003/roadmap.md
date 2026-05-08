@@ -99,13 +99,13 @@ revision explicitly changes them.
    Merge after: item-012-indexed-next-domain-plan
    Completion notes: Round 013 approved and merged the moifold-owned indexed issue-planning adapter in commit `e2a12a7`, covering `IssuePlanningTurnStarted`, `IssuePlanningIssuesRequested`, `IssuePlanningGraphUpdated`, `IssuePlanningReadyIssuesFixed`, `IssuePlanningScopeCompleted`, `IssuePlanningTurnRetryRequested`, `IssuePlanningTurnCompleted`, and `WatcherBlocked` policy transitions. Reviewer evidence covered graph validation success and failure cases, invalid-observation parity, replay/effect/permission/dry-run/request-id/action-ordering parity, compatibility write preservation, unchanged live daemon routing and schema/core ownership surfaces, plus passing focused indexed and issue-planning tests, `cabal build all`, `cabal test watcher-core-test`, `git diff --check`, and `git diff --cached --check`.
 
-8. [pending] Route live issue-planning daemon start through the indexed adapter
+8. [done] Route live issue-planning daemon start through the indexed adapter
    Item id: item-014-indexed-issue-planning-daemon-start
    Depends on: item-013-indexed-issue-planning-policy
    Parallel safe: no
    Parallel group: none
    Merge after: item-013-indexed-issue-planning-policy
-   Completion notes: Route the live `PlanningReady` plus `ObservedPlanningTurnStarted` daemon observation through the indexed issue-planning adapter, then project back to existing moifold transaction results. Preserve planner thread creation, planner turn start, app-server request-id progression, `DaemonTickResult`, `DaemonObservedTickResult`, `DaemonObservedTransactionFailure`, dry-run reports, execute reports, action ordering, compatibility writes, `planning-state.json`, `issue-snapshot.json`, and invalid-observation failures.
+   Completion notes: Round 014 approved and merged the live `PlanningReady` plus `ObservedPlanningTurnStarted` daemon-start route through the moifold-owned indexed issue-planning adapter in commit `6cbb843`, then projected back to existing daemon transaction surfaces. Reviewer evidence covered planner turn start, request-id progression, dry-run and execute reports, action ordering, compatibility writes, snapshot-path preservation, invalid-observation rejection, unchanged non-start issue-planning daemon routes, and package-boundary preservation, plus passing `cabal test watcher-core-test` before and after `cabal build all`, passing `cabal build all`, clean `git diff --check`, and clean staged whitespace when committed.
 
 9. [pending] Route issue-planning graph and request daemon observations through the indexed adapter
    Item id: item-015-indexed-issue-planning-daemon-graph-and-requests
