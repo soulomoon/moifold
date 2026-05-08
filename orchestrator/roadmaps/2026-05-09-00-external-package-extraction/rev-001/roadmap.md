@@ -166,8 +166,11 @@ completed the Codex package layout in `8f81c1e`, adding the standalone
 `agent-workflow-codex` descriptor, local project wiring, and boundary
 assertions while preserving the existing Codex source layout and internal
 sublibrary for current moifold consumers. Milestone 002 remains in progress
-because GitHub package layout and moifold local consumer wiring are still
-pending.
+because moifold local consumer wiring is still pending. Round 041 completed
+the GitHub package layout in `f8061c2`, adding the standalone
+`agent-workflow-github` descriptor, local project wiring, and boundary
+assertions while preserving the existing GitHub source layout and internal
+sublibrary for current moifold consumers.
 
 Candidate directions:
 
@@ -201,6 +204,7 @@ Candidate directions:
   modules build outside the main moifold library.
 
 - Direction id: `direction-006-github-package-layout`
+  Status: complete via round 041, merged as `f8061c2`.
   Summary: create or validate the standalone `agent-workflow-github` package
   descriptor and source layout.
   Why it matters now: GitHub adapter parsing and pure command specs should be
