@@ -1,0 +1,12 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-002-standalone-package-layout",
+  "direction_id": "direction-006-github-package-layout",
+  "extracted_item_id": "item-041-github-package-layout",
+  "roadmap_item_id": "item-041-github-package-layout",
+  "status": "approved",
+  "decision": "approved",
+  "evidence_summary": "Standalone agent-workflow-github descriptor, explicit cabal.project entry, focused boundary assertions, package-specific checks, baseline build/test, and whitespace validation all passed; no staged files made cached diff check not applicable."
+}

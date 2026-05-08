@@ -7834,6 +7834,7 @@ codexBoundaryForbiddenImportModules =
 workflowGithubCabalSublibraryKeepsPackageBoundary :: IO Bool
 workflowGithubCabalSublibraryKeepsPackageBoundary = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
+  standaloneCabalSource <- Text.pack <$> readFile ("agent-workflow-github" </> "agent-workflow-github.cabal")
   importViolations <-
     sourceImportViolationsUnder
       ("agent-workflow-github" </> "src")
@@ -7843,6 +7844,7 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
       ("agent-workflow-github" </> "src")
       githubForbiddenOwnershipTokens
   let githubSection = cabalComponentSection "library agent-workflow-github" cabalSource
+      standaloneGithubSection = cabalComponentSection "library" standaloneCabalSource
       forbiddenPackageNeedles =
         [ "bytestring"
         , "containers"
@@ -7856,27 +7858,72 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
         , "moifold,"
         , "moifold:"
         ]
+      standaloneForbiddenPackageNeedles =
+        forbiddenPackageNeedles
+          <> [ "agent-workflow-core"
+             , "agent-workflow-codex"
+             ]
       exposesGithubModules =
-        all
-          (`Text.isInfixOf` githubSection)
-          [ "CodexWatcher.Workflow.GitHub.Command"
-          , "CodexWatcher.Workflow.GitHub.Ids"
-          , "CodexWatcher.Workflow.GitHub.Remote"
-          ]
+        githubSectionExposesAdapterModules githubSection
+      standaloneExposesGithubModules =
+        githubSectionExposesAdapterModules standaloneGithubSection
+      githubDependencyPackages = cabalBuildDependsPackages githubSection
+      standaloneGithubDependencyPackages = cabalBuildDependsPackages standaloneGithubSection
+      unapprovedGithubDependencyMatches =
+        filter (`notElem` ["aeson", "base", "text"]) githubDependencyPackages
+      unapprovedStandaloneGithubDependencyMatches =
+        filter (`notElem` ["aeson", "base", "text"]) standaloneGithubDependencyPackages
       dependsOnlyOnGithubDeps =
+        all (`elem` githubDependencyPackages) ["aeson", "base", "text"]
+          && null unapprovedGithubDependencyMatches
+          && not (any (`Text.isInfixOf` githubSection) forbiddenPackageNeedles)
+      standaloneDependsOnlyOnGithubDeps =
+        all
+          (`elem` standaloneGithubDependencyPackages)
+          ["aeson", "base", "text"]
+          && null unapprovedStandaloneGithubDependencyMatches
+          && not (any (`Text.isInfixOf` standaloneGithubSection) standaloneForbiddenPackageNeedles)
+      dependencyBoundsMatchPolicy =
         all
           (`Text.isInfixOf` githubSection)
           [ "aeson >=2.2 && <3"
           , "base >=4.18 && <5"
           , "text >=2.0 && <3"
           ]
-          && not (any (`Text.isInfixOf` githubSection) forbiddenPackageNeedles)
+      standaloneDependencyBoundsMatchPolicy =
+        all
+          (`Text.isInfixOf` standaloneGithubSection)
+          [ "aeson >=2.2 && <3"
+          , "base >=4.18 && <5"
+          , "text >=2.0 && <3"
+          ]
       moifoldDependsOnGithub =
         "moifold:agent-workflow-github" `Text.isInfixOf` cabalSource
+      standaloneMetadataMatchesPolicy =
+        all
+          (`Text.isInfixOf` standaloneCabalSource)
+          [ "name:          agent-workflow-github"
+          , "version:       0.1.0.0"
+          , "license:       MIT"
+          , "author:        soulomoon"
+          , "maintainer:    soulomoon"
+          , "category:      Development"
+          , "build-type:    Simple"
+          , "location: https://github.com/soulomoon/moifold.git"
+          , "hs-source-dirs:   src"
+          ]
   cabalOk <-
     assert
       "workflow GitHub sublibrary exposes only adapter modules and dependencies"
-      (exposesGithubModules && dependsOnlyOnGithubDeps && moifoldDependsOnGithub)
+      (exposesGithubModules && dependsOnlyOnGithubDeps && dependencyBoundsMatchPolicy && moifoldDependsOnGithub)
+  standaloneCabalOk <-
+    assert
+      "standalone workflow GitHub package exposes only adapter modules and dependencies"
+      (standaloneExposesGithubModules && standaloneDependsOnlyOnGithubDeps && standaloneDependencyBoundsMatchPolicy)
+  standaloneMetadataOk <-
+    assert
+      "standalone workflow GitHub package records approved metadata and source layout"
+      standaloneMetadataMatchesPolicy
   importsOk <-
     assertNoTextMatches
       "workflow GitHub source has no moifold state-machine, daemon, lifecycle, runtime, or compatibility imports"
@@ -7885,7 +7932,16 @@ workflowGithubCabalSublibraryKeepsPackageBoundary = do
     assertNoTextMatches
       "workflow GitHub source has no moifold lifecycle ownership tokens"
       ownershipViolations
-  pure (cabalOk && importsOk && ownershipOk)
+  pure (cabalOk && standaloneCabalOk && standaloneMetadataOk && importsOk && ownershipOk)
+
+githubSectionExposesAdapterModules :: Text -> Bool
+githubSectionExposesAdapterModules section =
+  all
+    (`Text.isInfixOf` section)
+    [ "CodexWatcher.Workflow.GitHub.Command"
+    , "CodexWatcher.Workflow.GitHub.Ids"
+    , "CodexWatcher.Workflow.GitHub.Remote"
+    ]
 
 githubForbiddenImportModules :: [Text]
 githubForbiddenImportModules =
