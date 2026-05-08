@@ -147,7 +147,7 @@ Candidate directions:
   Extraction notes: map `CodexWatcher.AppServerClient` and other wrappers to
   preferred package imports and future removal evidence.
 
-### 2. [in-progress] Build Standalone Package Layout
+### 2. [complete] Build Standalone Package Layout
 
 Milestone id: `milestone-002-standalone-package-layout`
 Depends on: `milestone-001-package-identity-release-contract`
@@ -165,12 +165,19 @@ boundary assertions while preserving the existing core source layout. Round 040
 completed the Codex package layout in `8f81c1e`, adding the standalone
 `agent-workflow-codex` descriptor, local project wiring, and boundary
 assertions while preserving the existing Codex source layout and internal
-sublibrary for current moifold consumers. Milestone 002 remains in progress
-because moifold local consumer wiring is still pending. Round 041 completed
-the GitHub package layout in `f8061c2`, adding the standalone
-`agent-workflow-github` descriptor, local project wiring, and boundary
-assertions while preserving the existing GitHub source layout and internal
-sublibrary for current moifold consumers.
+sublibrary for current moifold consumers. Round 041 completed the GitHub
+package layout in `f8061c2`, adding the standalone `agent-workflow-github`
+descriptor, local project wiring, and boundary assertions while preserving the
+existing GitHub source layout and internal sublibrary for current moifold
+consumers. Round 042 completed moifold local consumer wiring in `14f84a4`,
+switching moifold and `watcher-core-test` to consume the local standalone
+`agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`
+package candidates with approved bounds, removing the internal
+`moifold:agent-workflow-*` sublibrary wiring, and preserving compatibility
+facades and behavior validation. Milestone 002 is complete because directions
+004, 005, 006, and 007 now satisfy the standalone package descriptors,
+equivalent build surfaces, local moifold consumption, package-boundary
+assertions, and current-behavior checks required by the completion signal.
 
 Candidate directions:
 
@@ -217,6 +224,7 @@ Candidate directions:
   scans after descriptor changes.
 
 - Direction id: `direction-007-moifold-local-consumer-wiring`
+  Status: complete via round 042, merged as `14f84a4`.
   Summary: wire moifold to consume the local package candidates and preserve
   existing compatibility facades.
   Why it matters now: external extraction is only useful if the product can
