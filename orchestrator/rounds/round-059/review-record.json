@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-004-expand-follow-up-backlog",
+  "direction_id": "direction-008-roadmap-expansion-update",
+  "extracted_item_id": "round-059-roadmap-expansion-update",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Artifact-only roadmap expansion approved. Checks confirmed rev-002 preserves the roadmap id and strategy-backlog style, records activation metadata for rev-002, keeps milestones 001-004 complete, orders import-facade, runtime compatibility, and external operator/downstream evidence before gated removals, preserves explicit reviewer approval requirements for removal, leaves rev-001 and forbidden tracked files unchanged, has no worker-plan.json, and passes diff/no-index whitespace checks. Cabal/package baselines were intentionally skipped under the rev-002 artifact-only verification allowance."
+}
