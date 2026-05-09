@@ -314,8 +314,15 @@ active, stopped, and idle projection shapes, old-shape fixture tolerance,
 snapshot and golden replay readback, healthcheck, repair, restart cleanup,
 current `keep` classification, and conservative blockers before any later
 cleanup, removal, migration, schema, healthcheck, daemon, restart-script,
+projection, publication, upload, or release decision. Round 068 completed
+`direction-017-pr-state-external-path-inventory`, merged as `c0bfb23`, with
+source-backed evidence for PR review compatibility state files, issue PR URL
+field usage, absent checked-in dedicated PR URL/state paths, snapshot and
+healthcheck readback, runbook/script/operator expectations, test and golden
+fixture coverage, current `keep`/`defer` classifications, and conservative
+blockers before any later cleanup, migration, schema, healthcheck, repair,
 projection, publication, upload, or release decision. The milestone remains
-pending because directions 017 through 019 are unresolved.
+pending because directions 018 and 019 are unresolved.
 
 Candidate directions:
 
@@ -352,6 +359,7 @@ Candidate directions:
   Boundary notes: daemon summary compatibility stays stable.
 
 - Direction id: `direction-017-pr-state-external-path-inventory`
+  Status: complete via round 068, merged as `c0bfb23`.
   Summary: inventory PR review state files, PR URL fields, absent dedicated
   PR URL/state paths, runbooks, scripts, and downstream/operator expectations.
   Preconditions: current PR review compatibility outputs and golden fixture
