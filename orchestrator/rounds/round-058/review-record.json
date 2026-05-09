@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-001",
+  "milestone_id": "milestone-004-expand-follow-up-backlog",
+  "direction_id": "direction-007-follow-up-discovery",
+  "extracted_item_id": "round-058-follow-up-discovery",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Artifact-only discovery approved. Boundary checks showed only round-local artifacts; focused import, Cabal exposure, runtime filename, healthcheck, repair, runtime-owner, live snapshot, and banned-claim checks support the compact candidate list while preserving keep/defer classifications and leaving roadmap publication to direction-008."
+}
