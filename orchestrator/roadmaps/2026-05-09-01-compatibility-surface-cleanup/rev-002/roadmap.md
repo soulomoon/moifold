@@ -202,7 +202,7 @@ Candidate directions:
   Boundary notes: this update changes active revision metadata only after
   merge/update-roadmap; it does not approve cleanup.
 
-### 5. [pending] Complete Import-Facade Follow-Up Evidence
+### 5. [complete] Complete Import-Facade Follow-Up Evidence
 
 Milestone id: `milestone-005-import-facade-follow-up-evidence`
 Depends on: `milestone-004-expand-follow-up-backlog`
@@ -228,9 +228,13 @@ Round 062 completed
 refreshed `CodexWatcher.Workflow.EventLog` import/reference scans, helper
 ownership classification, package exposure readback, old-log/golden replay
 coverage notes, and conservative blockers for any later helper movement,
-facade narrowing, migration, deprecation, or removal decision. The milestone
-remains pending because direction 012 still needs evidence before milestone
-completion.
+facade narrowing, migration, deprecation, or removal decision. Round 063
+completed `direction-012-workflow-permission-public-api-review`, merged as
+`b7d5eff`, with public `CodexWatcher.Workflow.Permission` exposure readback,
+import/reference inventory, focused permission behavior evidence, replacement
+and ownership notes, and downstream/operator blockers before any later
+cleanup. The milestone is complete because directions 009 through 012 are now
+complete.
 
 Candidate directions:
 
@@ -261,6 +265,7 @@ Candidate directions:
   and fixtures are compatibility contracts.
 
 - Direction id: `direction-012-workflow-permission-public-api-review`
+  Status: complete via round 063, merged as `b7d5eff`.
   Summary: review `CodexWatcher.Workflow.Permission` as a public API surface,
   including downstream-user inventory and concrete permission behavior parity.
   Preconditions: public exposure readback and permission behavior tests or
