@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-008-gated-compatibility-removals",
+  "direction_id": "none-selected-no-lawful-removal-surface",
+  "extracted_item_id": "round-072-no-lawful-removal-surface-status",
+  "roadmap_item_id": "round-072-no-lawful-removal-surface-status",
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only no-lawful-removal status: milestone 008 is dependency-reached but blocked/held, directions 021 and 022 have no exact surface with all gates and reviewer approval, milestone 009 is not selected, local absence remains unavailable/blocked evidence, and no production or compatibility behavior changes are approved."
+}
