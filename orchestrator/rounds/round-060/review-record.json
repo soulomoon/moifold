@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-005-import-facade-follow-up-evidence",
+  "direction_id": "direction-009-core-ids-split-import-evidence",
+  "extracted_item_id": "round-060-core-ids-split-import-evidence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only round: Core.Ids scans, split ownership map, package-boundary exposure, no worker-plan, artifact-only diff scope, and whitespace checks all passed; Cabal/package baselines skipped under rev-002 artifact-only allowance."
+}
