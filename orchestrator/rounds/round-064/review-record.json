@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-006-runtime-compatibility-follow-up-evidence",
+  "direction_id": "direction-013-planning-state-fixture-policy",
+  "extracted_item_id": "direction-013-planning-state-fixture-policy",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: round 064 is limited to selected evidence artifacts plus the allowed policy-doc pointer; producer, compatibility, fanout, and healthcheck readbacks match the current source; no planning-state.json fixture exists; defer classification and blockers remain."
+}
