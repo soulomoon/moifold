@@ -90,10 +90,18 @@ Parallel lane: serial by default; `import-facades` and `runtime-compatibility`
 may run in parallel only if the planner assigns disjoint files and artifacts.
 Coordination notes: inventory rounds must not remove, deprecate, or rename
 surfaces. Unknown ownership should be recorded as risk, not silently filled in.
+Progress: round 052 completed the import-facade inventory in `2179bb4`,
+recording the six selected public compatibility import facades, current
+repo-local users, preferred replacement imports, Cabal exposure, protecting
+tests, source scans, and unresolved unknowns without changing production code,
+descriptors, imports, runtime compatibility files, deprecation status, or
+removal status. Milestone 001 remains pending because the runtime
+compatibility-file inventory direction is still open.
 
 Candidate directions:
 
 - Direction id: `direction-001-import-facade-inventory`
+  Status: complete via round 052, merged as `2179bb4`.
   Summary: inventory Haskell compatibility import facades and current users.
   Why it matters now: import facades are the lowest-risk cleanup candidates,
   but removal still requires proof of user coverage and replacement paths.
