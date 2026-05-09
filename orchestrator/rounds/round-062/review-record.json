@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-005-import-facade-follow-up-evidence",
+  "direction_id": "direction-011-event-log-concrete-helper-boundary",
+  "extracted_item_id": "round-062-event-log-concrete-helper-boundary",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only EventLog helper boundary evidence. Review reran scope, whitespace, import/reference scans, package exposure readbacks, old-log/golden replay readbacks, and no-worker-plan checks; diff remained limited to round-local orchestrator artifacts, so full Cabal/package baselines were skipped under the active verification allowance."
+}
