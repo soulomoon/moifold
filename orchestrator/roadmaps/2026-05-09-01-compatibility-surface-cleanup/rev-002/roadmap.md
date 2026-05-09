@@ -400,7 +400,7 @@ Candidate directions:
   Preconditions: current issue planning write path and timing tests.
   Boundary notes: live snapshot timing is a workflow contract.
 
-### 7. [pending] Complete External Operator And Downstream Inventory
+### 7. [complete] Complete External Operator And Downstream Inventory
 
 Milestone id: `milestone-007-external-operator-downstream-inventory`
 Depends on: `milestone-006-runtime-compatibility-follow-up-evidence`
@@ -412,10 +412,26 @@ unsupported-user decisions.
 Coordination notes: local repository scans are not sufficient removal
 approval. This milestone may record a deliberate hold if external evidence is
 unavailable or if operator approval is required.
+Progress: round 071 completed
+`direction-020-external-operator-downstream-inventory`, merged as `fc10244`,
+with observed repo-local evidence for public imports, state-file paths,
+shell/operator consumers, runbooks, and local package/downstream references;
+unavailable external downstream repositories, live state archives, external
+operator scripts, hosted CI, uploads, tags, releases, and release
+announcements; blocked operator/reviewer/release-gate approval evidence; no
+recorded unsupported-user decisions; and per-surface blockers. The milestone
+is complete as an inventory only. It does not approve deprecation, migration,
+removal, package publication, upload, release, Cabal exposure changes,
+production import rewrites, schema or filename changes, event-type changes,
+write-timing changes, planner-turn changes, projection changes, healthcheck
+changes, repair changes, replay changes, restart-script changes, or operator
+behavior changes. Local absence remains unavailable or blocked evidence, not
+removal approval.
 
 Candidate directions:
 
 - Direction id: `direction-020-external-operator-downstream-inventory`
+  Status: complete via round 071, merged as `fc10244`.
   Summary: inventory external scripts, operator runbooks, downstream imports,
   state-file path readers, and known unsupported-user decisions across the
   import-facade and runtime compatibility surfaces.
@@ -436,6 +452,13 @@ Coordination notes: this is the first milestone where removal is allowed. Each
 round must name exactly which surfaces it removes, why every gate is
 satisfied, what old-log/golden/repair/healthcheck/import evidence applies, and
 where reviewer approval is recorded.
+Progress: round 071 completed the prerequisite external operator/downstream
+inventory, but it did not approve any exact surface for removal. No exact
+surface has passed the milestone-008 removal gates yet; unavailable external
+evidence, blocked approval evidence, missing unsupported-user decisions, and
+per-surface blockers remain removal blockers until a selected removal round
+names the exact surface and records every satisfied gate plus reviewer
+approval.
 
 Candidate directions:
 
