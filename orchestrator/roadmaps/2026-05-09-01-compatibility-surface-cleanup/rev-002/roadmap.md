@@ -321,8 +321,16 @@ field usage, absent checked-in dedicated PR URL/state paths, snapshot and
 healthcheck readback, runbook/script/operator expectations, test and golden
 fixture coverage, current `keep`/`defer` classifications, and conservative
 blockers before any later cleanup, migration, schema, healthcheck, repair,
-projection, publication, upload, or release decision. The milestone remains
-pending because directions 018 and 019 are unresolved.
+projection, publication, upload, or release decision. Round 069 completed
+`direction-018-block-state-repair-failure-fixture`, merged as `4c297c8`, with
+source-backed evidence for repair-failure `block-state.json` writer shape,
+normal blocked writes, compatibility projection, healthcheck/snapshot/golden
+readback, stale-block cleanup, restart cleanup, fixture inventory, existing
+assertions, current `keep` classification, and conservative blockers before
+any later cleanup, removal, migration, schema, write-timing, healthcheck,
+repair, projection, stale-cleanup, restart, publication, upload, or release
+decision. The milestone remains pending because direction 019 remains
+unresolved.
 
 Candidate directions:
 
@@ -368,6 +376,7 @@ Candidate directions:
   outputs.
 
 - Direction id: `direction-018-block-state-repair-failure-fixture`
+  Status: complete via round 069, merged as `4c297c8`.
   Summary: add focused evidence for repair-failure `block-state.json` output
   shape, direct blocked writes, healthcheck reads, and stale-block cleanup.
   Preconditions: current runner, effect interpreter, compatibility projection,
