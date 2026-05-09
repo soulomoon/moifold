@@ -207,10 +207,20 @@ family, and which evidence is required per surface.
 Parallel lane: `docs-policy`
 Coordination notes: policy must quote current source evidence. It must not
 claim removal approval by itself.
+Progress: round 056 completed the import-facade cleanup policy in `8a6bcf6`,
+recording preferred reusable-package imports, current selected-facade import
+counts, Cabal exposure, keep/defer classifications, protecting tests, and
+missing deprecation/removal gates for the six selected public compatibility
+import facades without changing production imports, Cabal descriptors,
+deprecation status, public exposure, runtime compatibility-file policy,
+roadmap revision, or removal status. Milestone 003 remains pending until
+`direction-006-runtime-compatibility-cleanup-policy` records the runtime
+compatibility-file policy from the approved behavior-gate evidence.
 
 Candidate directions:
 
 - Direction id: `direction-005-import-facade-cleanup-policy`
+  Status: complete via round 056, merged as `8a6bcf6`.
   Summary: document preferred imports, deprecation readiness, and removal gates
   for Haskell import facades.
   Why it matters now: later removal rounds need a reviewed surface-by-surface
