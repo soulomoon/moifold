@@ -413,13 +413,18 @@ approved evidence that moifold consumes the standalone `agent-workflow-core`,
 the intended local package wiring; compatibility facades remain available;
 package validation, the external consumer example build/run, `cabal build all`,
 `cabal test watcher-core-test`, CLI help smokes, `render-service`, and
-empty-root `healthcheck` all pass. Milestone 005 remains pending because
-directions 015 and 016 still need the release-candidate evidence bundle and
-explicit publication/hold gate. Round 049 did not approve publication, assemble
-a release-candidate bundle, upload packages, change descriptors, source,
-schemas, compatibility facades, runtime/healthcheck/repair/prompt policy, CI,
-changelog/release notes, roadmap payload, generated artifacts, or controller
-state payload.
+empty-root `healthcheck` all pass. Round 050 completed the release-candidate
+evidence bundle in `955062f`, adding
+`docs/agentic-workflow-framework/release-candidate-bundle.md`, a README link,
+and round artifacts with approved package artifacts, validation, docs, CI
+configuration, consumer validation, compatibility/deprecation notes, no-upload
+evidence, and remaining terminal-gate follow-ups: hosted CI was not observed
+for the branch, and Haddock per-export/link warnings remain to classify.
+Milestone 005 remains pending because direction 016 still needs the explicit
+publication/hold gate. Rounds 049 and 050 did not approve publication, upload
+packages, change descriptors, source, schemas, compatibility facades,
+runtime/healthcheck/repair/prompt policy, CI, changelog/release notes,
+generated artifacts, or controller state payload.
 
 Candidate directions:
 
@@ -438,6 +443,7 @@ Candidate directions:
   current CLI/watcher workflows.
 
 - Direction id: `direction-015-release-candidate-bundle`
+  Status: complete via round 050, merged as `955062f`.
   Summary: assemble a release-candidate evidence bundle: package artifacts,
   checks, docs, changelog, CI status, compatibility/deprecation notes, and
   remaining blockers.
