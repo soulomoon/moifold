@@ -223,8 +223,14 @@ with refreshed `CodexWatcher.AppServerClient` import counts, caller grouping by
 client/parser, transport/session, protocol/request, and product-policy
 ownership, replacement module exposure evidence, current app-server behavior
 coverage readback, and conservative blockers for later migration or cleanup.
-The milestone remains pending because directions 011-012 still need evidence
-before milestone completion.
+Round 062 completed
+`direction-011-event-log-concrete-helper-boundary`, merged as `da13d68`, with
+refreshed `CodexWatcher.Workflow.EventLog` import/reference scans, helper
+ownership classification, package exposure readback, old-log/golden replay
+coverage notes, and conservative blockers for any later helper movement,
+facade narrowing, migration, deprecation, or removal decision. The milestone
+remains pending because direction 012 still needs evidence before milestone
+completion.
 
 Candidate directions:
 
@@ -247,6 +253,7 @@ Candidate directions:
   evidence direction alone.
 
 - Direction id: `direction-011-event-log-concrete-helper-boundary`
+  Status: complete via round 062, merged as `da13d68`.
   Summary: prove which `CodexWatcher.Workflow.EventLog` helpers are concrete
   moifold compatibility helpers versus preferred reusable event-log imports.
   Preconditions: old-log and golden replay evidence for any helper movement.
