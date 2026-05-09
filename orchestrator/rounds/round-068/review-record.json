@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-006-runtime-compatibility-follow-up-evidence",
+  "direction_id": "direction-017-pr-state-external-path-inventory",
+  "extracted_item_id": "direction-017-pr-state-external-path-inventory",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only round-local inventory for PR review compatibility state files, PR URL field usage, absent dedicated PR URL/state paths, snapshot and healthcheck readback, runbook/script/operator expectations, tests/golden fixtures, current keep/defer classifications, and conservative blockers before later cleanup decisions."
+}
