@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-001",
+  "milestone_id": "milestone-002-replacement-paths-and-behavior-gates",
+  "direction_id": "direction-004-runtime-file-behavior-gates",
+  "extracted_item_id": "round-055-runtime-file-behavior-gates",
+  "roadmap_item_id": "round-055-runtime-file-behavior-gates",
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only runtime compatibility-file behavior-gate readiness. The report covers all selected surfaces, records missing evidence conservatively, marks no surface remove-later, changes no runtime or policy files, and passes cabal build all, cabal test watcher-core-test, scripts/validate-workflow-packages.sh, git diff --check, and git diff --cached --check."
+}
