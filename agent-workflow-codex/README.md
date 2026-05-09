@@ -67,3 +67,5 @@ release gate.
 - [Compatibility and deprecation policy](../docs/agentic-workflow-framework/compatibility-deprecation-policy.md)
 - [Package extraction readiness](../docs/agentic-workflow-framework/package-extraction-readiness.md)
 - [Package validation](../docs/agentic-workflow-framework/package-validation.md)
+- [Package consumer guide](../docs/agentic-workflow-framework/package-consumer-guide.md)
+- [Buildable consumer example](../examples/workflow-package-consumer)

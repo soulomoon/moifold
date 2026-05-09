@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-004-public-docs-examples",
+  "direction_id": "direction-012-examples-and-consumer-guides",
+  "extracted_item_id": "item-047-examples-and-consumer-guides",
+  "roadmap_item_id": "item-047-examples-and-consumer-guides",
+  "decision": "approved",
+  "evidence_summary": "Approved after staged-scope inspection, standalone example build/run, root build, watcher-core-test, Haddock, workflow package validation, whitespace checks, forbidden import scan, and release/ownership wording scan all passed. Payload excludes orchestrator/state.json, root cabal.project, existing package descriptors, changelog/release-note files, and publication actions."
+}

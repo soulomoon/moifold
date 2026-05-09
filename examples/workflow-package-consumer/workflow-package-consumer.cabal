@@ -1,0 +1,28 @@
+cabal-version: 3.8
+name:          workflow-package-consumer
+version:       0.1.0.0
+synopsis:      Local consumer example for workflow package candidates
+description:
+  Buildable local example that consumes agent-workflow-core,
+  agent-workflow-codex, and agent-workflow-github through their package-facing
+  exposed modules. This package is not part of the root project package set.
+license:       MIT
+author:        soulomoon
+maintainer:    soulomoon
+category:      Development
+build-type:    Simple
+
+executable workflow-package-consumer
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  build-depends:
+    aeson >=2.2 && <3,
+    agent-workflow-codex >=0.1 && <0.2,
+    agent-workflow-core >=0.1 && <0.2,
+    agent-workflow-github >=0.1 && <0.2,
+    base >=4.18 && <5,
+    bytestring >=0.12 && <0.13,
+    text >=2.0 && <3
+  ghc-options:
+    -Wall
+  default-language: GHC2021

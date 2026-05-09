@@ -76,3 +76,5 @@ own workflow spec, codecs, interpreters, and runtime.
 - [Implemented API freeze](../docs/agentic-workflow-framework/implemented-api-freeze.md)
 - [Package extraction readiness](../docs/agentic-workflow-framework/package-extraction-readiness.md)
 - [Package validation](../docs/agentic-workflow-framework/package-validation.md)
+- [Package consumer guide](../docs/agentic-workflow-framework/package-consumer-guide.md)
+- [Buildable consumer example](../examples/workflow-package-consumer)

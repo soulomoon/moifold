@@ -61,6 +61,9 @@ Implemented contract:
 - [package-validation.md](package-validation.md): local `cabal check` and
   source-distribution validation commands, artifact paths, and no-upload
   boundary for the external package candidates.
+- [package-consumer-guide.md](package-consumer-guide.md): source-backed local
+  consumer example and preferred package-facing imports for the three workflow
+  package candidates.
 - [compatibility-deprecation-policy.md](compatibility-deprecation-policy.md):
   preferred-import guidance, compatibility facade status, and deprecation and
   removal gates for future external package candidates.
