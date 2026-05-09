@@ -32,6 +32,10 @@ stable contracts instead of restating them in every role or roadmap file.
   `planning-state.json`, PR URL files, block state, repair state, and runtime
   owner files keep their current names and field meanings unless explicitly
   migrated.
+- Compatibility cleanup sequencing: cleanup must proceed from source-backed
+  inventory to readiness evidence to policy before removal. Runtime
+  compatibility-file removal additionally requires old-log, golden, repair,
+  healthcheck, and write-timing evidence for the selected surface.
 
 ## Alignment Invariants
 
@@ -48,6 +52,11 @@ stable contracts instead of restating them in every role or roadmap file.
   no generic prompt runner; no workflow `liftIO`; no YAML-defined state
   machines; no moving concrete moifold issue/PR lifecycle policy into generic
   core just to satisfy package shape.
+- Roadmap expansion discipline: compatibility cleanup roadmaps should not mark
+  terminal completion only because an initial todo list is exhausted. Near the
+  end of a cleanup family, the guider must inspect merged evidence and either
+  expand newly discovered follow-up items into a reviewed roadmap update or
+  record why no further cleanup items are justified.
 
 ## Verification Anchors
 
