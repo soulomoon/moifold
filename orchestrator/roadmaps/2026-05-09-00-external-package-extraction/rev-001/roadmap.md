@@ -309,7 +309,7 @@ Candidate directions:
   Boundary notes: do not weaken ownership scans to make package movement pass.
   Extraction notes: prefer recursive source-tree checks over hand-listed files.
 
-### 4. [in progress] Publish Public Docs And Examples
+### 4. [complete] Publish Public Docs And Examples
 
 Milestone id: `milestone-004-public-docs-examples`
 Depends on: `milestone-002-standalone-package-layout`
@@ -338,8 +338,17 @@ Haddock, workflow package validation, whitespace checks, forbidden import scan,
 and ownership/release wording scan while preserving root `cabal.project`,
 existing package descriptors, changelog/release-note files, release gates,
 publication actions, event schemas, compatibility facades, runtime policy, and
-controller state payload. Milestone 004 remains in progress because direction
-013 changelog and release-note work is still pending.
+controller state payload. Round 048 completed package-candidate changelog and
+release notes in `e1c9492`, adding source-backed changelog and release-note
+material plus docs/package README links for the three `0.1.0.0` package
+candidates. The approved evidence passed build/test/package validation, the
+consumer example, metadata scans, overclaim scans, ownership scans, and scope
+scans while preserving package descriptors, root `cabal.project`, CI, source
+modules, publication state, event schemas, compatibility facades, runtime
+policy, and controller state payload. Milestone 004 is complete because
+directions 011, 012, and 013 now satisfy package READMEs, Haddock-facing module
+docs, examples and consumer guides, changelog/release notes, and public
+non-goals aligned with implemented APIs.
 
 Candidate directions:
 
@@ -371,6 +380,7 @@ Candidate directions:
   prose when feasible.
 
 - Direction id: `direction-013-changelog-and-release-notes`
+  Status: complete via round 048, merged as `e1c9492`.
   Summary: prepare changelog entries and release notes for the package
   candidates.
   Why it matters now: release gates need human-readable change scope and
