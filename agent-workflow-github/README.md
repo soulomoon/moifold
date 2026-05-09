@@ -44,4 +44,6 @@ repair, Codex agent behavior, moifold runtime ownership, or publication gates.
 - [Compatibility and deprecation policy](../docs/agentic-workflow-framework/compatibility-deprecation-policy.md)
 - [Package validation](../docs/agentic-workflow-framework/package-validation.md)
 - [Package consumer guide](../docs/agentic-workflow-framework/package-consumer-guide.md)
+- [Package candidate changelog](../docs/agentic-workflow-framework/changelog.md)
+- [Package candidate release notes](../docs/agentic-workflow-framework/release-notes.md)
 - [Buildable consumer example](../examples/workflow-package-consumer)

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-004-public-docs-examples",
+  "direction_id": "direction-013-changelog-and-release-notes",
+  "extracted_item_id": "item-048-changelog-and-release-notes",
+  "roadmap_item_id": "item-048-changelog-and-release-notes",
+  "decision": "approved",
+  "evidence_summary": "Approved. Staged payload is limited to expected documentation and round artifacts; controller state is unstaged only. Baseline build/test/checks, package validation, consumer example, metadata scans, overclaim scans, ownership scans, and scope scans all passed. New changelog and release notes align with current package descriptors and preserve release-gate and moifold-owned boundary wording."
+}

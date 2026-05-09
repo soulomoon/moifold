@@ -64,6 +64,12 @@ Implemented contract:
 - [package-consumer-guide.md](package-consumer-guide.md): source-backed local
   consumer example and preferred package-facing imports for the three workflow
   package candidates.
+- [changelog.md](changelog.md): package-candidate changelog material for the
+  local `0.1.0.0` workflow package candidates, without package-publication
+  approval.
+- [release-notes.md](release-notes.md): release-note material for a future
+  release-gate review, including package scope, compatibility status,
+  validation evidence, and remaining moifold-owned policy.
 - [compatibility-deprecation-policy.md](compatibility-deprecation-policy.md):
   preferred-import guidance, compatibility facade status, and deprecation and
   removal gates for future external package candidates.
