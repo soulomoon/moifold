@@ -73,6 +73,8 @@ Implemented contract:
 - [release-candidate-bundle.md](release-candidate-bundle.md): package-by-package
   evidence bundle for the terminal publication gate, without package upload or
   publish/hold choice.
+- [publication-gate-decision.md](publication-gate-decision.md): terminal
+  publication-gate decision holding the package candidates in candidate state.
 - [compatibility-deprecation-policy.md](compatibility-deprecation-policy.md):
   preferred-import guidance, compatibility facade status, and deprecation and
   removal gates for future external package candidates.

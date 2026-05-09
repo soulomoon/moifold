@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-005-consumer-release-gate",
+  "direction_id": "direction-016-explicit-publication-gate",
+  "extracted_item_id": "item-051-explicit-publication-gate",
+  "roadmap_item_id": "item-051-explicit-publication-gate",
+  "decision": "APPROVED",
+  "evidence_summary": "Staged round-051 payload is docs-only and records the terminal publication gate as a deliberate hold. Local package validation, build, watcher-core test, Haddock generation, consumer example build/run, CI config scan, overclaim/no-upload scan, decision wording scan, moifold-owned policy scan, whitespace checks, and scope scan passed. Hosted CI was not observed, Haddock per-export/link warnings remain publication blockers, and there is no explicit operator approval for externally visible package upload."
+}
