@@ -273,7 +273,7 @@ Candidate directions:
   Boundary notes: absence of production imports does not make a public exposed
   module removable.
 
-### 6. [pending] Complete Runtime Compatibility Follow-Up Evidence
+### 6. [complete] Complete Runtime Compatibility Follow-Up Evidence
 
 Milestone id: `milestone-006-runtime-compatibility-follow-up-evidence`
 Depends on: `milestone-005-import-facade-follow-up-evidence`
@@ -329,8 +329,17 @@ readback, stale-block cleanup, restart cleanup, fixture inventory, existing
 assertions, current `keep` classification, and conservative blockers before
 any later cleanup, removal, migration, schema, write-timing, healthcheck,
 repair, projection, stale-cleanup, restart, publication, upload, or release
-decision. The milestone remains pending because direction 019 remains
-unresolved.
+decision. Round 070 completed
+`direction-019-live-issue-snapshot-fixture-timing`, merged as `93e9e55`, with
+source-backed evidence for live `issue-snapshot.json` execute-mode writer
+timing before planner turn start, prompt/path contract, scoped and closed-scope
+snapshot behavior, focused timing tests, absent checked-in live fixture
+coverage, no current healthcheck/repair/restart/replay reader, current `defer`
+classification, and conservative blockers before any later cleanup, removal,
+migration, schema, filename, event-type, write-timing, planner-turn,
+projection, healthcheck, repair, replay, publication, upload, release, or
+operator behavior decision. The milestone is complete because directions 013
+through 019 are complete.
 
 Candidate directions:
 
@@ -385,6 +394,7 @@ Candidate directions:
   cleanup claims.
 
 - Direction id: `direction-019-live-issue-snapshot-fixture-timing`
+  Status: complete via round 070, merged as `93e9e55`.
   Summary: add live `issue-snapshot.json` fixture and write-timing evidence for
   issue-planning snapshot creation before planner turn start.
   Preconditions: current issue planning write path and timing tests.
