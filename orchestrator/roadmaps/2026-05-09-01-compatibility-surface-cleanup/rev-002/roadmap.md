@@ -299,8 +299,17 @@ ordering, compatibility rewrite ordering, summary fields, production-reader
 inventory, current non-healthcheck status, missing checked-in fixture coverage,
 existing source-order test coverage, and conservative blockers before any
 later cleanup, migration, schema, timing, healthcheck, repair, projection,
-stale-block-cleanup, or removal decision. The milestone remains pending
-because directions 015 through 019 are unresolved.
+stale-block-cleanup, or removal decision. Round 066 completed
+`direction-015-runtime-owner-fixture-operator-inventory`, merged as
+`4139015`, with source-backed evidence for `runtime-owner.json` schema and CLI
+behavior, automatic-loop timing, healthcheck reads and field-path mismatch,
+PR-review launch reuse, `scripts/restart-watcher` parsing and cleanup
+behavior, runbook and policy references, missing checked-in fixture coverage,
+current `keep` classification, and conservative blockers before any later
+cleanup, migration, schema, lease-field, healthcheck, daemon ownership,
+restart-script, projection, publication, upload, release, or removal decision.
+The milestone remains pending because directions 016 through 019 are
+unresolved.
 
 Candidate directions:
 
@@ -320,6 +329,7 @@ Candidate directions:
   Boundary notes: repair write order must not change.
 
 - Direction id: `direction-015-runtime-owner-fixture-operator-inventory`
+  Status: complete via round 066, merged as `4139015`.
   Summary: record checked-in fixture coverage, `lease` field-path readback,
   healthcheck behavior, and operator script/runbook inventory for
   `runtime-owner.json`.
