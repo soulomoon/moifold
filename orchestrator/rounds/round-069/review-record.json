@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-006-runtime-compatibility-follow-up-evidence",
+  "direction_id": "direction-018-block-state-repair-failure-fixture",
+  "extracted_item_id": "direction-018-block-state-repair-failure-fixture",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only round-local artifact. Source readbacks and focused scans confirmed repair-failure block-state writer shape, normal blocked writes, compatibility projection, healthcheck/snapshot/golden readback, stale-block cleanup, restart cleanup, fixture inventory, existing assertions, keep classification, and conservative blockers. Cabal/package baselines were skipped under the artifact-only allowance because no production, test, fixture, script, docs policy, roadmap, package, project-contract, or controller-state files changed."
+}
