@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-001",
+  "milestone_id": "milestone-002-replacement-paths-and-behavior-gates",
+  "direction_id": "direction-003-import-replacement-readiness",
+  "extracted_item_id": "round-054-import-replacement-readiness",
+  "roadmap_item_id": "round-054-import-replacement-readiness",
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only import-replacement readiness round. Live scans verified selected-facade import counts, docs/Cabal replacement references, Cabal exposure, package-boundary test coverage, conservative classifications, and untouched runtime compatibility-file behavior gates. Required baseline checks passed: cabal build all, cabal test watcher-core-test, scripts/validate-workflow-packages.sh, git diff --check, and git diff --cached --check."
+}
