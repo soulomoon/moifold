@@ -195,7 +195,7 @@ Candidate directions:
   Extraction notes: name each fixture, command, or healthcheck path that guards
   a future cleanup candidate.
 
-### 3. [pending] Write Cleanup Policy From Evidence
+### 3. [complete] Write Cleanup Policy From Evidence
 
 Milestone id: `milestone-003-evidence-backed-cleanup-policy`
 Depends on: `milestone-002-replacement-paths-and-behavior-gates`
@@ -213,9 +213,19 @@ counts, Cabal exposure, keep/defer classifications, protecting tests, and
 missing deprecation/removal gates for the six selected public compatibility
 import facades without changing production imports, Cabal descriptors,
 deprecation status, public exposure, runtime compatibility-file policy,
-roadmap revision, or removal status. Milestone 003 remains pending until
-`direction-006-runtime-compatibility-cleanup-policy` records the runtime
-compatibility-file policy from the approved behavior-gate evidence.
+roadmap revision, or removal status. At that point, milestone 003 remained
+pending until `direction-006-runtime-compatibility-cleanup-policy` recorded
+the runtime compatibility-file policy from the approved behavior-gate
+evidence. Round 057
+completed the runtime compatibility-file cleanup policy in `10b3191`,
+recording conservative keep/defer classifications, required old-log, golden,
+repair, healthcheck, write-timing, fixture, external-operator, focused-test,
+and reviewer-approval gates, and the explicit no-removal-approval boundary for
+selected runtime compatibility files and snapshots without changing runtime
+schemas, filenames, write timing, behavior, roadmap revision, project
+contract, import-facade policy, or removal status. Milestone 003 is complete
+because both cleanup-policy directions now have approved evidence-backed
+policy artifacts while preserving the required future gates.
 
 Candidate directions:
 
@@ -233,6 +243,7 @@ Candidate directions:
   specs such as `CodexWatcher.Workflow.Types`.
 
 - Direction id: `direction-006-runtime-compatibility-cleanup-policy`
+  Status: complete via round 057, merged as `10b3191`.
   Summary: document keep/defer/remove-later policy for runtime compatibility
   files and snapshots.
   Why it matters now: runtime file cleanup has operational consequences beyond
