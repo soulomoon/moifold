@@ -77,7 +77,7 @@ current package boundaries.
 
 ## Milestones
 
-### 1. [pending] Inventory Compatibility Surfaces
+### 1. [complete] Inventory Compatibility Surfaces
 
 Milestone id: `milestone-001-inventory-compatibility-surfaces`
 Depends on: none
@@ -95,8 +95,14 @@ recording the six selected public compatibility import facades, current
 repo-local users, preferred replacement imports, Cabal exposure, protecting
 tests, source scans, and unresolved unknowns without changing production code,
 descriptors, imports, runtime compatibility files, deprecation status, or
-removal status. Milestone 001 remains pending because the runtime
-compatibility-file inventory direction is still open.
+removal status. Round 053 completed the runtime compatibility-file inventory
+in `9e34917`, recording selected runtime compatibility files, current
+producers and consumers, write timing, healthcheck and repair use, golden and
+old-log assumptions, protecting tests, and explicit unknowns without changing
+file names, schemas, compatibility write behavior, runtime behavior,
+deprecation status, or removal status. Milestone 001 is complete because both
+inventory directions now have approved, source-backed artifacts covering the
+milestone completion signal.
 
 Candidate directions:
 
@@ -116,6 +122,7 @@ Candidate directions:
   `CodexWatcher.Workflow.Permission`.
 
 - Direction id: `direction-002-runtime-compatibility-file-inventory`
+  Status: complete via round 053, merged as `9e34917`.
   Summary: inventory runtime compatibility files, write sites, read sites,
   repair use, healthcheck use, and old-log assumptions.
   Why it matters now: runtime files are user-visible and operationally
