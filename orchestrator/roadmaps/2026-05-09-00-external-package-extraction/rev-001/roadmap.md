@@ -330,8 +330,16 @@ package descriptor. The approved evidence passed Haddock generation, package
 validation, build, `watcher-core-test`, whitespace checks, README module-list
 checks, Haddock header checks, descriptor-scope inspection, staged-path scope
 scan, and overclaim/non-goal scans, with no package upload or publication
-claim. Milestone 004 remains in progress because examples or consumer guides
-and changelog or release-note work are still pending.
+claim. Round 047 completed examples and consumer guides in `822e3bf`, adding a
+standalone `examples/workflow-package-consumer` local Cabal project and
+executable, a package consumer guide, and README/index links. The approved
+evidence passed the standalone example build/run, root build, `watcher-core-test`,
+Haddock, workflow package validation, whitespace checks, forbidden import scan,
+and ownership/release wording scan while preserving root `cabal.project`,
+existing package descriptors, changelog/release-note files, release gates,
+publication actions, event schemas, compatibility facades, runtime policy, and
+controller state payload. Milestone 004 remains in progress because direction
+013 changelog and release-note work is still pending.
 
 Candidate directions:
 
@@ -349,6 +357,7 @@ Candidate directions:
   readiness report where useful.
 
 - Direction id: `direction-012-examples-and-consumer-guides`
+  Status: complete via round 047, merged as `822e3bf`.
   Summary: add small package examples or consumer guides that demonstrate core,
   Codex, and GitHub package usage without moifold lifecycle dependencies.
   Why it matters now: examples prove the extracted packages are understandable
