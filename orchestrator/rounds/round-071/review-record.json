@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-007-external-operator-downstream-inventory",
+  "direction_id": "direction-020-external-operator-downstream-inventory",
+  "extracted_item_id": "direction-020-external-operator-downstream-inventory",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after rev-002 artifact-only boundary checks, git diff whitespace checks, round-071 trailing-whitespace scan, selection/plan/implementation-notes/inventory readback, changed-path inspection, refreshed import scans, runtime path fixture/source scans, shell/operator and runbook scans, and explicit confirmation that local absence is recorded only as unavailable or blocked evidence. Cabal and package baselines were skipped under the rev-002 artifact-only allowance because the diff is limited to round-local orchestrator artifacts and changes no production behavior."
+}
