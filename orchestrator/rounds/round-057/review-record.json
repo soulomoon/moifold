@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-001",
+  "milestone_id": "milestone-003-evidence-backed-cleanup-policy",
+  "direction_id": "direction-006-runtime-compatibility-cleanup-policy",
+  "extracted_item_id": "round-057-runtime-compatibility-cleanup-policy",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved. Baseline build, watcher-core-test, workflow package validation, diff checks, focused runtime compatibility scans, readback, scope, and conservative classification checks passed. The diff is docs/policy/artifact-only, project-contract.md remains unchanged with documented justification, and no selected runtime compatibility surface is remove-later or approved for removal."
+}

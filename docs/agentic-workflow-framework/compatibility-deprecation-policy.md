@@ -30,6 +30,17 @@ Source-backed inputs for this policy:
   the selected import scans and Cabal exposure, keeps the round 054
   classifications, and records the gates still missing before deprecation or
   removal.
+- `orchestrator/rounds/round-053/runtime-compatibility-file-inventory.md`
+  records the selected runtime compatibility-file inventory, including
+  producers, readers, write timing, healthcheck, repair, golden/snapshot
+  evidence, protecting tests, and unknowns.
+- `orchestrator/rounds/round-055/runtime-file-behavior-gates.md` refreshes
+  runtime compatibility-file behavior gates and records conservative
+  `keep`/`defer` classifications; no selected runtime surface reached
+  `remove-later`.
+- `orchestrator/rounds/round-057/runtime-compatibility-cleanup-policy.md`
+  refreshes the selected runtime scans and turns the round 053 and round 055
+  evidence into this cleanup policy.
 - `docs/agentic-workflow-framework/package-extraction-readiness.md` records
   the package ownership split, dependency ownership, current compatibility
   facade status, boundary-test evidence, and remaining moifold-owned blockers.
@@ -91,6 +102,60 @@ classification remains in force.
 | `CodexWatcher.Workflow.EventLog` | Main-library module exposes generic event-log helpers plus moifold-specific helpers such as `initializeMoifoldWorkflow`, `applyMoifoldWorkflowEvent`, and `replayMoifoldWorkflowEvents`; round 056 still finds 3 selected-facade imports. | Reusable code should import `CodexWatcher.Workflow.EventLog.Core`, `CodexWatcher.Workflow.EventLog.File.Core`, `CodexWatcher.Workflow.EventLog.Commit.Core`, and `CodexWatcher.Workflow.Audit` as needed. | Existing moifold code may continue using the facade for concrete event-log and audit behavior. | `defer` | No deprecation or removal while concrete `WatcherEvent`, replay policy, old-log, golden-fixture, and compatibility behavior evidence remains missing. |
 | `CodexWatcher.Workflow.Execution` | Main-library module bridges generic execution-core metadata to concrete effects, action executors, runtime configs, command reports, and request ids; round 056 still finds 4 selected-facade imports. | Reusable execution code should import `CodexWatcher.Workflow.Execution.Core`. | Existing moifold runtime and effect-interpreter code may keep using the concrete execution facade. | `keep` | Not a removal candidate. Concrete runtime action types and command/report behavior remain product-owned. |
 | `CodexWatcher.Workflow.Permission` | Main-library module bridges `CodexWatcher.Workflow.Permission.Core` to concrete moifold phase validation, `SomeWatcherState`, `EffectPlan`, and `MoifoldSpec`; round 056 still finds 1 selected-facade import in tests and public exposure remains. | Reusable permission code should import `CodexWatcher.Workflow.Permission.Core`. | Existing moifold code may continue using `validateMoifoldEffectPlan`, `moifoldPermissionPolicy`, and concrete validation helpers. | `defer` | No deprecation or removal until public API, downstream-user, and behavior evidence is reviewed. |
+
+## Runtime Compatibility-File Cleanup Policy
+
+The event log remains workflow truth. Runtime compatibility files are
+moifold-owned operator/runtime contracts derived from event-log state,
+runtime ownership state, repair execution, or live issue-planning snapshots.
+They are not reusable-package APIs, and package extraction does not move their
+names, schemas, field meanings, write timing, repair behavior, healthcheck
+behavior, or operator recovery policy into `agent-workflow-core`,
+`agent-workflow-codex`, or `agent-workflow-github`.
+
+This policy classifies cleanup readiness only. It does not approve migration,
+removal, filename changes, schema changes, write-timing changes, event JSON
+`type` changes, repair redesign, healthcheck redesign, runtime behavior
+changes, roadmap expansion, import-facade changes, or removal approval.
+
+| Surface | Classification | Evidence basis | Missing gates before later deprecation, migration, or removal |
+| --- | --- | --- | --- |
+| `issue-state.json` | `keep` | Round 053 records current producers in compatibility projection, repair rewrite, fanout, startup/reconciliation, and PR-review handoff paths; healthcheck reads `issueState`; golden issue fixtures cover blocked, plan-ready, and incomplete snapshots; tests protect PR URL projection, golden replay/bootstrap, daemon write order, and compatibility parity. Round 055 keeps this as a current operator/runtime contract. | Exhaustive old live state-directory fixtures for field combinations and external operator/downstream direct-reader inventory are still missing. |
+| `daemon-state.json` | `keep` | Round 053 records compatibility projection producers for idle, active, stopped, and concrete daemon summaries; healthcheck reads shared `daemonState`; repair rewrites daemon state through repaired replay compatibility writes; the incomplete issue fixture covers an older tolerated `lastCompletedTurn` shape. Round 055 keeps the file because it remains an operator contract. | Active and stopped daemon fixtures and external operator/downstream direct-reader inventory are still missing. |
+| `planning-state.json` | `defer` | Round 053 records two producer shapes: direct `RecordPlanningGraph` planned writes and compatibility projection from waiting-ready-issues planning state. Tests protect direct graph recording, canonical graph recording, indexed planning parity, and daemon compatibility writes. Round 055 records no healthcheck reader and no checked-in `planning-state.json` fixture. | Healthcheck coverage is absent by current design, old snapshot/file fixture coverage is missing, and external operator/downstream direct-reader inventory is missing. |
+| PR review state files and PR URL fields | `keep` for current PR review state files; `defer` for absent dedicated PR URL file wording | Round 053 maps the selected surface to current `watcher-state.json`, `checker-state.json`, optional `agent-state.json`, `reviewer-state.json`, `issue-state.json` `pr_url`, and PR review config `prUrl`; no dedicated `pr-url` or `pr-state` file producer was found. Golden PR-review snapshots cover merged, unresolved, blocked, and clean-ready shapes; healthcheck reads PR-review state files; tests protect PR-review compatibility and PR URL projection. | External operator/downstream inventory is still required before concluding no user expects a dedicated PR URL/state path. |
+| `block-state.json` | `keep` | Round 053 records direct `RecordBlocked` planned writes, compatibility projection for blocked state, and runner repair-failure block-state writes. Healthcheck reads blocked state across issue planning, issue implementation, and PR review; successful repair removes stale block state after compatibility rewrite; golden PR-review blocked fixture and blocked event-log fixtures exist. Round 055 keeps the file as a current operator contract. | A checked-in fixture for runner repair-failure block-state JSON and external operator/downstream direct-reader inventory are still missing. |
+| `repair-state.json` | `defer` | Round 053 records the single producer in `repair-invalid-state --execute`: archive invalid log, write repaired `events.jsonl`, write `repair-state.json`, rewrite compatibility files, then remove stale `block-state.json`. Round 055 records no production reader, no healthcheck reader, and no checked-in fixture; tests protect dry-run/execute source-order behavior. | Fixture round-trip coverage, healthcheck or explicit non-healthcheck policy, production-reader expectations, and external operator/downstream direct-reader inventory are missing. |
+| `runtime-owner.json` | `keep` | Round 053 records runtime owner store and CLI producers/readers, automatic-loop validation and renewal, healthcheck surfacing, and `scripts/restart-watcher` shell parsing/removal. Tests protect current lease JSON parsing, rejection of old owner-only shapes, running-lease rejection, and current-process cleanup. Round 055 keeps this as live daemon ownership state. | Checked-in fixture coverage, healthcheck field-path mismatch resolution or explicit policy, and external operator/downstream script inventory are still missing. |
+| Checked-in compatibility snapshots | `defer` | Round 053 records golden PR-review and issue-implementation snapshot directories plus golden event-log replay/bootstrap coverage. Round 055 separates checked-in compatibility snapshots from live `issue-snapshot.json` and records replay/bootstrap tests as the current evidence. | Any removal or migration needs fixture-by-fixture old-log/golden proof and reviewer approval that the snapshot is no longer required. |
+| Live `issue-snapshot.json` | `defer` | Round 053 records live issue-planning snapshot production before planner turn start, and tests protect snapshot write timing plus closed-scope completion without starting a planner turn. Round 055 records no checked-in live `issue-snapshot.json` fixture and no healthcheck reader. | Old live snapshot fixture coverage, external operator/downstream direct-reader inventory, and explicit write-timing migration evidence are missing. |
+
+Future rounds must preserve the round 055 classifications unless refreshed
+source, fixture, old-log, repair, healthcheck, write-timing, and external
+operator evidence proves a stronger classification. `remove-later` means only
+that a later selected removal round may be proposed; it is not removal
+approval. The current evidence classifies no selected runtime compatibility
+surface as `remove-later`.
+
+Before any runtime compatibility-file deprecation, migration, or removal is
+selected, the future round must name the exact file, field, or snapshot
+surface and prove every applicable gate:
+
+- old-log and golden replay/bootstrap behavior for historical event logs and
+  checked-in compatibility snapshots;
+- repair behavior, including `repair-invalid-state --execute` ordering,
+  compatibility rewrite behavior, and stale `block-state.json` handling;
+- healthcheck behavior, including read-only reporting or an explicit reviewed
+  reason the selected file is not healthcheck-owned;
+- write timing, including event append ordering, launch/fanout ordering,
+  startup/reconciliation ordering, runtime-owner lease timing, and live
+  snapshot-before-turn-start timing when applicable;
+- fixture coverage for every old and current JSON shape that remains
+  supported or is intentionally rejected;
+- external operator, runbook, script, and downstream direct-reader inventory;
+- focused behavior tests and baseline build/test validation;
+- reviewer approval that names the exact surface and confirms this policy is
+  satisfied.
 
 ## Compatibility Rules
 
