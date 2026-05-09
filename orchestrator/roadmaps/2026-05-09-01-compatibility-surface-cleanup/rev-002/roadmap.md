@@ -217,8 +217,14 @@ selected evidence direction explicitly proves behavior-preserving readiness.
 Progress: round 060 completed `direction-009-core-ids-split-import-evidence`,
 merged as `329e827`, with refreshed `CodexWatcher.Core.Ids` import scans,
 split agent/GitHub ownership evidence, package-boundary exposure assertions,
-and conservative migration blockers. The milestone remains pending because
-directions 010-012 still need evidence before milestone completion.
+and conservative migration blockers. Round 061 completed
+`direction-010-app-server-client-migration-readiness`, merged as `ef04cd3`,
+with refreshed `CodexWatcher.AppServerClient` import counts, caller grouping by
+client/parser, transport/session, protocol/request, and product-policy
+ownership, replacement module exposure evidence, current app-server behavior
+coverage readback, and conservative blockers for later migration or cleanup.
+The milestone remains pending because directions 011-012 still need evidence
+before milestone completion.
 
 Candidate directions:
 
@@ -232,6 +238,7 @@ Candidate directions:
   round proves downstream compatibility and reviewer approval.
 
 - Direction id: `direction-010-app-server-client-migration-readiness`
+  Status: complete via round 061, merged as `ef04cd3`.
   Summary: group each `CodexWatcher.AppServerClient` use by
   client/transport/parser ownership and record dry-run migration readiness.
   Preconditions: refreshed import count, current tests for app-server client
