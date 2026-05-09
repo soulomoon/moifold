@@ -135,7 +135,7 @@ Candidate directions:
   `planning-state.json`, PR URL/state files, block state, repair state,
   runtime owner files, and compatibility snapshots.
 
-### 2. [pending] Prove Replacement Paths And Behavior Gates
+### 2. [complete] Prove Replacement Paths And Behavior Gates
 
 Milestone id: `milestone-002-replacement-paths-and-behavior-gates`
 Depends on: `milestone-001-inventory-compatibility-surfaces`
@@ -154,10 +154,18 @@ imports, Cabal exposure, package-boundary assertions, protecting tests,
 missing evidence, and conservative keep/defer classifications for the six
 selected public compatibility import facades without changing production
 imports, public exposure, runtime compatibility-file behavior gates, cleanup
-policy, deprecation status, or removal status. Milestone 002 remains pending
-because `direction-004-runtime-file-behavior-gates` is still open and runtime
-compatibility-file behavior evidence is required before cleanup policy or
-removal work can advance.
+policy, deprecation status, or removal status. Milestone 002 remained pending
+until `direction-004-runtime-file-behavior-gates` provided runtime
+compatibility-file behavior evidence before cleanup policy or removal work
+could advance. Round 055 completed runtime compatibility-file
+behavior gates in `e6bc2ee`, recording golden replay, repair, healthcheck,
+write-timing, old snapshot/file evidence, protecting tests, missing evidence,
+and conservative keep/defer classifications for the selected runtime
+compatibility surfaces without changing schemas, filenames, write timing,
+runtime behavior, policy, roadmap revision, or removal status. Milestone 002
+is complete because both replacement-readiness and runtime behavior-gate
+directions now have approved evidence and missing tests or manual evidence are
+identified before any candidate can advance.
 
 Candidate directions:
 
@@ -176,6 +184,7 @@ Candidate directions:
   boundary assertions over hand-maintained lists.
 
 - Direction id: `direction-004-runtime-file-behavior-gates`
+  Status: complete via round 055, merged as `e6bc2ee`.
   Summary: prove compatibility-file behavior through golden replay, repair,
   healthcheck, write-timing, and old snapshot evidence.
   Why it matters now: runtime cleanup must not strand existing watcher state or
