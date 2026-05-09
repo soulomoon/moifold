@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-005-import-facade-follow-up-evidence",
+  "direction_id": "direction-012-workflow-permission-public-api-review",
+  "extracted_item_id": "direction-012-workflow-permission-public-api-review",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only public API review for CodexWatcher.Workflow.Permission. Public exposure, import/reference scans, focused permission behavior test, replacement and ownership notes, downstream/operator blocker, diff scope, worker-plan absence, and whitespace checks were verified."
+}
