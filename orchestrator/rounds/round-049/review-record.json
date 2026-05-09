@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-005-consumer-release-gate",
+  "direction_id": "direction-014-moifold-consumer-validation",
+  "extracted_item_id": "item-049-moifold-consumer-validation",
+  "roadmap_item_id": "item-049-moifold-consumer-validation",
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only moifold consumer validation: staged payload is limited to the validation doc and round notes, package validation and consumer example passed, cabal build all and watcher-core-test passed, CLI/render-service/empty-root healthcheck smokes passed, and no release, descriptor, source, schema, runtime, CI, changelog, roadmap, controller-state, or generated-artifact payload changes were staged."
+}
