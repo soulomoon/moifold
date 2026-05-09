@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-005-import-facade-follow-up-evidence",
+  "direction_id": "direction-010-app-server-client-migration-readiness",
+  "extracted_item_id": "round-061-app-server-client-migration-readiness",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: refreshed AppServerClient import count is 28, grouping/readiness and replacement exposure evidence are present, no worker-plan exists, and visible changes remain limited to round-local orchestrator artifacts under the artifact-only baseline allowance."
+}
