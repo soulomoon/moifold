@@ -148,10 +148,21 @@ tests are added before the candidate can advance.
 Parallel lane: limited to proven-disjoint candidate groups.
 Coordination notes: this milestone may add tests and docs. It still must not
 remove compatibility surfaces.
+Progress: round 054 completed import replacement readiness in `2c2771c`,
+recording recursive selected-facade import scans, preferred replacement
+imports, Cabal exposure, package-boundary assertions, protecting tests,
+missing evidence, and conservative keep/defer classifications for the six
+selected public compatibility import facades without changing production
+imports, public exposure, runtime compatibility-file behavior gates, cleanup
+policy, deprecation status, or removal status. Milestone 002 remains pending
+because `direction-004-runtime-file-behavior-gates` is still open and runtime
+compatibility-file behavior evidence is required before cleanup policy or
+removal work can advance.
 
 Candidate directions:
 
 - Direction id: `direction-003-import-replacement-readiness`
+  Status: complete via round 054, merged as `2c2771c`.
   Summary: prove preferred package-facing imports and add tests or scans that
   prevent accidental fallback to compatibility facades.
   Why it matters now: imports can only be cleaned when replacements are clear
