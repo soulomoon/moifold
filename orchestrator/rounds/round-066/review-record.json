@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-006-runtime-compatibility-follow-up-evidence",
+  "direction_id": "direction-015-runtime-owner-fixture-operator-inventory",
+  "extracted_item_id": "direction-015-runtime-owner-fixture-operator-inventory",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved evidence-only runtime-owner fixture/operator inventory. Diff remains limited to round-local artifacts; source readbacks support schema, CLI, automatic-loop, healthcheck, PR-review launch, restart-script, runbook/policy, fixture-gap, keep classification, and conservative blocker claims."
+}
