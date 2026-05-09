@@ -308,8 +308,14 @@ behavior, runbook and policy references, missing checked-in fixture coverage,
 current `keep` classification, and conservative blockers before any later
 cleanup, migration, schema, lease-field, healthcheck, daemon ownership,
 restart-script, projection, publication, upload, release, or removal decision.
-The milestone remains pending because directions 016 through 019 are
-unresolved.
+Round 067 completed `direction-016-daemon-state-active-stopped-fixtures`,
+merged as `8782e33`, with source-backed evidence for `daemon-state.json`
+active, stopped, and idle projection shapes, old-shape fixture tolerance,
+snapshot and golden replay readback, healthcheck, repair, restart cleanup,
+current `keep` classification, and conservative blockers before any later
+cleanup, removal, migration, schema, healthcheck, daemon, restart-script,
+projection, publication, upload, or release decision. The milestone remains
+pending because directions 017 through 019 are unresolved.
 
 Candidate directions:
 
@@ -338,6 +344,7 @@ Candidate directions:
   Boundary notes: this file remains live daemon ownership state.
 
 - Direction id: `direction-016-daemon-state-active-stopped-fixtures`
+  Status: complete via round 067, merged as `8782e33`.
   Summary: add active and stopped `daemon-state.json` fixture evidence and
   preserve existing tolerated old-shape evidence.
   Preconditions: current compatibility projection, healthcheck, repair, and
