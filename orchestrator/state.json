@@ -6,7 +6,7 @@
   "roadmap_revision": "rev-001",
   "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
   "stage": null,
-  "controller_stage": "dispatch-rounds",
+  "controller_stage": "done",
   "max_parallel_rounds": 1,
   "active_round_id": null,
   "active_rounds": [],
@@ -17,7 +17,7 @@
   "worktree_path": null,
   "active_round_dir": null,
   "round_artifacts": {},
-  "last_completed_round": "round-050",
+  "last_completed_round": "round-051",
   "resume_error": null,
   "resume_errors": {},
   "retry": null

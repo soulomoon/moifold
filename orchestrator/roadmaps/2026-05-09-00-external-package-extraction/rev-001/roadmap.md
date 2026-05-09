@@ -392,7 +392,7 @@ Candidate directions:
   Extraction notes: distinguish internal extraction history from public API
   promises.
 
-### 5. [pending] Validate Consumer And Release Gate
+### 5. [complete] Validate Consumer And Release Gate
 
 Milestone id: `milestone-005-consumer-release-gate`
 Depends on: `milestone-003-release-validation-ci`,
@@ -419,10 +419,17 @@ evidence bundle in `955062f`, adding
 and round artifacts with approved package artifacts, validation, docs, CI
 configuration, consumer validation, compatibility/deprecation notes, no-upload
 evidence, and remaining terminal-gate follow-ups: hosted CI was not observed
-for the branch, and Haddock per-export/link warnings remain to classify.
-Milestone 005 remains pending because direction 016 still needs the explicit
-publication/hold gate. Rounds 049 and 050 did not approve publication, upload
-packages, change descriptors, source, schemas, compatibility facades,
+for the branch, and Haddock per-export/link warnings remain to classify. Round
+051 completed the explicit publication gate in `b9dd88d`, adding
+`docs/agentic-workflow-framework/publication-gate-decision.md`, a README link,
+and round artifacts with approved evidence that the terminal decision is a
+deliberate publication hold: hosted CI was not observed, Haddock
+per-export/link warnings remain, and no explicit operator approval exists for
+externally visible package upload. Milestone 005 is complete because directions
+014, 015, and 016 now satisfy the consumer validation, compatibility policy,
+release artifact review, and final approved-plan-or-deliberate-hold completion
+signal. Rounds 049, 050, and 051 did not approve publication, upload packages,
+change descriptors, source, schemas, compatibility facades,
 runtime/healthcheck/repair/prompt policy, CI, changelog/release notes,
 generated artifacts, or controller state payload.
 
@@ -455,6 +462,7 @@ Candidate directions:
   Extraction notes: make the go/no-go decision reviewable by package.
 
 - Direction id: `direction-016-explicit-publication-gate`
+  Status: complete via round 051, merged as `b9dd88d`.
   Summary: record the final publish/hold decision and, only if explicitly
   approved, perform the release action specified by the reviewed plan.
   Why it matters now: this family exists to proceed toward real external
