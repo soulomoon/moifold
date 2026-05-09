@@ -266,10 +266,20 @@ are justified by current evidence.
 Parallel lane: serial
 Coordination notes: this milestone implements the user's instruction to expand
 work near the end rather than treating the first todo list as exhaustive.
+Progress: round 058 completed follow-up discovery in `ada64b6`, recording a
+compact candidate list for later roadmap expansion across import-facade
+evidence, runtime compatibility-file fixtures and policy, runtime-owner,
+daemon-state, PR state/path, block-state, live issue-snapshot, and external
+operator/downstream inventory work. The discovery preserves current keep/defer
+classifications, does not approve migration or removal for any surface, and
+leaves the expansion or revision decision to
+`direction-008-roadmap-expansion-update`. Milestone 004 remains pending until
+that direction publishes the expansion decision.
 
 Candidate directions:
 
 - Direction id: `direction-007-follow-up-discovery`
+  Status: complete via round 058, merged as `ada64b6`.
   Summary: review inventories, policy docs, tests, TODOs, and reviewer notes to
   find follow-up cleanup items before removal rounds.
   Why it matters now: compatibility cleanup tends to reveal secondary callers
