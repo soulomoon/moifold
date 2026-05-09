@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-002",
+  "milestone_id": "milestone-006-runtime-compatibility-follow-up-evidence",
+  "direction_id": "direction-019-live-issue-snapshot-fixture-timing",
+  "extracted_item_id": "direction-019-live-issue-snapshot-fixture-timing",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after artifact-only boundary checks, git diff whitespace checks, round-070 trailing-whitespace scan, rev-002 artifact/readback checks, source readbacks for live issue-snapshot writer path and prompt contract, focused timing-test readbacks, fixture inventory, and healthcheck/repair/restart/replay non-use scans. Cabal and package baselines were skipped under the artifact-only allowance because the integrated result is limited to round-local orchestrator evidence artifacts and changes no production behavior."
+}
