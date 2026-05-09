@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-001",
+  "milestone_id": "milestone-001-inventory-compatibility-surfaces",
+  "direction_id": "direction-002-runtime-compatibility-file-inventory",
+  "extracted_item_id": "round-053-runtime-compatibility-file-inventory",
+  "roadmap_item_id": "round-053-runtime-compatibility-file-inventory",
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, scripts/validate-workflow-packages.sh, git diff --check, git diff --cached --check, required runtime-surface scans, and focused healthcheck, repair, old-log, golden, snapshot, compatibility-write, and runtime-owner lookups passed. The integrated result is evidence-only and changes only round-local artifacts."
+}
