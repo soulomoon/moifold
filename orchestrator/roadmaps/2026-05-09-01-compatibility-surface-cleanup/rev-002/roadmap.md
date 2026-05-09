@@ -214,10 +214,16 @@ evidence, and explicit remaining blockers before any final removal round.
 Coordination notes: this milestone must not add deprecation pragmas, remove
 facades, change Cabal exposure, or migrate production imports except where a
 selected evidence direction explicitly proves behavior-preserving readiness.
+Progress: round 060 completed `direction-009-core-ids-split-import-evidence`,
+merged as `329e827`, with refreshed `CodexWatcher.Core.Ids` import scans,
+split agent/GitHub ownership evidence, package-boundary exposure assertions,
+and conservative migration blockers. The milestone remains pending because
+directions 010-012 still need evidence before milestone completion.
 
 Candidate directions:
 
 - Direction id: `direction-009-core-ids-split-import-evidence`
+  Status: complete via round 060, merged as `329e827`.
   Summary: produce a per-import ownership map for `CodexWatcher.Core.Ids`,
   separating agent ids from GitHub ids and recording migration risks.
   Preconditions: refreshed recursive import scan and current package-boundary
