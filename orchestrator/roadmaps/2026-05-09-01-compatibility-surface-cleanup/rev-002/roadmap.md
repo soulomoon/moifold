@@ -287,10 +287,18 @@ Coordination notes: this milestone does not change filenames, schemas, event
 types, write timing, healthcheck behavior, repair behavior, or compatibility
 projection behavior unless a later selected round explicitly authorizes a
 proven migration.
+Progress: round 064 completed
+`direction-013-planning-state-fixture-policy`, merged as `d3a7897`, with
+source-backed evidence for `planning-state.json` producers, current
+non-healthcheck status, behavior-test coverage, missing checked-in fixture
+coverage, and conservative blockers before any later cleanup, migration,
+schema, timing, healthcheck, projection, or removal decision. The milestone
+remains pending because directions 014 through 019 are unresolved.
 
 Candidate directions:
 
 - Direction id: `direction-013-planning-state-fixture-policy`
+  Status: complete via round 064, merged as `d3a7897`.
   Summary: add evidence for `planning-state.json`, including fixture coverage
   or explicit non-healthcheck policy for its current write-only projection.
   Preconditions: current producer readback and healthcheck state-file readback.
