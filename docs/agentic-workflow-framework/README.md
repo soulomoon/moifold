@@ -70,6 +70,9 @@ Implemented contract:
 - [release-notes.md](release-notes.md): release-note material for a future
   release-gate review, including package scope, compatibility status,
   validation evidence, and remaining moifold-owned policy.
+- [release-candidate-bundle.md](release-candidate-bundle.md): package-by-package
+  evidence bundle for the terminal publication gate, without package upload or
+  publish/hold choice.
 - [compatibility-deprecation-policy.md](compatibility-deprecation-policy.md):
   preferred-import guidance, compatibility facade status, and deprecation and
   removal gates for future external package candidates.

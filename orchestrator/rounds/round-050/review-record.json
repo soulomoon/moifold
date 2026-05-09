@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-00-external-package-extraction",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-00-external-package-extraction/rev-001",
+  "milestone_id": "milestone-005-consumer-release-gate",
+  "direction_id": "direction-015-release-candidate-bundle",
+  "extracted_item_id": "item-050-release-candidate-bundle",
+  "roadmap_item_id": "item-050-release-candidate-bundle",
+  "decision": "APPROVED",
+  "evidence_summary": "Staged release-candidate bundle is docs-only, package-by-package, source-backed, and evidence-only; local package validation, build, watcher-core test, Haddock, consumer example, descriptor scans, boundary scans, compatibility scan, CI config scan, overclaim/no-upload scan, moifold-owned policy scan, and scope hygiene passed. Hosted CI was not observed for the branch, and Haddock warnings remain recorded as terminal-gate follow-ups."
+}
