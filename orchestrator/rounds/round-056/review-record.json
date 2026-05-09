@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-001",
+  "milestone_id": "milestone-003-evidence-backed-cleanup-policy",
+  "direction_id": "direction-005-import-facade-cleanup-policy",
+  "extracted_item_id": "round-056-import-facade-cleanup-policy",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Baseline build, watcher-core-test, workflow package validation, diff checks, selected-facade import scans, Cabal exposure scan, and policy overclaim inspection passed. The round is documentation-only, keeps selected facades available, records keep/defer classifications, and leaves runtime compatibility-file cleanup to direction-006."
+}
