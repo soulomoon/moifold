@@ -292,8 +292,15 @@ Progress: round 064 completed
 source-backed evidence for `planning-state.json` producers, current
 non-healthcheck status, behavior-test coverage, missing checked-in fixture
 coverage, and conservative blockers before any later cleanup, migration,
-schema, timing, healthcheck, projection, or removal decision. The milestone
-remains pending because directions 014 through 019 are unresolved.
+schema, timing, healthcheck, projection, or removal decision. Round 065
+completed `direction-014-repair-state-fixture-reader-policy`, merged as
+`580e4b3`, with source-backed evidence for `repair-state.json` repair execute
+ordering, compatibility rewrite ordering, summary fields, production-reader
+inventory, current non-healthcheck status, missing checked-in fixture coverage,
+existing source-order test coverage, and conservative blockers before any
+later cleanup, migration, schema, timing, healthcheck, repair, projection,
+stale-block-cleanup, or removal decision. The milestone remains pending
+because directions 015 through 019 are unresolved.
 
 Candidate directions:
 
@@ -305,6 +312,7 @@ Candidate directions:
   Boundary notes: active writes remain protected.
 
 - Direction id: `direction-014-repair-state-fixture-reader-policy`
+  Status: complete via round 065, merged as `580e4b3`.
   Summary: add fixture, reader, and healthcheck or non-healthcheck evidence for
   `repair-state.json` and repair execution ordering.
   Preconditions: replay repair write-order evidence and compatibility rewrite
