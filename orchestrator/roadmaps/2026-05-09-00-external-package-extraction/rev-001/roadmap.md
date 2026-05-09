@@ -406,10 +406,25 @@ or a deliberate hold with blockers.
 Parallel lane: default serial
 Coordination notes: keep this final and serial. Publication, if any, requires a
 selected release-gate direction and explicit review approval.
+Progress: round 049 completed moifold consumer validation in `35698ae`,
+adding `docs/agentic-workflow-framework/moifold-consumer-validation.md` with
+approved evidence that moifold consumes the standalone `agent-workflow-core`,
+`agent-workflow-codex`, and `agent-workflow-github` package candidates through
+the intended local package wiring; compatibility facades remain available;
+package validation, the external consumer example build/run, `cabal build all`,
+`cabal test watcher-core-test`, CLI help smokes, `render-service`, and
+empty-root `healthcheck` all pass. Milestone 005 remains pending because
+directions 015 and 016 still need the release-candidate evidence bundle and
+explicit publication/hold gate. Round 049 did not approve publication, assemble
+a release-candidate bundle, upload packages, change descriptors, source,
+schemas, compatibility facades, runtime/healthcheck/repair/prompt policy, CI,
+changelog/release notes, roadmap payload, generated artifacts, or controller
+state payload.
 
 Candidate directions:
 
 - Direction id: `direction-014-moifold-consumer-validation`
+  Status: complete via round 049, merged as `35698ae`.
   Summary: prove moifold builds and tests while consuming the external-package
   candidates through the intended local/package mechanism.
   Why it matters now: the product must remain the behavioral oracle while the
