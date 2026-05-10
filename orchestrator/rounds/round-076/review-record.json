@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-001-current-facade-evidence",
+  "direction_id": "direction-002-behavior-owner-classification",
+  "extracted_item_id": "round-076-behavior-owner-classification",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Artifact-only round approved: implementation records evidence-backed behavior-owner classifications for AppServerClient, Core.Ids, Workflow.EventLog, and Workflow.Permission without production, package, docs, roadmap, compatibility, event-schema, healthcheck, repair, deprecation, migration, or removal edits."
+}
