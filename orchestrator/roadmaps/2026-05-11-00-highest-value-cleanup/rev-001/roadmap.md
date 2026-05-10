@@ -279,18 +279,23 @@ by locking the current `runtime-owner.json` healthcheck field-path contract,
 and `round-090-planner-planning-compatibility-fixtures` completed a
 `direction-007-runtime-compatibility-fixtures` slice at merged commit
 `b2ffeed` by adding checked-in fixture and test evidence for the
-`planner-state.json` and `planning-state.json` issue-planning surfaces only.
+`planner-state.json` and `planning-state.json` issue-planning surfaces only,
+and `round-091-daemon-state-compatibility-fixtures` completed a
+`direction-007-runtime-compatibility-fixtures` slice at merged commit
+`fd7be82` by adding checked-in fixture and test evidence for the active and
+stopped `daemon-state.json` shapes only.
 Milestone 002 is in progress, not complete: the inventory names fixture,
 healthcheck-contract, operator/downstream, and removal/migration blockers, the
 state-file contract is now explicit, the runtime-owner healthcheck contract is
-now recorded, and the planner/planning fixture slice is covered, but broad
-fixture/test coverage for remaining selected compatibility surfaces,
-healthcheck compatibility-contract evidence for remaining selected surfaces,
-and final cleanup classifications still remain for later directions. This
-status does not approve deprecation, facade removal, Cabal exposure removal,
-runtime compatibility-file deletion or rename, healthcheck behavior changes,
-repair behavior changes, fixture batch approval, release approval, terminal
-completion, or public compatibility removal.
+now recorded, and the planner/planning and daemon-state fixture slices are
+covered, but broad fixture/test coverage for remaining selected compatibility
+surfaces, healthcheck compatibility-contract evidence for remaining selected
+surfaces, and final cleanup classifications still remain for later directions.
+This status does not approve deprecation, facade removal, Cabal exposure
+removal, runtime compatibility-file deletion or rename, healthcheck behavior
+changes, repair behavior changes, restart behavior changes, fixture batch
+approval, release approval, terminal completion, or public compatibility
+removal.
 
 Candidate directions:
 
@@ -359,13 +364,22 @@ Candidate directions:
   `golden/runtime-compatibility/issue-planning/...` and watcher-core
   assertions for exact fixture JSON shapes, compatibility projection writes,
   direct `RecordPlanningGraph` behavior, and the current healthcheck reader
-  boundary. This is fixture/test evidence for the selected planning slice
-  only; it does not approve deletion, rename, schema migration, healthcheck
-  behavior changes, repair behavior changes, broad fixture batch approval,
-  deprecation, facade removal, Cabal exposure removal, release approval,
-  terminal completion, or public compatibility removal. Direction 007 remains
-  incomplete because fixtures for remaining selected runtime compatibility
-  surfaces still require later slices.
+  boundary. `round-091` completed
+  `round-091-daemon-state-compatibility-fixtures` at `fd7be82` for the active
+  and stopped `daemon-state.json` slice only. The reviewed round added two
+  checked-in fixtures under
+  `golden/runtime-compatibility/daemon-state/...` and watcher-core assertions
+  for exact active/stopped fixture JSON shapes, snapshot-reader tolerance,
+  representative compatibility projection writes, non-interchangeability, and
+  the current healthcheck, repair rewrite, and restart cleanup source
+  boundaries. This is fixture/test evidence for the selected planning and
+  daemon-state slices only; it does not approve deletion, rename, schema
+  migration, healthcheck behavior changes, repair behavior changes, restart
+  behavior changes, broad fixture batch approval, deprecation, facade removal,
+  Cabal exposure removal, release approval, terminal completion, or public
+  compatibility removal. Direction 007 remains incomplete because fixtures for
+  remaining selected runtime compatibility surfaces still require later
+  slices.
 
 - Direction id: `direction-008-healthcheck-compatibility-contracts`
   Summary: Add or refresh healthcheck tests for compatibility-state files that
