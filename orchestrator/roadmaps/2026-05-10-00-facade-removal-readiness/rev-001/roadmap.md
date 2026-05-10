@@ -289,7 +289,7 @@ Candidate directions:
   Boundary notes: no exposed-module deletion from local absence alone.
   Extraction notes: reviewer approval must name the exact exposed module.
 
-### 4. [pending] Exact Removal Or Terminal Hold
+### 4. [complete] Exact Removal Or Terminal Hold
 
 Milestone id: `milestone-004-exact-removal-or-hold`
 Depends on: `milestone-003-public-facade-decision-gates`
@@ -298,6 +298,14 @@ hold that preserves every blocker and decision.
 Completion signal: either approved removal rounds have landed with all gates
 satisfied, or a final reviewed report records kept, deferred, deprecated, and
 removed surfaces with the removed-surface set explicitly stated.
+Progress: round 082 completed the terminal decision report in `40ddd2a` as an
+approved artifact-only hold. The report records all four selected facades as
+kept available for now, deferred for public deprecation and Cabal exposure
+removal, and blocked from exact removal by named evidence gaps. The deprecated
+surface set is empty and the removed surface set is empty. No exact removal,
+deprecation, Cabal exposure, package descriptor, production source, test,
+documentation, public API, runtime compatibility, event schema, healthcheck,
+repair, release, or publication change is approved by this milestone closeout.
 Parallel lane: serial
 Coordination notes: terminal completion must distinguish removal completion from
 a hold. Do not imply package release, upload, or broad compatibility-file
@@ -306,6 +314,8 @@ cleanup.
 Candidate directions:
 
 - Direction id: `direction-008-exact-approved-removal`
+  Status: not run; milestone 003 did not approve any exact selected facade,
+  module, or exposed-module entry for removal.
   Summary: Remove only surfaces whose gates passed and whose approval names the
   exact module or exposure entry.
   Why it matters now: this is the only lawful path from readiness evidence to
@@ -318,6 +328,8 @@ Candidate directions:
   behavior evidence.
 
 - Direction id: `direction-009-terminal-decision-report`
+  Status: complete via round 082, merged as `40ddd2a`, with an approved
+  artifact-only terminal hold. Deprecated and removed surface sets are empty.
   Summary: Close the family with an explicit final decision report.
   Why it matters now: the family must not silently finish by exhausting tasks if
   no surface is lawful to remove.
