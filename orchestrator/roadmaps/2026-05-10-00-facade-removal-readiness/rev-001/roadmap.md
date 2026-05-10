@@ -220,7 +220,7 @@ Candidate directions:
   `MoifoldSpec` concrete bridge semantics.
   Extraction notes: a valid result may be a reviewed hold instead of migration.
 
-### 3. [pending] Public Facade Decision Gates
+### 3. [in progress] Public Facade Decision Gates
 
 Milestone id: `milestone-003-public-facade-decision-gates`
 Depends on: `milestone-002-internal-import-migration`
@@ -230,6 +230,19 @@ consequences.
 Completion signal: every selected facade has a reviewed decision record with
 gate evidence, required docs/Cabal changes, and explicit reviewer approval or
 blockers.
+Progress: round 080 completed the selected public deprecation-readiness
+decision in `7c8a3cd` as an approved artifact-only decision. All four selected
+facades, `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
+`CodexWatcher.Workflow.EventLog`, and `CodexWatcher.Workflow.Permission`, are
+`defer`: preferred-import and migration-path evidence exists, but remaining
+local facade imports, mixed moifold bridge behavior, bounded downstream
+inventory, and absent public deprecation/Cabal/Haddock alignment leave public
+deprecation unapproved. The round made no production code, test, documentation,
+package descriptor, public API, deprecation pragma, public deprecation wording,
+Cabal exposure, facade removal, runtime compatibility, event schema,
+healthcheck, repair, import migration, roadmap state, or release/publication
+changes. Milestone 003 remains in progress because direction 007 is still
+pending.
 Parallel lane: serial
 Coordination notes: deprecation and removal are separate decisions. A facade may
 be documented as compatibility-only without receiving removal approval.
@@ -237,6 +250,10 @@ be documented as compatibility-only without receiving removal approval.
 Candidate directions:
 
 - Direction id: `direction-006-deprecation-readiness`
+  Status: complete via round 080, merged as `7c8a3cd`, with an approved
+  artifact-only `defer` decision for all four selected facades and no public
+  deprecation wording, `DEPRECATED` pragmas, docs changes, Cabal exposure
+  changes, public API changes, or removals approved.
   Summary: Evaluate whether any facade should receive a deprecation pragma or
   public deprecation wording.
   Why it matters now: warnings are externally visible API signals and need a
