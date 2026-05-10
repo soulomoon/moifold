@@ -1,0 +1,11 @@
+### Squash Commit
+- Title: Record terminal cleanup hold
+- Summary: Record the approved artifact-only terminal cleanup gate for `round-074-terminal-cleanup-gate`. The round closes the current rev-003 compatibility-surface cleanup family as a reviewed terminal hold, not removal completion, while preserving milestone 008 as held, directions 021 and 022 as held/not lawful, round 073 as complete via `37cde0a`, the removed-surface set as empty, and all publication, release, migration, deprecation, removal, Cabal exposure, production import, and compatibility behavior non-approvals.
+
+### Merge Readiness
+- Base branch freshness: confirmed. `orchestrator/state.json` names `codex/workflow-facade-extraction` as the base branch, and both `HEAD` and that base resolve to `547fa509b0b42158aa0257e788316abe90815d7b`; the base is an ancestor of the round branch. This is acceptable for the artifact-only round.
+- Merge ordering satisfied: yes. Controller state has `max_parallel_rounds` set to 1, `active_rounds` contains only `round-074`, `last_completed_round` is `round-073`, the selection scheduler fields have empty `depends_on_round_ids` and `merge_after_item_ids`, and the rev-003 roadmap marks `direction-024-terminal-cleanup-gate` as the next lawful dispatch after round 073.
+- Pending dependencies: none. Review is approved, `review-record.json` has `"decision": "approved"`, `worker-plan.json` is absent, `resume_error` is null, and no round-local dependency or merge-order blocker remains.
+
+### Follow-Up Notes
+Focused readiness checks passed: status and changed-path inspection are confined to untracked round-local artifacts under `orchestrator/rounds/round-074/`, current head/base ancestry is acceptable, the approved review record read back correctly, no worker plan exists, `git diff --check` and `git diff --cached --check` are clean, and the round-local trailing-whitespace scan has no matches. The controller should treat this as merge-ready for the reviewed terminal hold only; any later cleanup, publication, release, deprecation, migration, removal, Cabal exposure change, production import rewrite, or compatibility behavior change requires a later selected roadmap family or exact approved removal round.

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-003",
+  "milestone_id": "milestone-009-close-cleanup-family",
+  "direction_id": "direction-024-terminal-cleanup-gate",
+  "extracted_item_id": "round-074-terminal-cleanup-gate",
+  "roadmap_item_id": "round-074-terminal-cleanup-gate",
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only terminal cleanup gate for the rev-003 hold path: changed paths before reviewer-owned files were confined to round-local round-074 artifacts; focused readbacks, required content greps, artifact-only diff checks, diff checks, and whitespace checks passed; the gate records a reviewed terminal hold, preserves milestone 008 as held/not removal-complete, keeps directions 021 and 022 held/not lawful, records direction 023 complete via round 073 / 37cde0a, keeps the removed-surface set empty with no surfaces removed, carries blockers forward, and does not approve publication, release, deprecation, migration, removal, Cabal exposure changes, production import rewrites, or compatibility behavior changes."
+}
