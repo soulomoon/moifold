@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-001-current-facade-evidence",
+  "direction_id": "direction-001-import-scan-refresh",
+  "extracted_item_id": "round-075-import-scan-refresh",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only facade evidence refresh. Live scan confirms selected-facade import counts and replacement mappings; changed paths remain limited to round-local orchestrator artifacts, so cabal build/test baselines were intentionally skipped per plan scope."
+}
