@@ -146,8 +146,12 @@ approves a clearer equivalent.
 Current status: `round-083-cleanup-inventory-refresh` completed
 `direction-001-cleanup-inventory-refresh` as artifact-only evidence in
 `orchestrator/rounds/round-083/cleanup-inventory.md` at merged commit
-`0aed2e4`. The milestone remains pending because directions 002 through 004
-still need focused test extraction work before the completion signal is met.
+`0aed2e4`, and `round-084-boundary-policy-test-module-split` completed
+`direction-002-boundary-policy-test-module-split` by extracting reusable
+package-boundary scanner helpers and boundary-policy assertions into focused
+watcher-core test modules at merged commit `83cac48`. The milestone remains
+pending because directions 003 and 004 still need focused test extraction work
+before the completion signal is met.
 
 Candidate directions:
 
@@ -182,6 +186,13 @@ Candidate directions:
   facade checks.
   Extraction notes: start around the existing boundary-policy helper cluster
   and keep `watcher-core-test` as the validation gate.
+  Status: completed by `round-084` at `83cac48`; the reviewed split added
+  `test/BoundaryPolicySpec.hs` and `test/TestSupport/SourceScan.hs`, kept the
+  existing `test/Main.hs` aggregation reaching `workflowBoundaryPolicyTests`,
+  and added only the required `watcher-core-test` `other-modules` metadata for
+  those extracted modules. This status does not approve production import
+  convergence, public deprecation, facade removal, Cabal exposure removal, or
+  runtime compatibility-file removal.
 
 - Direction id: `direction-003-facade-import-policy-test-split`
   Summary: Move facade extraction, import-policy, and compatibility policy
