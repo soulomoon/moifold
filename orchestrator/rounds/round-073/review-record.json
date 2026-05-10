@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-09-01-compatibility-surface-cleanup",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-09-01-compatibility-surface-cleanup/rev-003",
+  "milestone_id": "milestone-009-close-cleanup-family",
+  "direction_id": "direction-023-final-compatibility-surface-report",
+  "extracted_item_id": "round-073-final-compatibility-surface-report",
+  "roadmap_item_id": "round-073-final-compatibility-surface-report",
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only final compatibility surface report for the rev-003 hold path: changed paths were limited to round-local round-073 artifacts before reviewer-owned files; required content greps passed; kept, removed-empty, and deferred surfaces carry round 071 and 072 blockers; direction 021 and 022 remain held/not lawful; direction 024, publication, release, deprecation, migration, removal, Cabal exposure changes, production import rewrites, and compatibility behavior changes remain out of scope."
+}
