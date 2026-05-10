@@ -283,14 +283,19 @@ and `round-090-planner-planning-compatibility-fixtures` completed a
 and `round-091-daemon-state-compatibility-fixtures` completed a
 `direction-007-runtime-compatibility-fixtures` slice at merged commit
 `fd7be82` by adding checked-in fixture and test evidence for the active and
-stopped `daemon-state.json` shapes only.
+stopped `daemon-state.json` shapes only, and
+`round-092-repair-failure-block-state-compatibility-fixtures` completed a
+`direction-007-runtime-compatibility-fixtures` slice at merged commit
+`047b5d7` by adding checked-in fixture and test evidence for the
+repair-failure `block-state.json` shape only.
 Milestone 002 is in progress, not complete: the inventory names fixture,
 healthcheck-contract, operator/downstream, and removal/migration blockers, the
 state-file contract is now explicit, the runtime-owner healthcheck contract is
-now recorded, and the planner/planning and daemon-state fixture slices are
-covered, but broad fixture/test coverage for remaining selected compatibility
-surfaces, healthcheck compatibility-contract evidence for remaining selected
-surfaces, and final cleanup classifications still remain for later directions.
+now recorded, and the planner/planning, daemon-state, and repair-failure
+block-state fixture slices are covered, but broad fixture/test coverage for
+remaining selected compatibility surfaces, healthcheck compatibility-contract
+evidence for remaining selected surfaces, and final cleanup classifications
+still remain for later directions.
 This status does not approve deprecation, facade removal, Cabal exposure
 removal, runtime compatibility-file deletion or rename, healthcheck behavior
 changes, repair behavior changes, restart behavior changes, fixture batch
@@ -372,14 +377,24 @@ Candidate directions:
   for exact active/stopped fixture JSON shapes, snapshot-reader tolerance,
   representative compatibility projection writes, non-interchangeability, and
   the current healthcheck, repair rewrite, and restart cleanup source
-  boundaries. This is fixture/test evidence for the selected planning and
-  daemon-state slices only; it does not approve deletion, rename, schema
-  migration, healthcheck behavior changes, repair behavior changes, restart
-  behavior changes, broad fixture batch approval, deprecation, facade removal,
-  Cabal exposure removal, release approval, terminal completion, or public
-  compatibility removal. Direction 007 remains incomplete because fixtures for
-  remaining selected runtime compatibility surfaces still require later
-  slices.
+  boundaries. `round-092` completed
+  `round-092-repair-failure-block-state-compatibility-fixtures` at `047b5d7`
+  for the repair-failure `block-state.json` slice only. The reviewed round
+  added the checked-in fixture
+  `golden/runtime-compatibility/block-state/repair-failure/block-state.json`
+  and watcher-core assertions for exact parity with
+  `repairFailureBlockStateJson`, snapshot-reader tolerance,
+  repair-failure-specific fields, non-interchangeability with normal blocked
+  writes, and the current automatic-loop writer, healthcheck reader, snapshot
+  reader, successful-repair stale-block cleanup, and restart cleanup source
+  boundaries. This is fixture/test evidence for the selected planning,
+  daemon-state, and repair-failure block-state slices only; it does not approve
+  deletion, rename, schema migration, healthcheck behavior changes, repair
+  behavior changes, restart behavior changes, broad fixture batch approval,
+  deprecation, facade removal, Cabal exposure removal, release approval,
+  terminal completion, or public compatibility removal. Direction 007 remains
+  incomplete because fixtures for remaining selected runtime compatibility
+  surfaces still require later slices.
 
 - Direction id: `direction-008-healthcheck-compatibility-contracts`
   Summary: Add or refresh healthcheck tests for compatibility-state files that
