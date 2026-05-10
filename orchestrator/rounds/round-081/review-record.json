@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-003-public-facade-decision-gates",
+  "direction_id": "direction-007-cabal-exposure-decision",
+  "extracted_item_id": "round-081-cabal-exposure-decision",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only Cabal exposure decision: all four selected facades are evidence-backed defer, no exposed-module removal or descriptor/API/code/test/docs/roadmap/state changes occurred, moifold.cabal still exposes all four, cabal haddock all passed, GitHub code search was correctly bounded as owner-scoped, and build/test baselines were skipped under the artifact-only plan rationale."
+}
