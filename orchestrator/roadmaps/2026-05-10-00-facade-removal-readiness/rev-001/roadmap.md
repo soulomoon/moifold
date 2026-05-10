@@ -130,7 +130,7 @@ Candidate directions:
   Extraction notes: distinguish adapter-id convenience from concrete event-log,
   replay, permission, and phase-validation behavior.
 
-### 2. [in-progress] Internal Import Migration Readiness
+### 2. [complete] Internal Import Migration Readiness
 
 Milestone id: `milestone-002-internal-import-migration`
 Depends on: `milestone-001-current-facade-evidence`
@@ -157,8 +157,23 @@ users without changing constructors, parsers, renderers, command output, package
 descriptors, docs, public API, deprecation pragmas, Cabal exposure, facade
 modules, runtime compatibility files, healthcheck, repair, or event schemas.
 Both rounds passed `cabal test watcher-core-test`, `cabal build all`,
-`git diff --check`, and `git diff --cached --check`. Milestone 002 remains in
-progress because `direction-005-eventlog-permission-readiness` is still pending.
+`git diff --check`, and `git diff --cached --check`. Round 079 completed the
+selected `CodexWatcher.Workflow.EventLog` and
+`CodexWatcher.Workflow.Permission` readiness decision in `c5cb385` as an
+approved artifact-only hold. The round recorded that both facades remain mixed
+moifold bridge surfaces for now: `Workflow.EventLog` still carries concrete
+moifold replay and transition bridge helpers over `WatcherEvent`,
+`SomeWatcherState`, `EffectPlan`, and `MoifoldSpec`, while
+`Workflow.Permission` still carries concrete phase-action validation,
+state-machine error formatting, and `MoifoldSpec` permission policy behavior.
+The hold preserved both facade modules and Cabal exposure, made no production
+code, test, package descriptor, documentation, public API, event schema,
+runtime compatibility, permission, healthcheck, repair, deprecation, import
+migration, or removal changes, and did not run `cabal test watcher-core-test`
+because reviewer-approved evidence showed no behavior surface changed. With
+directions 003, 004, and 005 complete, milestone 002 is complete. Public
+facade decision gates remain pending and must not treat this hold as
+deprecation, Cabal exposure, public API, or removal approval.
 Parallel lane: serial by default; possible facade-specific lanes after approval
 Coordination notes: import migration is not deprecation. Facade modules must
 remain exposed unless a later milestone approves exact removal.
@@ -192,6 +207,8 @@ Candidate directions:
   facade.
 
 - Direction id: `direction-005-eventlog-permission-readiness`
+  Status: complete via round 079, merged as `c5cb385`, with an approved
+  artifact-only hold for both selected mixed surfaces.
   Summary: Decide whether `Workflow.EventLog` and `Workflow.Permission` are
   migration candidates or concrete moifold bridge surfaces for now.
   Why it matters now: these facades expose concrete event-log, replay, and
