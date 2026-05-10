@@ -7,9 +7,9 @@ module RuntimeCompatibilityFixtureSpec
   ( runtimeCompatibilityFixtureTests
   ) where
 
-import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Core.Ids (IssueNumber (..), PrNumber (..), RepoName (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
-import CodexWatcher.Core.Reason (StopReason (..))
+import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..))
 import CodexWatcher.Domain.IssuePlanning.Types
@@ -20,9 +20,12 @@ import CodexWatcher.Domain.IssuePlanning.Types
   )
 import CodexWatcher.EffectInterpreter (CompiledEffectPlan (..), EffectRuntimeConfig (..), PlannedAction (..), compileEffectPlan)
 import CodexWatcher.Effects (Effect (..), SomeEffect (..))
+import CodexWatcher.EventLog.Types (ReplayFailure (..), WatcherEvent (..), eventName)
+import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
+import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
-import CodexWatcher.Snapshot (NodeIssueDaemonState (..))
+import CodexWatcher.Snapshot (NodeBlockedState (..), NodeIssueDaemonState (..))
 import Data.Aeson (Value (..), eitherDecodeStrict', object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -41,9 +44,12 @@ runtimeCompatibilityFixtureTests =
     , daemonFixtureShapeTests
     , compatibilityProjectionFixtureTests
     , daemonCompatibilityProjectionFixtureTests
+    , blockStateRepairFailureFixtureTests
+    , blockStateCompatibilityShapeTests
     , recordPlanningGraphFixtureTest
     , healthcheckPlannerReaderBoundaryTest
     , daemonStateSourceBoundaryTest
+    , blockStateSourceBoundaryTest
     ]
 
 fixtureShapeTests :: IO Bool
@@ -189,6 +195,78 @@ daemonCompatibilityProjectionFixtureTests =
         )
     ]
 
+blockStateRepairFailureFixtureTests :: IO Bool
+blockStateRepairFailureFixtureTests = do
+  fixtureResult <- loadBlockStateFixtureValue ("repair-failure" </> "block-state.json")
+  blockedStateResult <- loadBlockStateFixtureState ("repair-failure" </> "block-state.json")
+  decodedOk <-
+    assert
+      "runtime compatibility repair-failure block-state fixture decodes as JSON"
+      (isRight fixtureResult)
+  snapshotReaderOk <-
+    assert
+      "snapshot blocked-state reader accepts repair-failure block-state fixture"
+      (blockedStateResult == Right (NodeBlockedState True (Just fixtureReplayFailure.reason)))
+  shapeOk <-
+    case fixtureResult of
+      Right fixtureValue ->
+        sequenceAnd
+          [ assert
+              "repair-failure block-state fixture matches current generator output"
+              (fixtureValue == repairFailureBlockStateJson fixtureReplayFailure)
+          , assert
+              "repair-failure block-state fixture keeps invalid-event-log fields"
+              ( lookupObjectKey "blockedKind" fixtureValue == Just (String "invalid_event_log")
+                  && lookupObjectKey "eventIndex" fixtureValue == Just (Number 3)
+                  && lookupObjectKey "eventType" fixtureValue == Just (String (eventName fixtureReplayFailure.event))
+                  && lookupObjectKey "event" fixtureValue == Just (toJSON fixtureReplayFailure.event)
+              )
+          , assert
+              "repair-failure block-state embedded event keeps current event type"
+              (case lookupObjectKey "event" fixtureValue of
+                Just eventValue ->
+                  lookupObjectKey "type" eventValue == Just (String (eventName fixtureReplayFailure.event))
+                _ -> False
+              )
+          ]
+      Left _ -> pure False
+  pure (decodedOk && snapshotReaderOk && shapeOk)
+
+blockStateCompatibilityShapeTests :: IO Bool
+blockStateCompatibilityShapeTests = do
+  fixtureResult <- loadBlockStateFixtureValue ("repair-failure" </> "block-state.json")
+  case fixtureResult of
+    Left _ -> pure False
+    Right fixtureValue -> do
+      let blockedReason = BlockedReason fixtureReplayFailure.reason
+          normalBlockStateValue = blockedStateJson blockedReason
+          config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
+          directBlockPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
+          compiled = compileEffectPlan config [SomeEffect (RecordBlocked blockedReason)]
+          compatibilityWrites =
+            compatibilityStateWrites
+              fixtureStateDir
+              (SomeWatcherState (BlockedState blockedReason :: WatcherState 'IssuePlanning 'Blocked))
+      sequenceAnd
+        [ assert
+            "normal blocked-state JSON is not interchangeable with repair-failure fixture"
+            ( normalBlockStateValue /= fixtureValue
+                && objectLacksKeys ["blockedKind", "eventIndex", "eventType", "event"] normalBlockStateValue
+            )
+        , assert
+            "BlockedState compatibility projection keeps the normal block-state shape"
+            ( singleWriteValue fixtureBlockStatePath compatibilityWrites == Just normalBlockStateValue
+                && singleWriteValue fixtureBlockStatePath compatibilityWrites /= Just fixtureValue
+                && maybe False (objectLacksKeys ["blockedKind", "eventIndex", "eventType", "event"]) (singleWriteValue fixtureBlockStatePath compatibilityWrites)
+            )
+        , assert
+            "RecordBlocked compiled effect keeps the normal block-state shape"
+            ( compiled.compiledActions == [PlannedWriteJson directBlockPath normalBlockStateValue]
+                && compiled.compiledActions /= [PlannedWriteJson directBlockPath fixtureValue]
+                && objectLacksKeys ["blockedKind", "eventIndex", "eventType", "event"] normalBlockStateValue
+            )
+        ]
+
 recordPlanningGraphFixtureTest :: IO Bool
 recordPlanningGraphFixtureTest = do
   let config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
@@ -226,6 +304,25 @@ daemonStateSourceBoundaryTest = do
         && "\"$state_dir/daemon-state.json\"" `Text.isInfixOf` restartSource
     )
 
+blockStateSourceBoundaryTest :: IO Bool
+blockStateSourceBoundaryTest = do
+  runnerSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "AutomaticLoop" </> "Runner.hs")
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
+  replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
+  restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  assert
+    "block-state compatibility interactions keep current repair-failure, healthcheck, snapshot, repair, and restart paths"
+    ( "DaemonLoopDaemonFailure (DaemonReplayFailed replayFailure) -> do" `Text.isInfixOf` runnerSource
+        && "writeJsonValue (stateDir </> \"block-state.json\") (repairFailureBlockStateJson replayFailure)" `Text.isInfixOf` runnerSource
+        && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
+        && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
+        && "(\"blockedState\", \"block-state.json\")" `Text.isInfixOf` healthcheckSource
+        && "blockedResult <- decodeOptionalJsonFile (dir </> \"block-state.json\")" `Text.isInfixOf` snapshotSource
+        && "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")" `Text.isInfixOf` replaySource
+        && "\"$state_dir/block-state.json\"" `Text.isInfixOf` restartSource
+    )
+
 writesOnlyPlannerState :: SomeWatcherState -> Value -> Bool
 writesOnlyPlannerState state expectedPlannerValue =
   let writes = compatibilityStateWrites fixtureStateDir state
@@ -254,6 +351,14 @@ loadDaemonFixtureState :: FilePath -> IO (Either String NodeIssueDaemonState)
 loadDaemonFixtureState relativePath =
   eitherDecodeStrict' <$> ByteString.readFile (daemonFixtureRoot </> relativePath)
 
+loadBlockStateFixtureValue :: FilePath -> IO (Either String Value)
+loadBlockStateFixtureValue relativePath =
+  eitherDecodeStrict' <$> ByteString.readFile (blockStateFixtureRoot </> relativePath)
+
+loadBlockStateFixtureState :: FilePath -> IO (Either String NodeBlockedState)
+loadBlockStateFixtureState relativePath =
+  eitherDecodeStrict' <$> ByteString.readFile (blockStateFixtureRoot </> relativePath)
+
 hasPlannerStatusKey :: Value -> Bool
 hasPlannerStatusKey =
   hasObjectKey "status"
@@ -267,6 +372,16 @@ hasObjectKey key (Object objectValue) =
   KeyMap.member (Key.fromText key) objectValue
 hasObjectKey _ _ =
   False
+
+lookupObjectKey :: Text -> Value -> Maybe Value
+lookupObjectKey key (Object objectValue) =
+  KeyMap.lookup (Key.fromText key) objectValue
+lookupObjectKey _ _ =
+  Nothing
+
+objectLacksKeys :: [Text] -> Value -> Bool
+objectLacksKeys keys value =
+  all (not . (`hasObjectKey` value)) keys
 
 plannerStateValue :: Text -> Value
 plannerStateValue statusValue =
@@ -296,6 +411,13 @@ stoppedDaemonStateValue =
     , "activeTurnPurpose" .= Null
     , "stopReason" .= ("stopped for fixture" :: Text)
     ]
+
+fixtureReplayFailure :: ReplayFailure
+fixtureReplayFailure =
+  ReplayFailure
+    3
+    (IssueImplementationCompletedEvent (PrNumber 42) Nothing)
+    "event issue_implementation_completed is invalid in IssueImplement/PlanReady"
 
 fixtureRepo :: RepoName
 fixtureRepo =
@@ -336,6 +458,10 @@ daemonFixtureRoot :: FilePath
 daemonFixtureRoot =
   "golden" </> "runtime-compatibility" </> "daemon-state"
 
+blockStateFixtureRoot :: FilePath
+blockStateFixtureRoot =
+  "golden" </> "runtime-compatibility" </> "block-state"
+
 fixtureStateDir :: FilePath
 fixtureStateDir =
   "/tmp/runtime-compatibility-fixtures"
@@ -351,3 +477,7 @@ fixturePlanningPath =
 fixtureDaemonPath :: FilePath
 fixtureDaemonPath =
   fixtureStateDir </> "daemon-state.json"
+
+fixtureBlockStatePath :: FilePath
+fixtureBlockStatePath =
+  fixtureStateDir </> "block-state.json"

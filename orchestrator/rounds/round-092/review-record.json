@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-007-runtime-compatibility-fixtures",
+  "extracted_item_id": "round-092-repair-failure-block-state-compatibility-fixtures",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Baseline build/test and focused repair-failure block-state fixture checks passed; fixture and watcher-core assertions match the selected compatibility contract without production behavior changes."
+}
