@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-004-exact-removal-or-hold",
+  "direction_id": "direction-009-terminal-decision-report",
+  "extracted_item_id": "round-082-terminal-decision-report",
+  "roadmap_item_id": "round-082-terminal-decision-report",
+  "decision": "approved",
+  "evidence_summary": "Artifact-only terminal report explicitly records kept, deferred, deprecated, removed, and blocked sets for all four selected facades; deprecated and removed sets are empty; no removal, deprecation, Cabal exposure, source, docs, roadmap, state, runtime compatibility, event schema, healthcheck, repair, release, or publication change is approved."
+}
