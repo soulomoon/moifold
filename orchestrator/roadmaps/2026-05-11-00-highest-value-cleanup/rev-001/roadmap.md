@@ -298,15 +298,23 @@ boundaries, and `round-094-runtime-owner-compatibility-fixtures` completed a
 `1ab9db7` by adding checked-in fixture and test evidence for the current
 `runtime-owner.json` top-level `lease` shape only, including current
 runtime-owner reader acceptance, healthcheck `runtimeOwner` mapping and summary
-field path, and restart-script pid extraction and cleanup boundaries.
+field path, and restart-script pid extraction and cleanup boundaries, and
+`round-095-live-issue-snapshot-compatibility-fixtures` completed a
+`direction-007-runtime-compatibility-fixtures` slice at merged commit
+`aaa2e85` by adding checked-in fixture and test evidence for the current live
+`issue-snapshot.json` planner snapshot shape only, including current writer
+shape, `planningIssueFactsFromSnapshot` parser acceptance, execute-mode
+write-before-planner-turn timing, planner prompt path consumption, and
+healthcheck, repair, replay, and restart non-reader boundaries.
 Milestone 002 is in progress, not complete: the inventory names fixture,
 healthcheck-contract, operator/downstream, and removal/migration blockers, the
 state-file contract is now explicit, the runtime-owner healthcheck contract is
 now recorded, and the planner/planning, daemon-state, repair-failure
-block-state, repair-state, and runtime-owner current-lease fixture slices are
-covered, but broad fixture/test coverage for remaining selected compatibility
-surfaces, healthcheck compatibility-contract evidence for remaining selected
-surfaces, and final cleanup classifications still remain for later directions.
+block-state, repair-state, runtime-owner current-lease, and live issue-snapshot
+fixture slices are covered, but healthcheck compatibility-contract evidence
+for remaining selected surfaces, any additional fixture slices justified by
+later checked-in snapshot or downstream evidence, and final cleanup
+classifications still remain for later directions.
 This status does not approve deprecation, facade removal, Cabal exposure
 removal, runtime compatibility-file deletion or rename, healthcheck behavior
 changes, repair behavior changes, restart behavior changes, fixture batch
@@ -416,15 +424,26 @@ Candidate directions:
   legacy-field absence, nested lease field paths and values, runtime-owner
   reader acceptance, the current healthcheck `runtimeOwner` mapping and
   `["runtimeOwner", "owner"]` summary path, and restart-script pid extraction,
-  stop, and cleanup assumptions. This is fixture/test evidence for the
-  selected planning, daemon-state, repair-failure block-state, repair-state,
-  and runtime-owner current-lease slices only; it does not approve deletion,
-  rename, schema migration, healthcheck behavior changes, script behavior
-  changes, repair behavior changes, restart behavior changes, broad fixture
-  batch approval, deprecation, facade removal, Cabal exposure removal, release
-  approval, terminal completion, or public compatibility removal. Direction
-  007 remains incomplete because fixtures for remaining selected runtime
-  compatibility surfaces still require later slices.
+  stop, and cleanup assumptions. `round-095` completed
+  `round-095-live-issue-snapshot-compatibility-fixtures` at `aaa2e85` for the
+  current live `issue-snapshot.json` planner snapshot slice only. The reviewed
+  round added the checked-in fixture
+  `golden/runtime-compatibility/issue-snapshot/scoped-open-with-closed-subissue/issue-snapshot.json`
+  and watcher-core assertions for exact current snapshot shape, parser
+  acceptance through `planningIssueFactsFromSnapshot`, execute-mode
+  write-before-planner-turn timing, planner prompt path rendering, and current
+  healthcheck, repair, replay, and restart non-reader source boundaries. This
+  is fixture/test evidence for the selected planning, daemon-state,
+  repair-failure block-state, repair-state, runtime-owner current-lease, and
+  live issue-snapshot slices only; it does not approve deletion, rename, schema
+  migration, healthcheck behavior changes, script behavior changes, repair
+  behavior changes, restart behavior changes, broad fixture batch approval,
+  checked-in snapshot cleanup, deprecation, facade removal, Cabal exposure
+  removal, release approval, terminal completion, or public compatibility
+  removal. Direction 007 remains partial: round-095 closes the live
+  issue-snapshot fixture blocker from the round-087 inventory, but it does not
+  approve broad fixture batch completion, checked-in snapshot cleanup, or later
+  cleanup classification/removal gates.
 
 - Direction id: `direction-008-healthcheck-compatibility-contracts`
   Summary: Add or refresh healthcheck tests for compatibility-state files that
