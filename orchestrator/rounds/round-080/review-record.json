@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-003-public-facade-decision-gates",
+  "direction_id": "direction-006-deprecation-readiness",
+  "extracted_item_id": "round-080-public-deprecation-readiness-decision",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Artifact-only deprecation readiness decision approved: all four selected facades are evidence-backed as defer, Haddock validation passed, GitHub search scope is owner-scoped and accurately bounded, and no source/test/docs/Cabal/state/roadmap/API/deprecation/exposure/removal surfaces changed."
+}
