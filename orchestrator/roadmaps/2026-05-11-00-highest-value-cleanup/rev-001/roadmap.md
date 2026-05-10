@@ -265,6 +265,18 @@ deprecate, migrate, or remove with blockers.
 Parallel lane: compatibility fixture lane after test helpers are stable
 Coordination notes: fixture additions may be split by state file, but
 healthcheck and write-timing semantics must stay coherent.
+Current status: `round-087-compatibility-fixture-gap-inventory` completed
+`direction-005-compatibility-fixture-gap-inventory` as artifact-only evidence
+in
+`orchestrator/rounds/round-087/compatibility-fixture-gap-inventory.md` at
+merged commit `51774b6`. Milestone 002 is in progress, not complete: the
+inventory names fixture, healthcheck-contract, planner/planning-contract,
+operator/downstream, and removal/migration blockers, but fixture/test coverage,
+explicit reviewed state-file contracts, healthcheck tests, and final cleanup
+classifications still remain for later directions. This status does not approve
+deprecation, facade removal, Cabal exposure removal, runtime compatibility-file
+deletion or rename, healthcheck behavior changes, repair behavior changes,
+release approval, or public compatibility removal.
 
 Candidate directions:
 
@@ -278,6 +290,17 @@ Candidate directions:
   Boundary notes: no runtime behavior or file-name change.
   Extraction notes: compare production producers/readers, healthcheck readers,
   golden snapshots, and docs policy.
+  Status: completed by `round-087` at `51774b6`; the reviewed artifact-only
+  inventory covers planning, daemon, block, repair, runtime-owner, checked-in
+  compatibility snapshots, and live `issue-snapshot.json` surfaces. It records
+  current producers and readers, healthcheck reader and non-reader evidence,
+  existing checked-in fixture coverage, policy references, and prioritized
+  blockers for future fixture, healthcheck-contract, planner/planning-contract,
+  operator/downstream, and removal/migration rounds. Missing fixtures and
+  non-reader evidence are blockers only; this status does not approve
+  deprecation, facade removal, Cabal exposure removal, runtime
+  compatibility-file deletion or rename, healthcheck behavior changes, repair
+  behavior changes, release approval, or public compatibility removal.
 
 - Direction id: `direction-006-planner-vs-planning-state-contract`
   Summary: Record and test the compatibility contract for
