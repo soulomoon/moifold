@@ -531,17 +531,20 @@ updates, no unexplained pending cleanup items, and current validation evidence.
 Because milestone 008 is held rather than removal-complete, this milestone
 must record an explicit hold and must not imply cleanup removals, publication,
 or release approval.
-Progress: not selected by round 072. Rev-003 makes this milestone dependency
-ready on the hold path so the next lawful dispatch is
-`direction-023-final-compatibility-surface-report`. The final report must
-carry forward every kept/deferred surface and blocker from rounds 071-072 and
-must state that no surfaces were removed in this family after milestone 008
-was held.
+Progress: round 073 completed
+`direction-023-final-compatibility-surface-report` via commit `37cde0a`,
+recording the final compatibility-surface report for the approved rev-003 hold
+path. The report carries forward every kept/deferred surface and blocker from
+rounds 071-072, records the removed-surface set as empty, and states that no
+surfaces were removed in this family after milestone 008 was held. Milestone
+009 remains pending until `direction-024-terminal-cleanup-gate` is selected,
+reviewed, and accepted. The next lawful dispatch after the report is
+`direction-024-terminal-cleanup-gate`.
 
 Candidate directions:
 
 - Direction id: `direction-023-final-compatibility-surface-report`
-  Status: pending; next lawful dispatch after rev-003 activation.
+  Status: complete via round 073, merged as `37cde0a`.
   Summary: produce a final report of kept, removed, and deferred compatibility
   surfaces with validation evidence.
   Preconditions: round 072 hold is approved and rev-003 is active, or removal
@@ -551,7 +554,7 @@ Candidate directions:
   rewrite, or compatibility behavior change.
 
 - Direction id: `direction-024-terminal-cleanup-gate`
-  Status: pending after `direction-023-final-compatibility-surface-report`.
+  Status: pending; next lawful dispatch after the round 073 final report.
   Summary: mark the family complete or hold it with explicit blockers.
   Preconditions: final report reviewed and active roadmap bundle re-read.
   Boundary notes: no silent done when pending or newly discovered items remain;
