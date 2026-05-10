@@ -272,15 +272,20 @@ in
 merged commit `51774b6`, and `round-088-planner-vs-planning-state-contract`
 completed `direction-006-planner-vs-planning-state-contract` at merged commit
 `1ebf426` by locking `planner-state.json` and `planning-state.json` as
-distinct compatibility surfaces. Milestone 002 is in progress, not complete:
-the inventory names fixture, healthcheck-contract, operator/downstream, and
-removal/migration blockers, and the state-file contract is now explicit, but
-broad fixture/test coverage, healthcheck compatibility-contract tests for the
-remaining selected surfaces, and final cleanup classifications still remain
-for later directions. This status does not approve deprecation, facade removal,
-Cabal exposure removal, runtime compatibility-file deletion or rename,
-healthcheck behavior changes, repair behavior changes, fixture batch approval,
-release approval, or public compatibility removal.
+distinct compatibility surfaces, and `round-089` completed the
+`round-089-runtime-owner-healthcheck-contract` extraction under
+`direction-008-healthcheck-compatibility-contracts` at merged commit `fa1337c`
+by locking the current `runtime-owner.json` healthcheck field-path contract.
+Milestone 002 is in progress, not complete: the inventory names fixture,
+healthcheck-contract, operator/downstream, and removal/migration blockers, the
+state-file contract is now explicit, and the runtime-owner healthcheck
+contract is now recorded, but broad fixture/test coverage, healthcheck
+compatibility-contract evidence for remaining selected surfaces, and final
+cleanup classifications still remain for later directions. This status does
+not approve deprecation, facade removal, Cabal exposure removal, runtime
+compatibility-file deletion or rename, healthcheck behavior changes, repair
+behavior changes, fixture batch approval, release approval, or public
+compatibility removal.
 
 Candidate directions:
 
@@ -354,6 +359,21 @@ Candidate directions:
   Boundary notes: no healthcheck behavior change without focused approval.
   Extraction notes: record explicit non-reader policy for write-only files such
   as `planning-state.json` or `repair-state.json` when applicable.
+  Status: partial; `round-089` completed
+  `round-089-runtime-owner-healthcheck-contract` at `fa1337c` for the
+  `runtime-owner.json` slice only. The reviewed round added runtime-owner JSON
+  assertions, a healthcheck source-policy assertion preserving
+  `runtime-owner.json` as the `runtimeOwner` state surface for issue planning,
+  issue implementation, and PR review, and a narrow policy note recording that
+  the current summary lookup remains `["runtimeOwner", "owner"]` rather than
+  the lease-shaped `["runtimeOwner", "lease", "runtime"]` path. This is
+  current contract evidence only; it does not approve healthcheck behavior
+  changes, runtime-owner schema or producer changes, script changes, fixture
+  batch approval, file deletion or rename, schema migration, repair behavior
+  changes, deprecation or removal, release approval, or public compatibility
+  removal. Remaining healthcheck-contract surfaces from the milestone and
+  round-087 inventory still require later selected slices, so direction 008 is
+  not complete.
 
 ### 3. [pending] Import Convergence And Package-Boundary Cleanup
 
