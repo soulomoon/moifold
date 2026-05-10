@@ -32,6 +32,10 @@ stable contracts instead of restating them in every role or roadmap file.
   `planning-state.json`, PR URL files, block state, repair state, and runtime
   owner files keep their current names and field meanings unless explicitly
   migrated.
+- Terminal compatibility holds: the `2026-05-09-01-compatibility-surface-cleanup`
+  family closed with an empty removed-surface set. Later facade-removal work
+  must be selected under a fresh active family and must not cite that hold as
+  deprecation, migration, Cabal exposure, or removal approval.
 - Compatibility cleanup sequencing: cleanup must proceed from source-backed
   inventory to readiness evidence to policy before removal. Runtime
   compatibility-file removal additionally requires old-log, golden, repair,
