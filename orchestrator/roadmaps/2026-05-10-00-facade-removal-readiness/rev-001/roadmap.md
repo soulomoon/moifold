@@ -146,11 +146,19 @@ imports with `CodexWatcher.Workflow.Agent.Codex.Transport`, client-value imports
 with `CodexWatcher.Workflow.Agent.Codex.Client`, and split `test/AppServerSpec.hs`
 onto direct owner imports while keeping `src/CodexWatcher/AppServerClient.hs`
 live and unchanged. Review evidence records the starting inventory at 28 facade
-imports and the final inventory at 13 remaining broad/deferred facade imports,
-with `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
-`git diff --cached --check` passing. Milestone 002 remains in progress because
-`direction-004-core-ids-split-import-migration` and
-`direction-005-eventlog-permission-readiness` are still pending.
+imports and the final inventory at 13 remaining broad/deferred facade imports.
+Round 078 completed the selected `CodexWatcher.Core.Ids` split-import migration
+slice in `d5b4892`. It moved selected single-owner callers to
+`CodexWatcher.Workflow.Agent.Ids` or `CodexWatcher.Workflow.GitHub.Ids`, reduced
+`CodexWatcher.Core.Ids` imports from 65 to 35, raised direct owner id imports
+from 12 to 42, and recorded remaining mixed, deferred, executable dependency,
+event-log, repair, runtime compatibility, healthcheck, guard, and test facade
+users without changing constructors, parsers, renderers, command output, package
+descriptors, docs, public API, deprecation pragmas, Cabal exposure, facade
+modules, runtime compatibility files, healthcheck, repair, or event schemas.
+Both rounds passed `cabal test watcher-core-test`, `cabal build all`,
+`git diff --check`, and `git diff --cached --check`. Milestone 002 remains in
+progress because `direction-005-eventlog-permission-readiness` is still pending.
 Parallel lane: serial by default; possible facade-specific lanes after approval
 Coordination notes: import migration is not deprecation. Facade modules must
 remain exposed unless a later milestone approves exact removal.
@@ -171,6 +179,7 @@ Candidate directions:
   migration.
 
 - Direction id: `direction-004-core-ids-split-import-migration`
+  Status: complete via round 078, merged as `d5b4892`.
   Summary: Split internal `CodexWatcher.Core.Ids` imports into agent ids and
   GitHub ids where the caller only needs one side.
   Why it matters now: `Core.Ids` is a convenience facade over two package
