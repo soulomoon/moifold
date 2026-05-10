@@ -157,6 +157,7 @@ import GhGitSpec
   , prop_ghGitParsesReviewThreadsGraphql
   )
 import JsonPathSpec (prop_jsonPathHelpersDecodeNestedValues)
+import RuntimeCompatibilityFixtureSpec (runtimeCompatibilityFixtureTests)
 import RuntimeSpec
   ( prop_runtimeCommandSpecsHaveExecutable
   , prop_runtimeDefaultsCentralizeThreadAndTurnOptions
@@ -7053,6 +7054,7 @@ main = do
   phaseActionValidationOk <- phaseActionValidationRejectsInvalidCombinations
   phaseActionDecisionValidationOk <- phaseActionValidationAcceptsStateMachineDecisions
   workflowFacadeOk <- workflowFacadeExtractionTests
+  runtimeCompatibilityFixtureOk <- runtimeCompatibilityFixtureTests
   issuePlanningFanoutActiveOk <- issuePlanningFanoutDiscoversOnlyRunningImplementers
   runnerGuardOk <- runnerGuardIgnoresMissingPidForCompletePlanning
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
@@ -7129,6 +7131,7 @@ main = do
       && phaseActionValidationOk
       && phaseActionDecisionValidationOk
       && workflowFacadeOk
+      && runtimeCompatibilityFixtureOk
       && issuePlanningFanoutActiveOk
       && runnerGuardOk
       && runnerGuardRestartOk

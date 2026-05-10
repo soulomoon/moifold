@@ -1,0 +1,22 @@
+{
+  "ready_issues": [
+    12
+  ],
+  "blocked_issues": [
+    {
+      "issueNumber": 13,
+      "blockedBy": [
+        12
+      ],
+      "reason": "wait for prerequisite"
+    }
+  ],
+  "dependencies": [
+    {
+      "issueNumber": 13,
+      "dependsOn": [
+        12
+      ]
+    }
+  ]
+}
