@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-005-compatibility-fixture-gap-inventory",
+  "extracted_item_id": "round-087-compatibility-fixture-gap-inventory",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only compatibility fixture gap inventory. Changed-path evidence is limited to controller state, round-local selection/plan/inventory/implementation notes, and review artifacts; focused scans confirm coverage of planning, daemon, block, repair, runtime-owner, checked-in snapshot, and live issue-snapshot surfaces, distinct planner-state versus planning-state treatment, healthcheck reader/non-reader evidence, and missing fixtures recorded as blockers."
+}
