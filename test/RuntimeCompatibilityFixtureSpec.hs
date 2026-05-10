@@ -8,6 +8,8 @@ module RuntimeCompatibilityFixtureSpec
   ) where
 
 import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
+import CodexWatcher.Core.Reason (StopReason (..))
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..))
 import CodexWatcher.Domain.IssuePlanning.Types
@@ -20,6 +22,7 @@ import CodexWatcher.EffectInterpreter (CompiledEffectPlan (..), EffectRuntimeCon
 import CodexWatcher.Effects (Effect (..), SomeEffect (..))
 import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
+import CodexWatcher.Snapshot (NodeIssueDaemonState (..))
 import Data.Aeson (Value (..), eitherDecodeStrict', object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -35,9 +38,12 @@ runtimeCompatibilityFixtureTests :: IO Bool
 runtimeCompatibilityFixtureTests =
   sequenceAnd
     [ fixtureShapeTests
+    , daemonFixtureShapeTests
     , compatibilityProjectionFixtureTests
+    , daemonCompatibilityProjectionFixtureTests
     , recordPlanningGraphFixtureTest
     , healthcheckPlannerReaderBoundaryTest
+    , daemonStateSourceBoundaryTest
     ]
 
 fixtureShapeTests :: IO Bool
@@ -107,6 +113,82 @@ compatibilityProjectionFixtureTests =
         (writesOnlyPlannerState (SomeWatcherState (CompleteState PlanningComplete)) completePlannerStateValue)
     ]
 
+daemonFixtureShapeTests :: IO Bool
+daemonFixtureShapeTests = do
+  activeResult <- loadDaemonFixtureValue ("planning-active" </> "daemon-state.json")
+  stoppedResult <- loadDaemonFixtureValue ("stopped" </> "daemon-state.json")
+  activeDecodeResult <- loadDaemonFixtureState ("planning-active" </> "daemon-state.json")
+  stoppedDecodeResult <- loadDaemonFixtureState ("stopped" </> "daemon-state.json")
+  decodedOk <-
+    assert
+      "runtime compatibility daemon fixtures decode as JSON values"
+      (all isRight [activeResult, stoppedResult])
+  snapshotReaderOk <-
+    assert
+      "issue-implementation snapshot daemon reader accepts active and stopped daemon fixtures"
+      ( activeDecodeResult == Right (NodeIssueDaemonState (Just "daemon-turn") (Just "plan") Nothing)
+          && stoppedDecodeResult == Right (NodeIssueDaemonState Nothing Nothing Nothing)
+      )
+  shapeOk <-
+    case (activeResult, stoppedResult) of
+      (Right activeValue, Right stoppedValue) ->
+        sequenceAnd
+          [ assert
+              "daemon active and stopped fixtures match current daemon-state JSON shapes"
+              ( activeValue == activeDaemonStateValue
+                  && stoppedValue == stoppedDaemonStateValue
+              )
+          , assert
+              "daemon active and stopped fixture shapes are not interchangeable"
+              ( activeValue /= stoppedValue
+                  && hasObjectKey "activeThreadId" activeValue
+                  && not (hasObjectKey "stopReason" activeValue)
+                  && hasObjectKey "stopReason" stoppedValue
+                  && not (hasObjectKey "activeThreadId" stoppedValue)
+              )
+          ]
+      _ -> pure False
+  pure (decodedOk && snapshotReaderOk && shapeOk)
+
+daemonCompatibilityProjectionFixtureTests :: IO Bool
+daemonCompatibilityProjectionFixtureTests =
+  sequenceAnd
+    [ assert
+        "PlanningTurnActive writes the active daemon-state fixture"
+        ( singleWriteValue
+            fixtureDaemonPath
+            ( compatibilityStateWrites
+                fixtureStateDir
+                (SomeWatcherState (PlanningTurnActive fixturePlannerConfig (ActiveTurn (ThreadId "daemon-thread") (TurnId "daemon-turn"))))
+            )
+            == Just activeDaemonStateValue
+        )
+    , assert
+        "StoppedState writes the stopped daemon-state fixture"
+        ( singleWriteValue
+            fixtureDaemonPath
+            ( compatibilityStateWrites
+                fixtureStateDir
+                (SomeWatcherState (StoppedState (StopReason "stopped for fixture") :: WatcherState 'IssuePlanning 'Stopped))
+            )
+            == Just stoppedDaemonStateValue
+        )
+    , assert
+        "active and stopped daemon compatibility writes are not interchangeable"
+        ( let activeWrites =
+                compatibilityStateWrites
+                  fixtureStateDir
+                  (SomeWatcherState (PlanningTurnActive fixturePlannerConfig (ActiveTurn (ThreadId "daemon-thread") (TurnId "daemon-turn"))))
+              stoppedWrites =
+                compatibilityStateWrites
+                  fixtureStateDir
+                  (SomeWatcherState (StoppedState (StopReason "stopped for fixture") :: WatcherState 'IssuePlanning 'Stopped))
+           in singleWriteValue fixtureDaemonPath activeWrites == Just activeDaemonStateValue
+                && singleWriteValue fixtureDaemonPath stoppedWrites == Just stoppedDaemonStateValue
+                && singleWriteValue fixtureDaemonPath activeWrites /= singleWriteValue fixtureDaemonPath stoppedWrites
+        )
+    ]
+
 recordPlanningGraphFixtureTest :: IO Bool
 recordPlanningGraphFixtureTest = do
   let config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
@@ -128,6 +210,22 @@ healthcheckPlannerReaderBoundaryTest = do
         && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
     )
 
+daemonStateSourceBoundaryTest :: IO Bool
+daemonStateSourceBoundaryTest = do
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
+  replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
+  restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  assert
+    "daemon-state compatibility interactions keep current healthcheck, snapshot, repair, and restart paths"
+    ( "(\"daemonState\", \"daemon-state.json\")" `Text.isInfixOf` healthcheckSource
+        && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
+        && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
+        && "daemonResult <- decodeOptionalJsonFile (dir </> \"daemon-state.json\")" `Text.isInfixOf` snapshotSource
+        && "writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState" `Text.isInfixOf` replaySource
+        && "\"$state_dir/daemon-state.json\"" `Text.isInfixOf` restartSource
+    )
+
 writesOnlyPlannerState :: SomeWatcherState -> Value -> Bool
 writesOnlyPlannerState state expectedPlannerValue =
   let writes = compatibilityStateWrites fixtureStateDir state
@@ -147,6 +245,14 @@ loadFixtureValue relativePath =
 loadPlanningGraphFixture :: FilePath -> IO (Either String PlanningGraph)
 loadPlanningGraphFixture relativePath =
   eitherDecodeStrict' <$> ByteString.readFile (fixtureRoot </> relativePath)
+
+loadDaemonFixtureValue :: FilePath -> IO (Either String Value)
+loadDaemonFixtureValue relativePath =
+  eitherDecodeStrict' <$> ByteString.readFile (daemonFixtureRoot </> relativePath)
+
+loadDaemonFixtureState :: FilePath -> IO (Either String NodeIssueDaemonState)
+loadDaemonFixtureState relativePath =
+  eitherDecodeStrict' <$> ByteString.readFile (daemonFixtureRoot </> relativePath)
 
 hasPlannerStatusKey :: Value -> Bool
 hasPlannerStatusKey =
@@ -174,6 +280,22 @@ plannerStateValue statusValue =
 completePlannerStateValue :: Value
 completePlannerStateValue =
   object ["status" .= ("complete" :: Text)]
+
+activeDaemonStateValue :: Value
+activeDaemonStateValue =
+  object
+    [ "activeTurnId" .= ("daemon-turn" :: Text)
+    , "activeTurnPurpose" .= ("plan" :: Text)
+    , "activeThreadId" .= ("daemon-thread" :: Text)
+    ]
+
+stoppedDaemonStateValue :: Value
+stoppedDaemonStateValue =
+  object
+    [ "activeTurnId" .= Null
+    , "activeTurnPurpose" .= Null
+    , "stopReason" .= ("stopped for fixture" :: Text)
+    ]
 
 fixtureRepo :: RepoName
 fixtureRepo =
@@ -210,6 +332,10 @@ fixtureRoot :: FilePath
 fixtureRoot =
   "golden" </> "runtime-compatibility" </> "issue-planning"
 
+daemonFixtureRoot :: FilePath
+daemonFixtureRoot =
+  "golden" </> "runtime-compatibility" </> "daemon-state"
+
 fixtureStateDir :: FilePath
 fixtureStateDir =
   "/tmp/runtime-compatibility-fixtures"
@@ -221,3 +347,7 @@ fixturePlannerPath =
 fixturePlanningPath :: FilePath
 fixturePlanningPath =
   fixtureStateDir </> "planning-state.json"
+
+fixtureDaemonPath :: FilePath
+fixtureDaemonPath =
+  fixtureStateDir </> "daemon-state.json"

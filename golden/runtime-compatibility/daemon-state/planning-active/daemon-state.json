@@ -1,0 +1,5 @@
+{
+  "activeTurnId": "daemon-turn",
+  "activeTurnPurpose": "plan",
+  "activeThreadId": "daemon-thread"
+}
