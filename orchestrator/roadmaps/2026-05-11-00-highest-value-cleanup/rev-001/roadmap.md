@@ -10,22 +10,28 @@ Make the repository easier to evolve by landing the highest-value cleanup in a
 sequenced way: split oversized tests first, add missing compatibility evidence,
 clarify runtime-state contracts, converge internal imports toward direct
 package owners, decompose large behavior modules behind tests, and only then
-perform gated deprecation and removal work.
+continue through gated deprecation and removal until compatibility surfaces are
+removed cleanly.
 
 ## Alignment Summary
 
 - Thesis: cleanup should reduce future risk before it removes compatibility.
   The previous facade-removal family ended in a terminal hold, so this roadmap
-  must collect removal gates and make risky behavior visible before any public
-  compatibility facade, compatibility file, or exposed module is deleted.
+  must keep pushing toward clean compatibility removal while collecting the
+  gates that make that removal safe. Risky behavior must be visible before any
+  public compatibility facade, compatibility file, or exposed module is
+  deleted.
 - Outcome: the repo has smaller test and runtime modules, reusable
   package-boundary checks outside the 17k-line `test/Main.hs`, fixture-backed
   compatibility-state contracts, clearer `planner-state.json` versus
   `planning-state.json` semantics, reduced internal facade imports, and exact
   deprecation/removal decisions backed by reviewer-approved evidence.
-- Success criteria: every cleanup slice preserves behavior, keeps public
-  compatibility surfaces exposed until gates are met, adds focused evidence for
-  touched runtime contracts, and leaves `cabal build all` plus
+- Success criteria: all compatibility surfaces covered by this family are
+  removed cleanly or migrated away from supported compatibility paths, with no
+  remaining kept, deferred, or blocked compatibility set. Every cleanup slice
+  must preserve behavior until its removal gate is approved, keep public
+  compatibility surfaces exposed until gates are met, add focused evidence for
+  touched runtime contracts, and leave `cabal build all` plus
   `cabal test watcher-core-test` green for behavior-affecting changes.
 - Non-goals: no casual removal of `CodexWatcher.AppServerClient`,
   `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, or
@@ -38,8 +44,11 @@ perform gated deprecation and removal work.
   deprecation/removal rounds.
 - Expansion rule: completing the current milestone list is not, by itself,
   proof that the family is finished. When late evidence reveals more
-  high-value cleanup, the guider should author a reviewed roadmap update or new
-  revision that adds milestones before terminal closeout.
+  compatibility-removal work, the guider must author a reviewed roadmap update
+  or new revision that adds milestones before terminal closeout. If any
+  compatibility surface remains kept, deferred, blocked, or only held, the
+  roadmap must keep expanding milestones toward clean removal instead of
+  marking `done`.
 - Deferred alternatives: direct facade deletion, direct runtime compatibility
   file deletion, and broad module rewrites without focused tests are rejected
   until the roadmap records the required gates.
@@ -90,6 +99,10 @@ Out of scope:
 - Before terminal closeout, inspect merged evidence for newly discovered
   cleanup fronts. If more cleanup is justified, refine the roadmap through a
   reviewed update or new revision instead of marking the family done.
+- Terminal closeout is valid only when compatibility removal is complete: no
+  roadmap-covered compatibility facade, compatibility file, public
+  compatibility module, or exposed-module compatibility entry remains in a
+  kept, deferred, blocked, or hold-only state.
 - Preserve `orchestrator/project-contract.md` invariants for event schemas,
   golden fixtures, compatibility files, dry-run rendering, package ownership,
   runtime ownership, healthcheck, repair, and public facade availability.
@@ -447,12 +460,14 @@ Depends on:
 `milestone-003-import-convergence-package-boundaries`,
 `milestone-005-runtime-compatibility-cleanup-gates`
 Intent: Perform only exact public deprecations and removals whose gates are
-complete, then close the family with an explicit final status report.
+complete, then keep expanding until every roadmap-covered compatibility surface
+is removed cleanly.
 Completion signal: every selected facade, compatibility file, public module,
-  exposed-module entry, deprecated symbol, and deferred cleanup surface has a
-reviewed final status; approved deprecations/removals are landed with docs,
-Cabal, fixture, behavior, and downstream evidence; unapproved surfaces are
-recorded as keep or defer with blockers.
+exposed-module entry, deprecated symbol, and deferred cleanup surface has
+landed its approved clean removal or migration away from supported
+compatibility paths with docs, Cabal, fixture, behavior, and downstream
+evidence; the final report has empty kept, deferred, and blocked
+compatibility-surface sets.
 Parallel lane: serial
 Coordination notes: deprecation is externally visible. Removal requires exact
 approval and cannot be inferred from preferred-import guidance.
@@ -497,17 +512,21 @@ Candidate directions:
   evidence, focused behavior evidence, and policy updates.
 
 - Direction id: `direction-024-terminal-cleanup-report`
-  Summary: Either close the family with an explicit final cleanup report or
-  expand the roadmap with newly discovered cleanup milestones.
+  Summary: Prove compatibility removal is complete or expand the roadmap with
+  the next cleanup milestones.
   Why it matters now: a broad cleanup family must not silently finish by
-  exhausting tasks while blockers remain.
-  Preconditions: deprecation/removal rounds complete or all remaining surfaces
-  have reviewed keep/defer decisions.
+  exhausting tasks while compatibility surfaces remain.
+  Preconditions: deprecation/removal rounds complete and every
+  roadmap-covered compatibility surface has a reviewed removed or migrated
+  final state.
   Parallel hints: serial.
-  Boundary notes: a hold is valid only if it preserves exact blockers and does
-  not imply removal approval. If evidence names additional high-value cleanup
-  that is not covered by the current milestones, terminal closeout is not
-  ready; the guider should add a reviewed roadmap revision instead.
+  Boundary notes: a hold is valid as interim evidence only; it is not terminal
+  success. If any compatibility surface remains kept, deferred, blocked, or
+  hold-only, or if evidence names additional high-value cleanup not covered by
+  the current milestones, terminal closeout is not ready; the guider should add
+  a reviewed roadmap revision with additional milestones instead.
   Extraction notes: include kept, deferred, deprecated, removed, migrated, and
-  blocked surface sets plus validation commands, or author an expansion update
-  that names the new milestones, dependencies, and verification gates.
+  blocked surface sets plus validation commands. The kept, deferred, and
+  blocked compatibility-surface sets must be empty for terminal approval; if
+  they are not empty, author an expansion update that names the next
+  milestones, dependencies, and verification gates.

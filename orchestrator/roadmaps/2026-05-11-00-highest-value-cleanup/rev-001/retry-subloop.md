@@ -5,11 +5,11 @@ Roadmap revision: `rev-001`
 
 ## Retry Policy
 
-Retries must preserve the selected cleanup surface and the compatibility
-boundary. A retry may narrow a split, add fixture evidence, restore behavior,
-or record a hold. A retry must not convert missing evidence into deprecation,
-runtime compatibility-file deletion, Cabal exposure removal, or facade
-removal.
+Retries must preserve the selected cleanup surface, the compatibility
+boundary, and the family goal of clean compatibility removal. A retry may
+narrow a split, add fixture evidence, restore behavior, or record an interim
+hold. A retry must not convert missing evidence into deprecation, runtime
+compatibility-file deletion, Cabal exposure removal, or facade removal.
 
 ## Common Retry Cases
 
@@ -27,10 +27,14 @@ removal.
 - If a large-module split creates import cycles, mixed ownership, or behavior
   drift, narrow the split or return to tests before retrying.
 - If deprecation or removal approval is missing, the lawful result is keep,
-  defer, or a terminal hold with exact blockers.
+  defer, or an interim hold with exact blockers. That blocker must feed later
+  roadmap work; it is not final success for this family.
 - If a terminal closeout finds additional high-value cleanup that is not
   covered by existing milestones, retry as a roadmap expansion update instead
   of approving the family as done.
+- If terminal closeout finds any compatibility surface still kept, deferred,
+  blocked, or hold-only, retry as roadmap expansion instead of approving the
+  family as done.
 
 ## Removal Retry Boundary
 
@@ -52,4 +56,6 @@ behavior must add focused checks for that touched surface.
 Adding milestones is allowed only through the delegated update-roadmap path and
 reviewed roadmap revision rules. The expansion must name the new milestones,
 their dependencies, verification gates, and evidence that justifies keeping the
-family open.
+family open. The family must keep expanding milestones until the reviewed final
+report proves all roadmap-covered compatibility surfaces have been removed
+cleanly or migrated away from supported compatibility paths.

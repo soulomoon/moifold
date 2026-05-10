@@ -41,6 +41,10 @@ fixture, docs, or behavior surface changed.
 - Confirm terminal closeout first inspects merged evidence for additional
   high-value cleanup. If new cleanup fronts remain, require a reviewed roadmap
   update or new revision with added milestones instead of approving `done`.
+- Confirm terminal closeout proves all roadmap-covered compatibility surfaces
+  are removed cleanly or migrated away from supported compatibility paths. Any
+  kept, deferred, blocked, or hold-only compatibility surface requires roadmap
+  milestone expansion, not terminal `done`.
 
 ## Task-Specific Checks
 
@@ -87,8 +91,9 @@ Reviewers should require focused checks matching the selected surface:
 - For large module splits, confirm the new module names communicate ownership
   and do not create import cycles or hidden package-boundary leakage.
 - For terminal closeout, verify the final report lists kept, deferred,
-  deprecated, removed, migrated, and blocked surfaces, and does not imply
-  release or package publication approval.
+  deprecated, removed, migrated, and blocked surfaces, does not imply release
+  or package publication approval, and has empty kept, deferred, and blocked
+  compatibility-surface sets.
 - For roadmap expansion, verify the update names new milestones, dependencies,
   verification gates, and why the work could not be represented by existing
   pending milestones.
@@ -107,3 +112,7 @@ Reviewers should require focused checks matching the selected surface:
   evidence reveals more highest-value cleanup, add milestones through a
   reviewed roadmap update or new revision before setting controller state to
   `done`.
+- Final success means all compatibility surfaces covered by the family are
+  removed cleanly. A terminal hold, defer, or keep decision is an intermediate
+  blocker record and must drive more roadmap work unless the user explicitly
+  approves a new goal in a later family.

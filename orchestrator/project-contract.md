@@ -40,11 +40,17 @@ stable contracts instead of restating them in every role or roadmap file.
   inventory to readiness evidence to policy before removal. Runtime
   compatibility-file removal additionally requires old-log, golden, repair,
   healthcheck, and write-timing evidence for the selected surface.
+- Compatibility removal goal: when a roadmap family is explicitly scoped to
+  clean compatibility removal, each reviewed roadmap update must keep pushing
+  toward that goal by adding milestones for newly discovered blockers or
+  cleanup fronts until all roadmap-covered compatibility surfaces are removed
+  cleanly.
 - Highest-value cleanup sequencing: split and preserve tests before using them
   as the evidence base for riskier cleanup; add missing compatibility fixtures
   before runtime-state cleanup; keep import convergence separate from public
   deprecation or removal; decompose large runtime modules behind focused tests;
-  perform deprecated or removed-surface cleanup only after exact gates are met.
+  perform deprecated or removed-surface cleanup only after exact gates are met;
+  keep refining the roadmap until compatibility surfaces are removed cleanly.
 - Planner state compatibility: `planner-state.json` and
   `planning-state.json` are distinct compatibility surfaces. Current runtime
   code writes both in different planning states, while healthcheck reads
@@ -76,7 +82,10 @@ stable contracts instead of restating them in every role or roadmap file.
   terminal completion only because an initial todo list is exhausted. Near the
   end of a cleanup family, the guider must inspect merged evidence and either
   expand newly discovered follow-up items into a reviewed roadmap update or
-  record why no further cleanup items are justified.
+  record why no further cleanup items are justified. For a roadmap whose
+  approved goal is clean compatibility removal, terminal completion additionally
+  requires no roadmap-covered compatibility surface to remain kept, deferred,
+  blocked, or hold-only.
 - Cleanup approval discipline: test reduction, import convergence,
   fixture coverage, and large-module extraction are evidence-producing cleanup
   steps. None of them is public deprecation, Cabal exposure removal,
