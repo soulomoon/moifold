@@ -1,0 +1,502 @@
+# Highest-Value Cleanup Roadmap
+
+Roadmap id: `2026-05-11-00-highest-value-cleanup`
+Roadmap revision: `rev-001`
+Roadmap style: `strategy-backlog`
+
+## Goal
+
+Make the repository easier to evolve by landing the highest-value cleanup in a
+sequenced way: split oversized tests first, add missing compatibility evidence,
+clarify runtime-state contracts, converge internal imports toward direct
+package owners, decompose large behavior modules behind tests, and only then
+perform gated deprecation and removal work.
+
+## Alignment Summary
+
+- Thesis: cleanup should reduce future risk before it removes compatibility.
+  The previous facade-removal family ended in a terminal hold, so this roadmap
+  must collect removal gates and make risky behavior visible before any public
+  compatibility facade, compatibility file, or exposed module is deleted.
+- Outcome: the repo has smaller test and runtime modules, reusable
+  package-boundary checks outside the 17k-line `test/Main.hs`, fixture-backed
+  compatibility-state contracts, clearer `planner-state.json` versus
+  `planning-state.json` semantics, reduced internal facade imports, and exact
+  deprecation/removal decisions backed by reviewer-approved evidence.
+- Success criteria: every cleanup slice preserves behavior, keeps public
+  compatibility surfaces exposed until gates are met, adds focused evidence for
+  touched runtime contracts, and leaves `cabal build all` plus
+  `cabal test watcher-core-test` green for behavior-affecting changes.
+- Non-goals: no casual removal of `CodexWatcher.AppServerClient`,
+  `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, or
+  `CodexWatcher.Workflow.Permission`; no compatibility-file rename or deletion
+  before fixture and healthcheck evidence; no event JSON `type` migration; no
+  release or publication approval; no broad API churn in reusable packages.
+- Chosen strategy: evidence-first cleanup. Start with test topology and
+  scanners, then fixture and runtime-state contracts, then import convergence,
+  then large-module splits, then compatibility cleanup, and finally exact
+  deprecation/removal rounds.
+- Deferred alternatives: direct facade deletion, direct runtime compatibility
+  file deletion, and broad module rewrites without focused tests are rejected
+  until the roadmap records the required gates.
+
+## Outcome Boundaries
+
+In scope:
+
+- `test/Main.hs`, especially facade extraction tests, package-boundary
+  scanners, import-policy checks, workflow behavior tests, and helper code
+  around the current boundary-policy tests.
+- Compatibility fixtures and contracts for `planner-state.json`,
+  `planning-state.json`, `daemon-state.json`, `block-state.json`,
+  `repair-state.json`, `runtime-owner.json`, checked-in compatibility
+  snapshots, and live `issue-snapshot.json`.
+- Internal import convergence away from compatibility facades in new or
+  reusable-package-oriented code, while public facades remain available.
+- Large-module decomposition targets:
+  `src/CodexWatcher/Daemon.hs`,
+  `src/CodexWatcher/Workflow/DocsMigration.hs`,
+  `src/CodexWatcher/Workflow/Moifold/IssueImplement/Indexed.hs`,
+  `src/CodexWatcher/EventLog/Types.hs`, and
+  `src/CodexWatcher/TurnOutput.hs`.
+- Exact deprecation and removal gates for surfaces that have completed current
+  import, fixture, behavior, documentation, Cabal, and downstream evidence.
+
+Out of scope:
+
+- Package upload, public release, or external publication decisions.
+- Removing compatibility facades solely because direct imports exist.
+- Removing or renaming compatibility state files solely because production code
+  has few local readers.
+- Moving concrete moifold lifecycle policy into reusable packages.
+- Reopening old roadmap families or editing prior used roadmap revisions.
+
+## Global Sequencing Rules
+
+- Split and preserve tests before relying on the suite for later risky cleanup.
+- Add compatibility fixtures before deleting, renaming, or changing runtime
+  compatibility-state files.
+- Clarify `planner-state.json` versus `planning-state.json` as a compatibility
+  contract before any rename, deletion, or healthcheck behavior change.
+- Migrate internal imports only when replacement modules are behaviorally
+  equivalent and package ownership becomes clearer.
+- Split large runtime modules only behind existing or newly extracted focused
+  tests, and avoid behavior change in pure extraction rounds.
+- Treat deprecation and removal as final gates, not cleanup shortcuts.
+- Preserve `orchestrator/project-contract.md` invariants for event schemas,
+  golden fixtures, compatibility files, dry-run rendering, package ownership,
+  runtime ownership, healthcheck, repair, and public facade availability.
+
+## Parallel Lanes
+
+Default execution remains serial with `max_parallel_rounds: 1`. The guider may
+later propose lane-bound parallelism only after the first inventory round
+records disjoint ownership.
+
+Candidate lanes after inventory:
+
+- Test topology lane: focused test-module extraction and harness wiring.
+- Compatibility fixture lane: fixture additions and runtime-state contract
+  tests.
+- Import convergence lane: direct-owner import migrations that do not touch the
+  same files as fixture or module-split work.
+- Large-module split lane: one module-family split at a time, unless planner
+  evidence proves non-overlapping ownership and verification.
+
+Deprecation/removal remains serial because public API, Cabal exposure, docs,
+and downstream evidence must be reviewed per exact surface.
+
+## Milestones
+
+### 1. [pending] Test Topology And Cleanup Inventory
+
+Milestone id: `milestone-001-test-topology-inventory`
+Depends on: none
+Intent: Make the cleanup evidence base navigable by inventorying current
+facade, fixture, package-boundary, and large-module risks, then extracting the
+highest-value reusable test helpers out of `test/Main.hs`.
+Completion signal: focused test modules own reusable package-boundary scanners
+and facade/import-policy checks; `test/Main.hs` is measurably smaller; the
+test-suite wiring still runs the same behavior coverage; and the cleanup
+inventory names remaining facade, fixture, and large-module follow-up gates.
+Parallel lane: serial until inventory proves disjoint file ownership
+Coordination notes: do not weaken tests to make extraction easier. Test helper
+extraction should preserve assertions and failure messages unless a reviewer
+approves a clearer equivalent.
+
+Candidate directions:
+
+- Direction id: `direction-001-cleanup-inventory-refresh`
+  Summary: Refresh the current cleanup inventory across compatibility facades,
+  runtime compatibility files, oversized test/helper clusters, and large
+  behavior modules.
+  Why it matters now: the roadmap is broad, and later rounds need a current
+  evidence map before changing tests or production boundaries.
+  Preconditions: active roadmap bundle and prior terminal hold re-read.
+  Parallel hints: serial; this creates the shared evidence base.
+  Boundary notes: no production, test, Cabal, docs, or compatibility behavior
+  changes except inventory artifacts.
+  Extraction notes: include import scans, module line counts, fixture coverage,
+  policy references, and downstream/operator inventory scope.
+
+- Direction id: `direction-002-boundary-policy-test-module-split`
+  Summary: Extract reusable package-boundary scanners and policy helpers from
+  `test/Main.hs` into focused test support or test modules.
+  Why it matters now: these scanners guard future package and facade cleanup,
+  but their current location makes future work harder to review.
+  Preconditions: direction 001 inventory or equivalent current evidence.
+  Parallel hints: serial unless the planner proves disjoint edits from other
+  test-split work.
+  Boundary notes: preserve current package-boundary assertions and selected
+  facade checks.
+  Extraction notes: start around the existing boundary-policy helper cluster
+  and keep `watcher-core-test` as the validation gate.
+
+- Direction id: `direction-003-facade-import-policy-test-split`
+  Summary: Move facade extraction, import-policy, and compatibility policy
+  checks into focused modules.
+  Why it matters now: future deprecation/removal gates need readable tests that
+  distinguish preferred imports from removal approval.
+  Preconditions: boundary helper extraction is available or the planner
+  records a safe independent split.
+  Parallel hints: can follow direction 002; co-schedule only with disjoint test
+  files.
+  Boundary notes: do not change compatibility facade exposure or policy
+  classifications.
+  Extraction notes: preserve tests for `CodexWatcher.AppServerClient`,
+  `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, and
+  `CodexWatcher.Workflow.Permission`.
+
+- Direction id: `direction-004-workflow-behavior-test-split`
+  Summary: Extract workflow behavior tests out of `test/Main.hs` once shared
+  test helpers are stable.
+  Why it matters now: large-module cleanup needs focused behavior tests before
+  production extraction.
+  Preconditions: helper ownership from directions 002 and 003 is clear.
+  Parallel hints: serial with other `test/Main.hs` work.
+  Boundary notes: behavior coverage must be preserved; no production changes.
+  Extraction notes: keep test ordering and aggregate result wiring easy to
+  audit.
+
+### 2. [pending] Compatibility Fixtures And Runtime-State Contracts
+
+Milestone id: `milestone-002-compatibility-fixtures-contracts`
+Depends on: `milestone-001-test-topology-inventory`
+Intent: Add missing evidence for runtime compatibility files and clarify the
+current state-file contract before runtime-state cleanup.
+Completion signal: fixture and test coverage exists for the selected old and
+current JSON shapes; `planner-state.json` versus `planning-state.json` has an
+explicit reviewed contract; healthcheck behavior is documented and tested; and
+runtime compatibility cleanup candidates are classified as keep, defer,
+deprecate, migrate, or remove with blockers.
+Parallel lane: compatibility fixture lane after test helpers are stable
+Coordination notes: fixture additions may be split by state file, but
+healthcheck and write-timing semantics must stay coherent.
+
+Candidate directions:
+
+- Direction id: `direction-005-compatibility-fixture-gap-inventory`
+  Summary: Refresh fixture gaps for planning, daemon, block, repair,
+  runtime-owner, checked-in snapshots, and live issue-snapshot surfaces.
+  Why it matters now: policy line items already name missing gates, and future
+  runtime cleanup must not guess.
+  Preconditions: milestone 001 inventory or current policy evidence.
+  Parallel hints: serial; establishes fixture ownership and priorities.
+  Boundary notes: no runtime behavior or file-name change.
+  Extraction notes: compare production producers/readers, healthcheck readers,
+  golden snapshots, and docs policy.
+
+- Direction id: `direction-006-planner-vs-planning-state-contract`
+  Summary: Record and test the compatibility contract for
+  `planner-state.json` and `planning-state.json`.
+  Why it matters now: runtime writes both names, healthcheck reads
+  `planner-state.json`, and docs mostly discuss `planning-state.json`.
+  Preconditions: fixture gap inventory or direct source evidence from
+  `Runtime.Compatibility` and `Healthcheck`.
+  Parallel hints: may run before broad fixture additions if scoped narrowly.
+  Boundary notes: no rename, deletion, or healthcheck reader change unless a
+  later reviewed behavior-change direction approves it.
+  Extraction notes: include producer, reader, docs, and fixture expectations.
+
+- Direction id: `direction-007-runtime-compatibility-fixtures`
+  Summary: Add focused fixtures for selected compatibility files and current
+  tolerated legacy shapes.
+  Why it matters now: runtime-state cleanup is blocked until old/current JSON
+  shapes are checked in and replayable where applicable.
+  Preconditions: direction 005 inventory.
+  Parallel hints: state-file slices may be parallel only with disjoint fixture
+  paths and tests.
+  Boundary notes: no deletion, rename, or schema migration.
+  Extraction notes: prioritize `daemon-state.json`, `planning-state.json`,
+  `block-state.json`, `repair-state.json`, `runtime-owner.json`, checked-in
+  compatibility snapshots, and live `issue-snapshot.json`.
+
+- Direction id: `direction-008-healthcheck-compatibility-contracts`
+  Summary: Add or refresh healthcheck tests for compatibility-state files that
+  healthcheck reads or explicitly does not read.
+  Why it matters now: healthcheck is an operator-facing compatibility reader,
+  so cleanup requires exact read-only behavior evidence.
+  Preconditions: direction 005 or 006 evidence for selected files.
+  Parallel hints: can pair with fixture work only when touched test modules do
+  not overlap.
+  Boundary notes: no healthcheck behavior change without focused approval.
+  Extraction notes: record explicit non-reader policy for write-only files such
+  as `planning-state.json` or `repair-state.json` when applicable.
+
+### 3. [pending] Import Convergence And Package-Boundary Cleanup
+
+Milestone id: `milestone-003-import-convergence-package-boundaries`
+Depends on: `milestone-001-test-topology-inventory`
+Intent: Continue package-boundary cleanup by moving new and internal reusable
+package-oriented code away from compatibility facade imports while keeping
+public facades exposed until gates are met.
+Completion signal: direct-owner imports replace safe internal facade imports;
+remaining facade users are inventoried with reasons; package-boundary tests
+protect reusable packages from moifold-owned dependencies; and no public
+deprecation or removal is implied.
+Parallel lane: import convergence lane after inventory
+Coordination notes: import migration is not deprecation. Keep facades exposed
+in `moifold.cabal` until exact removal gates are approved.
+
+Candidate directions:
+
+- Direction id: `direction-009-facade-import-scan-refresh`
+  Summary: Refresh current imports of `CodexWatcher.AppServerClient`,
+  `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, and
+  `CodexWatcher.Workflow.Permission`.
+  Why it matters now: prior counts are useful history, but cleanup rounds need
+  current imports after test splits and fixture work.
+  Preconditions: milestone 001 inventory.
+  Parallel hints: serial evidence round.
+  Boundary notes: no import changes or public surface changes.
+  Extraction notes: include `src`, `app`, `test`, package descriptors, docs,
+  and standalone package candidates.
+
+- Direction id: `direction-010-appserverclient-import-convergence`
+  Summary: Move safe remaining internal `CodexWatcher.AppServerClient` imports
+  to direct Codex client and transport modules.
+  Why it matters now: it reduces facade dependence while preserving the public
+  compatibility module.
+  Preconditions: current import scan and focused app-server behavior evidence.
+  Parallel hints: may be independent of Core.Ids slices if file ownership is
+  disjoint.
+  Boundary notes: no facade deletion, Cabal exposure change, or deprecation
+  pragma.
+  Extraction notes: preserve endpoint parsing, session protocol, command
+  rendering, and failure formatting.
+
+- Direction id: `direction-011-core-ids-import-convergence`
+  Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
+  agent-id or GitHub-id owner modules.
+  Why it matters now: the combined id facade obscures package ownership in
+  reusable or executable-adjacent code.
+  Preconditions: current import scan, package descriptor impact check, and
+  parser/rendering behavior evidence.
+  Parallel hints: may be sliced by domain when ownership is disjoint.
+  Boundary notes: do not change constructors, parsers, renderers, or command
+  output.
+  Extraction notes: record each remaining combined-facade user and blocker.
+
+- Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
+  Summary: Prepare exact split evidence for `Workflow.EventLog` and
+  `Workflow.Permission` mixed moifold bridge behavior.
+  Why it matters now: these facades are not pure reexports, and removal needs a
+  concrete owner split before public API action.
+  Preconditions: current import scan and fixture/behavior coverage for touched
+  replay or permission behavior.
+  Parallel hints: serial; both surfaces affect workflow correctness.
+  Boundary notes: no public deprecation, Cabal exposure change, or removal.
+  Extraction notes: separate reusable core imports from concrete moifold bridge
+  helpers and record what remains product-owned.
+
+### 4. [pending] Large Runtime Module Decomposition
+
+Milestone id: `milestone-004-large-module-decomposition`
+Depends on: `milestone-001-test-topology-inventory`
+Intent: Split the largest runtime and workflow modules behind focused tests so
+future behavior changes are reviewable.
+Completion signal: each selected module has a smaller, named ownership split;
+focused tests cover the moved behavior; public exports remain stable unless a
+specific reviewed direction approves a change; and baseline build/test checks
+pass after each split.
+Parallel lane: large-module split lane, one module family at a time by default
+Coordination notes: pure extraction is preferred. Behavior changes require a
+separate selected direction with focused tests.
+
+Candidate directions:
+
+- Direction id: `direction-013-daemon-module-split`
+  Summary: Split `CodexWatcher.Daemon` into focused runtime, tick, or command
+  ownership modules without changing daemon behavior.
+  Why it matters now: daemon code sits on real runtime behavior and should be
+  smaller before further cleanup.
+  Preconditions: focused daemon tests or extracted behavior tests from
+  milestone 001.
+  Parallel hints: serial with other daemon/runtime changes.
+  Boundary notes: preserve daemon result shapes, event append order,
+  compatibility writes, and runtime ownership.
+  Extraction notes: record moved exports and unchanged public API evidence.
+
+- Direction id: `direction-014-docs-migration-module-split`
+  Summary: Split `Workflow.DocsMigration` into smaller parsing, planning, and
+  replay/application owners.
+  Why it matters now: docs migration has golden and replay behavior that should
+  be isolated before cleanup.
+  Preconditions: current docs migration tests and golden replay evidence.
+  Parallel hints: serial unless only test support moves.
+  Boundary notes: preserve docs migration event schemas and golden behavior.
+  Extraction notes: keep old fixture replay coverage in the same reviewed
+  slice.
+
+- Direction id: `direction-015-issue-implement-indexed-module-split`
+  Summary: Split `Workflow.Moifold.IssueImplement.Indexed` into smaller indexed
+  policy, observation, transition, or adapter owners.
+  Why it matters now: indexed issue implementation is behavior-sensitive and
+  blocks future workflow cleanup if it stays monolithic.
+  Preconditions: focused indexed issue-implement tests and parity evidence.
+  Parallel hints: serial; avoid overlapping issue implementation behavior
+  changes.
+  Boundary notes: preserve event schemas, daemon routing, dry-run text,
+  request-id progression, and state transition parity.
+  Extraction notes: do not move concrete moifold policy into reusable packages.
+
+- Direction id: `direction-016-eventlog-types-module-split`
+  Summary: Split `CodexWatcher.EventLog.Types` into smaller event groups or
+  codec ownership modules.
+  Why it matters now: event type code is central compatibility surface and
+  should be easier to audit before schema cleanup.
+  Preconditions: golden event-log, codec, and replay tests for touched
+  constructors.
+  Parallel hints: serial.
+  Boundary notes: no event JSON `type` change, schema-version change, or old
+  log rejection unless separately approved.
+  Extraction notes: preserve parse/render behavior and fixture compatibility.
+
+- Direction id: `direction-017-turn-output-module-split`
+  Summary: Split `CodexWatcher.TurnOutput` into structured-output, prompt
+  version, and rendering owners.
+  Why it matters now: turn output and prompt compatibility are user-visible and
+  should be isolated before cleanup.
+  Preconditions: focused output/prompt tests for touched behavior.
+  Parallel hints: serial with prompt or app-server output changes.
+  Boundary notes: preserve structured-output requirements and prompt schema
+  compatibility.
+  Extraction notes: do not change app-server protocol or output parsing as an
+  incidental extraction.
+
+### 5. [pending] Runtime Compatibility Cleanup Gates
+
+Milestone id: `milestone-005-runtime-compatibility-cleanup-gates`
+Depends on: `milestone-002-compatibility-fixtures-contracts`
+Intent: Turn compatibility fixture evidence into exact keep, defer, migrate,
+  deprecate, or remove decisions for runtime compatibility surfaces.
+Completion signal: every selected runtime compatibility file has a reviewed
+decision with fixture, old-log, repair, healthcheck, write-timing,
+operator/downstream, and baseline validation evidence; approved migrations or
+removals are exact and scoped.
+Parallel lane: serial by default
+Coordination notes: do not delete runtime compatibility files from local
+absence alone. Missing downstream/operator evidence means defer or keep.
+
+Candidate directions:
+
+- Direction id: `direction-018-runtime-compatibility-decision-refresh`
+  Summary: Refresh the compatibility-file policy table after fixture and
+  healthcheck contract work.
+  Why it matters now: cleanup decisions must reflect current evidence, not
+  older policy gaps.
+  Preconditions: milestone 002 complete or selected fixture evidence accepted.
+  Parallel hints: serial evidence round.
+  Boundary notes: no deletion, rename, or schema change.
+  Extraction notes: classify each selected file as keep, defer, migrate,
+  deprecate, or remove with blockers.
+
+- Direction id: `direction-019-selected-compatibility-file-migration`
+  Summary: Land exact approved migrations for compatibility files whose gates
+  are satisfied.
+  Why it matters now: not every cleanup requires deletion; some may need docs,
+  healthcheck, or fixture alignment.
+  Preconditions: direction 018 approval naming the exact file and migration.
+  Parallel hints: serial unless files have disjoint producers, readers, and
+  fixtures.
+  Boundary notes: preserve event truth, repair ordering, healthcheck behavior,
+  and write timing.
+  Extraction notes: update fixtures, docs, tests, and policy in one reviewed
+  slice.
+
+- Direction id: `direction-020-selected-compatibility-file-removal`
+  Summary: Remove only compatibility files whose removal gates are all approved.
+  Why it matters now: deletion is the final cleanup action, not the first.
+  Preconditions: reviewer approval naming exact file paths and satisfied gates.
+  Parallel hints: serial.
+  Boundary notes: no broad runtime compatibility cleanup by implication.
+  Extraction notes: include old-log, fixture, healthcheck, repair,
+  write-timing, operator/downstream, and baseline evidence.
+
+### 6. [pending] Final Deprecation And Removal Campaign
+
+Milestone id: `milestone-006-final-deprecation-removal`
+Depends on:
+`milestone-003-import-convergence-package-boundaries`,
+`milestone-005-runtime-compatibility-cleanup-gates`
+Intent: Perform only exact public deprecations and removals whose gates are
+complete, then close the family with an explicit final status report.
+Completion signal: every selected facade, compatibility file, public module,
+  exposed-module entry, deprecated symbol, and deferred cleanup surface has a
+reviewed final status; approved deprecations/removals are landed with docs,
+Cabal, fixture, behavior, and downstream evidence; unapproved surfaces are
+recorded as keep or defer with blockers.
+Parallel lane: serial
+Coordination notes: deprecation is externally visible. Removal requires exact
+approval and cannot be inferred from preferred-import guidance.
+
+Candidate directions:
+
+- Direction id: `direction-021-public-deprecation-readiness`
+  Summary: Decide which compatibility facades or runtime surfaces should
+  receive explicit public deprecation signals.
+  Why it matters now: warnings and docs are public API signals and must be
+  aligned before removal.
+  Preconditions: import convergence, fixture evidence, policy refresh, and
+  downstream inventory for the exact surface.
+  Parallel hints: serial.
+  Boundary notes: no deprecation pragma or wording unless the exact surface is
+  approved.
+  Extraction notes: include docs, Haddock, changelog/release-note constraints,
+  Cabal exposure, and downstream scope.
+
+- Direction id: `direction-022-cabal-exposure-and-public-api-decision`
+  Summary: Decide whether exact exposed modules or public exports can be
+  removed, deprecated, or must remain available.
+  Why it matters now: Cabal exposure is the compatibility boundary for
+  downstream imports.
+  Preconditions: public deprecation readiness and current import/downstream
+  scans.
+  Parallel hints: serial.
+  Boundary notes: no exposed-module deletion from local absence alone.
+  Extraction notes: reviewer approval must name the exact module, export, or
+  exposed-module entry.
+
+- Direction id: `direction-023-exact-approved-removals`
+  Summary: Remove only deprecated or otherwise exact-approved surfaces whose
+  gates are satisfied.
+  Why it matters now: this is the final cleanup action after evidence and
+  public compatibility alignment.
+  Preconditions: exact approval for the surface, including import, behavior,
+  fixture, docs, Cabal, and downstream evidence.
+  Parallel hints: serial.
+  Boundary notes: do not bundle unrelated removals.
+  Extraction notes: record removed-surface set, retained-surface set, build/test
+  evidence, focused behavior evidence, and policy updates.
+
+- Direction id: `direction-024-terminal-cleanup-report`
+  Summary: Close the family with an explicit final cleanup report.
+  Why it matters now: a broad cleanup family must not silently finish by
+  exhausting tasks while blockers remain.
+  Preconditions: deprecation/removal rounds complete or all remaining surfaces
+  have reviewed keep/defer decisions.
+  Parallel hints: serial.
+  Boundary notes: a hold is valid only if it preserves exact blockers and does
+  not imply removal approval.
+  Extraction notes: include kept, deferred, deprecated, removed, migrated, and
+  blocked surface sets plus validation commands.
