@@ -143,6 +143,11 @@ Parallel lane: serial until inventory proves disjoint file ownership
 Coordination notes: do not weaken tests to make extraction easier. Test helper
 extraction should preserve assertions and failure messages unless a reviewer
 approves a clearer equivalent.
+Current status: `round-083-cleanup-inventory-refresh` completed
+`direction-001-cleanup-inventory-refresh` as artifact-only evidence in
+`orchestrator/rounds/round-083/cleanup-inventory.md` at merged commit
+`0aed2e4`. The milestone remains pending because directions 002 through 004
+still need focused test extraction work before the completion signal is met.
 
 Candidate directions:
 
@@ -158,13 +163,19 @@ Candidate directions:
   changes except inventory artifacts.
   Extraction notes: include import scans, module line counts, fixture coverage,
   policy references, and downstream/operator inventory scope.
+  Status: completed by `round-083` at `0aed2e4`; use
+  `orchestrator/rounds/round-083/cleanup-inventory.md` as the current cleanup
+  evidence map for later test-topology, fixture, import-convergence,
+  large-module, and compatibility-removal gate planning. This status does not
+  approve deprecation, migration, Cabal exposure changes, facade removal, or
+  runtime compatibility-file removal.
 
 - Direction id: `direction-002-boundary-policy-test-module-split`
   Summary: Extract reusable package-boundary scanners and policy helpers from
   `test/Main.hs` into focused test support or test modules.
   Why it matters now: these scanners guard future package and facade cleanup,
   but their current location makes future work harder to review.
-  Preconditions: direction 001 inventory or equivalent current evidence.
+  Preconditions: round-083 cleanup inventory evidence is available.
   Parallel hints: serial unless the planner proves disjoint edits from other
   test-split work.
   Boundary notes: preserve current package-boundary assertions and selected
