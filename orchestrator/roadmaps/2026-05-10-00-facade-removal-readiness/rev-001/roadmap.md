@@ -130,7 +130,7 @@ Candidate directions:
   Extraction notes: distinguish adapter-id convenience from concrete event-log,
   replay, permission, and phase-validation behavior.
 
-### 2. [pending] Internal Import Migration Readiness
+### 2. [in-progress] Internal Import Migration Readiness
 
 Milestone id: `milestone-002-internal-import-migration`
 Depends on: `milestone-001-current-facade-evidence`
@@ -140,6 +140,17 @@ available.
 Completion signal: selected internal imports are migrated or explicitly held
 with reasons, and tests show no behavior, package-boundary, or command-rendering
 drift.
+Progress: round 077 completed the selected `CodexWatcher.AppServerClient`
+explicit-import migration slice in `a37f71a`. The round replaced endpoint-only
+imports with `CodexWatcher.Workflow.Agent.Codex.Transport`, client-value imports
+with `CodexWatcher.Workflow.Agent.Codex.Client`, and split `test/AppServerSpec.hs`
+onto direct owner imports while keeping `src/CodexWatcher/AppServerClient.hs`
+live and unchanged. Review evidence records the starting inventory at 28 facade
+imports and the final inventory at 13 remaining broad/deferred facade imports,
+with `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+`git diff --cached --check` passing. Milestone 002 remains in progress because
+`direction-004-core-ids-split-import-migration` and
+`direction-005-eventlog-permission-readiness` are still pending.
 Parallel lane: serial by default; possible facade-specific lanes after approval
 Coordination notes: import migration is not deprecation. Facade modules must
 remain exposed unless a later milestone approves exact removal.
@@ -147,6 +158,7 @@ remain exposed unless a later milestone approves exact removal.
 Candidate directions:
 
 - Direction id: `direction-003-appserverclient-import-migration`
+  Status: complete via round 077, merged as `a37f71a`.
   Summary: Replace internal `CodexWatcher.AppServerClient` imports where direct
   Codex client or transport imports are equivalent.
   Why it matters now: this is the smallest likely pure reexport cleanup path.
