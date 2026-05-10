@@ -128,7 +128,7 @@ and downstream evidence must be reviewed per exact surface.
 
 ## Milestones
 
-### 1. [pending] Test Topology And Cleanup Inventory
+### 1. [completed] Test Topology And Cleanup Inventory
 
 Milestone id: `milestone-001-test-topology-inventory`
 Depends on: none
@@ -153,9 +153,14 @@ watcher-core test modules at merged commit `83cac48`, and
 `round-085-facade-import-policy-test-split` completed
 `direction-003-facade-import-policy-test-split` by extracting facade
 extraction, import-policy, and compatibility policy checks into a focused
-watcher-core test module at merged commit `fec075a`. The milestone remains
-pending because direction 004 still needs focused workflow behavior test
-extraction work before the completion signal is met.
+watcher-core test module at merged commit `fec075a`, and
+`round-086-workflow-behavior-test-split` completed
+`direction-004-workflow-behavior-test-split` by extracting focused workflow
+behavior tests into watcher-core modules at merged commit `0dc85da`.
+Milestone 001 is complete: the cleanup inventory exists, focused test modules
+own reusable boundary scanners, facade/import-policy checks, and workflow
+behavior coverage, `test/Main.hs` is measurably smaller, and reviewer evidence
+confirmed the watcher-core aggregation still reaches the moved behavior tests.
 
 Candidate directions:
 
@@ -232,6 +237,19 @@ Candidate directions:
   Boundary notes: behavior coverage must be preserved; no production changes.
   Extraction notes: keep test ordering and aggregate result wiring easy to
   audit.
+  Status: completed by `round-086` at `0dc85da`; the reviewed split added
+  `test/WorkflowEventLogSpec.hs`, `test/WorkflowAgentSpec.hs`,
+  `test/WorkflowIndexedSpec.hs`, `test/WorkflowDocsMigrationSpec.hs`,
+  `test/WorkflowExecutionSpec.hs`, and `test/TestSupport/Workflow.hs`, kept
+  `workflowFacadeExtractionTests` as the watcher-core aggregation path reaching
+  the moved runners, and added only the required `watcher-core-test`
+  `other-modules` metadata. Reviewer evidence records preserved assertion and
+  PASS labels, runner reachability, a `test/Main.hs` reduction from 15473 to
+  7120 lines, `cabal test watcher-core-test`, `cabal build all`, and diff
+  hygiene. This status completes milestone 001 but does not approve production
+  import convergence, public deprecation, facade removal, Cabal exposure
+  removal, runtime compatibility-file removal, release approval, or
+  compatibility-file rename/deletion.
 
 ### 2. [pending] Compatibility Fixtures And Runtime-State Contracts
 
