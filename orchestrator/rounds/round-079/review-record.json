@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-002-internal-import-migration",
+  "direction_id": "direction-005-eventlog-permission-readiness",
+  "extracted_item_id": "round-079-eventlog-permission-readiness-hold",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only hold decision. Review reran required status, diff, import, Cabal exposure, facade/core definition, and focused test scans; only round-local artifacts changed, both EventLog and Permission hold decisions are backed by concrete mixed-surface evidence, and cabal test watcher-core-test was not needed because no source/test/package/runtime/schema/API behavior surface changed."
+}
