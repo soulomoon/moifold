@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-007-runtime-compatibility-fixtures",
+  "extracted_item_id": "round-095-live-issue-snapshot-compatibility-fixtures",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after focused fixture checks, watcher-core-test, cabal build all, diff checks, and scope review confirmed live issue-snapshot compatibility coverage without behavior, removal, roadmap, or implementation-surface escape."
+}

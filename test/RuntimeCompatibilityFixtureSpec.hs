@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -12,8 +13,13 @@ import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..))
+import CodexWatcher.ActionExecutor (ActionExecutionMode (..))
+import CodexWatcher.AppServerProtocol (AppServerRequest (..))
 import CodexWatcher.Cli.Command.Replay (repairInvalidState)
 import CodexWatcher.Cli.Types (RepairInvalidStateCli (..))
+import CodexWatcher.Daemon (DaemonObservedTickResult (..), DaemonOptions (..))
+import CodexWatcher.DaemonLoop (DaemonLoopConfig (..), DaemonLoopTickResult (..), formatDaemonLoopFailure, runAutomaticDaemonLoopOnceWithEvents)
+import CodexWatcher.Domain.IssuePlanning.Graph.Canonical (PlanningIssueFact (..), planningIssueFactsFromSnapshot)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types
   ( BlockedPlanningIssue (..)
@@ -27,12 +33,13 @@ import CodexWatcher.EventLog.Types (EventReplayResult (replayState), ReplayFailu
 import CodexWatcher.EventLogRepair (EventLogRepairPlan (..), repairFailureBlockStateJson, repairIssueImplementEventLog)
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
+import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Owner.Store (readRuntimeOwner, readRuntimeOwnerMarker, runtimeLeaseJson)
 import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
 import CodexWatcher.Snapshot (NodeBlockedState (..), NodeIssueDaemonState (..))
 import Control.Monad (when)
-import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
+import Data.Aeson (Result (..), Value (..), eitherDecodeStrict', encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString qualified as ByteString
@@ -40,12 +47,13 @@ import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Either (isRight)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.IO qualified as TextIO
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
 import System.FilePath (takeDirectory, (</>))
-import TestSupport.Workflow (assert, effectRuntimeConfig, maxParallelForTest, sequenceAnd)
+import TestSupport.Workflow (FakeActionCall (..), assert, defaultFakeAppServer, defaultFakeCommand, effectRuntimeConfig, fakeActionExecutorWith, maxParallelForTest, sequenceAnd)
 
 runtimeCompatibilityFixtureTests :: IO Bool
 runtimeCompatibilityFixtureTests =
@@ -59,12 +67,14 @@ runtimeCompatibilityFixtureTests =
     , repairStateFixtureTests
     , repairStateExecuteShapeTest
     , runtimeOwnerFixtureTests
+    , issueSnapshotFixtureTests
     , recordPlanningGraphFixtureTest
     , healthcheckPlannerReaderBoundaryTest
     , daemonStateSourceBoundaryTest
     , blockStateSourceBoundaryTest
     , repairStateSourceBoundaryTest
     , runtimeOwnerSourceBoundaryTest
+    , issueSnapshotSourceBoundaryTest
     ]
 
 fixtureShapeTests :: IO Bool
@@ -393,6 +403,150 @@ runtimeOwnerFixtureReaderTest fixtureBytes = do
         && ownerResult == Right (Just HaskellRuntime)
     )
 
+issueSnapshotFixtureTests :: IO Bool
+issueSnapshotFixtureTests = do
+  fixtureBytes <- ByteString.readFile issueSnapshotFixturePath
+  let fixtureResult = eitherDecodeStrict' fixtureBytes
+  decodedOk <-
+    assert
+      "runtime compatibility issue-snapshot fixture decodes as JSON"
+      (isRight fixtureResult)
+  shapeOk <-
+    case fixtureResult of
+      Right fixtureValue ->
+        sequenceAnd
+          [ assert
+              "issue-snapshot fixture matches the current deterministic live snapshot shape"
+              (fixtureValue == fixtureIssueSnapshotValue)
+          , assert
+              "issue-snapshot fixture keeps the current top-level issue-planning keys only"
+              ( all (`hasObjectKey` fixtureValue) ["repoFullName", "scopeIssueNumbers", "issues"]
+                  && objectLacksKeys ["status", "ready_issues", "blocked_issues", "dependencies", "lease", "blocked", "repaired"] fixtureValue
+              )
+          , assert
+              "issue-snapshot fixture keeps the current scoped root issue fields"
+              (case lookupObjectKey "issues" fixtureValue >>= singleArrayValue of
+                Just rootIssue ->
+                  all
+                    (`hasObjectKey` rootIssue)
+                    [ "number"
+                    , "title"
+                    , "state"
+                    , "closed"
+                    , "body"
+                    , "url"
+                    , "labels"
+                    , "assignees"
+                    , "createdAt"
+                    , "updatedAt"
+                    , "parentIssueNumber"
+                    , "subIssues"
+                    ]
+                    && lookupObjectKey "parentIssueNumber" rootIssue == Just Null
+                    && lookupObjectKey "labels" rootIssue == Just (toJSON ([] :: [Value]))
+                    && lookupObjectKey "assignees" rootIssue == Just (toJSON ([] :: [Value]))
+                _ -> False)
+          , assert
+              "issue-snapshot fixture keeps the current closed child sub-issue fields"
+              (case lookupObjectKey "issues" fixtureValue >>= singleArrayValue >>= lookupObjectKey "subIssues" >>= singleArrayValue of
+                Just childIssue ->
+                  all (`hasObjectKey` childIssue) ["number", "title", "state", "closed", "body", "url", "parentIssueNumber"]
+                    && lookupObjectKey "number" childIssue == Just (Number 26)
+                    && lookupObjectKey "state" childIssue == Just (String "CLOSED")
+                    && lookupObjectKey "closed" childIssue == Just (Bool True)
+                    && lookupObjectKey "parentIssueNumber" childIssue == Just (Number 12)
+                _ -> False)
+          ]
+      Left _ -> pure False
+  parserOk <-
+    case fixtureResult of
+      Right fixtureValue ->
+        assert
+          "planningIssueFactsFromSnapshot accepts the checked-in issue-snapshot fixture"
+          ( planningIssueFactsFromSnapshot fixtureValue
+              == Right
+                [ PlanningIssueFact
+                    { planningIssueFactNumber = IssueNumber 12
+                    , planningIssueFactClosed = False
+                    , planningIssueFactParent = Nothing
+                    , planningIssueFactSubIssues = [IssueNumber 26]
+                    }
+                , PlanningIssueFact
+                    { planningIssueFactNumber = IssueNumber 26
+                    , planningIssueFactClosed = True
+                    , planningIssueFactParent = Just (IssueNumber 12)
+                    , planningIssueFactSubIssues = []
+                    }
+                ]
+          )
+      Left _ -> pure False
+  writerOk <- issueSnapshotExecuteWriterTest
+  pure (decodedOk && shapeOk && parserOk && writerOk)
+
+issueSnapshotExecuteWriterTest :: IO Bool
+issueSnapshotExecuteWriterTest = do
+  (executor, getCalls) <-
+    fakeActionExecutorWith
+      ( \case
+          RawCommand "gh" ["issue", "view", "12", "--repo", "soulomoon/mlf2", "--json", _] Nothing ->
+            jsonCommandReport issueSnapshotRootIssueCommandValue
+          RawCommand "gh" ["api", "repos/soulomoon/mlf2/issues/12/sub_issues", "--paginate", "--jq", _] Nothing ->
+            jsonCommandReport (toJSON [issueSnapshotChildIssueValue])
+          command -> defaultFakeCommand command
+      )
+      defaultFakeAppServer
+  let runtimeConfig = effectRuntimeConfig fixtureRepo "/tmp/work" 121
+      options =
+        DaemonOptions
+          { daemonEventLogPath = "/tmp/events.jsonl"
+          , daemonRuntimeConfig = runtimeConfig
+          , daemonExecutionMode = ExecuteActions
+          }
+      loopConfig = DaemonLoopConfig options Nothing
+      events = [IssuePlanningInitialized fixturePlannerConfig]
+      snapshotPath = runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "issue-snapshot.json"
+  result <- runAutomaticDaemonLoopOnceWithEvents executor loopConfig events
+  calls <- getCalls
+  case result of
+    Right tick -> do
+      let observedEvent = daemonObservedEvent <$> tick.loopObservedTick
+          snapshotWrites = [value | FakeWriteJson path value <- calls, path == snapshotPath]
+          threadStarts = [request | FakeAppServer request <- calls, request.requestMethod == "thread/start"]
+          turnStarts = [request | FakeAppServer request <- calls, request.requestMethod == "turn/start"]
+      sequenceAnd
+        [ assert
+            "automatic planning execute writes exactly one issue-snapshot fixture value"
+            (snapshotWrites == [fixtureIssueSnapshotValue])
+        , assert
+            "automatic planning execute writes issue-snapshot before planner turn start"
+            (snapshotWriteBeforeTurnStart snapshotPath calls)
+        , assert
+            "automatic planning execute starts one planner thread and one planner turn for open scoped issue"
+            (length threadStarts == 1 && length turnStarts == 1)
+        , assert
+            "automatic planning execute emits the planner turn started event for open scoped issue"
+            (observedEvent == Just (IssuePlanningTurnStarted (ThreadId "thread-started") (TurnId "turn-started")))
+        ]
+    Left failure -> do
+      putStrLn ("FAIL issue-snapshot execute writer fixture: " <> Text.unpack (formatDaemonLoopFailure failure))
+      pure False
+ where
+  snapshotWriteBeforeTurnStart :: FilePath -> [FakeActionCall] -> Bool
+  snapshotWriteBeforeTurnStart snapshotPath calls =
+    case break isTurnStart calls of
+      (beforeStart, FakeAppServer {} : _) -> any (isSnapshotWrite snapshotPath) beforeStart
+      _ -> False
+
+  isTurnStart :: FakeActionCall -> Bool
+  isTurnStart = \case
+    FakeAppServer request -> request.requestMethod == "turn/start"
+    _ -> False
+
+  isSnapshotWrite :: FilePath -> FakeActionCall -> Bool
+  isSnapshotWrite snapshotPath = \case
+    FakeWriteJson path _ -> path == snapshotPath
+    _ -> False
+
 recordPlanningGraphFixtureTest :: IO Bool
 recordPlanningGraphFixtureTest = do
   let config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
@@ -553,6 +707,67 @@ runtimeOwnerSourceBoundaryTest = do
         )
     ]
 
+issueSnapshotSourceBoundaryTest :: IO Bool
+issueSnapshotSourceBoundaryTest = do
+  loopSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Domain" </> "IssuePlanning" </> "Loop.hs")
+  turnOutputSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "TurnOutput.hs")
+  promptTemplatesSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "PromptTemplates.hs")
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
+  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
+  restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  sequenceAnd
+    [ assert
+        "execute planning writes issue-snapshot before starting the planner turn"
+        ( textNeedlesInOrder
+            [ "ExecuteActions -> do"
+            , "snapshot <- ensureIssuePlanningSnapshot executor config plannerConfig"
+            , "Right False ->"
+            , "startPlannerTurn ops executor config events"
+            ]
+            loopSource
+        )
+    , assert
+        "issuePlanningSnapshotPath keeps the live issue-snapshot.json runtime-state path"
+        ( textNeedlesInOrder
+            [ "issuePlanningSnapshotPath :: DaemonLoopConfig -> FilePath"
+            , "runtimeStateDirFile config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir \"issue-snapshot.json\""
+            ]
+            loopSource
+        )
+    , assert
+        "buildIssuePlanningSnapshot keeps the current top-level issue-snapshot keys"
+        ( all
+            (`Text.isInfixOf` loopSource)
+            [ "\"repoFullName\" .= unRepoName plannerConfig.plannerRepo"
+            , "\"scopeIssueNumbers\" .= fmap unIssueNumber plannerConfig.plannerScopeIssues"
+            , "\"issues\" .= issueValues"
+            ]
+        )
+    , assert
+        "fetchScopedIssueSnapshot keeps parentIssueNumber and subIssues writer-added fields"
+        ( all
+            (`Text.isInfixOf` loopSource)
+            [ "fetchScopedIssueSnapshot :: Monad m => ActionExecutor m -> RepoName -> IssueNumber -> m (Either Text Value)"
+            , "Right (issueValue `withObjectField` (\"parentIssueNumber\", Null) `withObjectField` (\"subIssues\", arrayOrEmpty subIssueValue))"
+            ]
+        )
+    , assert
+        "planner developer instructions still render the current issue-snapshot path"
+        ( "(\"issueSnapshotPath\", Text.pack (stateDir </> \"issue-snapshot.json\"))" `Text.isInfixOf` turnOutputSource
+        )
+    , assert
+        "planner prompt still instructs planners to read the current issue snapshot"
+        ( "Read the issue snapshot from {{issueSnapshotPath}}." `Text.isInfixOf` promptTemplatesSource
+        )
+    , assert
+        "healthcheck, repair, replay snapshot loading, and restart remain live issue-snapshot non-readers"
+        ( all
+            (not . ("issue-snapshot.json" `Text.isInfixOf`))
+            [healthcheckSource, replaySource, snapshotSource, restartSource]
+        )
+    ]
+
 writesOnlyPlannerState :: SomeWatcherState -> Value -> Bool
 writesOnlyPlannerState state expectedPlannerValue =
   let writes = compatibilityStateWrites fixtureStateDir state
@@ -616,6 +831,15 @@ lookupObjectKey _ _ =
 objectLacksKeys :: [Text] -> Value -> Bool
 objectLacksKeys keys value =
   all (not . (`hasObjectKey` value)) keys
+
+singleArrayValue :: Value -> Maybe Value
+singleArrayValue value =
+  case fromJSON value :: Result [Value] of
+    Success values ->
+      case values of
+        [singleValue] -> Just singleValue
+        _ -> Nothing
+    Error _ -> Nothing
 
 showText :: Show a => a -> Text
 showText =
@@ -684,6 +908,58 @@ plannerStateValue statusValue =
 completePlannerStateValue :: Value
 completePlannerStateValue =
   object ["status" .= ("complete" :: Text)]
+
+fixtureIssueSnapshotValue :: Value
+fixtureIssueSnapshotValue =
+  object
+    [ "repoFullName" .= ("soulomoon/mlf2" :: Text)
+    , "scopeIssueNumbers" .= ([12] :: [Int])
+    , "issues" .= [issueSnapshotRootIssueValue]
+    ]
+
+issueSnapshotRootIssueCommandValue :: Value
+issueSnapshotRootIssueCommandValue =
+  object
+    [ "number" .= (12 :: Int)
+    , "title" .= ("Root issue" :: Text)
+    , "state" .= ("OPEN" :: Text)
+    , "closed" .= False
+    , "body" .= ("Root body" :: Text)
+    , "url" .= ("https://github.com/soulomoon/mlf2/issues/12" :: Text)
+    , "labels" .= ([] :: [Value])
+    , "assignees" .= ([] :: [Value])
+    , "createdAt" .= ("2026-01-01T00:00:00Z" :: Text)
+    , "updatedAt" .= ("2026-01-02T00:00:00Z" :: Text)
+    ]
+
+issueSnapshotRootIssueValue :: Value
+issueSnapshotRootIssueValue =
+  object
+    [ "number" .= (12 :: Int)
+    , "title" .= ("Root issue" :: Text)
+    , "state" .= ("OPEN" :: Text)
+    , "closed" .= False
+    , "body" .= ("Root body" :: Text)
+    , "url" .= ("https://github.com/soulomoon/mlf2/issues/12" :: Text)
+    , "labels" .= ([] :: [Value])
+    , "assignees" .= ([] :: [Value])
+    , "createdAt" .= ("2026-01-01T00:00:00Z" :: Text)
+    , "updatedAt" .= ("2026-01-02T00:00:00Z" :: Text)
+    , "parentIssueNumber" .= Null
+    , "subIssues" .= [issueSnapshotChildIssueValue]
+    ]
+
+issueSnapshotChildIssueValue :: Value
+issueSnapshotChildIssueValue =
+  object
+    [ "number" .= (26 :: Int)
+    , "title" .= ("Sub issue" :: Text)
+    , "state" .= ("CLOSED" :: Text)
+    , "closed" .= True
+    , "body" .= ("Sub body" :: Text)
+    , "url" .= ("https://github.com/soulomoon/mlf2/issues/26" :: Text)
+    , "parentIssueNumber" .= (12 :: Int)
+    ]
 
 activeDaemonStateValue :: Value
 activeDaemonStateValue =
@@ -776,6 +1052,14 @@ runtimeOwnerFixturePath :: FilePath
 runtimeOwnerFixturePath =
   runtimeOwnerFixtureRoot </> "current-lease" </> "runtime-owner.json"
 
+issueSnapshotFixtureRoot :: FilePath
+issueSnapshotFixtureRoot =
+  "golden" </> "runtime-compatibility" </> "issue-snapshot"
+
+issueSnapshotFixturePath :: FilePath
+issueSnapshotFixturePath =
+  issueSnapshotFixtureRoot </> "scoped-open-with-closed-subissue" </> "issue-snapshot.json"
+
 fixtureStateDir :: FilePath
 fixtureStateDir =
   "/tmp/runtime-compatibility-fixtures"
@@ -809,6 +1093,16 @@ fixtureRuntimeLease =
     , runtimeLeaseClaimedAt = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 0)
     , runtimeLeaseExpiresAt = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 3600)
     , runtimeLeaseEventLogHeadHash = "fixture-head"
+    }
+
+jsonCommandReport :: Value -> CommandReport
+jsonCommandReport value =
+  CommandReport
+    { ok = True
+    , status = Just 0
+    , stdout = TextEncoding.decodeUtf8 (LazyByteString.toStrict (encode value))
+    , stderr = ""
+    , errorMessage = Nothing
     }
 
 runtimeSourceFiles :: [FilePath]

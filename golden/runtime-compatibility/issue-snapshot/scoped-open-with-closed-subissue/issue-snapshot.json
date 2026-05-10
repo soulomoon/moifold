@@ -1,0 +1,32 @@
+{
+  "repoFullName": "soulomoon/mlf2",
+  "scopeIssueNumbers": [
+    12
+  ],
+  "issues": [
+    {
+      "number": 12,
+      "title": "Root issue",
+      "state": "OPEN",
+      "closed": false,
+      "body": "Root body",
+      "url": "https://github.com/soulomoon/mlf2/issues/12",
+      "labels": [],
+      "assignees": [],
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-02T00:00:00Z",
+      "parentIssueNumber": null,
+      "subIssues": [
+        {
+          "number": 26,
+          "title": "Sub issue",
+          "state": "CLOSED",
+          "closed": true,
+          "body": "Sub body",
+          "url": "https://github.com/soulomoon/mlf2/issues/26",
+          "parentIssueNumber": 12
+        }
+      ]
+    }
+  ]
+}
