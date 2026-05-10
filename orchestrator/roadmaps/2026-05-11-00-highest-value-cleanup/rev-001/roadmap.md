@@ -149,9 +149,13 @@ Current status: `round-083-cleanup-inventory-refresh` completed
 `0aed2e4`, and `round-084-boundary-policy-test-module-split` completed
 `direction-002-boundary-policy-test-module-split` by extracting reusable
 package-boundary scanner helpers and boundary-policy assertions into focused
-watcher-core test modules at merged commit `83cac48`. The milestone remains
-pending because directions 003 and 004 still need focused test extraction work
-before the completion signal is met.
+watcher-core test modules at merged commit `83cac48`, and
+`round-085-facade-import-policy-test-split` completed
+`direction-003-facade-import-policy-test-split` by extracting facade
+extraction, import-policy, and compatibility policy checks into a focused
+watcher-core test module at merged commit `fec075a`. The milestone remains
+pending because direction 004 still needs focused workflow behavior test
+extraction work before the completion signal is met.
 
 Candidate directions:
 
@@ -208,6 +212,15 @@ Candidate directions:
   Extraction notes: preserve tests for `CodexWatcher.AppServerClient`,
   `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, and
   `CodexWatcher.Workflow.Permission`.
+  Status: completed by `round-085` at `fec075a`; the reviewed split added
+  `test/FacadeImportPolicySpec.hs`, kept the existing `test/Main.hs`
+  aggregation reaching `workflowFacadeImportPolicyTests`, and added only the
+  required `watcher-core-test` `other-modules` metadata for the extracted
+  module. The moved checks preserve compatibility-facade policy
+  classifications, runner reachability, source-scan detail, replay parity, and
+  permission-policy assertions. This status does not approve production import
+  convergence, public deprecation, facade removal, Cabal exposure removal,
+  runtime compatibility-file removal, or compatibility-file rename/deletion.
 
 - Direction id: `direction-004-workflow-behavior-test-split`
   Summary: Extract workflow behavior tests out of `test/Main.hs` once shared
