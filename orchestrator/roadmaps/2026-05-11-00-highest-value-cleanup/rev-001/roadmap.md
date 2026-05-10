@@ -275,17 +275,22 @@ completed `direction-006-planner-vs-planning-state-contract` at merged commit
 distinct compatibility surfaces, and `round-089` completed the
 `round-089-runtime-owner-healthcheck-contract` extraction under
 `direction-008-healthcheck-compatibility-contracts` at merged commit `fa1337c`
-by locking the current `runtime-owner.json` healthcheck field-path contract.
+by locking the current `runtime-owner.json` healthcheck field-path contract,
+and `round-090-planner-planning-compatibility-fixtures` completed a
+`direction-007-runtime-compatibility-fixtures` slice at merged commit
+`b2ffeed` by adding checked-in fixture and test evidence for the
+`planner-state.json` and `planning-state.json` issue-planning surfaces only.
 Milestone 002 is in progress, not complete: the inventory names fixture,
 healthcheck-contract, operator/downstream, and removal/migration blockers, the
-state-file contract is now explicit, and the runtime-owner healthcheck
-contract is now recorded, but broad fixture/test coverage, healthcheck
-compatibility-contract evidence for remaining selected surfaces, and final
-cleanup classifications still remain for later directions. This status does
-not approve deprecation, facade removal, Cabal exposure removal, runtime
-compatibility-file deletion or rename, healthcheck behavior changes, repair
-behavior changes, fixture batch approval, release approval, or public
-compatibility removal.
+state-file contract is now explicit, the runtime-owner healthcheck contract is
+now recorded, and the planner/planning fixture slice is covered, but broad
+fixture/test coverage for remaining selected compatibility surfaces,
+healthcheck compatibility-contract evidence for remaining selected surfaces,
+and final cleanup classifications still remain for later directions. This
+status does not approve deprecation, facade removal, Cabal exposure removal,
+runtime compatibility-file deletion or rename, healthcheck behavior changes,
+repair behavior changes, fixture batch approval, release approval, terminal
+completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -347,6 +352,20 @@ Candidate directions:
   Extraction notes: prioritize `daemon-state.json`, `planning-state.json`,
   `block-state.json`, `repair-state.json`, `runtime-owner.json`, checked-in
   compatibility snapshots, and live `issue-snapshot.json`.
+  Status: partial; `round-090` completed
+  `round-090-planner-planning-compatibility-fixtures` at `b2ffeed` for the
+  `planner-state.json` / `planning-state.json` issue-planning slice only. The
+  reviewed round added five checked-in fixtures under
+  `golden/runtime-compatibility/issue-planning/...` and watcher-core
+  assertions for exact fixture JSON shapes, compatibility projection writes,
+  direct `RecordPlanningGraph` behavior, and the current healthcheck reader
+  boundary. This is fixture/test evidence for the selected planning slice
+  only; it does not approve deletion, rename, schema migration, healthcheck
+  behavior changes, repair behavior changes, broad fixture batch approval,
+  deprecation, facade removal, Cabal exposure removal, release approval,
+  terminal completion, or public compatibility removal. Direction 007 remains
+  incomplete because fixtures for remaining selected runtime compatibility
+  surfaces still require later slices.
 
 - Direction id: `direction-008-healthcheck-compatibility-contracts`
   Summary: Add or refresh healthcheck tests for compatibility-state files that
