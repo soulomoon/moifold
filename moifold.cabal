@@ -177,11 +177,13 @@ test-suite watcher-core-test
   main-is:          Main.hs
   other-modules:
     AppServerSpec
+    BoundaryPolicySpec
     CliSpec
     GhGitSpec
     HealthcheckSpec
     JsonPathSpec
     RuntimeSpec
+    TestSupport.SourceScan
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,

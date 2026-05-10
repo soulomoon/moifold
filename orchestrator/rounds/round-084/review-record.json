@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-001-test-topology-inventory",
+  "direction_id": "direction-002-boundary-policy-test-module-split",
+  "extracted_item_id": "round-084-boundary-policy-test-module-split",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "watcher-core-test, cabal build all, diff hygiene, staged diff hygiene, reachability, assertion preservation, and scope checks passed; moifold.cabal only adds BoundaryPolicySpec and TestSupport.SourceScan to watcher-core-test other-modules."
+}
