@@ -27,6 +27,8 @@ import CodexWatcher.EventLog.Types (EventReplayResult (replayState), ReplayFailu
 import CodexWatcher.EventLogRepair (EventLogRepairPlan (..), repairFailureBlockStateJson, repairIssueImplementEventLog)
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
+import CodexWatcher.Runtime.Owner.Store (readRuntimeOwner, readRuntimeOwnerMarker, runtimeLeaseJson)
+import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
 import CodexWatcher.Snapshot (NodeBlockedState (..), NodeIssueDaemonState (..))
 import Control.Monad (when)
@@ -39,6 +41,8 @@ import Data.Either (isRight)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
+import Data.Time.Calendar (fromGregorian)
+import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
 import System.FilePath (takeDirectory, (</>))
 import TestSupport.Workflow (assert, effectRuntimeConfig, maxParallelForTest, sequenceAnd)
@@ -54,11 +58,13 @@ runtimeCompatibilityFixtureTests =
     , blockStateCompatibilityShapeTests
     , repairStateFixtureTests
     , repairStateExecuteShapeTest
+    , runtimeOwnerFixtureTests
     , recordPlanningGraphFixtureTest
     , healthcheckPlannerReaderBoundaryTest
     , daemonStateSourceBoundaryTest
     , blockStateSourceBoundaryTest
     , repairStateSourceBoundaryTest
+    , runtimeOwnerSourceBoundaryTest
     ]
 
 fixtureShapeTests :: IO Bool
@@ -336,6 +342,57 @@ repairStateExecuteShapeTest = do
     "repair-invalid-state --execute writes the repair-state summary shape before archive-path normalization"
     result
 
+runtimeOwnerFixtureTests :: IO Bool
+runtimeOwnerFixtureTests = do
+  fixtureBytes <- ByteString.readFile runtimeOwnerFixturePath
+  let fixtureResult = eitherDecodeStrict' fixtureBytes
+  decodedOk <-
+    assert
+      "runtime compatibility runtime-owner fixture decodes as JSON"
+      (isRight fixtureResult)
+  shapeOk <-
+    case fixtureResult of
+      Right fixtureValue ->
+        sequenceAnd
+          [ assert
+              "runtime-owner fixture matches current runtimeLeaseJson lease shape"
+              (fixtureValue == runtimeLeaseJson fixtureRuntimeLease)
+          , assert
+              "runtime-owner fixture keeps lease at the top level and legacy fields out of the top level"
+              ( hasObjectKey "lease" fixtureValue
+                  && objectLacksKeys ["owner", "runtime", "pid", "hostname", "claimedAt", "expiresAt", "eventLogHeadHash"] fixtureValue
+              )
+          , assert
+              "runtime-owner fixture keeps current nested lease fields"
+              (case lookupObjectKey "lease" fixtureValue of
+                Just leaseValue ->
+                  lookupObjectKey "runtime" leaseValue == Just (String "haskell")
+                    && lookupObjectKey "pid" leaseValue == Just (String "123456")
+                    && lookupObjectKey "hostname" leaseValue == Just (String "runtime-fixture-host")
+                    && lookupObjectKey "claimedAt" leaseValue == Just (String "2026-01-01T00:00:00Z")
+                    && lookupObjectKey "expiresAt" leaseValue == Just (String "2026-01-01T01:00:00Z")
+                    && lookupObjectKey "eventLogHeadHash" leaseValue == Just (String "fixture-head")
+                _ -> False)
+          ]
+      Left _ -> pure False
+  readerOk <- runtimeOwnerFixtureReaderTest fixtureBytes
+  pure (decodedOk && shapeOk && readerOk)
+
+runtimeOwnerFixtureReaderTest :: ByteString.ByteString -> IO Bool
+runtimeOwnerFixtureReaderTest fixtureBytes = do
+  let stateDir = "/tmp/moifold-runtime-owner-fixture-test"
+      ownerPath = stateDir </> "runtime-owner.json"
+  resetDirectory stateDir
+  ByteString.writeFile ownerPath fixtureBytes
+  markerResult <- readRuntimeOwnerMarker stateDir
+  ownerResult <- readRuntimeOwner stateDir
+  cleanupDirectory stateDir
+  assert
+    "runtime owner readers accept the checked-in lease fixture"
+    ( markerResult == Right (Just (RuntimeOwnerLeased fixtureRuntimeLease))
+        && ownerResult == Right (Just HaskellRuntime)
+    )
+
 recordPlanningGraphFixtureTest :: IO Bool
 recordPlanningGraphFixtureTest = do
   let config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
@@ -462,6 +519,37 @@ repairStateSourceBoundaryTest = do
     , assert
         "snapshot, runtime, and automatic-loop sources remain repair-state non-readers"
         ( all (not . ("repair-state.json" `Text.isInfixOf`)) (snapshotSource : runtimeSources <> automaticLoopSources)
+        )
+    ]
+
+runtimeOwnerSourceBoundaryTest :: IO Bool
+runtimeOwnerSourceBoundaryTest = do
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  sequenceAnd
+    [ assert
+        "healthcheck keeps runtime-owner.json mapping and current runtimeOwner summary field path"
+        ( all
+            (`Text.isInfixOf` healthcheckSource)
+            [ "SIssuePlanning ->\n    sharedStateFiles"
+            , "SIssueImplement ->\n    sharedStateFiles"
+            , "SPrReview ->\n    [ (\"watcherState\", \"watcher-state.json\")"
+            , "(\"runtimeOwner\", \"runtime-owner.json\")"
+            , "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states"
+            ]
+            && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` healthcheckSource)
+        )
+    , assert
+        "restart-watcher keeps runtime-owner pid extraction, stop, and cleanup behavior"
+        ( all
+            (`Text.isInfixOf` restartSource)
+            [ "read_runtime_owner_pid() {"
+            , "local path=\"$state_dir/runtime-owner.json\""
+            , "sed -n 's/.*\"pid\"[[:space:]]*:[[:space:]]*\"\\([0-9][0-9]*\\)\".*/\\1/p' \"$path\" | head -n 1"
+            , "pid_from_owner=$(read_runtime_owner_pid)"
+            , "stop_pid \"$pid_from_owner\""
+            , "\"$state_dir/runtime-owner.json\""
+            ]
         )
     ]
 
@@ -680,6 +768,14 @@ repairStateFixtureRoot :: FilePath
 repairStateFixtureRoot =
   "golden" </> "runtime-compatibility" </> "repair-state"
 
+runtimeOwnerFixtureRoot :: FilePath
+runtimeOwnerFixtureRoot =
+  "golden" </> "runtime-compatibility" </> "runtime-owner"
+
+runtimeOwnerFixturePath :: FilePath
+runtimeOwnerFixturePath =
+  runtimeOwnerFixtureRoot </> "current-lease" </> "runtime-owner.json"
+
 fixtureStateDir :: FilePath
 fixtureStateDir =
   "/tmp/runtime-compatibility-fixtures"
@@ -703,6 +799,17 @@ fixtureBlockStatePath =
 repairStateFixtureArchivePath :: FilePath
 repairStateFixtureArchivePath =
   fixtureStateDir </> "events.jsonl.invalid-fixture"
+
+fixtureRuntimeLease :: RuntimeLease
+fixtureRuntimeLease =
+  RuntimeLease
+    { runtimeLeaseOwner = HaskellRuntime
+    , runtimeLeasePid = "123456"
+    , runtimeLeaseHost = "runtime-fixture-host"
+    , runtimeLeaseClaimedAt = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 0)
+    , runtimeLeaseExpiresAt = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 3600)
+    , runtimeLeaseEventLogHeadHash = "fixture-head"
+    }
 
 runtimeSourceFiles :: [FilePath]
 runtimeSourceFiles =
