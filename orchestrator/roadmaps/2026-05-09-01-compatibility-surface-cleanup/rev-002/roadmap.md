@@ -458,11 +458,24 @@ surface has passed the milestone-008 removal gates yet; unavailable external
 evidence, blocked approval evidence, missing unsupported-user decisions, and
 per-surface blockers remain removal blockers until a selected removal round
 names the exact surface and records every satisfied gate plus reviewer
-approval.
+approval. Round 072 recorded the approved hold/status artifact in
+`161b6edf3f90f4f799af5bdb22919622d4f4d882`: milestone 008 is
+dependency-reached after milestone 007, but removal is blocked/held because no
+exact import facade or runtime compatibility surface currently satisfies every
+removal gate and exact reviewer approval. Milestone 008 remains pending; this
+status does not approve deprecation, migration, removal, package publication,
+upload, release, Cabal exposure changes, production import rewrites, schema or
+filename changes, event-type changes, write-timing changes, planner-turn
+changes, projection changes, healthcheck changes, repair changes, replay
+changes, restart-script changes, or operator behavior changes. Local absence
+remains unavailable or blocked evidence, not removal approval.
 
 Candidate directions:
 
 - Direction id: `direction-021-remove-approved-import-facades`
+  Status: held after round 072; no exact import facade currently has every
+  required policy, follow-up evidence, external inventory, unsupported-user,
+  behavior/package-boundary, and exact reviewer-approval gate satisfied.
   Summary: remove or narrow only import facades that policy, follow-up
   evidence, external inventory, and reviewer approval mark as safe removal
   candidates.
@@ -472,6 +485,10 @@ Candidate directions:
   modules are removed.
 
 - Direction id: `direction-022-remove-approved-runtime-compatibility-surfaces`
+  Status: held after round 072; no exact runtime compatibility file or
+  snapshot currently has every required old-log/golden, repair, healthcheck or
+  non-healthcheck, runtime-owner, fixture, operator, write-timing,
+  unsupported-user, and exact reviewer-approval gate satisfied.
   Summary: remove or migrate only runtime compatibility files or snapshots
   that policy, follow-up evidence, external inventory, and reviewer approval
   mark as safe removal candidates.
@@ -494,6 +511,9 @@ Coordination notes: completion requires no live rounds, no pending roadmap
 updates, no unexplained pending cleanup items, and current validation evidence.
 If removal rounds are not approved or external evidence is unavailable, this
 milestone should record an explicit hold rather than implying cleanup is done.
+Progress: not selected by round 072. Milestone 009 remains pending because
+milestone 008 remains pending/held and no final report or terminal cleanup gate
+has been selected or approved.
 
 Candidate directions:
 
