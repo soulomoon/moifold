@@ -25,7 +25,7 @@ module CodexWatcher.DaemonLoop.Types
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionReport (..), ActionExecutionResult (..), ActionExecutor, ActionOutcome (..))
-import CodexWatcher.AppServerClient (AppServerClientFailure, AppServerTurn (..))
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure, AppServerTurn (..))
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation, DaemonObservedTickResult, DaemonOptions)
 import CodexWatcher.EventLog.Types (EventReplayResult, WatcherEvent)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))

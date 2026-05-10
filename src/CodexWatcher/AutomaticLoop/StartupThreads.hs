@@ -9,7 +9,7 @@ module CodexWatcher.AutomaticLoop.StartupThreads
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..), ActionExecutor (..))
-import CodexWatcher.AppServerClient (formatAppServerClientFailure)
+import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
 import CodexWatcher.Cli.Types (LoopCli (..))
 import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonOptions (..), appendWatcherEvent)

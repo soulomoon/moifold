@@ -37,7 +37,7 @@ module CodexWatcher.Cli.Parser.Common
   , workdirOptionDefault
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import CodexWatcher.Core.Ids
   ( IssueNumber (..)
   , RepoName (..)

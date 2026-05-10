@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-002-internal-import-migration",
+  "direction_id": "direction-003-appserverclient-import-migration",
+  "extracted_item_id": "round-077-appserverclient-import-migration-readiness",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Behavior-neutral AppServerClient import migration approved: inventory/direct-owner rg checks passed, cabal test watcher-core-test passed, cabal build all passed, diff checks passed, and no facade removal/deprecation/Cabal/docs/runtime/event/healthcheck/repair surfaces changed."
+}

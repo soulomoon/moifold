@@ -18,7 +18,7 @@ module CodexWatcher.Cli.Command.RunnerGuard
   , watcherStartCommand
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import CodexWatcher.ChildDaemon (runWithOptionalPidFile, stableExecutablePath)
 import CodexWatcher.Cli.Types
 import CodexWatcher.IssueText (issueNumbersCsv)

@@ -16,7 +16,7 @@ module CodexWatcher.DaemonLoop
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient (formatAppServerClientFailure)
+import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.Runtime
 import CodexWatcher.DaemonLoop.Types

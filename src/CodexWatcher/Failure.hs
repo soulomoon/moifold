@@ -12,7 +12,7 @@ module CodexWatcher.Failure
   , transientFailureText
   ) where
 
-import CodexWatcher.AppServerClient (AppServerClientFailure (..), JsonRpcError (..))
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure (..), JsonRpcError (..))
 import CodexWatcher.Workflow.Failure
   ( FailureClass (..)
   , FailureClassification (..)

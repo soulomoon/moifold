@@ -6,7 +6,7 @@ module CodexWatcher.Workflow.Moifold.PrReview.Agent
   , prReviewWorkerAgentRole
   ) where
 
-import CodexWatcher.AppServerClient (AppServerTurn)
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Domain.PrReview.Protocol (ReviewerOutcome (..), WorkerOutcome (..))
 import CodexWatcher.Domain.PrReview.TurnClassifier
   ( classifyPrReviewReviewerTurn

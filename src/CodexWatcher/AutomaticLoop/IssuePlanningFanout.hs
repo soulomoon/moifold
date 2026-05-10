@@ -10,7 +10,7 @@ module CodexWatcher.AutomaticLoop.IssuePlanningFanout
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..), ActionExecutor (..))
-import CodexWatcher.AppServerClient (AppServerEndpoint)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import CodexWatcher.Cli.Types (LoopCli (..))
 import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)

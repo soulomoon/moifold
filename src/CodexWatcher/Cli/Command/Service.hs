@@ -7,7 +7,7 @@ module CodexWatcher.Cli.Command.Service
   , serviceConfigFromCliWithExecutable
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import CodexWatcher.ChildDaemon (stableExecutablePath)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Supervisor

@@ -37,7 +37,7 @@ module CodexWatcher.Healthcheck.Types
   , withSomeWatcher
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import CodexWatcher.Runtime.Command.Types (CommandReport)
 import CodexWatcher.Core.Kinds (Domain (..), SDomain (..))
 import CodexWatcher.Core.State (SomeWatcherState, someDomain)

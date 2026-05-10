@@ -49,7 +49,7 @@ module CodexWatcher.Workflow.DocsMigration
   , replayDocsMigrationEvents
   ) where
 
-import CodexWatcher.AppServerClient (AppServerTurn (..))
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))
 import CodexWatcher.Core.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)

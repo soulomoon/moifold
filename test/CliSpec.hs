@@ -8,7 +8,7 @@ module CliSpec
   , prop_cliParsesGenericRunnerGuardDomains
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import CodexWatcher.Cli.Parser (parseCliCommand)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), ThreadId (..))

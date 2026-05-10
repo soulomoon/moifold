@@ -18,7 +18,7 @@ module CodexWatcher.Cli.Types
   , cliDomainToDomain
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import CodexWatcher.Core.Ids
   ( CommitSha
   , IssueNumber

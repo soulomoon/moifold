@@ -27,12 +27,29 @@ module AppServerSpec
   ) where
 
 import CodexWatcher.ActionExecutor (AppServerInterpreter (..))
-import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Turn.Classifier.Common (StructuredTurnOutcome (..), parseStructuredTurnOutcome)
 import CodexWatcher.TurnOutput (structuredTurnOutputSchema)
 import CodexWatcher.Core.Ids (RequestId (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.Agent.Codex.Client
+  ( AppServerClientFailure (..)
+  , AppServerTurn (..)
+  , JsonRpcError (..)
+  , decodeAppServerIncomingValue
+  , latestTurnById
+  , matchAppServerIncoming
+  , parseThreadReadTurns
+  , parseThreadStartThreadId
+  , parseTurnStartTurnId
+  , threadReadFallbackRequest
+  , threadReadMaterializationPending
+  , threadSystemError
+  )
+import CodexWatcher.Workflow.Agent.Codex.Transport
+  ( appServerRequestSession
+  , startThreadWithInterpreter
+  )
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
