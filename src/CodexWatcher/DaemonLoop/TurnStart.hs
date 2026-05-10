@@ -15,7 +15,7 @@ import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
-import CodexWatcher.Core.Ids (RequestId (..), ThreadId, TurnId (..))
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId, TurnId (..))
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
 import CodexWatcher.Workflow.Agent.Codex qualified as AgentCodex
 import CodexWatcher.Workflow.Agent.Types (AgentTurnStart (..))

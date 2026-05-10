@@ -33,7 +33,7 @@ import CodexWatcher.Domain.IssuePlanning.Fanout
 import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Cli.Command.Replay (formatReplayFailure)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
-import CodexWatcher.Core.Ids (IssueNumber (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..))
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)

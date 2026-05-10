@@ -37,7 +37,7 @@ module CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   , projectIssuePlanningTurnStartedObservation
   ) where
 
-import CodexWatcher.Core.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState)
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-10-00-facade-removal-readiness",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-10-00-facade-removal-readiness/rev-001",
+  "milestone_id": "milestone-002-internal-import-migration",
+  "direction_id": "direction-004-core-ids-split-import-migration",
+  "extracted_item_id": "round-078-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: diff is limited to planned Core.Ids import replacements, remaining facade users are recorded, out-of-scope facade/owner/Cabal/docs/runtime/healthcheck/repair/event/public API surfaces are unchanged, and required scans plus cabal test watcher-core-test, cabal build all, git diff --check, and git diff --cached --check pass."
+}

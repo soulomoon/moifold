@@ -15,7 +15,7 @@ module CodexWatcher.Domain.IssuePlanning.Types
   , issueNumberListAlias
   ) where
 
-import CodexWatcher.Core.Ids (IssueNumber (..), RepoName)
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName)
 import CodexWatcher.Core.Limits (MaxParallel)
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.:), (.:?), (.!=), (.=))

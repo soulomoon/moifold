@@ -12,7 +12,7 @@ module GhGitSpec
   ) where
 
 import CodexWatcher.GhGit
-import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), ReviewThreadId (..))
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), ReviewThreadId (..))
 import Data.Aeson (Value (..), encode, object, toJSON, (.=))
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Either (isLeft)

@@ -25,7 +25,7 @@ import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
-import CodexWatcher.Core.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..))

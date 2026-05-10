@@ -46,7 +46,7 @@ import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Json (parseCommandJson)
-import CodexWatcher.Core.Ids (BranchName, IssueNumber, PrNumber, RepoName)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName, IssueNumber, PrNumber, RepoName)
 import CodexWatcher.Domain.PrReview.Types (PrConfig)
 import CodexWatcher.Workflow.GitHub.Command qualified as GitHubCommand
 import CodexWatcher.Workflow.GitHub.Remote

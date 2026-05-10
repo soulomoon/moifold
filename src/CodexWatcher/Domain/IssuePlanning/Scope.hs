@@ -6,7 +6,7 @@ module CodexWatcher.Domain.IssuePlanning.Scope
   , scopedGraphClosure
   ) where
 
-import CodexWatcher.Core.Ids (IssueNumber)
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber)
 import CodexWatcher.Domain.IssuePlanning.Types
   ( BlockedPlanningIssue (..)
   , IssueDependency (..)

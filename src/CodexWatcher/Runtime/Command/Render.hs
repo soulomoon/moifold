@@ -8,7 +8,7 @@ module CodexWatcher.Runtime.Command.Render
   ) where
 
 import CodexWatcher.Runtime.Command.Types
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)
   , CommitSha (..)
   , IssueNumber (..)

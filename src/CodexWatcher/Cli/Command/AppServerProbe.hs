@@ -16,7 +16,7 @@ import CodexWatcher.AppServerClient
   )
 import CodexWatcher.AppServerProtocol (initializeRequest, threadReadRequest, threadStartRequest, turnStartRequest)
 import CodexWatcher.Cli.Types (AppServerProbeCli (..))
-import CodexWatcher.Core.Ids (RequestId (..), unThreadId, unTurnId)
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), unThreadId, unTurnId)
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions, defaultTurnStartOptions)
 import Control.Applicative ((<|>))
 import Control.Monad (when)

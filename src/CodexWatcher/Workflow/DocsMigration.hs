@@ -50,7 +50,7 @@ module CodexWatcher.Workflow.DocsMigration
   ) where
 
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))
-import CodexWatcher.Core.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)
   , AgentRole (..)

@@ -18,7 +18,7 @@ import CodexWatcher.TurnOutput
   ( prReviewWorkerTurnOutputSchema
   , reviewerTurnOutputSchema
   )
-import CodexWatcher.Core.Ids (CommitSha)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha)
 import CodexWatcher.Workflow.Agent
   ( AgentOutputClass (..)
   , AgentRole (..)

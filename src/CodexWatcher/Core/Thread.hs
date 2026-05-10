@@ -9,7 +9,7 @@ module CodexWatcher.Core.Thread
   , ReviewerThread (..)
   ) where
 
-import CodexWatcher.Core.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
 import CodexWatcher.Core.Kinds (ThreadActivity (..))
 
 data ActiveTurn = ActiveTurn

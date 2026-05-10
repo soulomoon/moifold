@@ -9,7 +9,7 @@ module CodexWatcher.Domain.IssuePlanning.Graph.Canonical
   , planningIssueFactsFromSnapshot
   ) where
 
-import CodexWatcher.Core.Ids (IssueNumber (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..))
 import CodexWatcher.Domain.IssuePlanning.Types
   ( BlockedPlanningIssue (..)
   , IssueDependency (..)

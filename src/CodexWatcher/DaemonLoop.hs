@@ -29,7 +29,7 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Domain.IssuePlanning.Loop qualified as PlanningLoop
 import CodexWatcher.Domain.PrReview.Loop qualified as PrReviewLoop
 import CodexWatcher.Runtime.Command.Render (commandText)
-import CodexWatcher.Core.Ids (ThreadId)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId)
 import CodexWatcher.Core.Kinds (ThreadActivity (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ReviewerThread (..), WorkerThread (..))

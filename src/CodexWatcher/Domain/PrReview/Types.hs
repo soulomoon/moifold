@@ -38,7 +38,7 @@ module CodexWatcher.Domain.PrReview.Types
   , MergeCommit (..)
   ) where
 
-import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, RepoName, ReviewThreadId)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber, RepoName, ReviewThreadId)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)

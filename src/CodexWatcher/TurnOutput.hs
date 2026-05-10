@@ -42,7 +42,7 @@ import CodexWatcher.PromptTemplates
   , validationProtocolTemplate
   )
 import CodexWatcher.IssueText (issueNumbersText)
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)
   , CommitSha (..)
   , IssueNumber (..)

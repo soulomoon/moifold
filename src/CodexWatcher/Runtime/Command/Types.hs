@@ -8,7 +8,7 @@ module CodexWatcher.Runtime.Command.Types
   , RuntimeCommandSpec (..)
   ) where
 
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName
   , IssueNumber
   , PrNumber

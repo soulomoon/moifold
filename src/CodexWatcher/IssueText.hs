@@ -5,7 +5,7 @@ module CodexWatcher.IssueText
   , issueNumbersText
   ) where
 
-import CodexWatcher.Core.Ids (IssueNumber (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 

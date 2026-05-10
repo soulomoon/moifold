@@ -12,7 +12,7 @@ module CodexWatcher.Workflow.Moifold.PrReview.Mergeability
 
 import CodexWatcher.Observation (ObservedTick, invalidObservation, observedFromDecision)
 import CodexWatcher.StateMachine (Event (..), step)
-import CodexWatcher.Core.Ids (CommitSha)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), ReviewEvidence)
 import CodexWatcher.EventLog.Types (WatcherEvent (..))

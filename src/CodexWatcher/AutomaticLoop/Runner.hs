@@ -35,7 +35,7 @@ import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLeaseIfOwnedByCurrentProcess, renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
-import CodexWatcher.Core.Ids (ThreadId)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId)
 import CodexWatcher.Core.Kinds (Domain)
 import CodexWatcher.Core.Limits (pollSecondsMicros)
 import CodexWatcher.Core.State (someDomain, someDomainIs, withDomain)

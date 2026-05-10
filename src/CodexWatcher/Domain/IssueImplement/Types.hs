@@ -4,7 +4,7 @@ module CodexWatcher.Domain.IssueImplement.Types
   ( IssueConfig (..)
   ) where
 
-import CodexWatcher.Core.Ids (BranchName, IssueNumber, RepoName)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName, IssueNumber, RepoName)
 
 data IssueConfig = IssueConfig
   { issueRepo :: RepoName

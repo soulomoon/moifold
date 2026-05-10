@@ -31,7 +31,7 @@ import CodexWatcher.AppServerProtocol
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Turn.Classifier.Common (StructuredTurnOutcome (..), parseStructuredTurnOutcome)
 import CodexWatcher.TurnOutput (structuredTurnOutputSchema)
-import CodexWatcher.Core.Ids (RequestId (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.Agent.Codex.Client
   ( AppServerClientFailure (..)
   , AppServerTurn (..)

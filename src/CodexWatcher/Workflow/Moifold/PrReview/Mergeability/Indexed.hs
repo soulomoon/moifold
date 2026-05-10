@@ -29,7 +29,7 @@ module CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed
 
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent)
-import CodexWatcher.Core.Ids (CommitSha)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha)
 import CodexWatcher.Core.State (SomeWatcherState)
 import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
