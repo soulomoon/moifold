@@ -13,14 +13,14 @@
   "pending_merge_rounds": [],
   "roadmap_update": {
     "source_round_id": "round-082",
-    "source_commit": null,
+    "source_commit": "40ddd2a",
     "branch": "orchestrator/roadmap-update-round-082-terminal-decision-report",
     "worktree_path": "orchestrator/worktrees/roadmap-update-round-082",
     "update_artifact": "orchestrator/roadmap-updates/round-082-roadmap-update.md",
     "review_artifact": "orchestrator/roadmap-updates/round-082-roadmap-update-review.md",
     "prior_roadmap_revision": "rev-001",
     "proposed_roadmap_revision": "rev-001",
-    "status": "pending-round-commit",
+    "status": "review",
     "resume_error": null
   },
   "current_task": null,
