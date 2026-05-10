@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-007-runtime-compatibility-fixtures",
+  "extracted_item_id": "round-093-repair-state-compatibility-fixtures",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after verifying the checked-in repair-state fixture, exact summary shape and execute-output tests, writer ordering, non-reader/non-healthcheck boundaries, cabal test watcher-core-test, cabal build all, git diff --check, and git diff --cached --check."
+}

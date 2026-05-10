@@ -7,11 +7,14 @@ module RuntimeCompatibilityFixtureSpec
   ( runtimeCompatibilityFixtureTests
   ) where
 
-import CodexWatcher.Core.Ids (IssueNumber (..), PrNumber (..), RepoName (..), ThreadId (..), TurnId (..))
+import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..), RepoName (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
-import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
+import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Core.Thread (ActiveTurn (..))
+import CodexWatcher.Cli.Command.Replay (repairInvalidState)
+import CodexWatcher.Cli.Types (RepairInvalidStateCli (..))
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types
   ( BlockedPlanningIssue (..)
   , IssueDependency (..)
@@ -20,21 +23,24 @@ import CodexWatcher.Domain.IssuePlanning.Types
   )
 import CodexWatcher.EffectInterpreter (CompiledEffectPlan (..), EffectRuntimeConfig (..), PlannedAction (..), compileEffectPlan)
 import CodexWatcher.Effects (Effect (..), SomeEffect (..))
-import CodexWatcher.EventLog.Types (ReplayFailure (..), WatcherEvent (..), eventName)
-import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
+import CodexWatcher.EventLog.Types (EventReplayResult (replayState), ReplayFailure (..), WatcherEvent (..), eventName)
+import CodexWatcher.EventLogRepair (EventLogRepairPlan (..), repairFailureBlockStateJson, repairIssueImplementEventLog)
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
 import CodexWatcher.Snapshot (NodeBlockedState (..), NodeIssueDaemonState (..))
-import Data.Aeson (Value (..), eitherDecodeStrict', object, toJSON, (.=))
+import Control.Monad (when)
+import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString qualified as ByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Either (isRight)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
-import System.FilePath ((</>))
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
+import System.FilePath (takeDirectory, (</>))
 import TestSupport.Workflow (assert, effectRuntimeConfig, maxParallelForTest, sequenceAnd)
 
 runtimeCompatibilityFixtureTests :: IO Bool
@@ -46,10 +52,13 @@ runtimeCompatibilityFixtureTests =
     , daemonCompatibilityProjectionFixtureTests
     , blockStateRepairFailureFixtureTests
     , blockStateCompatibilityShapeTests
+    , repairStateFixtureTests
+    , repairStateExecuteShapeTest
     , recordPlanningGraphFixtureTest
     , healthcheckPlannerReaderBoundaryTest
     , daemonStateSourceBoundaryTest
     , blockStateSourceBoundaryTest
+    , repairStateSourceBoundaryTest
     ]
 
 fixtureShapeTests :: IO Bool
@@ -267,6 +276,66 @@ blockStateCompatibilityShapeTests = do
             )
         ]
 
+repairStateFixtureTests :: IO Bool
+repairStateFixtureTests = do
+  fixtureResult <- loadRepairStateFixtureValue ("completion-without-implementation" </> "repair-state.json")
+  let planResult = repairIssueImplementEventLog repairStateInvalidEvents
+  decodedOk <-
+    assert
+      "runtime compatibility repair-state fixture decodes as JSON"
+      (isRight fixtureResult)
+  shapeOk <-
+    case (fixtureResult, planResult) of
+      (Right fixtureValue, Right plan) ->
+        sequenceAnd
+          [ assert
+              "repair-state fixture matches current repair summary generator fields"
+              (fixtureValue == repairSummaryValue repairStateFixtureArchivePath plan)
+          , assert
+              "repair-state fixture keeps exact current completion-without-implementation summary shape"
+              ( lookupObjectKey "repaired" fixtureValue == Just (Bool True)
+                  && lookupObjectKey "strategy" fixtureValue == Just (String plan.repairStrategy)
+                  && lookupObjectKey "archivePath" fixtureValue == Just (String (Text.pack repairStateFixtureArchivePath))
+                  && lookupObjectKey "failedEventIndex" fixtureValue == Just (Number 5)
+                  && lookupObjectKey "failedEventType" fixtureValue == Just (String (eventName plan.repairFailure.event))
+                  && lookupObjectKey "failedReason" fixtureValue == Just (String plan.repairFailure.reason)
+                  && lookupObjectKey "insertedEvents" fixtureValue == Just (toJSON (fmap eventName plan.repairInsertedEvents))
+                  && lookupObjectKey "droppedEvents" fixtureValue == Just (toJSON (fmap eventName plan.repairDroppedEvents))
+                  && lookupObjectKey "finalDomain" fixtureValue == Just (String (showText (someDomain plan.repairReplayResult.replayState)))
+                  && lookupObjectKey "finalPhase" fixtureValue == Just (String (showText (somePhase plan.repairReplayResult.replayState)))
+              )
+          , assert
+              "repair-state fixture is not interchangeable with repair-failure block-state JSON"
+              (objectLacksKeys ["blocked", "blockedKind", "eventIndex", "eventType", "event"] fixtureValue)
+          ]
+      _ -> pure False
+  pure (decodedOk && shapeOk)
+
+repairStateExecuteShapeTest :: IO Bool
+repairStateExecuteShapeTest = do
+  let stateDir = "/tmp/moifold-repair-state-fixture-test"
+      eventsPath = stateDir </> "events.jsonl"
+      repairStatePath = stateDir </> "repair-state.json"
+  resetDirectory stateDir
+  writeWatcherEventsForTest eventsPath repairStateInvalidEvents
+  repairInvalidState
+    RepairInvalidStateCli
+      { repairCliEventsPath = eventsPath
+      , repairCliStateDir = stateDir
+      , repairCliExecute = True
+      }
+  fixtureResult <- loadRepairStateFixtureValue ("completion-without-implementation" </> "repair-state.json")
+  generatedResult <- eitherDecodeStrict' <$> ByteString.readFile repairStatePath
+  let normalizedGenerated = generatedResult >>= maybe (Left "archivePath did not match execute archive format") Right . normalizeRepairArchivePath eventsPath
+      result =
+        case (fixtureResult, normalizedGenerated) of
+          (Right fixtureValue, Right generatedValue) -> fixtureValue == generatedValue
+          _ -> False
+  cleanupDirectory stateDir
+  assert
+    "repair-invalid-state --execute writes the repair-state summary shape before archive-path normalization"
+    result
+
 recordPlanningGraphFixtureTest :: IO Bool
 recordPlanningGraphFixtureTest = do
   let config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
@@ -323,6 +392,79 @@ blockStateSourceBoundaryTest = do
         && "\"$state_dir/block-state.json\"" `Text.isInfixOf` restartSource
     )
 
+repairStateSourceBoundaryTest :: IO Bool
+repairStateSourceBoundaryTest = do
+  replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
+  runtimeSources <- traverse TextIO.readFile runtimeSourceFiles
+  automaticLoopSources <- traverse TextIO.readFile automaticLoopSourceFiles
+  sequenceAnd
+    [ assert
+        "repair CLI dry-run reports the repair plan before the execute write branch"
+        ( textNeedlesInOrder
+            [ "plan <- either (die . Text.unpack) pure (repairIssueImplementEventLog events)"
+            , "putStrLn (\"repair strategy: \""
+            , "putStrLn (\"failed event index: \""
+            , "putStrLn (\"inserted events: \""
+            , "putStrLn (\"dropped events: \""
+            , "putStrLn (\"repaired phase: \""
+            , "if options.repairCliExecute"
+            , "putStrLn \"dry-run: pass --execute to archive and rewrite events.jsonl\""
+            ]
+            replaySource
+        )
+    , assert
+        "repair execute order archives, rewrites events, writes repair state, rewrites compatibility, then removes stale block state"
+        ( textNeedlesInOrder
+            [ "archivePath <- archiveEventLog options.repairCliEventsPath"
+            , "writeWatcherEventsFile options.repairCliEventsPath plan.repairRepairedEvents"
+            , "writeRepairSummary options.repairCliStateDir archivePath plan"
+            , "writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState"
+            , "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")"
+            ]
+            replaySource
+        )
+    , assert
+        "writeRepairSummary writes exactly repair-state.json with the current summary fields"
+        ( all
+            (`Text.isInfixOf` replaySource)
+            [ "writeRepairSummary :: FilePath -> FilePath -> EventLogRepairPlan -> IO ()"
+            , "(stateDir </> \"repair-state.json\")"
+            , "\"repaired\" .= True"
+            , "\"strategy\" .= plan.repairStrategy"
+            , "\"archivePath\" .= archivePath"
+            , "\"failedEventIndex\" .= plan.repairFailure.eventIndex"
+            , "\"failedEventType\" .= eventName plan.repairFailure.event"
+            , "\"failedReason\" .= plan.repairFailure.reason"
+            , "\"insertedEvents\" .= fmap eventName plan.repairInsertedEvents"
+            , "\"droppedEvents\" .= fmap eventName plan.repairDroppedEvents"
+            , "\"finalDomain\" .= show (someDomain plan.repairReplayResult.replayState)"
+            , "\"finalPhase\" .= show (somePhase plan.repairReplayResult.replayState)"
+            ]
+        )
+    , assert
+        "writeCompatibilityFiles remains a separate compatibility rewrite from writeRepairSummary"
+        ( textNeedlesInOrder
+            [ "writeRepairSummary :: FilePath -> FilePath -> EventLogRepairPlan -> IO ()"
+            , "(stateDir </> \"repair-state.json\")"
+            , "writeCompatibilityFiles :: FilePath -> SomeWatcherState -> IO ()"
+            , "compatibilityStateWrites stateDir state"
+            ]
+            replaySource
+        )
+    , assert
+        "healthcheck remains a repair-state non-reader"
+        ( "stateFileSpecs" `Text.isInfixOf` healthcheckSource
+            && "sharedStateFiles" `Text.isInfixOf` healthcheckSource
+            && not ("repair-state.json" `Text.isInfixOf` healthcheckSource)
+        )
+    , assert
+        "snapshot, runtime, and automatic-loop sources remain repair-state non-readers"
+        ( all (not . ("repair-state.json" `Text.isInfixOf`)) (snapshotSource : runtimeSources <> automaticLoopSources)
+        )
+    ]
+
 writesOnlyPlannerState :: SomeWatcherState -> Value -> Bool
 writesOnlyPlannerState state expectedPlannerValue =
   let writes = compatibilityStateWrites fixtureStateDir state
@@ -359,6 +501,10 @@ loadBlockStateFixtureState :: FilePath -> IO (Either String NodeBlockedState)
 loadBlockStateFixtureState relativePath =
   eitherDecodeStrict' <$> ByteString.readFile (blockStateFixtureRoot </> relativePath)
 
+loadRepairStateFixtureValue :: FilePath -> IO (Either String Value)
+loadRepairStateFixtureValue relativePath =
+  eitherDecodeStrict' <$> ByteString.readFile (repairStateFixtureRoot </> relativePath)
+
 hasPlannerStatusKey :: Value -> Bool
 hasPlannerStatusKey =
   hasObjectKey "status"
@@ -382,6 +528,61 @@ lookupObjectKey _ _ =
 objectLacksKeys :: [Text] -> Value -> Bool
 objectLacksKeys keys value =
   all (not . (`hasObjectKey` value)) keys
+
+showText :: Show a => a -> Text
+showText =
+  Text.pack . show
+
+textNeedlesInOrder :: [Text] -> Text -> Bool
+textNeedlesInOrder [] _ =
+  True
+textNeedlesInOrder (needle : restNeedles) haystack =
+  let (_before, matchAndAfter) = Text.breakOn needle haystack
+   in not (Text.null matchAndAfter)
+        && textNeedlesInOrder restNeedles (Text.drop (Text.length needle) matchAndAfter)
+
+repairSummaryValue :: FilePath -> EventLogRepairPlan -> Value
+repairSummaryValue archivePath plan =
+  object
+    [ "repaired" .= True
+    , "strategy" .= plan.repairStrategy
+    , "archivePath" .= archivePath
+    , "failedEventIndex" .= plan.repairFailure.eventIndex
+    , "failedEventType" .= eventName plan.repairFailure.event
+    , "failedReason" .= plan.repairFailure.reason
+    , "insertedEvents" .= fmap eventName plan.repairInsertedEvents
+    , "droppedEvents" .= fmap eventName plan.repairDroppedEvents
+    , "finalDomain" .= showText (someDomain plan.repairReplayResult.replayState)
+    , "finalPhase" .= showText (somePhase plan.repairReplayResult.replayState)
+    ]
+
+normalizeRepairArchivePath :: FilePath -> Value -> Maybe Value
+normalizeRepairArchivePath eventsPath (Object objectValue) =
+  case KeyMap.lookup (Key.fromText "archivePath") objectValue of
+    Just (String archivePath)
+      | Text.pack (eventsPath <> ".invalid-") `Text.isPrefixOf` archivePath ->
+          Just
+            ( Object
+                (KeyMap.insert (Key.fromText "archivePath") (String (Text.pack repairStateFixtureArchivePath)) objectValue)
+            )
+    _ -> Nothing
+normalizeRepairArchivePath _ _ =
+  Nothing
+
+writeWatcherEventsForTest :: FilePath -> [WatcherEvent] -> IO ()
+writeWatcherEventsForTest eventsPath events = do
+  createDirectoryIfMissing True (takeDirectory eventsPath)
+  LazyByteString.writeFile eventsPath (mconcat (fmap (\event -> encode event <> "\n") events))
+
+resetDirectory :: FilePath -> IO ()
+resetDirectory path = do
+  cleanupDirectory path
+  createDirectoryIfMissing True path
+
+cleanupDirectory :: FilePath -> IO ()
+cleanupDirectory path = do
+  exists <- doesDirectoryExist path
+  when exists (removePathForcibly path)
 
 plannerStateValue :: Text -> Value
 plannerStateValue statusValue =
@@ -418,6 +619,19 @@ fixtureReplayFailure =
     3
     (IssueImplementationCompletedEvent (PrNumber 42) Nothing)
     "event issue_implementation_completed is invalid in IssueImplement/PlanReady"
+
+repairStateInvalidEvents :: [WatcherEvent]
+repairStateInvalidEvents =
+  [ IssueImplementInitialized repairStateIssueConfig (ThreadId "worker-thread")
+  , IssuePullRequestCreatedEvent (PrNumber 7)
+  , IssuePlanTurnStartedEvent (TurnId "turn-plan")
+  , IssuePlanCompletedEvent "Implement the issue in small verified steps." Nothing
+  , IssueImplementationCompletedEvent (PrNumber 7) Nothing
+  ]
+
+repairStateIssueConfig :: IssueConfig
+repairStateIssueConfig =
+  IssueConfig (RepoName "soulomoon/mlf2") (IssueNumber 42) (BranchName "codex/issue-42")
 
 fixtureRepo :: RepoName
 fixtureRepo =
@@ -462,6 +676,10 @@ blockStateFixtureRoot :: FilePath
 blockStateFixtureRoot =
   "golden" </> "runtime-compatibility" </> "block-state"
 
+repairStateFixtureRoot :: FilePath
+repairStateFixtureRoot =
+  "golden" </> "runtime-compatibility" </> "repair-state"
+
 fixtureStateDir :: FilePath
 fixtureStateDir =
   "/tmp/runtime-compatibility-fixtures"
@@ -481,3 +699,34 @@ fixtureDaemonPath =
 fixtureBlockStatePath :: FilePath
 fixtureBlockStatePath =
   fixtureStateDir </> "block-state.json"
+
+repairStateFixtureArchivePath :: FilePath
+repairStateFixtureArchivePath =
+  fixtureStateDir </> "events.jsonl.invalid-fixture"
+
+runtimeSourceFiles :: [FilePath]
+runtimeSourceFiles =
+  [ "src" </> "CodexWatcher" </> "Runtime" </> "BlockedState.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Command" </> "Render.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Command" </> "Types.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Compatibility.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Defaults.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "File.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Interpreter.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Json.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Owner" </> "Cli.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Owner" </> "Store.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Owner" </> "Types.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Paths.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "Process.hs"
+  , "src" </> "CodexWatcher" </> "Runtime" </> "WatcherPaths.hs"
+  ]
+
+automaticLoopSourceFiles :: [FilePath]
+automaticLoopSourceFiles =
+  [ "src" </> "CodexWatcher" </> "AutomaticLoop" </> "IssuePlanningFanout.hs"
+  , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "Output.hs"
+  , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "PrReviewHandoff.hs"
+  , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "Runner.hs"
+  , "src" </> "CodexWatcher" </> "AutomaticLoop" </> "StartupThreads.hs"
+  ]

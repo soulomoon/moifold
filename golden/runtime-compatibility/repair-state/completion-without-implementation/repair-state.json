@@ -1,0 +1,16 @@
+{
+  "repaired": true,
+  "strategy": "dropped unsafe completion and re-entered implementation",
+  "archivePath": "/tmp/runtime-compatibility-fixtures/events.jsonl.invalid-fixture",
+  "failedEventIndex": 5,
+  "failedEventType": "issue_implementation_completed",
+  "failedReason": "event issue_implementation_completed is invalid in IssueImplement/Implementing",
+  "insertedEvents": [
+    "watcher_recovered_invalid_state"
+  ],
+  "droppedEvents": [
+    "issue_implementation_completed"
+  ],
+  "finalDomain": "IssueImplement",
+  "finalPhase": "Implementing"
+}
