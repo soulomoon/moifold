@@ -24,11 +24,12 @@ should activate:
 ## Alignment Summary
 
 - Thesis: compatibility cleanup remains evidence-first. Rounds 071 and 072
-  proved that the active gates do not currently allow a removal slice, so
-  rev-003 makes the explicit hold path schedulable before terminal closeout.
+  proved that the active gates do not currently allow a removal slice; rounds
+  073 and 074 closed rev-003 through the explicit reviewed hold path without
+  removing any surface.
 - Success criteria: reviewers can see the completed evidence from rounds
-  052-072, then dispatch a final report/terminal hold without inventing
-  removal scope or marking held removal work complete.
+  052-074 and the reviewed terminal hold without inventing removal scope or
+  marking held removal work complete.
 - Non-goals: no package publication work, no event schema migration, no
   incidental prompt/runtime/healthcheck/repair redesign, no generic prompt
   runner, no workflow `liftIO`, no deprecation pragma, no migration, no
@@ -36,9 +37,9 @@ should activate:
   listed in this revision.
 - Chosen strategy: staged compatibility cleanup with an explicit held-removal
   closeout path. Inventory, readiness, policy, follow-up evidence, external
-  operator/downstream inventory, and no-lawful-removal status are complete;
-  rev-003 keeps removals behind exact reviewer approval and allows final
-  reporting on the approved hold.
+  operator/downstream inventory, no-lawful-removal status, final reporting,
+  and the reviewed terminal hold are complete; rev-003 keeps removals behind
+  exact reviewer approval.
 - Deferred alternatives: removal extraction is not lawful because round 072
   found no exact surface with every gate and exact reviewer approval. Silent
   terminal completion is also rejected; closeout must record kept, removed,
@@ -514,7 +515,7 @@ Candidate directions:
   Boundary notes: no event schema migration unless a later roadmap explicitly
   authorizes it; preserve operator recovery for supported old states.
 
-### 9. [pending] Close The Cleanup Family
+### 9. [complete] Close The Cleanup Family
 
 Milestone id: `milestone-009-close-cleanup-family`
 Depends on: `milestone-008-gated-compatibility-removals` held by round 072, or
@@ -536,10 +537,16 @@ Progress: round 073 completed
 recording the final compatibility-surface report for the approved rev-003 hold
 path. The report carries forward every kept/deferred surface and blocker from
 rounds 071-072, records the removed-surface set as empty, and states that no
-surfaces were removed in this family after milestone 008 was held. Milestone
-009 remains pending until `direction-024-terminal-cleanup-gate` is selected,
-reviewed, and accepted. The next lawful dispatch after the report is
-`direction-024-terminal-cleanup-gate`.
+surfaces were removed in this family after milestone 008 was held. Round 074
+completed `direction-024-terminal-cleanup-gate` via commit `738cb33`,
+recording the reviewed terminal hold for the approved rev-003 hold path.
+Milestone 009 is complete only as that reviewed terminal hold, not as removal
+completion. The cleanup family closed with the removed-surface set empty, no
+surfaces removed, and every kept/deferred surface and blocker preserved.
+Further cleanup requires a later selected roadmap family or an exact approved
+removal round that names the surface, lists every satisfied gate, records any
+needed unsupported-user decisions, and receives reviewer approval for the exact
+evidence.
 
 Candidate directions:
 
@@ -554,7 +561,7 @@ Candidate directions:
   rewrite, or compatibility behavior change.
 
 - Direction id: `direction-024-terminal-cleanup-gate`
-  Status: pending; next lawful dispatch after the round 073 final report.
+  Status: complete via round 074, merged as `738cb33`.
   Summary: mark the family complete or hold it with explicit blockers.
   Preconditions: final report reviewed and active roadmap bundle re-read.
   Boundary notes: no silent done when pending or newly discovered items remain;
