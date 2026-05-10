@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-001-test-topology-inventory",
+  "direction_id": "direction-004-workflow-behavior-test-split",
+  "extracted_item_id": "round-086-workflow-behavior-test-split",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal test watcher-core-test, cabal build all, git diff --check, git diff --cached --check, status review, Cabal scope inspection, runner reachability inspection, and label-preservation comparison."
+}

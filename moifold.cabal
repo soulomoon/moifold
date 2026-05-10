@@ -185,6 +185,12 @@ test-suite watcher-core-test
     JsonPathSpec
     RuntimeSpec
     TestSupport.SourceScan
+    TestSupport.Workflow
+    WorkflowAgentSpec
+    WorkflowDocsMigrationSpec
+    WorkflowEventLogSpec
+    WorkflowExecutionSpec
+    WorkflowIndexedSpec
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,
