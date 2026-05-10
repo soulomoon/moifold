@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-001-test-topology-inventory",
+  "direction_id": "direction-001-cleanup-inventory-refresh",
+  "extracted_item_id": "round-083-cleanup-inventory-refresh",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Changed paths are limited to controller state plus round-local artifacts; no production, test, Cabal, docs, fixture, runtime compatibility, public API, or behavior surface changed. Artifact-only baseline skip approved after diff, JSON, policy-word, section, and whitespace checks."
+}
