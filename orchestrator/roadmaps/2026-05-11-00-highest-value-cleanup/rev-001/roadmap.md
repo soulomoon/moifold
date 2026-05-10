@@ -293,15 +293,20 @@ repair-failure `block-state.json` shape only, and
 `d70a0c3` by adding checked-in fixture and test evidence for the current
 `repair-state.json` repair-summary shape only, including the current
 write-order, compatibility-rewrite separation, and non-reader/non-healthcheck
-boundaries.
+boundaries, and `round-094-runtime-owner-compatibility-fixtures` completed a
+`direction-007-runtime-compatibility-fixtures` slice at merged commit
+`1ab9db7` by adding checked-in fixture and test evidence for the current
+`runtime-owner.json` top-level `lease` shape only, including current
+runtime-owner reader acceptance, healthcheck `runtimeOwner` mapping and summary
+field path, and restart-script pid extraction and cleanup boundaries.
 Milestone 002 is in progress, not complete: the inventory names fixture,
 healthcheck-contract, operator/downstream, and removal/migration blockers, the
 state-file contract is now explicit, the runtime-owner healthcheck contract is
 now recorded, and the planner/planning, daemon-state, repair-failure
-block-state, and repair-state fixture slices are covered, but broad
-fixture/test coverage for remaining selected compatibility surfaces,
-healthcheck compatibility-contract evidence for remaining selected surfaces,
-and final cleanup classifications still remain for later directions.
+block-state, repair-state, and runtime-owner current-lease fixture slices are
+covered, but broad fixture/test coverage for remaining selected compatibility
+surfaces, healthcheck compatibility-contract evidence for remaining selected
+surfaces, and final cleanup classifications still remain for later directions.
 This status does not approve deprecation, facade removal, Cabal exposure
 removal, runtime compatibility-file deletion or rename, healthcheck behavior
 changes, repair behavior changes, restart behavior changes, fixture batch
@@ -402,9 +407,19 @@ Candidate directions:
   `repairInvalidState` output parity after archive-path normalization,
   separation from repair-failure `block-state.json`, repair writer ordering,
   compatibility rewrite separation, and the current non-reader/non-healthcheck
-  source boundaries. This is fixture/test evidence for the selected planning,
-  daemon-state, repair-failure block-state, and repair-state slices only; it
-  does not approve deletion, rename, schema migration, healthcheck behavior
+  source boundaries. `round-094` completed
+  `round-094-runtime-owner-compatibility-fixtures` at `1ab9db7` for the
+  current `runtime-owner.json` top-level `lease` slice only. The reviewed round
+  added the checked-in fixture
+  `golden/runtime-compatibility/runtime-owner/current-lease/runtime-owner.json`
+  and watcher-core assertions for exact `runtimeLeaseJson` parity, top-level
+  legacy-field absence, nested lease field paths and values, runtime-owner
+  reader acceptance, the current healthcheck `runtimeOwner` mapping and
+  `["runtimeOwner", "owner"]` summary path, and restart-script pid extraction,
+  stop, and cleanup assumptions. This is fixture/test evidence for the
+  selected planning, daemon-state, repair-failure block-state, repair-state,
+  and runtime-owner current-lease slices only; it does not approve deletion,
+  rename, schema migration, healthcheck behavior changes, script behavior
   changes, repair behavior changes, restart behavior changes, broad fixture
   batch approval, deprecation, facade removal, Cabal exposure removal, release
   approval, terminal completion, or public compatibility removal. Direction
