@@ -140,7 +140,28 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
           && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
           && not ("writeJsonValue" `Text.isInfixOf` healthcheckSource)
       )
-  pure (importsOk && tokensOk && lifecycleRouterOk && daemonRouterOk && compatibilityFacadeOk && launchOwnershipOk && healthcheckReadOnlyOk)
+  healthcheckRuntimeOwnerContractOk <-
+    assert
+      "healthcheck preserves runtime-owner.json field-path contract"
+      ( all
+          (`Text.isInfixOf` healthcheckSource)
+          [ "SIssuePlanning ->\n    sharedStateFiles"
+          , "SIssueImplement ->\n    sharedStateFiles"
+          , "(\"runtimeOwner\", \"runtime-owner.json\")"
+          , "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states"
+          ]
+          && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` healthcheckSource)
+      )
+  pure
+    ( importsOk
+        && tokensOk
+        && lifecycleRouterOk
+        && daemonRouterOk
+        && compatibilityFacadeOk
+        && launchOwnershipOk
+        && healthcheckReadOnlyOk
+        && healthcheckRuntimeOwnerContractOk
+    )
 
 workflowMoifoldCabalConsumesStandaloneWorkflowPackages :: IO Bool
 workflowMoifoldCabalConsumesStandaloneWorkflowPackages = do

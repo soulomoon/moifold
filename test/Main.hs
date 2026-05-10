@@ -2867,6 +2867,8 @@ prop_runtimeOwnerJsonAndParsing =
     && parseRuntimeOwner "node" /= Right HaskellRuntime
     && parseRuntimeOwner "unknown" /= Right HaskellRuntime
     && lookupValue "owner" (runtimeLeaseJson exampleLease) == Nothing
+    && lookupValue "runtime" (runtimeLeaseJson exampleLease) == Nothing
+    && lookupValue "lease" (runtimeLeaseJson exampleLease) /= Nothing
     && lookupValue "runtime" (runtimeLeaseValue exampleLease) == Just (String "haskell")
  where
   exampleTime = UTCTime (fromGregorian 2026 1 1) (secondsToDiffTime 0)

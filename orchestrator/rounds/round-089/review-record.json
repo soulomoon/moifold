@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-008-healthcheck-compatibility-contracts",
+  "extracted_item_id": "round-089-runtime-owner-healthcheck-contract",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: focused tests and policy text lock current runtime-owner.json healthcheck behavior. stateFileSpecs still map runtime-owner.json to runtimeOwner for issue planning, issue implementation, and PR review; summary lookup remains [\"runtimeOwner\",\"owner\"] and does not switch to [\"runtimeOwner\",\"lease\",\"runtime\"]; runtimeLeaseJson keeps top-level lease with nested lease.runtime and no top-level owner/runtime. No production behavior, healthcheck reader, runtime owner producer/schema, repair behavior, scripts, fixtures, roadmap files, file rename/deletion, schema migration, deprecation/removal, or broad fixture campaign changed."
+}
