@@ -131,11 +131,13 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
       ( all
           (`Text.isInfixOf` healthcheckSource)
           [ "(\"issueState\", \"issue-state.json\")"
+          , "(\"plannerState\", \"planner-state.json\")"
           , "(\"daemonState\", \"daemon-state.json\")"
           , "(\"blockedState\", \"block-state.json\")"
           , "(\"runtimeOwner\", \"runtime-owner.json\")"
           , "fallbackPidPath kind stateDir' config.pidPath"
           ]
+          && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
           && not ("writeJsonValue" `Text.isInfixOf` healthcheckSource)
       )
   pure (importsOk && tokensOk && lifecycleRouterOk && daemonRouterOk && compatibilityFacadeOk && launchOwnershipOk && healthcheckReadOnlyOk)

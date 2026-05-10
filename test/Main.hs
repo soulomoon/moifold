@@ -987,6 +987,26 @@ prop_prReviewCompatibilityClearsCheckerState =
           && lookupValue "unresolved_thread_ids" value == Just (toJSON ([] :: [Text]))
       _ -> False
 
+prop_issuePlanningCompatibilityDistinguishesPlannerAndPlanningState :: PlanningGraph -> Bool
+prop_issuePlanningCompatibilityDistinguishesPlannerAndPlanningState graph =
+  let config = PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 2) [IssueNumber 12]
+      baseDir = "/tmp/state"
+      plannerPath = baseDir </> "planner-state.json"
+      planningPath = baseDir </> "planning-state.json"
+      waitingWrites = compatibilityStateWrites baseDir (SomeWatcherState (PlanningWaitingForReadyIssues config graph))
+      readyWrites = compatibilityStateWrites baseDir (SomeWatcherState (PlanningReady config))
+      activeWrites = compatibilityStateWrites baseDir (SomeWatcherState (PlanningTurnActive config (ActiveTurn (ThreadId "planner-thread") (TurnId "planner-turn"))))
+      completeWrites = compatibilityStateWrites baseDir (SomeWatcherState (CompleteState PlanningComplete))
+      expectedPlannerJson = object ["repoFullName" .= ("soulomoon/mlf2" :: Text), "maxParallel" .= (2 :: Int), "scopeIssueNumbers" .= [12 :: Int], "status" .= ("waiting_ready_issues" :: Text)]
+      waitingPlannerValues = [value | CompatibilityWrite path value <- waitingWrites, path == plannerPath]
+      waitingPlanningValues = [value | CompatibilityWrite path value <- waitingWrites, path == planningPath]
+      otherPlannerStateWrites = readyWrites <> activeWrites <> completeWrites
+   in waitingPlannerValues == [expectedPlannerJson]
+        && waitingPlanningValues == [toJSON graph]
+        && expectedPlannerJson /= toJSON graph
+        && all (\(CompatibilityWrite path _) -> path /= planningPath) otherPlannerStateWrites
+        && length [() | CompatibilityWrite path _ <- otherPlannerStateWrites, path == plannerPath] == 3
+
 prop_eventLogFullIssuePlanningPathReturnsReady :: PlannerConfig -> ThreadId -> TurnId -> Bool
 prop_eventLogFullIssuePlanningPathReturnsReady config plannerThread plannerTurn =
   case replayEventLog
@@ -2805,7 +2825,9 @@ prop_effectInterpreterRecordPlanningGraphWritesState graph =
   let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 32
       compiled = compileEffectPlan config [SomeEffect (RecordPlanningGraph graph)]
       expectedPath = runtimeStateDirFile config.effectRuntimeStateDir "planning-state.json"
+      plannerPath = runtimeStateDirFile config.effectRuntimeStateDir "planner-state.json"
    in compiled.compiledActions == [PlannedWriteJson expectedPath (toJSON graph)]
+        && not (PlannedWriteJson plannerPath (toJSON graph) `elem` compiled.compiledActions)
         && compiled.compiledNextRequestId == RequestId 32
 
 prop_effectInterpreterCreateIssueUsesConfiguredEffect :: RepoName -> IssueCreationRequest -> Bool
@@ -6832,6 +6854,7 @@ main = do
       , quickCheckResult prop_issueImplementWatcherBlockedStops
       , quickCheckResult prop_issueImplementationCompatibilityWritesPrUrl
       , quickCheckResult prop_prReviewCompatibilityClearsCheckerState
+      , quickCheckResult prop_issuePlanningCompatibilityDistinguishesPlannerAndPlanningState
       , quickCheckResult prop_eventLogFullIssuePlanningPathReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningIssueCreationReturnsReady
       , quickCheckResult prop_eventLogIssuePlanningGraphWaitsForReadyIssues

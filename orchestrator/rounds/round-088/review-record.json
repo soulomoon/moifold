@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-006-planner-vs-planning-state-contract",
+  "extracted_item_id": "round-088-planner-vs-planning-state-contract",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after source/diff review plus passing json validation, planner/planning state rg scan, watcher-core-test, cabal build all, git diff checks, and status review. Tests now distinguish planner-state.json summary/status from planning-state.json graph writes, healthcheck source policy remains planner-state.json-only, direct RecordPlanningGraph writes only planning-state.json, and docs record blocker gates without approving reader changes, migration, deprecation, removal, fixtures, repair changes, roadmap edits, or production behavior changes."
+}
