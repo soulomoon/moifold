@@ -76,7 +76,7 @@ then, extract one round at a time.
 
 ## Milestones
 
-### 1. [pending] Current Facade Evidence Refresh
+### 1. [in-progress] Current Facade Evidence Refresh
 
 Milestone id: `milestone-001-current-facade-evidence`
 Depends on: none
@@ -86,6 +86,14 @@ behavior.
 Completion signal: a reviewed evidence artifact names every selected facade,
 current internal imports, preferred replacements, Cabal exposure, protecting
 tests, downstream/operator inventory scope, and remaining blocker class.
+Progress: round 075 completed the current import scan refresh in `066952b`.
+The round recorded local import counts, Cabal exposure, documentation
+references, replacement mappings, protecting checks, downstream/operator
+inventory limits, and blocker classes for the four selected facades without
+changing production code, package descriptors, docs, runtime compatibility
+files, imports, deprecation pragmas, Cabal exposure, or removals. Behavior-owner
+classification remains pending in direction 002, so this milestone is not yet
+complete.
 Parallel lane: serial
 Coordination notes: this milestone is evidence-only. It must not migrate imports,
 add warnings, edit Cabal exposure, or remove modules.
@@ -93,6 +101,7 @@ add warnings, edit Cabal exposure, or remove modules.
 Candidate directions:
 
 - Direction id: `direction-001-import-scan-refresh`
+  Status: complete via round 075, merged as `066952b`.
   Summary: Refresh import scans and replacement mapping for the four selected
   facades.
   Why it matters now: the previous counts are historical and cannot justify a
@@ -104,6 +113,7 @@ Candidate directions:
   references in the scan scope.
 
 - Direction id: `direction-002-behavior-owner-classification`
+  Status: pending.
   Summary: Classify each facade as pure reexport, moifold behavior bridge, or
   mixed surface.
   Why it matters now: replacement imports are safe only when behavior ownership
