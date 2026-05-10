@@ -269,13 +269,17 @@ Current status: `round-087-compatibility-fixture-gap-inventory` completed
 `direction-005-compatibility-fixture-gap-inventory` as artifact-only evidence
 in
 `orchestrator/rounds/round-087/compatibility-fixture-gap-inventory.md` at
-merged commit `51774b6`. Milestone 002 is in progress, not complete: the
-inventory names fixture, healthcheck-contract, planner/planning-contract,
-operator/downstream, and removal/migration blockers, but fixture/test coverage,
-explicit reviewed state-file contracts, healthcheck tests, and final cleanup
-classifications still remain for later directions. This status does not approve
-deprecation, facade removal, Cabal exposure removal, runtime compatibility-file
-deletion or rename, healthcheck behavior changes, repair behavior changes,
+merged commit `51774b6`, and `round-088-planner-vs-planning-state-contract`
+completed `direction-006-planner-vs-planning-state-contract` at merged commit
+`1ebf426` by locking `planner-state.json` and `planning-state.json` as
+distinct compatibility surfaces. Milestone 002 is in progress, not complete:
+the inventory names fixture, healthcheck-contract, operator/downstream, and
+removal/migration blockers, and the state-file contract is now explicit, but
+broad fixture/test coverage, healthcheck compatibility-contract tests for the
+remaining selected surfaces, and final cleanup classifications still remain
+for later directions. This status does not approve deprecation, facade removal,
+Cabal exposure removal, runtime compatibility-file deletion or rename,
+healthcheck behavior changes, repair behavior changes, fixture batch approval,
 release approval, or public compatibility removal.
 
 Candidate directions:
@@ -313,6 +317,18 @@ Candidate directions:
   Boundary notes: no rename, deletion, or healthcheck reader change unless a
   later reviewed behavior-change direction approves it.
   Extraction notes: include producer, reader, docs, and fixture expectations.
+  Status: completed by `round-088` at `1ebf426`; the reviewed implementation
+  added watcher-core tests that distinguish `planner-state.json` summary/status
+  writes from `planning-state.json` graph writes, strengthened the direct
+  `RecordPlanningGraph` test so it writes only `planning-state.json`,
+  strengthened the healthcheck source-policy assertion so issue planning reads
+  `planner-state.json` and not `planning-state.json`, and added a narrow
+  compatibility policy row for `planner-state.json` as a distinct kept
+  surface. This status records the current compatibility contract only; it
+  does not approve file rename/deletion, schema migration, healthcheck reader
+  behavior changes, repair behavior changes, fixture batch expansion,
+  deprecation, migration, runtime compatibility-file removal, release
+  approval, or public compatibility removal.
 
 - Direction id: `direction-007-runtime-compatibility-fixtures`
   Summary: Add focused fixtures for selected compatibility files and current
