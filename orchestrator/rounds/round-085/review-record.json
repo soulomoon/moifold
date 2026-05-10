@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-001-test-topology-inventory",
+  "direction_id": "direction-003-facade-import-policy-test-split",
+  "extracted_item_id": "round-085-facade-import-policy-test-split",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after watcher-core-test, cabal build all, diff hygiene, status review, runner reachability, Cabal metadata, and no out-of-scope production/docs/fixture/runtime compatibility/roadmap/public removal changes were verified."
+}

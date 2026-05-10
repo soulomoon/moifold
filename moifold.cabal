@@ -179,6 +179,7 @@ test-suite watcher-core-test
     AppServerSpec
     BoundaryPolicySpec
     CliSpec
+    FacadeImportPolicySpec
     GhGitSpec
     HealthcheckSpec
     JsonPathSpec
