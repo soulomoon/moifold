@@ -38,6 +38,9 @@ fixture, docs, or behavior surface changed.
   reusable packages.
 - Confirm final deprecation/removal rounds update docs, Haddock or public
   wording, Cabal exposure, fixtures, tests, and policy together when relevant.
+- Confirm terminal closeout first inspects merged evidence for additional
+  high-value cleanup. If new cleanup fronts remain, require a reviewed roadmap
+  update or new revision with added milestones instead of approving `done`.
 
 ## Task-Specific Checks
 
@@ -86,6 +89,9 @@ Reviewers should require focused checks matching the selected surface:
 - For terminal closeout, verify the final report lists kept, deferred,
   deprecated, removed, migrated, and blocked surfaces, and does not imply
   release or package publication approval.
+- For roadmap expansion, verify the update names new milestones, dependencies,
+  verification gates, and why the work could not be represented by existing
+  pending milestones.
 
 ## Roadmap Overrides
 
@@ -97,3 +103,7 @@ Reviewers should require focused checks matching the selected surface:
   and reader/writer contracts are explicit.
 - Public compatibility facades remain exposed until exact removal gates are
   satisfied and reviewer approval names the surface.
+- Exhausting the initial milestone list is not terminal by itself. If reviewed
+  evidence reveals more highest-value cleanup, add milestones through a
+  reviewed roadmap update or new revision before setting controller state to
+  `done`.

@@ -28,6 +28,9 @@ removal.
   drift, narrow the split or return to tests before retrying.
 - If deprecation or removal approval is missing, the lawful result is keep,
   defer, or a terminal hold with exact blockers.
+- If a terminal closeout finds additional high-value cleanup that is not
+  covered by existing milestones, retry as a roadmap expansion update instead
+  of approving the family as done.
 
 ## Removal Retry Boundary
 
@@ -43,3 +46,10 @@ reviewer records a valid artifact-only changed-path rationale. Retries that
 touch public API, Cabal exposure, docs, compatibility fixtures, runtime
 compatibility files, healthcheck, repair, event schemas, or large runtime
 behavior must add focused checks for that touched surface.
+
+## Roadmap Expansion Boundary
+
+Adding milestones is allowed only through the delegated update-roadmap path and
+reviewed roadmap revision rules. The expansion must name the new milestones,
+their dependencies, verification gates, and evidence that justifies keeping the
+family open.

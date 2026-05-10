@@ -36,6 +36,10 @@ perform gated deprecation and removal work.
   scanners, then fixture and runtime-state contracts, then import convergence,
   then large-module splits, then compatibility cleanup, and finally exact
   deprecation/removal rounds.
+- Expansion rule: completing the current milestone list is not, by itself,
+  proof that the family is finished. When late evidence reveals more
+  high-value cleanup, the guider should author a reviewed roadmap update or new
+  revision that adds milestones before terminal closeout.
 - Deferred alternatives: direct facade deletion, direct runtime compatibility
   file deletion, and broad module rewrites without focused tests are rejected
   until the roadmap records the required gates.
@@ -83,6 +87,9 @@ Out of scope:
 - Split large runtime modules only behind existing or newly extracted focused
   tests, and avoid behavior change in pure extraction rounds.
 - Treat deprecation and removal as final gates, not cleanup shortcuts.
+- Before terminal closeout, inspect merged evidence for newly discovered
+  cleanup fronts. If more cleanup is justified, refine the roadmap through a
+  reviewed update or new revision instead of marking the family done.
 - Preserve `orchestrator/project-contract.md` invariants for event schemas,
   golden fixtures, compatibility files, dry-run rendering, package ownership,
   runtime ownership, healthcheck, repair, and public facade availability.
@@ -490,13 +497,17 @@ Candidate directions:
   evidence, focused behavior evidence, and policy updates.
 
 - Direction id: `direction-024-terminal-cleanup-report`
-  Summary: Close the family with an explicit final cleanup report.
+  Summary: Either close the family with an explicit final cleanup report or
+  expand the roadmap with newly discovered cleanup milestones.
   Why it matters now: a broad cleanup family must not silently finish by
   exhausting tasks while blockers remain.
   Preconditions: deprecation/removal rounds complete or all remaining surfaces
   have reviewed keep/defer decisions.
   Parallel hints: serial.
   Boundary notes: a hold is valid only if it preserves exact blockers and does
-  not imply removal approval.
+  not imply removal approval. If evidence names additional high-value cleanup
+  that is not covered by the current milestones, terminal closeout is not
+  ready; the guider should add a reviewed roadmap revision instead.
   Extraction notes: include kept, deferred, deprecated, removed, migrated, and
-  blocked surface sets plus validation commands.
+  blocked surface sets plus validation commands, or author an expansion update
+  that names the new milestones, dependencies, and verification gates.
