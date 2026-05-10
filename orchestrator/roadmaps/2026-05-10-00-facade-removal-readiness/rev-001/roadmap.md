@@ -220,7 +220,7 @@ Candidate directions:
   `MoifoldSpec` concrete bridge semantics.
   Extraction notes: a valid result may be a reviewed hold instead of migration.
 
-### 3. [in progress] Public Facade Decision Gates
+### 3. [complete] Public Facade Decision Gates
 
 Milestone id: `milestone-003-public-facade-decision-gates`
 Depends on: `milestone-002-internal-import-migration`
@@ -241,8 +241,18 @@ deprecation unapproved. The round made no production code, test, documentation,
 package descriptor, public API, deprecation pragma, public deprecation wording,
 Cabal exposure, facade removal, runtime compatibility, event schema,
 healthcheck, repair, import migration, roadmap state, or release/publication
-changes. Milestone 003 remains in progress because direction 007 is still
-pending.
+changes. Round 081 completed the selected Cabal exposure decision in `ecfb67a`
+as an approved artifact-only decision. All four selected facades remain
+`defer` for exposed-module removal and must stay exposed in `moifold.cabal` for
+now: replacement modules and migration-path evidence exist, but remaining local
+facade imports, mixed moifold bridge ownership, bounded downstream evidence,
+absent public deprecation/removal alignment, and focused behavior-validation
+gaps are blockers, not removal approval. The round approved no exposed-module
+removal, package descriptor change, public API change, documentation change,
+deprecation wording, facade removal, runtime compatibility change, event schema
+change, healthcheck or repair change, import migration, roadmap state change,
+or release/publication change. With directions 006 and 007 complete, milestone
+003 is complete.
 Parallel lane: serial
 Coordination notes: deprecation and removal are separate decisions. A facade may
 be documented as compatibility-only without receiving removal approval.
@@ -266,6 +276,10 @@ Candidate directions:
   and downstream inventory scope.
 
 - Direction id: `direction-007-cabal-exposure-decision`
+  Status: complete via round 081, merged as `ecfb67a`, with an approved
+  artifact-only `defer` decision for all four selected facades and no
+  exposed-module removal, Cabal/package descriptor change, public API change,
+  docs/deprecation/removal change, or facade removal approved.
   Summary: Decide whether any exposed module can be removed from `moifold.cabal`
   or must remain exposed.
   Why it matters now: Cabal exposure is the public compatibility boundary for
