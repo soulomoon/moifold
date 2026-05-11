@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-125-issue-fanout-appserverclient-coverage",
+  "roadmap_item_id": "round-125-issue-fanout-appserverclient-coverage",
+  "decision": "approved",
+  "evidence_summary": "Focused IssueFanout app-server coverage passed REPL, watcher-core-test, cabal build all, diff checks, import/no-diff guards, no-worker-plan guard, changed-path checks, and review-stage JSON checks."
+}

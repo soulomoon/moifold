@@ -113,6 +113,7 @@ import AutomaticLoopRunnerSpec (automaticLoopRunnerTests)
 import AppServerProbeSpec (appServerProbeCommandTests)
 import ObserveCommandSpec (observeCommandTests)
 import PrReviewLaunchCliSpec (prReviewLaunchCliTests)
+import IssueFanoutAppServerSpec (issueFanoutAppServerTests)
 import AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientDetectsSystemErrorThreadStatus
@@ -7078,6 +7079,7 @@ main = do
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
   observeCommandOk <- observeCommandTests
   prReviewLaunchCliOk <- prReviewLaunchCliTests
+  issueFanoutAppServerOk <- issueFanoutAppServerTests
   automaticLoopRunnerOk <- automaticLoopRunnerTests
   if
     all isSuccess results
@@ -7161,6 +7163,7 @@ main = do
       && observeParsingOk
       && observeCommandOk
       && prReviewLaunchCliOk
+      && issueFanoutAppServerOk
       && automaticLoopRunnerOk
     then pure ()
     else exitFailure

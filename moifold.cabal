@@ -185,6 +185,7 @@ test-suite watcher-core-test
     FacadeImportPolicySpec
     GhGitSpec
     HealthcheckSpec
+    IssueFanoutAppServerSpec
     JsonPathSpec
     ObserveCommandSpec
     PrReviewLaunchCliSpec
