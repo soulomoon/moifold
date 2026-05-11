@@ -6,7 +6,7 @@ module CodexWatcher.Domain.IssuePlanning.TurnClassifier
   ( classifyIssuePlanningTurn
   ) where
 
-import CodexWatcher.AppServerClient
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.Core.Reason (BlockedReason (..))

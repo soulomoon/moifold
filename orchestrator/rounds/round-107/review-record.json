@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-107-issue-planning-turn-classifier-appserverclient-import-convergence",
+  "roadmap_item_id": "round-107-issue-planning-turn-classifier-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved: production diff is exactly the selected TurnClassifier.hs AppServerTurn import move; target-file facade import scan is clean; direct owner import is present; watcher-core-test, cabal build all, diff checks, descriptor/facade diff check, worker-plan absence, and JSON validation passed."
+}
