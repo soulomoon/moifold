@@ -876,6 +876,29 @@ remains exposed; and this does NOT approve production Healthcheck import
 migration, behavior changes, public facade removal/deprecation, Cabal/API
 exposure cleanup, docs cleanup, other importer migration, milestone completion,
 release approval, or terminal completion.
+`round-117` completed the
+`round-117-healthcheck-appserverclient-import-convergence` slice at merged
+commit `bd7951f` under direction 010. The accepted change moved only
+`src/CodexWatcher/Healthcheck.hs` from the public
+`CodexWatcher.AppServerClient` facade to direct owner imports from
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport`. The reviewed change was
+import-only: no code bodies, behavior, tests, package descriptors, public
+facade, direct owner modules, protocol modules, docs, or other importers
+changed. Validation passed with a Healthcheck target import scan confirming no
+facade import, direct-owner import scans, the focused Healthcheck REPL
+aggregate, `cabal test watcher-core-test`, `cabal build all`, diff checks,
+forbidden-path diff guards, no worker-plan, and review-record `jq`. This
+records `Healthcheck.hs` as migrated off the `CodexWatcher.AppServerClient`
+facade, but milestone 003 remains in progress: remaining source users still
+include `Domain/PrReview/LaunchCli.hs`, `Domain/IssuePlanning/Loop.hs`,
+`AutomaticLoop/Runner.hs`, `Cli/Command/Observe.hs`, and
+`Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports;
+`RunnerGuard.hs`, `Cli/Command/AppServerProbe.hs`, and `Healthcheck.hs` remain
+absent from the remaining source-user list after their migrations; the public
+compatibility facade remains exposed; and this does NOT approve public facade
+removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
+migration, milestone completion, release approval, or terminal completion.
 
 Candidate directions:
 
@@ -1159,6 +1182,29 @@ Candidate directions:
   changes, public facade removal/deprecation, Cabal/API exposure cleanup, docs
   cleanup, other importer migration, milestone completion, release approval, or
   terminal completion.
+  `round-117` completed the
+  `round-117-healthcheck-appserverclient-import-convergence` slice at merged
+  commit `bd7951f` by moving only `src/CodexWatcher/Healthcheck.hs` from the
+  public `CodexWatcher.AppServerClient` facade to direct owner imports from
+  `CodexWatcher.Workflow.Agent.Codex.Client` and
+  `CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+  import-only: no code bodies, behavior, tests, package descriptors, public
+  facade, direct owner modules, protocol modules, docs, or other importers
+  changed. Validation passed with a Healthcheck target import scan confirming
+  no facade import, direct-owner import scans, the focused Healthcheck REPL
+  aggregate, `cabal test watcher-core-test`, `cabal build all`, diff checks,
+  forbidden-path diff guards, no worker-plan, and review-record `jq`. This
+  records `Healthcheck.hs` as migrated off the `CodexWatcher.AppServerClient`
+  facade. Direction 010 remains in progress: remaining source users still
+  include `Domain/PrReview/LaunchCli.hs`,
+  `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
+  `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus test-policy
+  and test-support imports; `RunnerGuard.hs`,
+  `Cli/Command/AppServerProbe.hs`, and `Healthcheck.hs` remain absent from the
+  remaining source-user list after their migrations; the public compatibility
+  facade remains exposed; and this does NOT approve public facade
+  removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
+  migration, milestone completion, release approval, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
