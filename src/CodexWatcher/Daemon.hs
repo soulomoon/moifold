@@ -51,7 +51,6 @@ import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.EventLog.Commit.Core
   ( WorkflowEventCommitter (..)
   , appendEncodedWorkflowEvent
@@ -119,7 +118,7 @@ data DaemonObservedTickResult = DaemonObservedTickResult
   , daemonObservedCompatibilityWrites :: [CompatibilityWrite]
   , daemonObservedCompiledEffects :: CompiledEffectPlan
   , daemonObservedActionReports :: [ActionExecutionReport]
-  , daemonObservedAudit :: WorkflowEventLog.WorkflowTickAudit MoifoldSpec ActionExecutionReport
+  , daemonObservedAudit :: WorkflowAudit.WorkflowTickAudit MoifoldSpec FailureClassification ActionExecutionReport
   }
   deriving stock (Show, Generic)
 
@@ -727,7 +726,7 @@ observedDetailedTransactionResultToDaemon options observation result =
   observedTransactionResultToDaemonWithAudit
     options
     result
-    ( WorkflowEventLog.workflowSuccessAudit @MoifoldSpec
+    ( WorkflowAudit.workflowSuccessAudit @MoifoldSpec
         result.workflowTransactionPriorReplay.replayState
         observation
         result.workflowTransactionPlanned
@@ -739,7 +738,7 @@ observedDetailedTransactionResultToDaemon options observation result =
 observedTransactionResultToDaemonWithAudit
   :: DaemonOptions
   -> WorkflowObservedTransactionResult MoifoldSpec WorkflowCompiledEffectPlan ActionExecutionReport failure
-  -> WorkflowEventLog.WorkflowTickAudit MoifoldSpec ActionExecutionReport
+  -> WorkflowAudit.WorkflowTickAudit MoifoldSpec FailureClassification ActionExecutionReport
   -> DaemonObservedTickResult
 observedTransactionResultToDaemonWithAudit options result audit =
   let coreTick = WorkflowDaemon.workflowObservedDaemonTickResult result
@@ -774,9 +773,9 @@ daemonObservedCoreTickResult tick =
     , WorkflowDaemon.workflowObservedDaemonCommittedEvents = tick.daemonObservedCommittedEvents
     , WorkflowDaemon.workflowObservedDaemonCompiledEffects = tick.daemonObservedCompiledEffects
     , WorkflowDaemon.workflowObservedDaemonPreCommitReports =
-        WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit
+        WorkflowAudit.workflowAuditPreCommitReports tick.daemonObservedAudit
     , WorkflowDaemon.workflowObservedDaemonPostCommitReports =
-        WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit
+        WorkflowAudit.workflowAuditPostCommitReports tick.daemonObservedAudit
     , WorkflowDaemon.workflowObservedDaemonActionReports = tick.daemonObservedActionReports
     , WorkflowDaemon.workflowObservedDaemonAudit = tick.daemonObservedAudit
     }

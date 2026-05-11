@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-128-daemon-eventlog-audit-direct-owner-import-convergence",
+  "roadmap_item_id": "round-128-daemon-eventlog-audit-direct-owner-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved: Daemon no longer imports the exact Workflow.EventLog facade or uses WorkflowEventLog audit qualifiers; direct Workflow.Audit owner usage and EventLog.Commit.Core ownership remain. Focused daemon/workflow REPL probes, cabal build all, cabal test watcher-core-test, diff checks, and facade scans all passed."
+}
