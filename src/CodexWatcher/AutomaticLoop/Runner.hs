@@ -12,7 +12,6 @@ module CodexWatcher.AutomaticLoop.Runner
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
 import CodexWatcher.AutomaticLoop.IssuePlanningFanout (issuePlanningFanoutAfterTick)
 import CodexWatcher.AutomaticLoop.Output (printLoopTick)
 import CodexWatcher.AutomaticLoop.PrReviewHandoff (issueImplementReviewHandoffAfterTick)
@@ -35,6 +34,11 @@ import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLeaseIfOwnedByCurrentProcess, renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
+import CodexWatcher.Workflow.Agent.Codex.Transport
+  ( AppServerEndpoint
+  , appServerInterpreterFromEndpoint
+  , defaultAppServerClientOptions
+  )
 import CodexWatcher.Workflow.Agent.Ids (ThreadId)
 import CodexWatcher.Core.Kinds (Domain)
 import CodexWatcher.Core.Limits (pollSecondsMicros)

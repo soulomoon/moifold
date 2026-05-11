@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-122-automatic-loop-runner-appserverclient-import-convergence",
+  "roadmap_item_id": "round-122-automatic-loop-runner-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration in src/CodexWatcher/AutomaticLoop/Runner.hs from CodexWatcher.AppServerClient to CodexWatcher.Workflow.Agent.Codex.Transport for exactly AppServerEndpoint, appServerInterpreterFromEndpoint, and defaultAppServerClientOptions. Focused runner REPL gate, watcher-core-test, cabal build all, whitespace checks, import scans, diff inspection, forbidden-path guard, no-worker-plan guard, and JSON checks passed."
+}
