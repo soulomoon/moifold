@@ -167,7 +167,8 @@ executable moifold
   main-is:          Main.hs
   build-depends:
     base >=4.18 && <5,
-    moifold
+    moifold,
+    agent-workflow-github >=0.1 && <0.2
   default-language: GHC2021
 
 test-suite watcher-core-test

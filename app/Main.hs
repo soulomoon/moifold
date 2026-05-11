@@ -15,7 +15,7 @@ import CodexWatcher.Cli.Command.Replay (repairInvalidState, replayEvents)
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease)
 import CodexWatcher.Cli.Command.RunnerGuard (runWatcherRunnerGuard)
 import CodexWatcher.Cli.Command.Service (renderService)
-import CodexWatcher.Core.Ids (RepoName (unRepoName))
+import CodexWatcher.Workflow.GitHub.Ids (RepoName (unRepoName))
 
 main :: IO ()
 main =
