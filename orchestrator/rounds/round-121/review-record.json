@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-121-automatic-loop-appserver-interpreter-coverage",
+  "roadmap_item_id": "round-121-automatic-loop-appserver-interpreter-coverage",
+  "decision": "approved",
+  "evidence_summary": "Focused watcher-core coverage passed for runAutomaticLoop execute endpoint traffic, dry-run no endpoint traffic, and retry/fallback classification. Full watcher-core tests, cabal build all, diff checks, scope guards, Runner.hs import guard, and worker-plan absence checks passed. No production import migration or forbidden path changes were found."
+}

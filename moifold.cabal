@@ -177,6 +177,7 @@ test-suite watcher-core-test
   hs-source-dirs:   test, app
   main-is:          Main.hs
   other-modules:
+    AutomaticLoopRunnerSpec
     AppServerProbeSpec
     AppServerSpec
     BoundaryPolicySpec

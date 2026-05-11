@@ -109,6 +109,7 @@ import WorkflowExecutionSpec (workflowExecutionTests)
 import WorkflowIndexedSpec (workflowIndexedTests)
 import TestSupport.SourceScan (textNeedlesInOrder)
 import TestSupport.Workflow (sameWatcherStateShape)
+import AutomaticLoopRunnerSpec (automaticLoopRunnerTests)
 import AppServerProbeSpec (appServerProbeCommandTests)
 import ObserveCommandSpec (observeCommandTests)
 import AppServerSpec
@@ -7075,6 +7076,7 @@ main = do
   pidRestoreOk <- restoreOwnedPidFileRepairsMissingAndStalePid
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
   observeCommandOk <- observeCommandTests
+  automaticLoopRunnerOk <- automaticLoopRunnerTests
   if
     all isSuccess results
       && goldenOk
@@ -7156,5 +7158,6 @@ main = do
       && pidRestoreOk
       && observeParsingOk
       && observeCommandOk
+      && automaticLoopRunnerOk
     then pure ()
     else exitFailure
