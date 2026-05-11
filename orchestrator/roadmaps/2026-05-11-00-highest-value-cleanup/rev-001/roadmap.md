@@ -715,6 +715,36 @@ fallback, command, or failure-formatting changes, other importer migration,
 release approval, milestone completion, or terminal completion.
 `CodexWatcher.AppServerClient` remains available and unchanged as a public
 facade.
+`round-109` completed the narrow
+`round-109-pr-review-turn-classifier-appserverclient-import-convergence`
+slice at merged commit `b7c059f` under direction 010. It moved only
+`src/CodexWatcher/Domain/PrReview/TurnClassifier.hs` from importing
+`CodexWatcher.AppServerClient` to importing direct owner
+`CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)`. PR-review
+classifier exports, type signatures, parsing, classification logic,
+`classifyPrReviewWorkerTurn`, `classifyPrReviewReviewerTurn`,
+`classifyTurnCompletion`, missing-output blocking, structured worker
+outcomes, reviewer-state JSON parsing, reviewed-commit validation, reviewer
+prompt-version validation, prior/new findings status handling, LGTM handling,
+solved/remaining review-thread handling, and incomplete/blocked reviewer
+outcomes were unchanged. Validation passed with target import scans,
+PR-review classifier test discovery, `cabal test watcher-core-test`,
+`cabal build all`, descriptor/facade diff check, no `worker-plan.json`,
+`git diff --check`, `git diff --cached --check`, and `jq` validation. This
+status records one narrow production direct-owner import convergence and does
+not approve public facade removal or deprecation, Cabal exposure removal,
+package descriptor cleanup, docs, fixtures, tests, protocol changes,
+endpoint/session/timeout/fallback, command, or failure-formatting changes,
+other importer migration, release approval, milestone completion, or terminal
+completion. `CodexWatcher.AppServerClient` remains available and unchanged as
+a public facade. Milestone 003 remains in progress; current
+`CodexWatcher.AppServerClient` source users remain in `RunnerGuard.hs`,
+`Domain/PrReview/LaunchCli.hs`, `Domain/IssuePlanning/Loop.hs`,
+`AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
+`Cli/Command/AppServerProbe.hs`, `Cli/Command/Observe.hs`, and
+`Cli/Command/IssueFanout.hs`, plus test-policy imports, and these are
+higher-risk endpoint/session/timeout/fallback/command/failure-formatting or
+test-policy surfaces.
 
 Candidate directions:
 
@@ -825,6 +855,35 @@ Candidate directions:
   approval, milestone completion, or terminal completion.
   `CodexWatcher.AppServerClient` remains available and unchanged as a public
   facade.
+  `round-109` completed the
+  `round-109-pr-review-turn-classifier-appserverclient-import-convergence`
+  slice at `b7c059f` by moving only
+  `src/CodexWatcher/Domain/PrReview/TurnClassifier.hs` from the
+  compatibility facade to direct owner
+  `CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)`. PR-review
+  classifier exports, type signatures, parsing, classification logic,
+  `classifyPrReviewWorkerTurn`, `classifyPrReviewReviewerTurn`,
+  `classifyTurnCompletion`, missing-output blocking, structured worker
+  outcomes, reviewer-state JSON parsing, reviewed-commit validation, reviewer
+  prompt-version validation, prior/new findings status handling, LGTM
+  handling, solved/remaining review-thread handling, and incomplete/blocked
+  reviewer outcomes were unchanged. Validation passed with old target import
+  scan no matches, direct-owner import scan found the selected import,
+  PR-review classifier test discovery, `cabal test watcher-core-test`,
+  `cabal build all`, descriptor/facade diff empty, no `worker-plan.json`,
+  `git diff --check`, `git diff --cached --check`, and `jq` validation. This
+  status records only that narrow import move and does not approve public
+  facade removal or deprecation, Cabal exposure removal, package descriptor
+  cleanup, docs, fixtures, tests, protocol changes,
+  endpoint/session/timeout/fallback, command, or failure-formatting changes,
+  other importer migration, release approval, milestone completion, or
+  terminal completion. `CodexWatcher.AppServerClient` remains available and
+  unchanged as a public facade. Direction 010 remains in progress: current
+  source users remain in `RunnerGuard.hs`, `Domain/PrReview/LaunchCli.hs`,
+  `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
+  `Healthcheck.hs`, `Cli/Command/AppServerProbe.hs`,
+  `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus
+  test-policy imports, and those surfaces still require focused gates.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
