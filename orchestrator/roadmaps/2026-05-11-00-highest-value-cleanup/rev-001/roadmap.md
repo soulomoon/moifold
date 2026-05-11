@@ -618,6 +618,27 @@ broader Core.Ids migration, public deprecation, facade removal, Cabal exposure
 removal, package descriptor cleanup, runtime compatibility cleanup,
 release/publication, milestone completion, or terminal completion changes.
 
+`round-104` completed the artifact-only
+`round-104-eventlog-permission-bridge-split-readiness` evidence round at
+merged commit `073a5d6` under direction 012. The approved live scan records
+`CodexWatcher.Workflow.EventLog` imports at `src`: 2 and `test`: 8, and
+`CodexWatcher.Workflow.Permission` imports at `test`: 7, with both facades at
+`app`: 0 and standalone package candidate imports: 0. The evidence confirms
+`moifold.cabal` still exposes both compatibility facades, while
+`agent-workflow-core` exposes direct-owner modules
+`CodexWatcher.Workflow.Audit`,
+`CodexWatcher.Workflow.EventLog.Commit.Core`,
+`CodexWatcher.Workflow.EventLog.Core`,
+`CodexWatcher.Workflow.EventLog.File.Core`, and
+`CodexWatcher.Workflow.Permission.Core`. The artifact classifies the mixed
+export surfaces and each live importer; strongest later candidates include
+`src/CodexWatcher/Workflow/DocsMigration.hs` and
+`src/CodexWatcher/Daemon.hs`, both requiring focused behavior gates before any
+future migration. Later work must remain narrow and gate-backed. This status
+does not approve import migration, public deprecation or removal, Cabal
+exposure removal, package descriptor cleanup, runtime compatibility cleanup,
+release approval, milestone completion, or terminal completion.
+
 Candidate directions:
 
 - Direction id: `direction-009-facade-import-scan-refresh`
@@ -733,6 +754,24 @@ Candidate directions:
   Boundary notes: no public deprecation, Cabal exposure change, or removal.
   Extraction notes: separate reusable core imports from concrete moifold bridge
   helpers and record what remains product-owned.
+  Status: completed by `round-104` at `073a5d6` as artifact-only readiness
+  evidence. The reviewed artifact records live import counts for
+  `CodexWatcher.Workflow.EventLog` as `src`: 2 and `test`: 8, and for
+  `CodexWatcher.Workflow.Permission` as `test`: 7; both facades have
+  `app`: 0 and standalone package candidate imports: 0. `moifold.cabal` still
+  exposes both compatibility facades, and `agent-workflow-core` exposes the
+  direct-owner modules `CodexWatcher.Workflow.Audit`,
+  `CodexWatcher.Workflow.EventLog.Commit.Core`,
+  `CodexWatcher.Workflow.EventLog.Core`,
+  `CodexWatcher.Workflow.EventLog.File.Core`, and
+  `CodexWatcher.Workflow.Permission.Core`. The evidence classifies mixed
+  export surfaces, every live importer, and later gates; strongest later
+  candidates include `src/CodexWatcher/Workflow/DocsMigration.hs` and
+  `src/CodexWatcher/Daemon.hs`, both requiring focused behavior gates. This
+  status is readiness evidence only and does not approve import migration,
+  public deprecation or removal, Cabal exposure removal, package descriptor
+  cleanup, runtime compatibility cleanup, release approval, milestone
+  completion, or terminal completion.
 
 ### 4. [pending] Large Runtime Module Decomposition
 
