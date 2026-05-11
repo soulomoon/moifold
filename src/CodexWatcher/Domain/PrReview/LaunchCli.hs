@@ -14,11 +14,12 @@ module CodexWatcher.Domain.PrReview.LaunchCli
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
+import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..), defaultAppServerClientOptions, startThreadWithEndpoint)
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-124-pr-review-launch-appserverclient-import-convergence",
+  "roadmap_item_id": "round-124-pr-review-launch-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved import-only LaunchCli.hs migration from CodexWatcher.AppServerClient to direct Codex app-server owner imports. git diff --unified=0 shows only import-line changes; facade scan leaves only out-of-scope users; state is at review with no worker plan; cabal test watcher-core-test, cabal build all, and git diff --check passed."
+}
