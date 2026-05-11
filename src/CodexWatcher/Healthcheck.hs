@@ -17,7 +17,6 @@ module CodexWatcher.Healthcheck
   , runHealthcheck
   ) where
 
-import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
 import CodexWatcher.EventLog.File (loadEventLogFile)
@@ -33,6 +32,8 @@ import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
 import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.State (someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..), formatAppServerClientFailure, parseThreadReadTurns)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerClientOptions (..), AppServerEndpoint, defaultAppServerClientOptions, sendOneAppServerRequest)
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.Workflow.GitHub.Command qualified as GitHubCommand
 import CodexWatcher.Workflow.GitHub.Remote (parseGhPrView, parseGitBranch, parseGitSha, parseLsRemoteBranch, remotePullRequestIsMerged)
