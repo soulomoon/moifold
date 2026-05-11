@@ -589,6 +589,22 @@ changes, Cabal exposure removal, package descriptor cleanup beyond the narrow
 executable dependency, parser, renderer, command-output, prompt, fixture,
 runtime-config, runtime compatibility cleanup, deprecation, removal,
 release/publication, milestone completion, or terminal completion changes.
+`round-102` completed a narrow test agent-id-only
+`direction-011-core-ids-import-convergence` slice at merged commit `ead9081`
+by moving `test/WorkflowDocsMigrationSpec.hs` from
+`CodexWatcher.Core.Ids` to direct
+`CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))`, preserving
+existing docs-migration workflow behavior coverage and term-level id fixtures,
+leaving package descriptors and public compatibility facade exposure
+unchanged, and passing `cabal test watcher-core-test`, `cabal build all`,
+`git diff --check`, and `git diff --cached --check`. This status records one
+test agent-id-only direct-owner import convergence and does not approve
+AppServerClient, Workflow.EventLog, Workflow.Permission, combined Core.Ids
+user migration, broader Core.Ids migration, public facade exposure changes,
+Cabal exposure removal, package descriptor cleanup, parser, renderer,
+command-output, prompt, fixture, runtime-config, runtime compatibility
+cleanup, deprecation, removal, release/publication, milestone completion, or
+terminal completion changes.
 
 Candidate directions:
 
@@ -669,7 +685,16 @@ Candidate directions:
   compile-proven executable-only `agent-workflow-github >=0.1 && <0.2`
   dependency for `executable moifold`, and validation passed with
   `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
-  `git diff --cached --check`. Remaining combined users, broader production
+  `git diff --cached --check`. `round-102` completed the
+  `round-102-workflow-docs-migration-agent-ids-import-convergence` slice at
+  `ead9081` by moving only `test/WorkflowDocsMigrationSpec.hs` from
+  `CodexWatcher.Core.Ids` to
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))`. Existing
+  docs-migration workflow behavior coverage and term-level id fixtures were
+  preserved, package descriptors and public compatibility facade exposure were
+  unchanged, and validation passed with `cabal test watcher-core-test`,
+  `cabal build all`, `git diff --check`, and `git diff --cached --check`.
+  Remaining combined users, broader Core.Ids migration, broader production
   import convergence, package descriptor cleanup beyond the narrow executable
   dependency, Cabal exposure removal, public deprecation, facade removal,
   runtime compatibility cleanup, release approval, milestone completion, and
