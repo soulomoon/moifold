@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-109-pr-review-turn-classifier-appserverclient-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: production diff is only the PR-review TurnClassifier import move from CodexWatcher.AppServerClient to CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn); target old-import scan is empty, direct-owner scan finds the selected import, descriptor/facade diff is empty, worker-plan.json is absent, git diff checks pass, cabal test watcher-core-test passes, and cabal build all is up to date. Approval is merge-ready after normal controller merge handling and excludes facade removal/deprecation, Cabal exposure changes, docs/fixtures/tests/protocol changes, endpoint/session/timeout/fallback/command/failure-formatting changes, other importer migration, milestone completion, and terminal completion."
+}

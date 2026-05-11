@@ -9,11 +9,11 @@ module CodexWatcher.Domain.PrReview.TurnClassifier
   , classifyPrReviewWorkerTurn
   ) where
 
-import CodexWatcher.AppServerClient
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..), ReviewThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Domain.PrReview.Types
