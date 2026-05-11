@@ -530,7 +530,17 @@ concrete moifold policy helpers plus permission soundness, phase-validation,
 state/effect validation, public API, and downstream evidence. This status does
 not approve import migration, Cabal exposure changes, public deprecation,
 facade removal, runtime compatibility cleanup, release/publication, milestone
-completion, or terminal completion.
+completion, or terminal completion. `round-098` completed a narrow
+`direction-011-core-ids-import-convergence` slice at merged commit `c223018`
+by moving `test/BoundaryPolicySpec.hs` from the combined
+`CodexWatcher.Core.Ids` compatibility facade to direct
+`CodexWatcher.Workflow.GitHub.Ids`, preserving boundary-policy assertions and
+command parity checks, leaving `moifold.cabal` unchanged, and passing
+`cabal test watcher-core-test` plus `cabal build all`. This status records
+one test-only direct-owner import convergence and does not approve production
+import convergence, combined-user migration, parser, renderer, command-output,
+prompt, fixture, runtime-config, public facade exposure, deprecation, removal,
+release/publication, milestone completion, or terminal completion changes.
 
 Candidate directions:
 
@@ -578,6 +588,15 @@ Candidate directions:
   Boundary notes: do not change constructors, parsers, renderers, or command
   output.
   Extraction notes: record each remaining combined-facade user and blocker.
+  Status: in progress; `round-098` completed the
+  `round-098-boundary-policy-github-ids-import-convergence` slice at
+  `c223018` by moving only `test/BoundaryPolicySpec.hs` from
+  `CodexWatcher.Core.Ids` to `CodexWatcher.Workflow.GitHub.Ids`. Assertions
+  were preserved, `moifold.cabal` was unchanged, and validation passed with
+  `cabal test watcher-core-test` plus `cabal build all`. Remaining work must
+  still inventory and justify other direct-owner candidates and blockers;
+  combined users and any production import convergence remain outside this
+  completed slice.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
