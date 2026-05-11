@@ -820,6 +820,21 @@ remaining source users still include `Domain/PrReview/LaunchCli.hs`,
 public compatibility facade remains exposed; and no public facade removal or
 deprecation, Cabal exposure or public API removal, release approval, milestone
 completion, or terminal completion is approved.
+`round-114` completed focused endpoint-backed `probeAppServer` command
+coverage at merged commit `0a5a842` under direction 010. The accepted
+test-only evidence covers command-level `initialize`, optional `thread/read`,
+smoke `thread/start`, smoke `turn/start`, request ids and selected params,
+success output, and selected JSON-RPC/decode failure formatting. The reviewed
+change added `test/AppServerProbeSpec.hs`, wired it through `test/Main.hs`,
+and added only the required `watcher-core-test` metadata in `moifold.cabal`.
+This satisfies the AppServerProbe command coverage gate for a later
+import-only decision, but milestone 003 remains in progress: current
+`CodexWatcher.AppServerClient` source users still remain, including
+`Cli/Command/AppServerProbe.hs`; the public compatibility facade remains
+exposed; and no production AppServerProbe/AppServerClient/direct-owner or
+protocol change, import migration, public facade removal or deprecation, Cabal
+exposure or public API removal, release approval, milestone completion, or
+terminal completion is approved.
 
 Candidate directions:
 
@@ -1040,6 +1055,26 @@ Candidate directions:
   public compatibility facade remains exposed; and this does not approve
   public facade removal or deprecation, Cabal exposure or public API removal,
   release approval, milestone completion, or terminal completion.
+  `round-114` completed the
+  `round-114-appserver-probe-command-coverage` slice at `0a5a842` by adding
+  focused endpoint-backed command tests for `probeAppServer`. The accepted
+  coverage verifies command-level `initialize`, optional `thread/read`, smoke
+  `thread/start`, smoke `turn/start`, request ids, selected params, success
+  output, and selected JSON-RPC/decode failure formatting. The change was
+  test-only: it added `test/AppServerProbeSpec.hs`, wired
+  `appServerProbeCommandTests` into `test/Main.hs`, and added only
+  `AppServerProbeSpec` to `watcher-core-test` metadata in `moifold.cabal`.
+  This records the AppServerProbe command coverage gate as satisfied for a
+  later import-only migration decision. Direction 010 remains in progress:
+  remaining source users still include `Domain/PrReview/LaunchCli.hs`,
+  `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
+  `Healthcheck.hs`, `Cli/Command/AppServerProbe.hs`,
+  `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus
+  test-policy and test-support imports; the public compatibility facade
+  remains exposed; and this does not approve production
+  AppServerProbe/AppServerClient/direct-owner or protocol changes, import
+  migration, public facade removal or deprecation, Cabal exposure or public API
+  removal, release approval, milestone completion, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
