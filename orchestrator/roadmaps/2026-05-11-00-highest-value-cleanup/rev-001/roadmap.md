@@ -946,6 +946,32 @@ after their migrations; the public compatibility facade remains exposed; and
 this does NOT approve public facade removal/deprecation, Cabal/API exposure
 cleanup, docs cleanup, other importer migration, milestone completion, release
 approval, or terminal completion.
+`round-120` completed the
+`round-120-issue-planning-loop-appserverclient-import-convergence` slice at
+merged commit `660e3a4` by moving only
+`src/CodexWatcher/Domain/IssuePlanning/Loop.hs` from the public
+`CodexWatcher.AppServerClient` facade to direct owner
+`CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)`. The accepted
+change was import-only: no code bodies, behavior, planner-thread
+initialization, request-id progression, dry-run synthetic planner thread
+behavior, planned app-server request/result behavior, active-turn reads,
+systemError retry/blocking behavior, command failure formatting for snapshot
+commands, tests, docs, package descriptors, public facade, direct owner
+modules, protocol modules, runtime files, app code, or other importers changed.
+Validation passed with the focused planning classifier and systemError REPL
+gate, `cabal test watcher-core-test`, `cabal build all`, diff checks, target
+import scans, forbidden diff guards, no worker-plan, and state/review-record
+JSON checks. This records `Domain/IssuePlanning/Loop.hs` as migrated off the
+`CodexWatcher.AppServerClient` facade, but milestone 003 remains in progress:
+remaining production source users still include `Domain/PrReview/LaunchCli.hs`,
+`AutomaticLoop/Runner.hs`, and `Cli/Command/IssueFanout.hs`, plus test-policy
+and test-support imports; `RunnerGuard.hs`,
+`Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`,
+`Cli/Command/Observe.hs`, and `Domain/IssuePlanning/Loop.hs` remain absent
+from the remaining source-user list after their migrations; the public
+compatibility facade remains exposed; and this does NOT approve public facade
+removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
+migration, milestone completion, release approval, or terminal completion.
 
 Candidate directions:
 
@@ -1300,6 +1326,34 @@ Candidate directions:
   this does NOT approve public facade removal/deprecation, Cabal/API exposure
   cleanup, docs cleanup, other importer migration, milestone completion,
   release approval, or terminal completion.
+  `round-120` completed the
+  `round-120-issue-planning-loop-appserverclient-import-convergence` slice at
+  merged commit `660e3a4` by moving only
+  `src/CodexWatcher/Domain/IssuePlanning/Loop.hs` from the public
+  `CodexWatcher.AppServerClient` facade to direct owner
+  `CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)`. The accepted
+  change was import-only: no code bodies, behavior, planner-thread
+  initialization, request-id progression, dry-run synthetic planner thread
+  behavior, planned app-server request/result behavior, active-turn reads,
+  systemError retry/blocking behavior, command failure formatting for snapshot
+  commands, tests, docs, package descriptors, public facade, direct owner
+  modules, protocol modules, runtime files, app code, or other importers
+  changed. Validation passed with the focused planning classifier and
+  systemError REPL gate, `cabal test watcher-core-test`, `cabal build all`,
+  diff checks, target import scans, forbidden diff guards, no worker-plan, and
+  state/review-record JSON checks. This records
+  `Domain/IssuePlanning/Loop.hs` as migrated off the
+  `CodexWatcher.AppServerClient` facade. Direction 010 remains in progress:
+  remaining production source users still include
+  `Domain/PrReview/LaunchCli.hs`, `AutomaticLoop/Runner.hs`, and
+  `Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports;
+  `RunnerGuard.hs`, `Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`,
+  `Cli/Command/Observe.hs`, and `Domain/IssuePlanning/Loop.hs` remain absent
+  from the remaining source-user list after their migrations; the public
+  compatibility facade remains exposed; and this does NOT approve public
+  facade removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other
+  importer migration, milestone completion, release approval, or terminal
+  completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
