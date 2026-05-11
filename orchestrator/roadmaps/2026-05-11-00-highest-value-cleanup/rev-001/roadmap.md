@@ -972,6 +972,39 @@ from the remaining source-user list after their migrations; the public
 compatibility facade remains exposed; and this does NOT approve public facade
 removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
 migration, milestone completion, release approval, or terminal completion.
+`round-121` completed the
+`round-121-automatic-loop-appserver-interpreter-coverage` slice at merged
+commit `523c552` by adding focused watcher-core coverage for
+`src/CodexWatcher/AutomaticLoop/Runner.hs` app-server interpreter construction
+before any import migration. `round-122` completed the
+`round-122-automatic-loop-runner-appserverclient-import-convergence` slice at
+merged commit `5c268da` by moving only
+`src/CodexWatcher/AutomaticLoop/Runner.hs` from the public
+`CodexWatcher.AppServerClient` facade to direct owner transport imports from
+`CodexWatcher.Workflow.Agent.Codex.Transport` for exactly
+`AppServerEndpoint`, `appServerInterpreterFromEndpoint`, and
+`defaultAppServerClientOptions`. The accepted round-122 change was
+import-only: no code bodies, behavior, tests, docs, package descriptors,
+public facade, direct owner modules, protocol modules, runtime files, app
+code, PR-review launch, issue fanout, test-policy/support imports, or other
+importers changed. Validation passed with the focused
+`AutomaticLoopRunnerSpec.automaticLoopRunnerTests` REPL gate,
+`cabal test watcher-core-test`, `cabal build all`, whitespace checks, import
+scans, diff inspection, forbidden-path guard, no-worker-plan guard, and JSON
+checks. This records `AutomaticLoop/Runner.hs` as migrated off the
+`CodexWatcher.AppServerClient` facade, but milestone 003 remains in progress:
+live source scans after round 122 show remaining production source users in
+`Domain/PrReview/LaunchCli.hs` and `Cli/Command/IssueFanout.hs`, plus
+test-policy and test-support imports; `RunnerGuard.hs`,
+`Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`,
+`Cli/Command/Observe.hs`, `Domain/IssuePlanning/Loop.hs`, and
+`AutomaticLoop/Runner.hs` remain absent from the remaining source-user list
+after their migrations; the public compatibility facade remains exposed; and
+this does NOT approve public facade removal/deprecation, Cabal/API exposure
+cleanup, docs cleanup, package descriptor cleanup, protocol/runtime/owner
+changes, PR-review launch migration, issue-fanout migration,
+test-policy/support import migration, milestone completion, release approval,
+terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -1381,6 +1414,35 @@ Candidate directions:
   package descriptor cleanup beyond the prior test metadata merged in
   round 121, protocol/runtime/owner changes, milestone completion, release
   approval, terminal completion, or public compatibility removal.
+  `round-122` completed the
+  `round-122-automatic-loop-runner-appserverclient-import-convergence` slice at
+  merged commit `5c268da` by moving only
+  `src/CodexWatcher/AutomaticLoop/Runner.hs` from the public
+  `CodexWatcher.AppServerClient` facade to direct owner
+  `CodexWatcher.Workflow.Agent.Codex.Transport` imports for exactly
+  `AppServerEndpoint`, `appServerInterpreterFromEndpoint`, and
+  `defaultAppServerClientOptions`. The accepted change was import-only: no code
+  bodies, behavior, tests, docs, package descriptors, public facade, direct
+  owner modules, protocol modules, runtime files, app code, PR-review launch,
+  issue fanout, test-policy/support imports, or other importers changed.
+  Validation passed with focused
+  `AutomaticLoopRunnerSpec.automaticLoopRunnerTests`,
+  `cabal test watcher-core-test`, `cabal build all`, whitespace checks, import
+  scans, diff inspection, forbidden-path guard, no-worker-plan guard, and JSON
+  checks. This records `AutomaticLoop/Runner.hs` as migrated off the
+  `CodexWatcher.AppServerClient` facade. Direction 010 remains in progress:
+  live source scans after round 122 show remaining production source users in
+  `Domain/PrReview/LaunchCli.hs` and `Cli/Command/IssueFanout.hs`, plus
+  test-policy and test-support imports; `RunnerGuard.hs`,
+  `Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`,
+  `Cli/Command/Observe.hs`, `Domain/IssuePlanning/Loop.hs`, and
+  `AutomaticLoop/Runner.hs` remain absent from the remaining source-user list
+  after their migrations; the public compatibility facade remains exposed; and
+  this does NOT approve public facade removal/deprecation, Cabal/API exposure
+  cleanup, docs cleanup, package descriptor cleanup, protocol/runtime/owner
+  changes, PR-review launch migration, issue-fanout migration,
+  test-policy/support import migration, milestone completion, release approval,
+  terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
