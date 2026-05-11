@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-118-observe-appserver-interpreter-coverage",
+  "roadmap_item_id": "round-118-observe-appserver-interpreter-coverage",
+  "decision": "approved",
+  "evidence_summary": "Coverage-only observe command round approved: focused observeOnce tests cover execute missing-endpoint failure, dry-run null-interpreter fallback without endpoint, and execute configured-endpoint fake app-server session/turn-start behavior; Observe.hs and import migration surfaces remain untouched; watcher-core-test, cabal build all, diff hygiene, scope guards, and review-stage state checks passed."
+}

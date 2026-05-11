@@ -185,6 +185,7 @@ test-suite watcher-core-test
     GhGitSpec
     HealthcheckSpec
     JsonPathSpec
+    ObserveCommandSpec
     RuntimeCompatibilityFixtureSpec
     RuntimeSpec
     RunnerGuardSpec

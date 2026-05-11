@@ -110,6 +110,7 @@ import WorkflowIndexedSpec (workflowIndexedTests)
 import TestSupport.SourceScan (textNeedlesInOrder)
 import TestSupport.Workflow (sameWatcherStateShape)
 import AppServerProbeSpec (appServerProbeCommandTests)
+import ObserveCommandSpec (observeCommandTests)
 import AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientDetectsSystemErrorThreadStatus
@@ -7073,6 +7074,7 @@ main = do
   runtimeOwnerCleanupOk <- runtimeOwnerCleanupClearsOnlyCurrentProcessLease
   pidRestoreOk <- restoreOwnedPidFileRepairsMissingAndStalePid
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
+  observeCommandOk <- observeCommandTests
   if
     all isSuccess results
       && goldenOk
@@ -7153,5 +7155,6 @@ main = do
       && runtimeOwnerCleanupOk
       && pidRestoreOk
       && observeParsingOk
+      && observeCommandOk
     then pure ()
     else exitFailure
