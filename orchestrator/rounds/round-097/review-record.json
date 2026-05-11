@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-009-facade-import-scan-refresh",
+  "extracted_item_id": "round-097-facade-import-scan-refresh",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after retry correction: Core.Ids exact-token scan verifies 3 GitHub-only, 2 agent-only, and 39 combined users; test/BoundaryPolicySpec.hs is correctly GitHub-only, no stale combined/blocker wording remains, selected-facade counts and package exposure remain correct, diff hygiene passes, and prior cabal build all plus cabal test watcher-core-test evidence is reused because the retry touched only round-local artifacts."
+}
