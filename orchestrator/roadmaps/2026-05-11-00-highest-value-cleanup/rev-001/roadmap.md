@@ -853,6 +853,29 @@ remaining source users still include `Domain/PrReview/LaunchCli.hs`,
 and test-support imports; the public compatibility facade remains exposed; and
 no public facade removal or deprecation, Cabal exposure or public API removal,
 release approval, milestone completion, or terminal completion is approved.
+`round-116` completed focused endpoint-backed `runHealthcheck` worker
+`thread/read` coverage at merged commit `c6b5c6b` under direction 010. The
+accepted test evidence covers request id `9001`, `includeTurns = True`, the
+configured thread id, latest turn id/status/count reporting, missing endpoint
+and missing thread id skip behavior, no `thread/read` when the thread id is
+absent, JSON-RPC error formatting, decode-failure prefix handling, and the
+direct-owner `AppServerEndpoint` test import. Validation passed with the
+focused REPL aggregate, `cabal test watcher-core-test`, `cabal build all`,
+whitespace checks, production/package/protocol diff guards, no
+`worker-plan.json`, and review-record `jq`. Timeout coverage was omitted and
+accepted because the production timeout is hard-coded to five seconds. This
+records the `Healthcheck.hs` coverage gate as satisfied for a later import-only
+migration decision, but `Healthcheck.hs` remains a source user until that
+migration happens. Milestone 003 remains in progress: remaining source users
+still include `Domain/PrReview/LaunchCli.hs`,
+`Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
+`Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus test-policy
+and test-support imports; `Cli/Command/AppServerProbe.hs` remains absent from
+the remaining source-user list after round 115; the public compatibility facade
+remains exposed; and this does NOT approve production Healthcheck import
+migration, behavior changes, public facade removal/deprecation, Cabal/API
+exposure cleanup, docs cleanup, other importer migration, milestone completion,
+release approval, or terminal completion.
 
 Candidate directions:
 
@@ -1110,6 +1133,32 @@ Candidate directions:
   public compatibility facade remains exposed; and this does not approve
   public facade removal or deprecation, Cabal exposure or public API removal,
   release approval, milestone completion, or terminal completion.
+  `round-116` completed the
+  `round-116-healthcheck-appserver-thread-inspection-coverage` slice at
+  `c6b5c6b` by adding focused endpoint-backed `runHealthcheck` worker
+  `thread/read` coverage. The accepted coverage verifies request id `9001`,
+  `includeTurns = True`, the configured thread id, latest turn
+  id/status/count reporting, missing endpoint and missing thread id skip
+  behavior, no `thread/read` when the thread id is absent, JSON-RPC error
+  formatting, decode-failure prefix handling, and the direct-owner
+  `AppServerEndpoint` test import. Validation passed with the focused REPL
+  aggregate, `cabal test watcher-core-test`, `cabal build all`, whitespace
+  checks, production/package/protocol diff guards, no `worker-plan.json`, and
+  review-record `jq`. Timeout coverage was omitted and accepted because the
+  production timeout is hard-coded to five seconds. This records the
+  `Healthcheck.hs` coverage gate as satisfied for a later import-only migration
+  decision, but `Healthcheck.hs` remains a source user until that migration
+  happens. Direction 010 remains in progress: remaining source users still
+  include `Domain/PrReview/LaunchCli.hs`,
+  `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
+  `Healthcheck.hs`, `Cli/Command/Observe.hs`, and
+  `Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports;
+  `Cli/Command/AppServerProbe.hs` remains absent from the remaining source-user
+  list after round 115; the public compatibility facade remains exposed; and
+  this does NOT approve production Healthcheck import migration, behavior
+  changes, public facade removal/deprecation, Cabal/API exposure cleanup, docs
+  cleanup, other importer migration, milestone completion, release approval, or
+  terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
