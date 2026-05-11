@@ -141,7 +141,8 @@ import CliSpec
   , prop_cliRejectsBadDomain
   )
 import HealthcheckSpec
-  ( prop_healthcheckDaemonRequiredStatuses
+  ( healthcheckAppServerThreadInspectionTests
+  , prop_healthcheckDaemonRequiredStatuses
   , prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
   , prop_healthcheckIssueImplementLifecycleReporting
   , prop_healthcheckSingletonDomains
@@ -7063,6 +7064,7 @@ main = do
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   runnerGuardActiveTurnInspectionOk <- runnerGuardActiveTurnInspectionTests
+  healthcheckAppServerThreadInspectionOk <- healthcheckAppServerThreadInspectionTests
   appServerProbeCommandOk <- appServerProbeCommandTests
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
   runtimeStatusIssueImplementOk <- runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier
@@ -7142,6 +7144,7 @@ main = do
       && runnerGuardWaitingRestartOk
       && runnerGuardRepairOk
       && runnerGuardActiveTurnInspectionOk
+      && healthcheckAppServerThreadInspectionOk
       && appServerProbeCommandOk
       && runtimeStatusOk
       && runtimeStatusIssueImplementOk

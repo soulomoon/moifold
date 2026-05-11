@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-116-healthcheck-appserver-thread-inspection-coverage",
+  "roadmap_item_id": "round-116-healthcheck-appserver-thread-inspection-coverage",
+  "decision": "approved",
+  "evidence_summary": "Focused REPL aggregate, watcher-core-test, cabal build all, whitespace checks, production/package/protocol diff guards, worker-plan absence, state lineage, and direct-owner HealthcheckSpec import check all passed."
+}
