@@ -673,6 +673,25 @@ direct-owner import convergence and does not approve public deprecation or
 removal, Cabal exposure removal, package descriptor cleanup, behavior changes
 beyond the import move, release approval, milestone completion, or terminal
 completion.
+`round-107` completed the narrow
+`round-107-issue-planning-turn-classifier-appserverclient-import-convergence`
+slice at merged commit `50f7ae6` under direction 010. It moved only
+`src/CodexWatcher/Domain/IssuePlanning/TurnClassifier.hs` from importing
+`CodexWatcher.AppServerClient` to importing direct owner
+`CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)`. Issue-planning
+classification behavior, `classifyIssuePlanningTurn`,
+`classifyTurnCompletion`, missing-output blocking, issue/subissue request
+parsing, planning graph parsing, invalid payload classification, and
+structured blocked/incomplete/complete classification were unchanged.
+Validation passed with target import scans, `cabal test watcher-core-test`,
+`cabal build all`, descriptor/facade diff check, no `worker-plan.json`,
+`git diff --check`, `git diff --cached --check`, and `jq` validation of state
+and review-record. This status records one narrow production direct-owner
+import convergence and does not approve public facade removal or deprecation,
+Cabal exposure removal, package descriptor cleanup, docs, fixtures, tests,
+protocol changes, other importer migration, release approval, milestone
+completion, or terminal completion. `CodexWatcher.AppServerClient` remains
+available and unchanged as a public facade.
 
 Candidate directions:
 
@@ -739,6 +758,25 @@ Candidate directions:
   move and does not approve public deprecation or removal, Cabal exposure
   removal, package descriptor cleanup, behavior changes beyond the import
   move, release approval, milestone completion, or terminal completion.
+  `round-107` completed the
+  `round-107-issue-planning-turn-classifier-appserverclient-import-convergence`
+  slice at `50f7ae6` by moving only
+  `src/CodexWatcher/Domain/IssuePlanning/TurnClassifier.hs` from the
+  compatibility facade to direct owner
+  `CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)`.
+  Issue-planning classification behavior, `classifyIssuePlanningTurn`,
+  `classifyTurnCompletion`, missing-output blocking, issue/subissue request
+  parsing, planning graph parsing, invalid payload classification, and
+  structured blocked/incomplete/complete classification were unchanged.
+  Validation passed with target import scans, `cabal test watcher-core-test`,
+  `cabal build all`, descriptor/facade diff check, no `worker-plan.json`,
+  `git diff --check`, `git diff --cached --check`, and `jq` validation of
+  state and review-record. This status records only that narrow import move
+  and does not approve public facade removal or deprecation, Cabal exposure
+  removal, package descriptor cleanup, docs, fixtures, tests, protocol
+  changes, other importer migration, release approval, milestone completion,
+  or terminal completion. `CodexWatcher.AppServerClient` remains available
+  and unchanged as a public facade.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
