@@ -744,7 +744,26 @@ a public facade. Milestone 003 remains in progress; current
 `Cli/Command/AppServerProbe.hs`, `Cli/Command/Observe.hs`, and
 `Cli/Command/IssueFanout.hs`, plus test-policy imports, and these are
 higher-risk endpoint/session/timeout/fallback/command/failure-formatting or
-test-policy surfaces.
+test-policy surfaces. `round-110` completed the artifact-only
+`round-110-runner-guard-appserverclient-gate-evidence` round at merged commit
+`74f715b` under direction 010. The accepted evidence maps every
+`src/CodexWatcher/RunnerGuard.hs` `CodexWatcher.AppServerClient` imported
+symbol to direct owner modules and use sites, and evaluates gates for
+repair-thread launch, `thread-name/set`, `turn/start`, request id progression,
+active-thread read, thread-read materialization pending, `threadSystemError`,
+latest-turn lookup, turn-completion classification, stale-turn decisions, and
+`formatAppServerClientFailure` text. The recommendation is no later
+RunnerGuard import-only split is safe yet until focused RunnerGuard active
+app-server turn inspection coverage lands first. This status does not approve
+migration, deprecation, public facade removal, Cabal exposure or package
+cleanup, behavior change, source/test/docs/package changes, release approval,
+milestone completion, or terminal completion. `CodexWatcher.AppServerClient`
+remains public and unchanged. Milestone 003 remains in progress; current
+`CodexWatcher.AppServerClient` source users remain in `RunnerGuard.hs` as
+blocked by focused behavior coverage, `Domain/PrReview/LaunchCli.hs`,
+`Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
+`Cli/Command/AppServerProbe.hs`, `Cli/Command/Observe.hs`,
+`Cli/Command/IssueFanout.hs`, plus test-policy imports.
 
 Candidate directions:
 
@@ -884,6 +903,27 @@ Candidate directions:
   `Healthcheck.hs`, `Cli/Command/AppServerProbe.hs`,
   `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus
   test-policy imports, and those surfaces still require focused gates.
+  `round-110` completed the artifact-only
+  `round-110-runner-guard-appserverclient-gate-evidence` round at `74f715b`
+  by mapping every `src/CodexWatcher/RunnerGuard.hs`
+  `CodexWatcher.AppServerClient` imported symbol to direct owner modules and
+  use sites, then evaluating gates for repair-thread launch,
+  `thread-name/set`, `turn/start`, request id progression, active-thread
+  read, thread-read materialization pending, `threadSystemError`,
+  latest-turn lookup, turn-completion classification, stale-turn decisions,
+  and `formatAppServerClientFailure` text. The accepted recommendation is
+  that no later RunnerGuard import-only split is safe yet until focused
+  RunnerGuard active app-server turn inspection coverage lands first. This
+  status does not approve migration, deprecation, public facade removal,
+  Cabal exposure or package cleanup, behavior change, source/test/docs/package
+  changes, release approval, milestone completion, or terminal completion.
+  `CodexWatcher.AppServerClient` remains public and unchanged. Direction 010
+  remains in progress: current source users remain in `RunnerGuard.hs` as
+  blocked by focused behavior coverage, `Domain/PrReview/LaunchCli.hs`,
+  `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
+  `Healthcheck.hs`, `Cli/Command/AppServerProbe.hs`,
+  `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus
+  test-policy imports.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
