@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-098-boundary-policy-github-ids-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: BoundaryPolicySpec now imports CodexWatcher.Workflow.GitHub.Ids instead of CodexWatcher.Core.Ids, uses only GitHub id tokens, moifold.cabal has no diff, tracked implementation diff is limited to the selected test import plus controller state, and cabal test watcher-core-test, cabal build all, git diff --check, and git diff --cached --check all passed."
+}

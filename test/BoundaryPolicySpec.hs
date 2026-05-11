@@ -6,7 +6,7 @@ module BoundaryPolicySpec
   , workflowBoundaryPolicyTests
   ) where
 
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.GitHub.Ids
 import CodexWatcher.Domain.PrReview.Types
 import CodexWatcher.Runtime.Command.Render (renderRuntimeCommand)
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..), RuntimeCommandSpec (..))
