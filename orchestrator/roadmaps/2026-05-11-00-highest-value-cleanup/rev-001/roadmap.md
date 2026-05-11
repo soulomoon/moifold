@@ -1028,6 +1028,29 @@ import migration, public facade removal/deprecation, Cabal/API exposure
 cleanup, docs cleanup, package descriptor cleanup, protocol/runtime/owner
 changes, milestone completion, release approval, terminal completion, or
 public compatibility removal.
+`round-124` completed the
+`round-124-pr-review-launch-appserverclient-import-convergence` slice at
+merged commit `fc2700a` by moving only
+`src/CodexWatcher/Domain/PrReview/LaunchCli.hs` from the public
+`CodexWatcher.AppServerClient` facade to direct owner imports from
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+import-only: no code bodies, behavior, request ids, launch-plan persistence,
+failure formatting, tests, docs, package descriptors, public facade, direct
+owner modules, protocol modules, runtime files, app code, IssueFanout, or
+test-policy/support imports changed. Validation passed with target import
+scans, `git diff --unified=0` showing only import-line changes,
+`cabal test watcher-core-test`, `cabal build all`, `git diff --check`, no
+worker-plan guard, and state/review-record JSON checks. This records
+`Domain/PrReview/LaunchCli.hs` as migrated off the
+`CodexWatcher.AppServerClient` facade, but milestone 003 remains in progress:
+remaining production source users still include `Cli/Command/IssueFanout.hs`,
+plus test-policy and test-support imports; the public compatibility facade
+remains exposed; and this does NOT approve IssueFanout migration,
+test-policy/support import migration, public facade removal/deprecation,
+Cabal/API exposure cleanup, docs cleanup, package descriptor cleanup,
+protocol/runtime/owner changes, milestone completion, release approval,
+terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -1495,6 +1518,29 @@ Candidate directions:
   removal/deprecation, Cabal/API exposure cleanup, docs cleanup, package
   descriptor cleanup, protocol/runtime/owner changes, milestone completion,
   release approval, terminal completion, or public compatibility removal.
+  `round-124` completed the
+  `round-124-pr-review-launch-appserverclient-import-convergence` slice at
+  merged commit `fc2700a` by moving only
+  `src/CodexWatcher/Domain/PrReview/LaunchCli.hs` from the public
+  `CodexWatcher.AppServerClient` facade to direct owner imports from
+  `CodexWatcher.Workflow.Agent.Codex.Client` and
+  `CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+  import-only: no code bodies, behavior, request ids, launch-plan persistence,
+  failure formatting, tests, docs, package descriptors, public facade, direct
+  owner modules, protocol modules, runtime files, app code, IssueFanout, or
+  test-policy/support imports changed. Validation passed with target import
+  scans, `git diff --unified=0` showing only import-line changes,
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, no
+  worker-plan guard, and state/review-record JSON checks. This records
+  `Domain/PrReview/LaunchCli.hs` as migrated off the
+  `CodexWatcher.AppServerClient` facade. Direction 010 remains in progress:
+  remaining production source users still include `Cli/Command/IssueFanout.hs`,
+  plus test-policy and test-support imports; the public compatibility facade
+  remains exposed; and this does NOT approve IssueFanout migration,
+  test-policy/support import migration, public facade removal/deprecation,
+  Cabal/API exposure cleanup, docs cleanup, package descriptor cleanup,
+  protocol/runtime/owner changes, milestone completion, release approval,
+  terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
