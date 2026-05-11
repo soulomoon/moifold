@@ -572,6 +572,23 @@ user migration, public facade exposure changes, Cabal exposure removal,
 package descriptor cleanup, parser, renderer, command-output, prompt,
 fixture, runtime-config, runtime compatibility cleanup, deprecation, removal,
 release/publication, milestone completion, or terminal completion changes.
+`round-101` completed a narrow executable GitHub-id-only
+`direction-011-core-ids-import-convergence` slice at merged commit `93196cd`
+by moving `app/Main.hs` from
+`CodexWatcher.Core.Ids (RepoName (unRepoName))` to direct
+`CodexWatcher.Workflow.GitHub.Ids (RepoName (unRepoName))`, preserving
+`healthcheckOptionsFromCli` behavior, leaving public compatibility facade
+exposure unchanged, adding only the compile-proven executable dependency
+`agent-workflow-github >=0.1 && <0.2` to `executable moifold`, and passing
+`cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+`git diff --cached --check`. This status records one executable
+GitHub-id-only direct-owner import convergence plus the required executable
+dependency, and does not approve AppServerClient, Workflow.EventLog,
+Workflow.Permission, combined Core.Ids user migration, public facade exposure
+changes, Cabal exposure removal, package descriptor cleanup beyond the narrow
+executable dependency, parser, renderer, command-output, prompt, fixture,
+runtime-config, runtime compatibility cleanup, deprecation, removal,
+release/publication, milestone completion, or terminal completion changes.
 
 Candidate directions:
 
@@ -641,11 +658,22 @@ Candidate directions:
   state and completion-evidence behavior were preserved, package descriptors
   and public compatibility facade exposure were unchanged, and validation
   passed with `cabal test watcher-core-test`, `cabal build all`,
-  `git diff --check`, and `git diff --cached --check`. Remaining combined
-  users, broader production import convergence, package descriptor cleanup,
-  Cabal exposure removal, public deprecation, facade removal, runtime
-  compatibility cleanup, release approval, milestone completion, and terminal
-  completion remain outside these completed slices.
+  `git diff --check`, and `git diff --cached --check`.
+  `round-101` completed the
+  `round-101-app-main-repo-name-import-convergence` slice at `93196cd` by
+  moving only `app/Main.hs` from
+  `CodexWatcher.Core.Ids (RepoName (unRepoName))` to
+  `CodexWatcher.Workflow.GitHub.Ids (RepoName (unRepoName))`. CLI
+  healthcheck option conversion was preserved, public compatibility facade
+  exposure was unchanged, the only package descriptor change was the
+  compile-proven executable-only `agent-workflow-github >=0.1 && <0.2`
+  dependency for `executable moifold`, and validation passed with
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+  `git diff --cached --check`. Remaining combined users, broader production
+  import convergence, package descriptor cleanup beyond the narrow executable
+  dependency, Cabal exposure removal, public deprecation, facade removal,
+  runtime compatibility cleanup, release approval, milestone completion, and
+  terminal completion remain outside these completed slices.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
