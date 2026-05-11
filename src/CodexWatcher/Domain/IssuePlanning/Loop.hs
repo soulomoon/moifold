@@ -11,7 +11,6 @@ module CodexWatcher.Domain.IssuePlanning.Loop
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
 import CodexWatcher.Daemon (DaemonObservation (..), DaemonOptions (..))
 import CodexWatcher.DaemonLoop.Types
 import CodexWatcher.EffectInterpreter
@@ -38,6 +37,7 @@ import CodexWatcher.Domain.IssuePlanning.Types
   )
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import Control.Monad (filterM)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key

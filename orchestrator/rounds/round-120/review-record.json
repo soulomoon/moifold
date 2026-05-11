@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-120-issue-planning-loop-appserverclient-import-convergence",
+  "roadmap_item_id": "round-120-issue-planning-loop-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration: IssuePlanning Loop no longer imports CodexWatcher.AppServerClient and directly imports AppServerTurn from CodexWatcher.Workflow.Agent.Codex.Client; non-import code and planning systemError behavior remained unchanged; focused REPL gate, watcher-core-test, cabal build all, import scans, forbidden diff guards, whitespace checks, no-worker check, and review-stage state lineage checks passed."
+}
