@@ -178,6 +178,7 @@ import RuntimeSpec
   , prop_runtimeKillZeroOnlyChecksPid
   , runtimeProcessSpecCapturesStreamsAndExit
   )
+import RunnerGuardSpec (runnerGuardActiveTurnInspectionTests)
 
 instance Arbitrary RepoName where
   arbitrary = RepoName . Text.pack <$> listOf1 (elements (['a' .. 'z'] <> ['/', '-']))
@@ -7060,6 +7061,7 @@ main = do
   runnerGuardRestartOk <- runnerGuardRestartsMissingPidForIncompletePlanning
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
+  runnerGuardActiveTurnInspectionOk <- runnerGuardActiveTurnInspectionTests
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
   runtimeStatusIssueImplementOk <- runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier
   runtimeOwnerLeaseOk <- runtimeOwnerLeaseParsingRejectsOwnerOnlyJson
@@ -7137,6 +7139,7 @@ main = do
       && runnerGuardRestartOk
       && runnerGuardWaitingRestartOk
       && runnerGuardRepairOk
+      && runnerGuardActiveTurnInspectionOk
       && runtimeStatusOk
       && runtimeStatusIssueImplementOk
       && runtimeOwnerLeaseOk

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-111-runner-guard-active-turn-inspection-coverage",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Focused RunnerGuard active app-server turn inspection coverage was added through watcher-core-test with endpoint-backed thread/read assertions, materialization fallback threshold coverage, active-turn problem mapping coverage, and formatted JSON-RPC/decode failure detail checks. Focused repl, cabal test watcher-core-test, cabal build all, whitespace checks, worker-plan absence, and production diff guard all passed."
+}

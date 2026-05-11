@@ -186,6 +186,8 @@ test-suite watcher-core-test
     JsonPathSpec
     RuntimeCompatibilityFixtureSpec
     RuntimeSpec
+    RunnerGuardSpec
+    TestSupport.AppServer
     TestSupport.SourceScan
     TestSupport.Workflow
     WorkflowAgentSpec
@@ -204,9 +206,11 @@ test-suite watcher-core-test
     agent-workflow-github >=0.1 && <0.2,
     directory >=1.3 && <1.4,
     filepath >=1.4 && <1.6,
+    network >=3.1 && <3.3,
     process >=1.6 && <1.7,
     QuickCheck >=2.14 && <3,
     text >=2.0 && <3,
     time >=1.12 && <1.15,
-    unix >=2.8 && <2.9
+    unix >=2.8 && <2.9,
+    websockets >=0.13 && <0.14
   default-language: GHC2021
