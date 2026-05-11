@@ -1072,6 +1072,29 @@ IssueFanout migration, test-policy/support import migration, public facade
 removal/deprecation, Cabal/API exposure cleanup, docs cleanup, package
 descriptor cleanup, protocol/runtime/owner changes, milestone completion,
 release approval, terminal completion, or public compatibility removal.
+`round-126` completed the
+`round-126-issue-fanout-appserverclient-import-convergence` slice at merged
+commit `d881412` by moving only
+`src/CodexWatcher/Cli/Command/IssueFanout.hs` from the public
+`CodexWatcher.AppServerClient` facade to direct owner imports from
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+import-only: no code bodies, behavior, tests, test support, package
+descriptors, public facade, direct owner modules, protocol modules, runtime
+files, docs, app code, or other importers changed. Validation passed with the
+focused `IssueFanoutAppServerSpec.issueFanoutAppServerTests` REPL gate,
+`cabal test watcher-core-test`, `cabal build all`, diff checks, import
+guards, no-worker-plan guard, and review-stage JSON checks. Live scans after
+round 126 show no remaining production source `CodexWatcher.AppServerClient`
+imports; remaining hits are the public facade and Cabal exposure, tests and
+test-support imports, and docs/policy references. This records the known
+production source IssueFanout import convergence, but milestone 003 remains in
+progress: the public compatibility facade remains exposed, test-policy and
+test-support imports remain, docs and policy references remain, and this does
+NOT approve test-policy/support migration, public facade removal/deprecation,
+Cabal/API exposure cleanup, docs cleanup, package descriptor cleanup,
+milestone completion, release approval, terminal completion, or public
+compatibility removal.
 
 Candidate directions:
 
@@ -1584,6 +1607,29 @@ Candidate directions:
   docs cleanup, package descriptor cleanup, protocol/runtime/owner changes,
   milestone completion, release approval, terminal completion, or public
   compatibility removal.
+  `round-126` completed the
+  `round-126-issue-fanout-appserverclient-import-convergence` slice at merged
+  commit `d881412` by moving only
+  `src/CodexWatcher/Cli/Command/IssueFanout.hs` from the public
+  `CodexWatcher.AppServerClient` facade to direct owner imports from
+  `CodexWatcher.Workflow.Agent.Codex.Client` and
+  `CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+  import-only: no code bodies, behavior, tests, test support, package
+  descriptors, public facade, direct owner modules, protocol modules, runtime
+  files, docs, app code, or other importers changed. Validation passed with
+  the focused `IssueFanoutAppServerSpec.issueFanoutAppServerTests` REPL gate,
+  `cabal test watcher-core-test`, `cabal build all`, diff checks, import
+  guards, no-worker-plan guard, and review-stage JSON checks. Live scans after
+  round 126 show no remaining production source `CodexWatcher.AppServerClient`
+  imports; remaining hits are the public facade and Cabal exposure, tests and
+  test-support imports, and docs/policy references. This records the known
+  production source IssueFanout import convergence, but direction 010 remains
+  in progress: the public compatibility facade remains exposed, test-policy
+  and test-support imports remain, docs and policy references remain, and this
+  does NOT approve test-policy/support migration, public facade
+  removal/deprecation, Cabal/API exposure cleanup, docs cleanup, package
+  descriptor cleanup, milestone completion, release approval, terminal
+  completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
