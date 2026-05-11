@@ -68,7 +68,7 @@ import CodexWatcher.EffectInterpreter
   , compileEffect
   , compileEffectPlan
   )
-import CodexWatcher.Core.Ids (RequestId)
+import CodexWatcher.Workflow.Agent.Ids (RequestId)
 import CodexWatcher.Effects (Effect (..), EffectPlan, SomeEffect (..))
 import CodexWatcher.Failure (FailureClassification, classifyExternalFailureText)
 import CodexWatcher.Runtime.Command.Types (CommandReport)
