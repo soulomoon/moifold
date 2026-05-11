@@ -20,23 +20,25 @@ module CodexWatcher.RunnerGuard
   , startRunnerGuardRepairThread
   ) where
 
-import CodexWatcher.AppServerClient
-  ( AppServerEndpoint
-  , AppServerTurn (..)
-  , defaultAppServerClientOptions
-  , formatAppServerClientFailure
-  , latestTurnById
-  , parseThreadReadTurns
-  , parseTurnStartTurnId
-  , sendOneAppServerRequest
-  , startThreadWithEndpoint
-  , threadReadMaterializationPending
-  , threadSystemError
-  )
 import CodexWatcher.AppServerProtocol
   ( threadNameSetRequest
   , threadReadRequest
   , turnStartRequest
+  )
+import CodexWatcher.Workflow.Agent.Codex.Client
+  ( AppServerTurn (..)
+  , formatAppServerClientFailure
+  , latestTurnById
+  , parseThreadReadTurns
+  , parseTurnStartTurnId
+  , threadReadMaterializationPending
+  , threadSystemError
+  )
+import CodexWatcher.Workflow.Agent.Codex.Transport
+  ( AppServerEndpoint
+  , defaultAppServerClientOptions
+  , sendOneAppServerRequest
+  , startThreadWithEndpoint
   )
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)

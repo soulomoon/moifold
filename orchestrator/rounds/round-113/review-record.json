@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-113-runner-guard-appserverclient-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only RunnerGuard migration from CodexWatcher.AppServerClient to direct Codex client and transport owner modules. Production diff is limited to RunnerGuard imports; facade, descriptors, owner modules, code bodies, tests, docs, and other importers remain unchanged. Focused RunnerGuard REPL aggregate, watcher-core-test, cabal build all, import scans, diff guards, whitespace checks, no-worker-plan check, and JSON validation passed."
+}
