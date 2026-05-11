@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-119-observe-appserverclient-import-convergence",
+  "roadmap_item_id": "round-119-observe-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Observe.hs no longer imports CodexWatcher.AppServerClient and now imports appServerInterpreterFromEndpoint/defaultAppServerClientOptions from CodexWatcher.Workflow.Agent.Codex.Transport. The diff is import-only, AppServerInterpreter null fallback remains available through ActionExecutor, focused observe coverage, watcher-core-test, cabal build all, diff checks, import scans, forbidden diff guards, no-worker check, and review-stage state checks passed."
+}

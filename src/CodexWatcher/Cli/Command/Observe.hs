@@ -8,7 +8,6 @@ module CodexWatcher.Cli.Command.Observe
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
 import CodexWatcher.Cli.Types
 import CodexWatcher.Daemon
 import CodexWatcher.Cli.RuntimeConfig
@@ -18,6 +17,10 @@ import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.Runtime.Owner.Cli (validateRuntimeOwnerForExecution)
+import CodexWatcher.Workflow.Agent.Codex.Transport
+  ( appServerInterpreterFromEndpoint
+  , defaultAppServerClientOptions
+  )
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (somePhase)
