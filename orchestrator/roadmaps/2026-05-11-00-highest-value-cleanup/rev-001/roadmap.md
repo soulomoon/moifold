@@ -604,7 +604,19 @@ user migration, broader Core.Ids migration, public facade exposure changes,
 Cabal exposure removal, package descriptor cleanup, parser, renderer,
 command-output, prompt, fixture, runtime-config, runtime compatibility
 cleanup, deprecation, removal, release/publication, milestone completion, or
-terminal completion changes.
+terminal completion changes. `round-103` completed the artifact-only
+`round-103-core-ids-remaining-blocker-readiness` evidence round at merged
+commit `b2eee52`. The approved live scan after rounds 098 through 102 records
+39 remaining `CodexWatcher.Core.Ids` imports: 29 under `src`, 10 under `test`,
+0 under `app`, and 0 under standalone package candidates. The five prior safe
+single-domain candidates no longer import the facade and now use direct owner
+imports. The remaining users are blocker-class production surfaces or
+test-policy evidence surfaces, so direction 011's current single-domain queue
+is closed. Any later `Core.Ids` work should be selected as split-import or
+bridge-readiness slices with focused evidence. This status does not approve
+broader Core.Ids migration, public deprecation, facade removal, Cabal exposure
+removal, package descriptor cleanup, runtime compatibility cleanup,
+release/publication, milestone completion, or terminal completion changes.
 
 Candidate directions:
 
@@ -694,11 +706,21 @@ Candidate directions:
   preserved, package descriptors and public compatibility facade exposure were
   unchanged, and validation passed with `cabal test watcher-core-test`,
   `cabal build all`, `git diff --check`, and `git diff --cached --check`.
-  Remaining combined users, broader Core.Ids migration, broader production
-  import convergence, package descriptor cleanup beyond the narrow executable
-  dependency, Cabal exposure removal, public deprecation, facade removal,
-  runtime compatibility cleanup, release approval, milestone completion, and
-  terminal completion remain outside these completed slices.
+  `round-103` completed the artifact-only
+  `round-103-core-ids-remaining-blocker-readiness` evidence round at
+  `b2eee52`: live `CodexWatcher.Core.Ids` imports now stand at 39 total
+  (`src`: 29, `test`: 10, `app`: 0, standalone packages: 0), all five prior
+  safe single-domain candidates from rounds 098 through 102 now use direct
+  owner imports, and the remaining importers are blocker-class production
+  surfaces or test-policy evidence surfaces. The current single-domain queue
+  for direction 011 is therefore closed; any later work should be split-import
+  or bridge-readiness slices with focused parser/renderer, event-log/replay,
+  prompt/loop-policy, runtime-compatibility, or test-policy evidence. Broader
+  Core.Ids migration, broader production import convergence, package
+  descriptor cleanup beyond the narrow executable dependency, Cabal exposure
+  removal, public deprecation, facade removal, runtime compatibility cleanup,
+  release approval, milestone completion, and terminal completion remain
+  outside these completed slices.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
