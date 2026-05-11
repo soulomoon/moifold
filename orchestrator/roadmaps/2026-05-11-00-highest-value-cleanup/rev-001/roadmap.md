@@ -305,21 +305,31 @@ field path, and restart-script pid extraction and cleanup boundaries, and
 `issue-snapshot.json` planner snapshot shape only, including current writer
 shape, `planningIssueFactsFromSnapshot` parser acceptance, execute-mode
 write-before-planner-turn timing, planner prompt path consumption, and
-healthcheck, repair, replay, and restart non-reader boundaries.
+healthcheck, repair, replay, and restart non-reader boundaries, and
+`round-096-runtime-state-healthcheck-read-nonread-contracts` completed a
+`direction-008-healthcheck-compatibility-contracts` slice at merged commit
+`0d1a0b2` by adding watcher-core source-policy evidence for the current
+healthcheck runtime-state read/non-read contract across selected surfaces:
+issue planning reads `planner-state.json` through shared state, issue
+implementation reads shared state plus `issue-state.json`, PR review keeps
+`block-state.json` and `runtime-owner.json`, shared state keeps
+`daemon-state.json`, `block-state.json`, and `runtime-owner.json`, healthcheck
+does not read `planning-state.json`, `repair-state.json`, or live
+`issue-snapshot.json`, and the runtime-owner summary path remains
+`["runtimeOwner", "owner"]`.
 Milestone 002 is in progress, not complete: the inventory names fixture,
 healthcheck-contract, operator/downstream, and removal/migration blockers, the
-state-file contract is now explicit, the runtime-owner healthcheck contract is
-now recorded, and the planner/planning, daemon-state, repair-failure
-block-state, repair-state, runtime-owner current-lease, and live issue-snapshot
-fixture slices are covered, but healthcheck compatibility-contract evidence
-for remaining selected surfaces, any additional fixture slices justified by
-later checked-in snapshot or downstream evidence, and final cleanup
-classifications still remain for later directions.
+state-file contract is now explicit, the planner/planning, daemon-state,
+repair-failure block-state, repair-state, runtime-owner current-lease, and live
+issue-snapshot fixture slices are covered, and the runtime-owner field-path and
+consolidated healthcheck read/non-read contracts are now recorded, but any
+additional fixture slices justified by later checked-in snapshot or downstream
+evidence and final cleanup classifications still remain for later directions.
 This status does not approve deprecation, facade removal, Cabal exposure
-removal, runtime compatibility-file deletion or rename, healthcheck behavior
-changes, repair behavior changes, restart behavior changes, fixture batch
-approval, release approval, terminal completion, or public compatibility
-removal.
+removal, runtime compatibility-file deletion, rename, or migration, healthcheck
+behavior changes, repair behavior changes, restart behavior changes, fixture
+batch approval, cleanup classification or removal approval, release approval,
+milestone completion, terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -456,21 +466,31 @@ Candidate directions:
   Boundary notes: no healthcheck behavior change without focused approval.
   Extraction notes: record explicit non-reader policy for write-only files such
   as `planning-state.json` or `repair-state.json` when applicable.
-  Status: partial; `round-089` completed
+  Status: completed for the current selected healthcheck-contract surfaces;
+  `round-089` completed
   `round-089-runtime-owner-healthcheck-contract` at `fa1337c` for the
   `runtime-owner.json` slice only. The reviewed round added runtime-owner JSON
   assertions, a healthcheck source-policy assertion preserving
   `runtime-owner.json` as the `runtimeOwner` state surface for issue planning,
   issue implementation, and PR review, and a narrow policy note recording that
   the current summary lookup remains `["runtimeOwner", "owner"]` rather than
-  the lease-shaped `["runtimeOwner", "lease", "runtime"]` path. This is
-  current contract evidence only; it does not approve healthcheck behavior
-  changes, runtime-owner schema or producer changes, script changes, fixture
-  batch approval, file deletion or rename, schema migration, repair behavior
-  changes, deprecation or removal, release approval, or public compatibility
-  removal. Remaining healthcheck-contract surfaces from the milestone and
-  round-087 inventory still require later selected slices, so direction 008 is
-  not complete.
+  the lease-shaped `["runtimeOwner", "lease", "runtime"]` path. `round-096`
+  completed `round-096-runtime-state-healthcheck-read-nonread-contracts` at
+  `0d1a0b2` by adding a consolidated watcher-core source-policy assertion for
+  the current healthcheck runtime-state read/non-read contract: issue planning
+  reads `planner-state.json` through shared state, issue implementation reads
+  shared state plus `issue-state.json`, PR review keeps `block-state.json` and
+  `runtime-owner.json`, shared state keeps `daemon-state.json`,
+  `block-state.json`, and `runtime-owner.json`, healthcheck does not mention
+  `planning-state.json`, `repair-state.json`, or live `issue-snapshot.json`,
+  healthcheck remains read-only for these source-policy checks, and the
+  runtime-owner summary lookup remains `["runtimeOwner", "owner"]`. This is
+  current contract evidence only; it does not approve production healthcheck
+  behavior changes, runtime-owner schema or producer changes, script changes,
+  broad fixture batch approval, compatibility-file deletion, rename, or
+  migration, repair behavior changes, deprecation or removal, cleanup
+  classification or removal approval, release approval, milestone completion,
+  terminal completion, or public compatibility removal.
 
 ### 3. [pending] Import Convergence And Package-Boundary Cleanup
 
