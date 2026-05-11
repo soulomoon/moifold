@@ -112,6 +112,7 @@ import TestSupport.Workflow (sameWatcherStateShape)
 import AutomaticLoopRunnerSpec (automaticLoopRunnerTests)
 import AppServerProbeSpec (appServerProbeCommandTests)
 import ObserveCommandSpec (observeCommandTests)
+import PrReviewLaunchCliSpec (prReviewLaunchCliTests)
 import AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientDetectsSystemErrorThreadStatus
@@ -7076,6 +7077,7 @@ main = do
   pidRestoreOk <- restoreOwnedPidFileRepairsMissingAndStalePid
   observeParsingOk <- observeOnceParsingCoversDomainsAndDefaults
   observeCommandOk <- observeCommandTests
+  prReviewLaunchCliOk <- prReviewLaunchCliTests
   automaticLoopRunnerOk <- automaticLoopRunnerTests
   if
     all isSuccess results
@@ -7158,6 +7160,7 @@ main = do
       && pidRestoreOk
       && observeParsingOk
       && observeCommandOk
+      && prReviewLaunchCliOk
       && automaticLoopRunnerOk
     then pure ()
     else exitFailure

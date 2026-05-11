@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-123-pr-review-launch-appserverclient-coverage",
+  "roadmap_item_id": "round-123-pr-review-launch-appserverclient-coverage",
+  "decision": "approved",
+  "evidence_summary": "Focused watcher-core PR-review launch coverage passed; watcher-core test, cabal build all, diff checks, import guards, path guards, package descriptor guard, no-worker-plan guard, and state checks all passed with no production LaunchCli or forbidden-surface changes."
+}
