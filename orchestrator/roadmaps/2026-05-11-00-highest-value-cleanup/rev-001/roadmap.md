@@ -781,6 +781,23 @@ blocker from round 110 before selecting any RunnerGuard import-only migration,
 other source users remain, and no migration, public facade removal or
 deprecation, Cabal exposure or public API removal, release approval, milestone
 completion, or terminal completion is approved.
+`round-112` completed focused RunnerGuard repair-launch sequence coverage at
+merged commit `0988458` under direction 010. The accepted test-only evidence
+drives `startRunnerGuardRepairThread` through the endpoint-backed fake
+app-server and verifies the repair launch request sequence: `thread/start`,
+`thread/name/set`, and `turn/start` with request ids `1`, `2`, and `3`;
+returned repair thread and turn ids; repair thread naming; repair cwd,
+developer instructions, and prompt details; and formatted failure details for
+launch, name-set, turn-start, and turn-start parse failures. Validation passed
+with the focused REPL aggregate, `cabal test watcher-core-test`,
+`cabal build all`, whitespace checks, no `worker-plan.json`, and an empty
+production diff guard for RunnerGuard, AppServerClient, client, transport, and
+protocol modules. This satisfies the second RunnerGuard behavior-coverage
+blocker recorded by round 110, but milestone 003 remains in progress: current
+`CodexWatcher.AppServerClient` source users still remain, the public
+compatibility facade remains exposed, and no production import migration,
+public facade removal or deprecation, Cabal exposure or public API removal,
+release approval, milestone completion, or terminal completion is approved.
 
 Candidate directions:
 
@@ -958,6 +975,25 @@ Candidate directions:
   repair-launch sequence coverage remains a follow-up blocker from round 110
   before selecting any RunnerGuard import-only migration, other source users
   remain, and this does not approve production RunnerGuard/AppServerClient or
+  app-server client/transport/protocol changes, import migration, public facade
+  removal or deprecation, Cabal exposure or public API removal, release
+  approval, milestone completion, or terminal completion.
+  `round-112` completed the
+  `round-112-runner-guard-repair-launch-sequence-coverage` slice at `0988458`
+  by adding focused endpoint-backed RunnerGuard repair-launch sequence coverage
+  through `startRunnerGuardRepairThread`. The accepted coverage verifies the
+  `thread/start`, `thread/name/set`, and `turn/start` request sequence with
+  ids `1`, `2`, and `3`; the returned repair thread and turn ids; repair
+  thread naming; repair cwd, developer instructions, prompt details, and
+  formatted JSON-RPC/decode failure details for launch, name-set, turn-start,
+  and parse failures. Validation passed with the focused REPL aggregate,
+  `cabal test watcher-core-test`, `cabal build all`, whitespace checks, no
+  `worker-plan.json`, and an empty production diff guard for RunnerGuard,
+  AppServerClient, client, transport, and protocol modules. This records the
+  second RunnerGuard behavior-coverage blocker from round 110 as satisfied,
+  but direction 010 remains in progress: current `CodexWatcher.AppServerClient`
+  source users still remain, the public compatibility facade remains exposed,
+  and this does not approve production RunnerGuard/AppServerClient or
   app-server client/transport/protocol changes, import migration, public facade
   removal or deprecation, Cabal exposure or public API removal, release
   approval, milestone completion, or terminal completion.
