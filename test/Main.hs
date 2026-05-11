@@ -109,6 +109,7 @@ import WorkflowExecutionSpec (workflowExecutionTests)
 import WorkflowIndexedSpec (workflowIndexedTests)
 import TestSupport.SourceScan (textNeedlesInOrder)
 import TestSupport.Workflow (sameWatcherStateShape)
+import AppServerProbeSpec (appServerProbeCommandTests)
 import AppServerSpec
   ( prop_appServerClientInitializesSingleRequestSessions
   , prop_appServerClientDetectsSystemErrorThreadStatus
@@ -7062,6 +7063,7 @@ main = do
   runnerGuardWaitingRestartOk <- runnerGuardRestartsMissingPidForWaitingPlanning
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   runnerGuardActiveTurnInspectionOk <- runnerGuardActiveTurnInspectionTests
+  appServerProbeCommandOk <- appServerProbeCommandTests
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
   runtimeStatusIssueImplementOk <- runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier
   runtimeOwnerLeaseOk <- runtimeOwnerLeaseParsingRejectsOwnerOnlyJson
@@ -7140,6 +7142,7 @@ main = do
       && runnerGuardWaitingRestartOk
       && runnerGuardRepairOk
       && runnerGuardActiveTurnInspectionOk
+      && appServerProbeCommandOk
       && runtimeStatusOk
       && runtimeStatusIssueImplementOk
       && runtimeOwnerLeaseOk
