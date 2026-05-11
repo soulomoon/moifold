@@ -764,6 +764,23 @@ blocked by focused behavior coverage, `Domain/PrReview/LaunchCli.hs`,
 `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
 `Cli/Command/AppServerProbe.hs`, `Cli/Command/Observe.hs`,
 `Cli/Command/IssueFanout.hs`, plus test-policy imports.
+`round-111` completed focused RunnerGuard active app-server turn inspection
+coverage at merged commit `ece12c5` under direction 010. The accepted
+test-only evidence drives `checkRunnerGuard` through an endpoint-backed fake
+app-server and verifies actual active `thread/read` request id `1` with
+`includeTurns = True`, materialization fallback across the stale threshold,
+`threadSystemError`, missing active turn, failed turn, completed-without-output,
+blank output, completed-but-unobserved output, and formatted JSON-RPC/decode
+failure details. Validation passed with the focused REPL aggregate,
+`cabal test watcher-core-test`, `cabal build all`, whitespace checks, no
+`worker-plan.json`, and an empty production diff guard for RunnerGuard,
+AppServerClient, client, transport, and protocol modules. This satisfies the
+first active-turn coverage blocker for `RunnerGuard.hs`, but milestone 003
+remains in progress: repair-launch sequence coverage remains a follow-up
+blocker from round 110 before selecting any RunnerGuard import-only migration,
+other source users remain, and no migration, public facade removal or
+deprecation, Cabal exposure or public API removal, release approval, milestone
+completion, or terminal completion is approved.
 
 Candidate directions:
 
@@ -924,6 +941,26 @@ Candidate directions:
   `Healthcheck.hs`, `Cli/Command/AppServerProbe.hs`,
   `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus
   test-policy imports.
+  `round-111` completed the
+  `round-111-runner-guard-active-turn-inspection-coverage` slice at `ece12c5`
+  by adding focused RunnerGuard active app-server turn inspection coverage
+  through `checkRunnerGuard` and a test-only endpoint-backed fake app-server.
+  The accepted coverage verifies the actual active `thread/read` request shape
+  with request id `1` and `includeTurns = True`, materialization fallback
+  across the stale threshold, `threadSystemError`, missing active turn, failed
+  turn, completed-without-output, blank output, completed-but-unobserved
+  output, and formatted JSON-RPC/decode failure details. Validation passed
+  with the focused REPL aggregate, `cabal test watcher-core-test`,
+  `cabal build all`, whitespace checks, no `worker-plan.json`, and an empty
+  production diff guard for RunnerGuard, AppServerClient, client, transport,
+  and protocol modules. This records the first active-turn coverage blocker for
+  `RunnerGuard.hs` as satisfied, but direction 010 remains in progress:
+  repair-launch sequence coverage remains a follow-up blocker from round 110
+  before selecting any RunnerGuard import-only migration, other source users
+  remain, and this does not approve production RunnerGuard/AppServerClient or
+  app-server client/transport/protocol changes, import migration, public facade
+  removal or deprecation, Cabal exposure or public API removal, release
+  approval, milestone completion, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
