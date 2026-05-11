@@ -1095,6 +1095,27 @@ NOT approve test-policy/support migration, public facade removal/deprecation,
 Cabal/API exposure cleanup, docs cleanup, package descriptor cleanup,
 milestone completion, release approval, terminal completion, or public
 compatibility removal.
+`round-127` completed the
+`round-127-docs-migration-eventlog-direct-owner-import-convergence` slice at
+merged commit `a18139d` by moving only
+`src/CodexWatcher/Workflow/DocsMigration.hs` from the mixed
+`CodexWatcher.Workflow.EventLog` facade to direct owner imports from
+`CodexWatcher.Workflow.EventLog.Core`,
+`CodexWatcher.Workflow.EventLog.Commit.Core`, and
+`CodexWatcher.Workflow.Audit`. The accepted change preserved
+DocsMigration behavior, event schema, exports, package exposure, replay and
+fixture behavior, daemon audit behavior, transaction behavior, and permission
+coverage. Validation passed with the focused DocsMigration test,
+`cabal test watcher-core-test`, `cabal build all`, diff checks, and
+import/facade scans. This records one production
+`CodexWatcher.Workflow.EventLog` direct-owner import convergence, but
+milestone 003 remains in progress: remaining exact EventLog facade users such
+as `src/CodexWatcher/Daemon.hs`, tests/test support, docs/policy references,
+and the public facade/exposure remain out of scope. This does NOT approve
+facade deprecation/removal, Cabal exposure removal, public API cleanup, package
+descriptor cleanup, remaining EventLog facade migration, Workflow.Permission
+migration, release approval, milestone completion, terminal completion, or
+public compatibility removal.
 
 Candidate directions:
 
@@ -1711,8 +1732,8 @@ Candidate directions:
   Boundary notes: no public deprecation, Cabal exposure change, or removal.
   Extraction notes: separate reusable core imports from concrete moifold bridge
   helpers and record what remains product-owned.
-  Status: completed by `round-104` at `073a5d6` as artifact-only readiness
-  evidence. The reviewed artifact records live import counts for
+  Status: in progress; `round-104` completed artifact-only readiness evidence
+  at `073a5d6`. The reviewed artifact records live import counts for
   `CodexWatcher.Workflow.EventLog` as `src`: 2 and `test`: 8, and for
   `CodexWatcher.Workflow.Permission` as `test`: 7; both facades have
   `app`: 0 and standalone package candidate imports: 0. `moifold.cabal` still
@@ -1728,7 +1749,23 @@ Candidate directions:
   status is readiness evidence only and does not approve import migration,
   public deprecation or removal, Cabal exposure removal, package descriptor
   cleanup, runtime compatibility cleanup, release approval, milestone
-  completion, or terminal completion.
+  completion, or terminal completion. `round-127` completed the first
+  production direct-owner import-convergence slice for this direction at
+  `a18139d` by moving only `src/CodexWatcher/Workflow/DocsMigration.hs` off
+  the mixed `CodexWatcher.Workflow.EventLog` facade to direct
+  `CodexWatcher.Workflow.EventLog.Core`,
+  `CodexWatcher.Workflow.EventLog.Commit.Core`, and
+  `CodexWatcher.Workflow.Audit` owner imports. DocsMigration behavior,
+  schema, exports, package exposure, replay/fixture behavior, daemon audit
+  behavior, transaction behavior, and permission coverage were preserved, with
+  the focused DocsMigration test, full watcher-core-test, `cabal build all`,
+  diff checks, and import/facade scans passing. Remaining exact EventLog facade
+  users, including `src/CodexWatcher/Daemon.hs`, tests/test support,
+  docs/policy references, and the public facade/exposure, stay out of scope;
+  this does not approve facade deprecation/removal, Cabal exposure removal,
+  package descriptor cleanup, remaining EventLog migration,
+  Workflow.Permission migration, release approval, milestone completion, or
+  terminal completion.
 
 ### 4. [pending] Large Runtime Module Decomposition
 
