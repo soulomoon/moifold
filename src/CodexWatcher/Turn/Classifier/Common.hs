@@ -15,8 +15,8 @@ module CodexWatcher.Turn.Classifier.Common
   , normalize
   ) where
 
-import CodexWatcher.AppServerClient
 import CodexWatcher.Core.Reason (BlockedReason (..))
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:?))
 import Data.List (find)
 import Data.Text (Text)

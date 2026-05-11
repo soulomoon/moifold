@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-106-turn-classifier-common-appserverclient-import-convergence",
+  "roadmap_item_id": "round-106-turn-classifier-common-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved the selected Common.hs import convergence change: the only production/test/package/docs/fixture diff is replacing CodexWatcher.AppServerClient with CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..)); import scans, descriptor/facade diff check, watcher-core-test, cabal build all, diff hygiene checks, worker-plan absence, and JSON validation passed. Approval excludes facade deprecation/removal, package descriptor changes, behavior changes, milestone/terminal completion, and the pre-existing orchestrator/state.json diff."
+}
