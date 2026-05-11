@@ -1051,6 +1051,27 @@ test-policy/support import migration, public facade removal/deprecation,
 Cabal/API exposure cleanup, docs cleanup, package descriptor cleanup,
 protocol/runtime/owner changes, milestone completion, release approval,
 terminal completion, or public compatibility removal.
+`round-125` completed the `round-125-issue-fanout-appserverclient-coverage`
+slice at merged commit `8efbab4` by adding focused watcher-core coverage for
+the app-server-backed `src/CodexWatcher/Cli/Command/IssueFanout.hs` child
+implementer launch path before any import migration. The accepted coverage
+verifies endpoint-backed `thread/start` launches, request ids starting at
+`8000`, launch workdir `cwd`, developer instruction context, persisted
+config/event/finalized manifest thread ids, child command rendering, retryable
+clone failure classification, fallback child-start classification ordering, and
+selected app-server failure formatting. The reviewed change was coverage-only:
+it added `test/IssueFanoutAppServerSpec.hs`, wired
+`issueFanoutAppServerTests` into `test/Main.hs`, and added only
+`IssueFanoutAppServerSpec` to `watcher-core-test` metadata in `moifold.cabal`.
+This records `Cli/Command/IssueFanout.hs` as the remaining production
+`CodexWatcher.AppServerClient` source user now covered for a later import-only
+migration decision. Milestone 003 remains in progress: `IssueFanout.hs` still
+imports the public facade, test-policy and test-support imports remain, the
+public compatibility facade remains exposed, and this does NOT approve
+IssueFanout migration, test-policy/support import migration, public facade
+removal/deprecation, Cabal/API exposure cleanup, docs cleanup, package
+descriptor cleanup, protocol/runtime/owner changes, milestone completion,
+release approval, terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -1541,6 +1562,28 @@ Candidate directions:
   Cabal/API exposure cleanup, docs cleanup, package descriptor cleanup,
   protocol/runtime/owner changes, milestone completion, release approval,
   terminal completion, or public compatibility removal.
+  `round-125` completed the `round-125-issue-fanout-appserverclient-coverage`
+  slice at merged commit `8efbab4` by adding focused watcher-core coverage for
+  the app-server-backed `src/CodexWatcher/Cli/Command/IssueFanout.hs` child
+  implementer launch path before any import migration. The accepted coverage
+  verifies endpoint-backed `thread/start` launches, request ids starting at
+  `8000`, launch workdir `cwd`, developer instruction context, persisted
+  config/event/finalized manifest thread ids, child command rendering,
+  retryable clone failure classification, fallback child-start classification
+  ordering, and selected app-server failure formatting. The reviewed change was
+  coverage-only: it added `test/IssueFanoutAppServerSpec.hs`, wired
+  `issueFanoutAppServerTests` into `test/Main.hs`, and added only
+  `IssueFanoutAppServerSpec` to `watcher-core-test` metadata in
+  `moifold.cabal`. This records `Cli/Command/IssueFanout.hs` as the remaining
+  production `CodexWatcher.AppServerClient` source user now covered for a later
+  import-only migration decision. Direction 010 remains in progress:
+  `IssueFanout.hs` still imports the public facade, test-policy and
+  test-support imports remain, the public compatibility facade remains exposed,
+  and this does NOT approve IssueFanout migration, test-policy/support import
+  migration, public facade removal/deprecation, Cabal/API exposure cleanup,
+  docs cleanup, package descriptor cleanup, protocol/runtime/owner changes,
+  milestone completion, release approval, terminal completion, or public
+  compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
