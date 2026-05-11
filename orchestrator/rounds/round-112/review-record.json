@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-112-runner-guard-repair-launch-sequence-coverage",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: endpoint-backed RunnerGuard repair-launch tests cover thread/start id 1, thread/name/set id 2, turn/start id 3, repair id/name/prompt flow, launch/name-set/turn-start/parse failure formatting, with full gates passing and no production RunnerGuard/AppServerClient/client/transport/protocol diff."
+}
