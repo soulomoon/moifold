@@ -828,13 +828,31 @@ success output, and selected JSON-RPC/decode failure formatting. The reviewed
 change added `test/AppServerProbeSpec.hs`, wired it through `test/Main.hs`,
 and added only the required `watcher-core-test` metadata in `moifold.cabal`.
 This satisfies the AppServerProbe command coverage gate for a later
-import-only decision, but milestone 003 remains in progress: current
-`CodexWatcher.AppServerClient` source users still remain, including
-`Cli/Command/AppServerProbe.hs`; the public compatibility facade remains
-exposed; and no production AppServerProbe/AppServerClient/direct-owner or
-protocol change, import migration, public facade removal or deprecation, Cabal
-exposure or public API removal, release approval, milestone completion, or
-terminal completion is approved.
+import-only decision; no production AppServerProbe/AppServerClient/direct-owner
+or protocol change, import migration, public facade removal or deprecation,
+Cabal exposure or public API removal, release approval, milestone completion,
+or terminal completion is approved by round 114.
+`round-115` completed the narrow
+`round-115-appserver-probe-appserverclient-import-convergence` slice at merged
+commit `dab7a84` under direction 010. It moved only
+`src/CodexWatcher/Cli/Command/AppServerProbe.hs` from importing
+`CodexWatcher.AppServerClient` to direct owner imports from
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport`. The reviewed change was
+import-only: no code bodies, behavior, tests, public facade exposure,
+package descriptors, public API, docs, direct owner modules, protocol modules,
+or other importers changed. Validation passed with target import scans,
+focused AppServerProbe command coverage, `cabal test watcher-core-test`,
+`cabal build all`, descriptor/facade/direct-owner/protocol diff guards, no
+`worker-plan.json`, whitespace checks, and JSON validation. This records
+`Cli/Command/AppServerProbe.hs` as migrated off the
+`CodexWatcher.AppServerClient` facade, but milestone 003 remains in progress:
+remaining source users still include `Domain/PrReview/LaunchCli.hs`,
+`Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
+`Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus test-policy
+and test-support imports; the public compatibility facade remains exposed; and
+no public facade removal or deprecation, Cabal exposure or public API removal,
+release approval, milestone completion, or terminal completion is approved.
 
 Candidate directions:
 
@@ -1066,15 +1084,32 @@ Candidate directions:
   `AppServerProbeSpec` to `watcher-core-test` metadata in `moifold.cabal`.
   This records the AppServerProbe command coverage gate as satisfied for a
   later import-only migration decision. Direction 010 remains in progress:
+  no production AppServerProbe/AppServerClient/direct-owner or protocol changes,
+  import migration, public facade removal or deprecation, Cabal exposure or
+  public API removal, release approval, milestone completion, or terminal
+  completion is approved by round 114.
+  `round-115` completed the
+  `round-115-appserver-probe-appserverclient-import-convergence` slice at
+  `dab7a84` by moving only
+  `src/CodexWatcher/Cli/Command/AppServerProbe.hs` from the compatibility
+  facade to direct owner imports from
+  `CodexWatcher.Workflow.Agent.Codex.Client` and
+  `CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+  import-only: no code bodies, behavior, tests, public facade exposure,
+  package descriptors, public API, docs, direct owner modules, protocol
+  modules, or other importers changed. Validation passed with target import
+  scans, focused AppServerProbe command coverage, `cabal test watcher-core-test`,
+  `cabal build all`, descriptor/facade/direct-owner/protocol diff guards, no
+  `worker-plan.json`, whitespace checks, and JSON validation. This records
+  `Cli/Command/AppServerProbe.hs` as migrated off the
+  `CodexWatcher.AppServerClient` facade. Direction 010 remains in progress:
   remaining source users still include `Domain/PrReview/LaunchCli.hs`,
   `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
-  `Healthcheck.hs`, `Cli/Command/AppServerProbe.hs`,
-  `Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus
-  test-policy and test-support imports; the public compatibility facade
-  remains exposed; and this does not approve production
-  AppServerProbe/AppServerClient/direct-owner or protocol changes, import
-  migration, public facade removal or deprecation, Cabal exposure or public API
-  removal, release approval, milestone completion, or terminal completion.
+  `Healthcheck.hs`, `Cli/Command/Observe.hs`, and
+  `Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports; the
+  public compatibility facade remains exposed; and this does not approve
+  public facade removal or deprecation, Cabal exposure or public API removal,
+  release approval, milestone completion, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
