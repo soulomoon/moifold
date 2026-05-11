@@ -899,6 +899,30 @@ absent from the remaining source-user list after their migrations; the public
 compatibility facade remains exposed; and this does NOT approve public facade
 removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
 migration, milestone completion, release approval, or terminal completion.
+`round-118` completed focused black-box `observeOnce` coverage at merged
+commit `e45b729` under direction 010. The accepted test-only evidence covers
+execute mode without an endpoint failing with the required endpoint flag
+message, dry-run without an endpoint succeeding through the null interpreter
+fallback, and execute mode with a configured endpoint reaching the fake
+app-server session and planner `turn/start` traffic. The reviewed change added
+`test/ObserveCommandSpec.hs`, wired it through `test/Main.hs`, and added only
+the required `watcher-core-test` metadata in `moifold.cabal`; production
+`src/CodexWatcher/Cli/Command/Observe.hs`, app-server client/transport/protocol
+modules, runtime compatibility files, fixtures, docs, app code, and other
+importers were not changed. This records the `Cli/Command/Observe.hs` coverage
+gate as satisfied for a later import-only migration decision, but
+`Cli/Command/Observe.hs` remains a `CodexWatcher.AppServerClient` source user
+until that later migration happens. Milestone 003 remains in progress:
+remaining source users still include `Domain/PrReview/LaunchCli.hs`,
+`Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`,
+`Cli/Command/Observe.hs`, and `Cli/Command/IssueFanout.hs`, plus test-policy
+and test-support imports; `RunnerGuard.hs`,
+`Cli/Command/AppServerProbe.hs`, and `Healthcheck.hs` remain absent from the
+remaining source-user list after their migrations; the public compatibility
+facade remains exposed; and this does NOT approve production Observe import
+migration, behavior changes, public facade removal/deprecation, Cabal/API
+exposure cleanup, docs cleanup, other importer migration, milestone completion,
+release approval, or terminal completion.
 
 Candidate directions:
 
@@ -1203,6 +1227,30 @@ Candidate directions:
   `Cli/Command/AppServerProbe.hs`, and `Healthcheck.hs` remain absent from the
   remaining source-user list after their migrations; the public compatibility
   facade remains exposed; and this does NOT approve public facade
+  removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
+  migration, milestone completion, release approval, or terminal completion.
+  `round-118` completed the
+  `round-118-observe-appserver-interpreter-coverage` slice at merged commit
+  `e45b729` by adding focused black-box `observeOnce` coverage for
+  `src/CodexWatcher/Cli/Command/Observe.hs`. The accepted coverage verifies
+  execute mode without an endpoint fails with the required endpoint flag
+  message, dry-run without an endpoint succeeds through the null interpreter
+  fallback, and execute mode with a configured endpoint reaches the fake
+  app-server session and planner `turn/start` traffic. The change was
+  test-only: it added `test/ObserveCommandSpec.hs`, wired
+  `observeCommandTests` into `test/Main.hs`, and added only
+  `ObserveCommandSpec` to `watcher-core-test` metadata in `moifold.cabal`.
+  This records the `Cli/Command/Observe.hs` coverage gate as satisfied for a
+  later import-only migration decision, but `Cli/Command/Observe.hs` remains a
+  `CodexWatcher.AppServerClient` source user until that migration happens.
+  Direction 010 remains in progress: remaining source users still include
+  `Domain/PrReview/LaunchCli.hs`, `Domain/IssuePlanning/Loop.hs`,
+  `AutomaticLoop/Runner.hs`, `Cli/Command/Observe.hs`, and
+  `Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports;
+  `RunnerGuard.hs`, `Cli/Command/AppServerProbe.hs`, and `Healthcheck.hs`
+  remain absent from the remaining source-user list after their migrations; the
+  public compatibility facade remains exposed; and this does NOT approve
+  production Observe import migration, behavior changes, public facade
   removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
   migration, milestone completion, release approval, or terminal completion.
 
