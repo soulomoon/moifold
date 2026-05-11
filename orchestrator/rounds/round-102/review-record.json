@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-102-workflow-docs-migration-agent-ids-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/WorkflowDocsMigrationSpec.hs only replaces CodexWatcher.Core.Ids with CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..)); focused scans prove no Core.Ids import remains and only ThreadId/TurnId id tokens are used; descriptor scan proves watcher-core-test reaches the direct owner module through agent-workflow-codex; cabal test watcher-core-test, cabal build all, git diff --check, and git diff --cached --check passed."
+}

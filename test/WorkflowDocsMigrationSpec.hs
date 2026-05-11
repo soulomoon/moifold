@@ -63,7 +63,7 @@ import CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds
 import CodexWatcher.Core.Limits
 import CodexWatcher.Core.Reason
