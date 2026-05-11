@@ -492,7 +492,7 @@ Candidate directions:
   classification or removal approval, release approval, milestone completion,
   terminal completion, or public compatibility removal.
 
-### 3. [pending] Import Convergence And Package-Boundary Cleanup
+### 3. [in-progress] Import Convergence And Package-Boundary Cleanup
 
 Milestone id: `milestone-003-import-convergence-package-boundaries`
 Depends on: `milestone-001-test-topology-inventory`
@@ -506,6 +506,31 @@ deprecation or removal is implied.
 Parallel lane: import convergence lane after inventory
 Coordination notes: import migration is not deprecation. Keep facades exposed
 in `moifold.cabal` until exact removal gates are approved.
+Current status: `round-097-facade-import-scan-refresh` completed
+`direction-009-facade-import-scan-refresh` as artifact-only accepted evidence
+at merged commit `04a675c`. The accepted inventory records current
+selected-facade import counts of `CodexWatcher.AppServerClient`: 19
+(`src`: 12, `test`: 7), `CodexWatcher.Core.Ids`: 44 (`src`: 31, `app`: 1,
+`test`: 12), `CodexWatcher.Workflow.EventLog`: 10 (`src`: 2, `test`: 8), and
+`CodexWatcher.Workflow.Permission`: 7 (`test`: 7); confirms `moifold.cabal`
+still exposes all four selected compatibility facades; confirms no exact
+selected-facade imports under `agent-workflow-core`, `agent-workflow-codex`,
+or `agent-workflow-github`; and corrects the current `Core.Ids` classification
+to 3 GitHub-only candidates, 2 agent-only candidates, and 39 combined users,
+with `test/BoundaryPolicySpec.hs` classified as GitHub-only. Later convergence
+remains blocked by per-surface evidence: `AppServerClient` needs endpoint
+parsing, protocol, session handling, command rendering, fallback, timeout, and
+failure-formatting checks; `Core.Ids` combined users need parser/renderer,
+serialization, prompt/output, runtime-config, and fixture stability evidence;
+`Workflow.EventLog` needs generic event-log/audit uses separated from moifold
+wrapper uses plus golden replay, old-log parsing, event JSON `type`,
+transition/replay parity, and wrapper behavior evidence; and
+`Workflow.Permission` needs reusable permission-core uses separated from
+concrete moifold policy helpers plus permission soundness, phase-validation,
+state/effect validation, public API, and downstream evidence. This status does
+not approve import migration, Cabal exposure changes, public deprecation,
+facade removal, runtime compatibility cleanup, release/publication, milestone
+completion, or terminal completion.
 
 Candidate directions:
 
@@ -520,6 +545,14 @@ Candidate directions:
   Boundary notes: no import changes or public surface changes.
   Extraction notes: include `src`, `app`, `test`, package descriptors, docs,
   and standalone package candidates.
+  Status: completed by `round-097` at `04a675c`; use
+  `orchestrator/rounds/round-097/facade-import-scan-refresh.md` as the current
+  accepted selected-facade import and exposure inventory for later
+  `AppServerClient`, `Core.Ids`, `Workflow.EventLog`, and
+  `Workflow.Permission` convergence slices. This status is evidence only and
+  does not approve import migration, Cabal exposure change, deprecation,
+  removal, runtime compatibility cleanup, milestone completion, or terminal
+  completion.
 
 - Direction id: `direction-010-appserverclient-import-convergence`
   Summary: Move safe remaining internal `CodexWatcher.AppServerClient` imports
