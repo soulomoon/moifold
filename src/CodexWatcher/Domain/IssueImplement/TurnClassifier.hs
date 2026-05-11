@@ -10,10 +10,10 @@ module CodexWatcher.Domain.IssueImplement.TurnClassifier
   , classifyIssuePlanTurn
   ) where
 
-import CodexWatcher.AppServerClient
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Core.Ids (CommitSha (..), PrNumber, ThreadId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromSummaries)

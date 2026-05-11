@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-108-issue-implement-turn-classifier-appserverclient-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: target TurnClassifier import moved from CodexWatcher.AppServerClient to CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn) only; descriptor/facade diff empty; no worker-plan artifact; watcher-core-test, cabal build all, diff checks, and JSON validation passed; no public facade removal/deprecation, Cabal exposure change, docs/fixtures/tests/protocol change, other importer migration, milestone completion, or terminal completion approved."
+}
