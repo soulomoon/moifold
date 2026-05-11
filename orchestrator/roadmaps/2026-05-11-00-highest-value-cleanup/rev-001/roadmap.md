@@ -541,6 +541,21 @@ one test-only direct-owner import convergence and does not approve production
 import convergence, combined-user migration, parser, renderer, command-output,
 prompt, fixture, runtime-config, public facade exposure, deprecation, removal,
 release/publication, milestone completion, or terminal completion changes.
+`round-099` completed a narrow production agent-id-only
+`direction-011-core-ids-import-convergence` slice at merged commit `08bd47a`
+by moving `src/CodexWatcher/Workflow/Execution.hs` from
+`CodexWatcher.Core.Ids (RequestId)` to direct
+`CodexWatcher.Workflow.Agent.Ids (RequestId)`, preserving workflow execution
+behavior, request-id threading, dry-run conversion, action partitioning, and
+checked execution behavior, leaving `moifold.cabal` unchanged, and passing
+`cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+`git diff --cached --check`. This status records one production
+agent-id-only direct-owner import convergence and does not approve
+AppServerClient, Workflow.EventLog, Workflow.Permission, combined Core.Ids
+user migration, public facade exposure changes, Cabal exposure removal,
+package descriptor cleanup, parser, renderer, command-output, prompt,
+fixture, runtime-config, runtime compatibility cleanup, deprecation, removal,
+release/publication, milestone completion, or terminal completion changes.
 
 Candidate directions:
 
@@ -594,9 +609,19 @@ Candidate directions:
   `CodexWatcher.Core.Ids` to `CodexWatcher.Workflow.GitHub.Ids`. Assertions
   were preserved, `moifold.cabal` was unchanged, and validation passed with
   `cabal test watcher-core-test` plus `cabal build all`. Remaining work must
-  still inventory and justify other direct-owner candidates and blockers;
-  combined users and any production import convergence remain outside this
-  completed slice.
+  still inventory and justify other direct-owner candidates and blockers.
+  `round-099` completed the
+  `round-099-workflow-execution-agent-id-import-convergence` slice at
+  `08bd47a` by moving only `src/CodexWatcher/Workflow/Execution.hs` from
+  `CodexWatcher.Core.Ids (RequestId)` to
+  `CodexWatcher.Workflow.Agent.Ids (RequestId)`. Workflow execution behavior
+  was preserved, `moifold.cabal` was unchanged, and validation passed with
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+  `git diff --cached --check`. Remaining combined users, broader production
+  import convergence, package descriptor cleanup, Cabal exposure removal,
+  public deprecation, facade removal, runtime compatibility cleanup, release
+  approval, milestone completion, and terminal completion remain outside these
+  completed slices.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
