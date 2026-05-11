@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-115-appserver-probe-appserverclient-import-convergence",
+  "roadmap_item_id": "direction-010-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration of src/CodexWatcher/Cli/Command/AppServerProbe.hs from CodexWatcher.AppServerClient to direct Codex client/transport owner imports. Focused AppServerProbe REPL aggregate, cabal test watcher-core-test, cabal build all, import scans, descriptor/facade/direct-owner/protocol guards, no-worker-plan check, diff checks, and JSON checks passed."
+}
