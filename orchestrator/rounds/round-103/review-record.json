@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-103-core-ids-remaining-blocker-readiness",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Artifact-only review approved: live Core.Ids import scan found 39 remaining imports (src 29, test 10, app 0, standalone packages 0), all five prior safe candidates now use direct owner imports, remaining importers are blocker-class users, descriptors and non-artifact paths have no diff, and diff hygiene passed."
+}
