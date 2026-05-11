@@ -1004,7 +1004,30 @@ this does NOT approve public facade removal/deprecation, Cabal/API exposure
 cleanup, docs cleanup, package descriptor cleanup, protocol/runtime/owner
 changes, PR-review launch migration, issue-fanout migration,
 test-policy/support import migration, milestone completion, release approval,
-terminal completion, or public compatibility removal.
+terminal completion, or public compatibility removal. `round-123` completed
+the `round-123-pr-review-launch-appserverclient-coverage` slice at merged
+commit `eaf8348` by adding focused watcher-core coverage for
+`src/CodexWatcher/Domain/PrReview/LaunchCli.hs` endpoint-backed PR-review
+worker/reviewer thread launch before any import migration. The accepted
+coverage verifies worker and reviewer `thread/start` requests with request ids
+`9000` and `9001`, role-specific developer instructions, refreshed thread-id
+persistence in the launch plan, dry-run child command rendering for root and
+non-root app-server paths, and selected JSON-RPC/decode failure formatting.
+The reviewed change was coverage-only: it added
+`test/PrReviewLaunchCliSpec.hs`, wired `prReviewLaunchCliTests` into
+`test/Main.hs`, and added only `PrReviewLaunchCliSpec` to `watcher-core-test`
+metadata in `moifold.cabal`. This records
+`Domain/PrReview/LaunchCli.hs` as a production `CodexWatcher.AppServerClient`
+user now covered for a later import-only migration decision. Milestone 003
+remains in progress: live import scans after round 123 show remaining
+production source users in `Domain/PrReview/LaunchCli.hs` and
+`Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports; the
+public compatibility facade remains exposed; and this does NOT approve
+PR-review launch import migration, IssueFanout migration, test-policy/support
+import migration, public facade removal/deprecation, Cabal/API exposure
+cleanup, docs cleanup, package descriptor cleanup, protocol/runtime/owner
+changes, milestone completion, release approval, terminal completion, or
+public compatibility removal.
 
 Candidate directions:
 
@@ -1443,6 +1466,35 @@ Candidate directions:
   changes, PR-review launch migration, issue-fanout migration,
   test-policy/support import migration, milestone completion, release approval,
   terminal completion, or public compatibility removal.
+  `round-123` completed the
+  `round-123-pr-review-launch-appserverclient-coverage` slice at merged commit
+  `eaf8348` by adding focused watcher-core coverage for
+  `src/CodexWatcher/Domain/PrReview/LaunchCli.hs` endpoint-backed PR-review
+  worker/reviewer thread launch before any import migration. The accepted
+  coverage verifies the worker and reviewer `thread/start` requests with
+  request ids `9000` and `9001`, role-specific developer instructions,
+  persisted refreshed thread ids in config/finalized manifest, dry-run child
+  command rendering for host, port, poll seconds, state paths, workdir,
+  execute/loop flags, pid file, root app-server path omission, non-root
+  `--app-server-path` handling, and selected JSON-RPC/decode failure
+  formatting through the public execute path. The change was coverage-only: it
+  added `test/PrReviewLaunchCliSpec.hs`, wired `prReviewLaunchCliTests` into
+  `test/Main.hs`, and added only `PrReviewLaunchCliSpec` to
+  `watcher-core-test` metadata in `moifold.cabal`; production
+  `LaunchCli.hs`, `CodexWatcher.AppServerClient`, direct owner
+  client/transport/protocol modules, runtime compatibility files, fixtures,
+  docs, app code, and IssueFanout were unchanged. This records
+  `Domain/PrReview/LaunchCli.hs` as a production
+  `CodexWatcher.AppServerClient` user now covered for a later import-only
+  migration decision. Direction 010 remains in progress: live import scans
+  after round 123 show remaining production source users in
+  `Domain/PrReview/LaunchCli.hs` and `Cli/Command/IssueFanout.hs`, plus
+  test-policy and test-support imports; the public compatibility facade
+  remains exposed; and this does NOT approve LaunchCli import migration,
+  IssueFanout migration, test-policy/support import migration, public facade
+  removal/deprecation, Cabal/API exposure cleanup, docs cleanup, package
+  descriptor cleanup, protocol/runtime/owner changes, milestone completion,
+  release approval, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
