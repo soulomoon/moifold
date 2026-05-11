@@ -656,6 +656,23 @@ surface cleanup. Later migration candidates are gate-backed only. This status
 does not approve import migration, public deprecation or removal, Cabal
 exposure removal, package descriptor cleanup, behavior change, release
 approval, milestone completion, or terminal completion.
+`round-106` completed the narrow
+`round-106-turn-classifier-common-appserverclient-import-convergence` slice at
+merged commit `604202e` under direction 010. It moved only
+`src/CodexWatcher/Turn/Classifier/Common.hs` from importing
+`CodexWatcher.AppServerClient` to importing direct owner
+`CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))`.
+Classifier logic, exports, status normalization, structured-output parsing,
+missing-output behavior, endpoint/session/protocol behavior, package
+descriptors, public facade exposure, docs, fixtures, tests, and other
+`CodexWatcher.AppServerClient` importers were unchanged. Validation passed
+with `cabal test watcher-core-test`, `cabal build all`, import scans,
+descriptor/facade diff check, `git diff --check`, and
+`git diff --cached --check`. This status records one narrow production
+direct-owner import convergence and does not approve public deprecation or
+removal, Cabal exposure removal, package descriptor cleanup, behavior changes
+beyond the import move, release approval, milestone completion, or terminal
+completion.
 
 Candidate directions:
 
@@ -706,7 +723,22 @@ Candidate directions:
   surface cleanup. This status is artifact-only readiness evidence; it does
   not approve import migration, public deprecation or removal, Cabal exposure
   removal, package descriptor cleanup, behavior change, release approval,
-  milestone completion, or terminal completion.
+  milestone completion, or terminal completion. `round-106` completed the
+  `round-106-turn-classifier-common-appserverclient-import-convergence` slice
+  at `604202e` by moving only
+  `src/CodexWatcher/Turn/Classifier/Common.hs` from the compatibility facade
+  to direct owner
+  `CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))`.
+  Classifier logic, exports, status normalization, structured-output parsing,
+  missing-output behavior, endpoint/session/protocol behavior, package
+  descriptors, public facade exposure, docs, fixtures, tests, and other
+  `CodexWatcher.AppServerClient` importers were unchanged. Validation passed
+  with `cabal test watcher-core-test`, `cabal build all`, import scans,
+  descriptor/facade diff check, `git diff --check`, and
+  `git diff --cached --check`. This status records only that narrow import
+  move and does not approve public deprecation or removal, Cabal exposure
+  removal, package descriptor cleanup, behavior changes beyond the import
+  move, release approval, milestone completion, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
