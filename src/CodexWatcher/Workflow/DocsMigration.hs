@@ -59,6 +59,9 @@ import CodexWatcher.Workflow.Agent
   , TurnRef (..)
   , defaultAgentRetryPolicy
   )
+import CodexWatcher.Workflow.Audit
+  ( WorkflowTickAudit (..)
+  )
 import CodexWatcher.Workflow.Codec
   ( WorkflowCodecContract (..)
   , WorkflowDecodeError (..)
@@ -68,14 +71,11 @@ import CodexWatcher.Workflow.Codec
   )
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
-import CodexWatcher.Workflow.EventLog
+import CodexWatcher.Workflow.EventLog.Core
   ( EventLogFixtureContract (..)
   , WorkflowReplaySummary (..)
-  , WorkflowTickAudit
   , formatWorkflowReplayFailure
   , replayWorkflowEventLogDetailed
-  , workflowAuditPostCommitReports
-  , workflowAuditPreCommitReports
   )
 import CodexWatcher.Workflow.EventLog.Commit.Core (WorkflowEventCommitter (..))
 import CodexWatcher.Workflow.Execution
@@ -251,7 +251,7 @@ data DocsMigrationDaemonTickResult = DocsMigrationDaemonTickResult
   , docsMigrationDaemonCommittedEvents :: [DocsMigrationEvent]
   , docsMigrationDaemonCompiledEffects :: WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
   , docsMigrationDaemonActionReports :: [DocsMigrationActionReport]
-  , docsMigrationDaemonAudit :: WorkflowTickAudit DocsMigrationSpec DocsMigrationActionReport
+  , docsMigrationDaemonAudit :: WorkflowTickAudit DocsMigrationSpec FailureClassification DocsMigrationActionReport
   }
   deriving stock (Eq, Show)
 

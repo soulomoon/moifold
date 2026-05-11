@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-127-docs-migration-eventlog-direct-owner-import-convergence",
+  "roadmap_item_id": "round-127-docs-migration-eventlog-direct-owner-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved. DocsMigration now uses direct EventLog.Core, EventLog.Commit.Core, and Audit owner imports without behavior/schema/export changes; focused DocsMigration test, watcher-core-test, cabal build all, diff checks, import/facade scans, and roadmap lineage checks passed."
+}
