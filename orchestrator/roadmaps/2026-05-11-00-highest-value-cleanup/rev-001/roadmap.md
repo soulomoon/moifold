@@ -1354,6 +1354,33 @@ Candidate directions:
   facade removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other
   importer migration, milestone completion, release approval, or terminal
   completion.
+  `round-121` completed the
+  `round-121-automatic-loop-appserver-interpreter-coverage` slice at merged
+  commit `523c552` by adding focused watcher-core coverage for
+  `src/CodexWatcher/AutomaticLoop/Runner.hs` app-server interpreter
+  construction before any import migration. The accepted coverage verifies
+  `runAutomaticLoop` execute mode sends endpoint-backed app-server traffic
+  through the configured `AppServerEndpoint`, including default initialization
+  plus planner `thread/start` and `turn/start`; verifies the matching dry-run
+  scenario succeeds without live endpoint traffic; and preserves
+  retry/fallback classification for app-server transport failures versus
+  decode/replay and unexpected-start-plan fatal failures. The change was
+  coverage-only: it added `test/AutomaticLoopRunnerSpec.hs`, wired
+  `automaticLoopRunnerTests` into `test/Main.hs`, and added only
+  `AutomaticLoopRunnerSpec` to `watcher-core-test` metadata in
+  `moifold.cabal`. Direction 010 remains in progress: remaining production
+  source users still include `Domain/PrReview/LaunchCli.hs`,
+  `AutomaticLoop/Runner.hs`, and `Cli/Command/IssueFanout.hs`, plus
+  test-policy and test-support imports; `RunnerGuard.hs`,
+  `Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`,
+  `Cli/Command/Observe.hs`, and `Domain/IssuePlanning/Loop.hs` remain absent
+  from the remaining source-user list after their migrations; the public
+  compatibility facade remains exposed; and this does NOT approve an
+  `AutomaticLoop/Runner.hs` import migration, any other importer migration,
+  public facade removal/deprecation, Cabal/API exposure cleanup, docs cleanup,
+  package descriptor cleanup beyond the prior test metadata merged in
+  round 121, protocol/runtime/owner changes, milestone completion, release
+  approval, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
