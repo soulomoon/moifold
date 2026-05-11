@@ -923,6 +923,29 @@ facade remains exposed; and this does NOT approve production Observe import
 migration, behavior changes, public facade removal/deprecation, Cabal/API
 exposure cleanup, docs cleanup, other importer migration, milestone completion,
 release approval, or terminal completion.
+`round-119` completed the
+`round-119-observe-appserverclient-import-convergence` slice at merged commit
+`f59c2c3` by moving only `src/CodexWatcher/Cli/Command/Observe.hs` from the
+public `CodexWatcher.AppServerClient` facade to direct owner transport imports
+for `appServerInterpreterFromEndpoint` and
+`defaultAppServerClientOptions`. The accepted change was import-only: no code
+bodies, behavior, parser, output, endpoint requirement, dry-run fallback,
+tests, docs, package descriptors, public facade, direct owner modules,
+protocol modules, runtime files, app code, or other importers changed.
+Validation passed with focused `ObserveCommandSpec.observeCommandTests`,
+`cabal test watcher-core-test`, `cabal build all`, diff checks, target import
+scans, forbidden diff guards, no worker-plan, and state/review-record JSON
+checks. This records `Cli/Command/Observe.hs` as migrated off the
+`CodexWatcher.AppServerClient` facade, but milestone 003 remains in progress:
+remaining production source users still include `Domain/PrReview/LaunchCli.hs`,
+`Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, and
+`Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports;
+`RunnerGuard.hs`, `Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`, and
+`Cli/Command/Observe.hs` remain absent from the remaining source-user list
+after their migrations; the public compatibility facade remains exposed; and
+this does NOT approve public facade removal/deprecation, Cabal/API exposure
+cleanup, docs cleanup, other importer migration, milestone completion, release
+approval, or terminal completion.
 
 Candidate directions:
 
@@ -1253,6 +1276,30 @@ Candidate directions:
   production Observe import migration, behavior changes, public facade
   removal/deprecation, Cabal/API exposure cleanup, docs cleanup, other importer
   migration, milestone completion, release approval, or terminal completion.
+  `round-119` completed the
+  `round-119-observe-appserverclient-import-convergence` slice at merged commit
+  `f59c2c3` by moving only `src/CodexWatcher/Cli/Command/Observe.hs` from the
+  public `CodexWatcher.AppServerClient` facade to direct owner transport
+  imports for `appServerInterpreterFromEndpoint` and
+  `defaultAppServerClientOptions`. The accepted change was import-only: no code
+  bodies, behavior, parser, output, endpoint requirement, dry-run fallback,
+  tests, docs, package descriptors, public facade, direct owner modules,
+  protocol modules, runtime files, app code, or other importers changed.
+  Validation passed with focused `ObserveCommandSpec.observeCommandTests`,
+  `cabal test watcher-core-test`, `cabal build all`, diff checks, target import
+  scans, forbidden diff guards, no worker-plan, and state/review-record JSON
+  checks. This records `Cli/Command/Observe.hs` as migrated off the
+  `CodexWatcher.AppServerClient` facade. Direction 010 remains in progress:
+  remaining production source users still include
+  `Domain/PrReview/LaunchCli.hs`, `Domain/IssuePlanning/Loop.hs`,
+  `AutomaticLoop/Runner.hs`, and `Cli/Command/IssueFanout.hs`, plus
+  test-policy and test-support imports; `RunnerGuard.hs`,
+  `Cli/Command/AppServerProbe.hs`, `Healthcheck.hs`, and
+  `Cli/Command/Observe.hs` remain absent from the remaining source-user list
+  after their migrations; the public compatibility facade remains exposed; and
+  this does NOT approve public facade removal/deprecation, Cabal/API exposure
+  cleanup, docs cleanup, other importer migration, milestone completion,
+  release approval, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
