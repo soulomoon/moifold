@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-002-compatibility-fixtures-contracts",
+  "direction_id": "direction-008-healthcheck-compatibility-contracts",
+  "extracted_item_id": "round-096-runtime-state-healthcheck-read-nonread-contracts",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after focused healthcheck runtime-state read/non-read source inspection, watcher-core-test, cabal build all, diff checks, and scope review confirmed test-only contract evidence without production healthcheck behavior, compatibility-file migration/removal, roadmap, or implementation-surface escape."
+}

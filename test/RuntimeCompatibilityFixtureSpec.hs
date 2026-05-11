@@ -70,6 +70,7 @@ runtimeCompatibilityFixtureTests =
     , issueSnapshotFixtureTests
     , recordPlanningGraphFixtureTest
     , healthcheckPlannerReaderBoundaryTest
+    , healthcheckRuntimeStateReadNonReadContractTest
     , daemonStateSourceBoundaryTest
     , blockStateSourceBoundaryTest
     , repairStateSourceBoundaryTest
@@ -566,6 +567,45 @@ healthcheckPlannerReaderBoundaryTest = do
     "healthcheck keeps issue planning plannerState on planner-state.json and not planning-state.json"
     ( "(\"plannerState\", \"planner-state.json\")" `Text.isInfixOf` healthcheckSource
         && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
+    )
+
+healthcheckRuntimeStateReadNonReadContractTest :: IO Bool
+healthcheckRuntimeStateReadNonReadContractTest = do
+  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  assert
+    "healthcheck keeps consolidated runtime-state read/non-read contract"
+    ( textNeedlesInOrder
+        [ "readStateFiles :: SDomain kind -> FilePath -> IO Value"
+        , "object <$> traverse readStateFile (stateFileSpecs kind)"
+        , "readStateFile (key, fileName) = do"
+        , "value <- readOptionalValueFile (stateDir' </> fileName)"
+        , "pure (Key.fromText key .= fromMaybe Null value)"
+        , "stateFileSpecs :: SDomain kind -> [(Text, FilePath)]"
+        , "SIssuePlanning ->"
+        , "sharedStateFiles"
+        , "(\"plannerState\", \"planner-state.json\")"
+        , "SIssueImplement ->"
+        , "sharedStateFiles"
+        , "(\"issueState\", \"issue-state.json\")"
+        , "SPrReview ->"
+        , "(\"blockedState\", \"block-state.json\")"
+        , "(\"runtimeOwner\", \"runtime-owner.json\")"
+        , "sharedStateFiles :: [(Text, FilePath)] -> [(Text, FilePath)]"
+        , "sharedStateFiles domainFiles ="
+        , "(\"daemonState\", \"daemon-state.json\")"
+        , ": domainFiles"
+        , "<> [ (\"blockedState\", \"block-state.json\")"
+        , ", (\"runtimeOwner\", \"runtime-owner.json\")"
+        , "readOptionalValueFile :: FilePath -> IO (Maybe Value)"
+        , "else either (const Nothing) Just <$> readJsonValue path"
+        ]
+        healthcheckSource
+        && "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states" `Text.isInfixOf` healthcheckSource
+        && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
+        && not ("repair-state.json" `Text.isInfixOf` healthcheckSource)
+        && not ("issue-snapshot.json" `Text.isInfixOf` healthcheckSource)
+        && not ("writeJsonValue" `Text.isInfixOf` healthcheckSource)
+        && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` healthcheckSource)
     )
 
 daemonStateSourceBoundaryTest :: IO Bool
