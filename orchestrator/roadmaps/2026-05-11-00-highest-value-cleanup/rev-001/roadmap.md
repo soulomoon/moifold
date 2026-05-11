@@ -556,6 +556,22 @@ user migration, public facade exposure changes, Cabal exposure removal,
 package descriptor cleanup, parser, renderer, command-output, prompt,
 fixture, runtime-config, runtime compatibility cleanup, deprecation, removal,
 release/publication, milestone completion, or terminal completion changes.
+`round-100` completed a narrow production GitHub-id-only
+`direction-011-core-ids-import-convergence` slice at merged commit `080fed5`
+by moving `src/CodexWatcher/Core/State.hs` from
+`CodexWatcher.Core.Ids (CommitSha, PrNumber)` to direct
+`CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber)`, preserving
+`CompletionEvidence`, `WatcherState`, `SomeWatcherState`, constructors,
+exports, deriving behavior, and existing watcher-core coverage, leaving
+package descriptors and public compatibility facade exposure unchanged, and
+passing `cabal test watcher-core-test`, `cabal build all`,
+`git diff --check`, and `git diff --cached --check`. This status records one
+production GitHub-id-only direct-owner import convergence and does not approve
+AppServerClient, Workflow.EventLog, Workflow.Permission, combined Core.Ids
+user migration, public facade exposure changes, Cabal exposure removal,
+package descriptor cleanup, parser, renderer, command-output, prompt,
+fixture, runtime-config, runtime compatibility cleanup, deprecation, removal,
+release/publication, milestone completion, or terminal completion changes.
 
 Candidate directions:
 
@@ -617,11 +633,19 @@ Candidate directions:
   `CodexWatcher.Workflow.Agent.Ids (RequestId)`. Workflow execution behavior
   was preserved, `moifold.cabal` was unchanged, and validation passed with
   `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
-  `git diff --cached --check`. Remaining combined users, broader production
-  import convergence, package descriptor cleanup, Cabal exposure removal,
-  public deprecation, facade removal, runtime compatibility cleanup, release
-  approval, milestone completion, and terminal completion remain outside these
-  completed slices.
+  `git diff --cached --check`. `round-100` completed the
+  `round-100-core-state-github-ids-import-convergence` slice at `080fed5` by
+  moving only `src/CodexWatcher/Core/State.hs` from
+  `CodexWatcher.Core.Ids (CommitSha, PrNumber)` to
+  `CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber)`. Typed watcher
+  state and completion-evidence behavior were preserved, package descriptors
+  and public compatibility facade exposure were unchanged, and validation
+  passed with `cabal test watcher-core-test`, `cabal build all`,
+  `git diff --check`, and `git diff --cached --check`. Remaining combined
+  users, broader production import convergence, package descriptor cleanup,
+  Cabal exposure removal, public deprecation, facade removal, runtime
+  compatibility cleanup, release approval, milestone completion, and terminal
+  completion remain outside these completed slices.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
