@@ -25,7 +25,6 @@ module CodexWatcher.Cli.Command.IssueFanout
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
@@ -49,6 +48,8 @@ import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), 
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
+import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..), defaultAppServerClientOptions, startThreadWithEndpoint)
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)

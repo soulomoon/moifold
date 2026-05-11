@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-126-issue-fanout-appserverclient-import-convergence",
+  "roadmap_item_id": "round-126-issue-fanout-appserverclient-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved: focused IssueFanout app-server REPL gate, watcher-core-test, cabal build all, diff checks, import guards, changed-path checks, no-worker-plan check, and review-stage JSON check all passed; implementation change is import-only in IssueFanout.hs and remaining AppServerClient hits are out-of-scope tests/support/docs/Cabal/facade exposure."
+}
