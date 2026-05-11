@@ -798,6 +798,28 @@ blocker recorded by round 110, but milestone 003 remains in progress: current
 compatibility facade remains exposed, and no production import migration,
 public facade removal or deprecation, Cabal exposure or public API removal,
 release approval, milestone completion, or terminal completion is approved.
+`round-113` completed the narrow
+`round-113-runner-guard-appserverclient-import-convergence` slice at merged
+commit `acd9a3a` under direction 010. It moved only
+`src/CodexWatcher/RunnerGuard.hs` from importing
+`CodexWatcher.AppServerClient` to direct owner imports from
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport`. The reviewed change was
+import-only: no code bodies, behavior, request ids, repair prompts, failure
+formatting, public facade exposure, package descriptors, public API, docs,
+direct owner modules, tests, or other importers changed. Validation passed
+with target import scans, focused RunnerGuard REPL coverage,
+`cabal test watcher-core-test`, `cabal build all`, descriptor/facade and
+direct-owner diff guards, no `worker-plan.json`, whitespace checks, and JSON
+validation. This records `RunnerGuard.hs` as migrated off the
+`CodexWatcher.AppServerClient` facade, but milestone 003 remains in progress:
+remaining source users still include `Domain/PrReview/LaunchCli.hs`,
+`Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
+`Cli/Command/AppServerProbe.hs`, `Cli/Command/Observe.hs`, and
+`Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports; the
+public compatibility facade remains exposed; and no public facade removal or
+deprecation, Cabal exposure or public API removal, release approval, milestone
+completion, or terminal completion is approved.
 
 Candidate directions:
 
@@ -997,6 +1019,27 @@ Candidate directions:
   app-server client/transport/protocol changes, import migration, public facade
   removal or deprecation, Cabal exposure or public API removal, release
   approval, milestone completion, or terminal completion.
+  `round-113` completed the
+  `round-113-runner-guard-appserverclient-import-convergence` slice at
+  `acd9a3a` by moving only `src/CodexWatcher/RunnerGuard.hs` from importing
+  `CodexWatcher.AppServerClient` to direct owner imports from
+  `CodexWatcher.Workflow.Agent.Codex.Client` and
+  `CodexWatcher.Workflow.Agent.Codex.Transport`. The accepted change was
+  import-only: no code bodies, behavior, request ids, repair prompts, failure
+  formatting, public facade exposure, package descriptors, public API, docs,
+  direct owner modules, tests, or other importers changed. Validation passed
+  with target import scans, focused RunnerGuard REPL coverage,
+  `cabal test watcher-core-test`, `cabal build all`, descriptor/facade and
+  direct-owner diff guards, no `worker-plan.json`, whitespace checks, and JSON
+  validation. This records `RunnerGuard.hs` as migrated off the
+  `CodexWatcher.AppServerClient` facade. Direction 010 remains in progress:
+  remaining source users still include `Domain/PrReview/LaunchCli.hs`,
+  `Domain/IssuePlanning/Loop.hs`, `AutomaticLoop/Runner.hs`, `Healthcheck.hs`,
+  `Cli/Command/AppServerProbe.hs`, `Cli/Command/Observe.hs`, and
+  `Cli/Command/IssueFanout.hs`, plus test-policy and test-support imports; the
+  public compatibility facade remains exposed; and this does not approve
+  public facade removal or deprecation, Cabal exposure or public API removal,
+  release approval, milestone completion, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
