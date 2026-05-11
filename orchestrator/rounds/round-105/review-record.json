@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-105-appserverclient-import-convergence-readiness",
+  "roadmap_item_id": "round-105-appserverclient-import-convergence-readiness",
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only AppServerClient import-convergence readiness evidence. Exact import scan confirmed src=12, test=7, app=0, agent-workflow-core=0, agent-workflow-codex=0, agent-workflow-github=0; facade and direct owner module exposures remain intact; no source, test, package, docs, fixture, behavior, migration, deprecation, release, milestone, or terminal-completion change is implied."
+}
