@@ -638,6 +638,24 @@ future migration. Later work must remain narrow and gate-backed. This status
 does not approve import migration, public deprecation or removal, Cabal
 exposure removal, package descriptor cleanup, runtime compatibility cleanup,
 release approval, milestone completion, or terminal completion.
+`round-105` completed the artifact-only
+`round-105-appserverclient-import-convergence-readiness` evidence round at
+merged commit `d145f79` under direction 010. The approved live scan records
+`CodexWatcher.AppServerClient` imports at `src`: 12, `test`: 7, `app`: 0,
+`agent-workflow-core`: 0, `agent-workflow-codex`: 0, and
+`agent-workflow-github`: 0. The evidence confirms
+`CodexWatcher.AppServerClient` remains a public compatibility reexport of
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport`; `moifold.cabal` still exposes
+the facade; and `agent-workflow-codex` exposes the direct owner modules. The
+artifact classifies all source and test importers and records later gates for
+endpoint parsing, app-server protocol, session handling, command rendering,
+timeout, fallback, failure formatting, turn-classifier behavior, package
+descriptor/public API/docs/downstream/test-policy evidence, and any public
+surface cleanup. Later migration candidates are gate-backed only. This status
+does not approve import migration, public deprecation or removal, Cabal
+exposure removal, package descriptor cleanup, behavior change, release
+approval, milestone completion, or terminal completion.
 
 Candidate directions:
 
@@ -673,6 +691,22 @@ Candidate directions:
   pragma.
   Extraction notes: preserve endpoint parsing, session protocol, command
   rendering, and failure formatting.
+  Status: readiness evidence completed by `round-105` at `d145f79`. The
+  reviewed artifact records live `CodexWatcher.AppServerClient` import counts
+  of `src`: 12, `test`: 7, `app`: 0, `agent-workflow-core`: 0,
+  `agent-workflow-codex`: 0, and `agent-workflow-github`: 0; confirms the
+  facade remains a public compatibility reexport of
+  `CodexWatcher.Workflow.Agent.Codex.Client` and
+  `CodexWatcher.Workflow.Agent.Codex.Transport`; confirms `moifold.cabal`
+  still exposes the facade while `agent-workflow-codex` exposes the direct
+  owner modules; and classifies all source/test importers with later gates for
+  endpoint parsing, app-server protocol, session handling, command rendering,
+  timeout, fallback, failure formatting, turn-classifier behavior, package
+  descriptor/public API/docs/downstream/test-policy evidence, and any public
+  surface cleanup. This status is artifact-only readiness evidence; it does
+  not approve import migration, public deprecation or removal, Cabal exposure
+  removal, package descriptor cleanup, behavior change, release approval,
+  milestone completion, or terminal completion.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
