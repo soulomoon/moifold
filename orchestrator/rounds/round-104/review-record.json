@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-104-eventlog-permission-bridge-split-readiness",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Artifact-only readiness evidence approved. Independent scans confirmed EventLog imports src=2/test=8 and Permission imports test=7, with no app or standalone package candidate facade imports. Broader scans confirmed moifold.cabal still exposes both compatibility facades and agent-workflow-core exposes direct-owner modules. No source, test, app, package descriptor, fixture, docs, public API, runtime behavior, or Cabal exposure files changed; git diff checks and jq validation passed."
+}
