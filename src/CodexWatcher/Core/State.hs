@@ -23,13 +23,13 @@ module CodexWatcher.Core.State
   , isTerminalState
   ) where
 
-import CodexWatcher.Core.Ids
 import CodexWatcher.Core.Kinds
 import CodexWatcher.Core.Reason
 import CodexWatcher.Core.Thread
 import CodexWatcher.Domain.IssueImplement.Types
 import CodexWatcher.Domain.IssuePlanning.Types
 import CodexWatcher.Domain.PrReview.Types
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber)
 import Data.Proxy (Proxy (..))
 import Data.Singletons (SingI (..), SingKind (..))
 
