@@ -181,7 +181,7 @@ import CodexWatcher.Workflow.Moifold.PrReview.Worker.Indexed
   , PrReviewWorkerIndexedUninitialized
   )
 import CodexWatcher.Workflow.Observation.Agent qualified as WorkflowObservationAgent
-import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
+import CodexWatcher.Workflow.Permission.Core qualified as WorkflowPermissionCore
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), WorkflowSpec (..), legacyObservedPlannedTransition, moifoldPlannedTransitionFromEffects, workflowPlanObservation)
 import Control.Exception (try)
@@ -335,15 +335,15 @@ workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions = 
             _ -> False
       , assert "workflow docs-migration law permission accepts complete draft plan" $
           workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState expectedEffects == Right ()
-            && isRightUnit (WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState expectedEffects)
+            && isRightUnit (WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState expectedEffects)
       , assert "workflow docs-migration law permission rejects partial draft plan" $
-          case (workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState partialEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState partialEffects) of
+          case (workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState partialEffects, WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState partialEffects) of
             (Left directReason, Left coreReason) ->
               "effect plan" `Text.isInfixOf` directReason
                 && "effect plan" `Text.isInfixOf` coreReason.workflowPermissionReason
             _ -> False
       , assert "workflow docs-migration law permission rejects wrong target draft write" $
-          case (workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects) of
+          case (workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects, WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects) of
             (Left directReason, Left coreReason) ->
               "target" `Text.isInfixOf` directReason
                 && coreReason.workflowPermissionEffectLabel == "write-docs-migration-draft"
@@ -714,16 +714,16 @@ workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec = do
       [ assert "indexed docs-migration permissions accept allowed draft plan" $
           indexedAllowedValidation == workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState allowedEffects
             && indexedAllowedValidation == Right ()
-            && isRightUnit (WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState allowedEffects)
+            && isRightUnit (WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState allowedEffects)
       , assert "indexed docs-migration permissions reject partial draft plan like compatibility" $
-          case (indexedPartialValidation, workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState partialEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState partialEffects) of
+          case (indexedPartialValidation, workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState partialEffects, WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState partialEffects) of
             (Left indexedReason, Left compatibilityReason, Left coreReason) ->
               indexedReason == compatibilityReason
                 && "effect plan" `Text.isInfixOf` indexedReason
                 && "effect plan" `Text.isInfixOf` coreReason.workflowPermissionReason
             _ -> False
       , assert "indexed docs-migration permissions reject wrong target plan like compatibility" $
-          case (indexedWrongTargetValidation, workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects, WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects) of
+          case (indexedWrongTargetValidation, workflowValidateEffects @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects, WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec activeState wrongTargetEffects) of
             (Left indexedReason, Left compatibilityReason, Left coreReason) ->
               indexedReason == compatibilityReason
                 && "target" `Text.isInfixOf` indexedReason
@@ -732,7 +732,7 @@ workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec = do
       , assert "indexed docs-migration permissions reject disallowed state like compatibility" $
           indexedDisallowedValidation == workflowValidateEffects @DocsMigration.DocsMigrationSpec readyState allowedEffects
             && indexedDisallowedEffect == workflowEffectAllowed @DocsMigration.DocsMigrationSpec readyState (DocsMigration.WriteDocsMigrationDraft "docs/target.md" "draft markdown")
-            && case WorkflowPermission.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec readyState allowedEffects of
+            && case WorkflowPermissionCore.validateWorkflowEffectPlanCore @DocsMigration.DocsMigrationSpec readyState allowedEffects of
               Left coreReason -> "ready" `Text.isInfixOf` coreReason.workflowPermissionReason
               Right () -> False
       , assert "indexed docs-migration keeps fixture codec contract unchanged" $
