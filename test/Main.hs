@@ -69,7 +69,7 @@ import CodexWatcher.Domain.IssuePlanning.Types
 import CodexWatcher.Domain.PrReview.Types
 import CodexWatcher.Runtime.Paths
 import CodexWatcher.WatcherRuntimeStatus
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
+import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as IssueImplementIndexed
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (PlannedTransition (..))
@@ -3774,11 +3774,11 @@ observedDaemonTickDryRunDoesNotMutate = do
           , assert "observed dry-run computes compatibility writes" (length tick.daemonObservedCompatibilityWrites == 2)
           , assert "observed dry-run does not mutate" (null calls)
           , assert "observed dry-run reports planned actions" (length tick.daemonObservedActionReports == 1)
-          , assert "observed dry-run audit records no committed event" (WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing)
+          , assert "observed dry-run audit records no committed event" (WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing)
           , assert "observed dry-run audit separates pre-commit reports" $
-              WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
-                && null (WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit)
-          , assert "observed dry-run audit recommends continuing" (WorkflowEventLog.workflowAuditNextDaemonRecommendation tick.daemonObservedAudit == WorkflowEventLog.WorkflowDaemonContinue)
+              WorkflowAudit.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
+                && null (WorkflowAudit.workflowAuditPostCommitReports tick.daemonObservedAudit)
+          , assert "observed dry-run audit recommends continuing" (WorkflowAudit.workflowAuditNextDaemonRecommendation tick.daemonObservedAudit == WorkflowAudit.WorkflowDaemonContinue)
           ]
       pure (and results)
     Left failure -> do
@@ -3811,7 +3811,7 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
                in all (\write -> callBefore appendCall (FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write)) calls) tick.daemonObservedCompatibilityWrites
           , assert "observed execute runs effect actions" (any isFakeAppServer calls)
           , assert "observed execute reaches plan mode" (somePhase tick.daemonObservedState == PlanMode)
-          , assert "observed execute audit records committed event" (WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started")
+          , assert "observed execute audit records committed event" (WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started")
           ]
       pure (and results)
     Left failure -> do
@@ -3849,14 +3849,14 @@ observedDaemonTickAuditSeparatesPreAndPostReports = do
       let audit = tick.daemonObservedAudit
       results <-
         sequence
-          [ assert "observed audit records prior state label" (WorkflowEventLog.workflowAuditPriorStateLabel audit == "IssueImplement/PlanMode")
-          , assert "observed audit records observation label" (WorkflowEventLog.workflowAuditObservationLabel audit == Just "DaemonIssueImplementObservation (ObservedPlanCompleted \"Implement the issue in small verified steps.\" Nothing)")
-          , assert "observed audit records committed event label" (WorkflowEventLog.workflowAuditCommittedEventLabel audit == Just "issue_plan_completed")
-          , assert "observed audit records final state label" (WorkflowEventLog.workflowAuditFinalStateLabel audit == Just "IssueImplement/Implementing")
-          , assert "observed audit records pre-commit plan write" (length (WorkflowEventLog.workflowAuditPreCommitReports audit) == 1)
-          , assert "observed audit records post-commit sleep" (length (WorkflowEventLog.workflowAuditPostCommitReports audit) == 1)
-          , assert "observed audit records no failure" (WorkflowEventLog.workflowAuditFailureClassification audit == Nothing)
-          , assert "observed audit recommends continuing" (WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == WorkflowEventLog.WorkflowDaemonContinue)
+          [ assert "observed audit records prior state label" (WorkflowAudit.workflowAuditPriorStateLabel audit == "IssueImplement/PlanMode")
+          , assert "observed audit records observation label" (WorkflowAudit.workflowAuditObservationLabel audit == Just "DaemonIssueImplementObservation (ObservedPlanCompleted \"Implement the issue in small verified steps.\" Nothing)")
+          , assert "observed audit records committed event label" (WorkflowAudit.workflowAuditCommittedEventLabel audit == Just "issue_plan_completed")
+          , assert "observed audit records final state label" (WorkflowAudit.workflowAuditFinalStateLabel audit == Just "IssueImplement/Implementing")
+          , assert "observed audit records pre-commit plan write" (length (WorkflowAudit.workflowAuditPreCommitReports audit) == 1)
+          , assert "observed audit records post-commit sleep" (length (WorkflowAudit.workflowAuditPostCommitReports audit) == 1)
+          , assert "observed audit records no failure" (WorkflowAudit.workflowAuditFailureClassification audit == Nothing)
+          , assert "observed audit recommends continuing" (WorkflowAudit.workflowAuditNextDaemonRecommendation audit == WorkflowAudit.WorkflowDaemonContinue)
           , assert "observed audit still appends event before post-commit sleep" (callBefore (FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)) FakeSleep calls)
           ]
       pure (and results)
@@ -3901,7 +3901,7 @@ observedDaemonTickExecuteCommandFailureDoesNotAppendEvent = do
                   _ -> False
                 && failure.daemonObservedTransactionFailureCommittedEvents == []
                 && failure.daemonObservedTransactionFailurePreCommitReports == []
-                && (WorkflowEventLog.workflowAuditCommittedEventLabel <$> failure.daemonObservedTransactionFailureAudit) == Just Nothing
+                && (WorkflowAudit.workflowAuditCommittedEventLabel <$> failure.daemonObservedTransactionFailureAudit) == Just Nothing
             _ -> False
       , assert "observed execute does not append event after command failure" (not (any isAppend calls))
       , assert "observed execute attempted issue creation" (FakeCommand (GhIssueCreate repo issueRequest) `elem` calls)

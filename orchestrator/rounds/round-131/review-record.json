@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-131-main-audit-eventlog-direct-owner-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/Main.hs moved only daemon audit EventLog facade import and WorkflowEventLog accessor/recommendation uses to Workflow.Audit; selected-file scan is empty; broad facade scan leaves only out-of-scope test facade/policy imports; watcher-core-test, cabal build all, git diff --check, and git diff --cached --check passed; state lineage is round-131 review with worker_mode none and merge_ready false."
+}
