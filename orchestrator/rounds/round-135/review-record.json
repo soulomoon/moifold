@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-135-workflow-eventlog-spec-facade-import-removal",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/WorkflowEventLogSpec.hs no longer imports or uses the WorkflowEventLog facade; the exact facade import remains only in untouched test/FacadeImportPolicySpec.hs; no out-of-scope tracked files changed; focused scans, watcher-core-test, cabal build all, and diff hygiene checks passed."
+}

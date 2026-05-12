@@ -82,7 +82,6 @@ import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
 import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
 import CodexWatcher.Workflow.EventLog.Core qualified as WorkflowEventLogCore
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
@@ -227,7 +226,7 @@ workflowEventLogTests =
     , workflowEventLogFileWrapperFormatsMalformedErrors
     , workflowEventLogCoreDetailedReplayMatchesMoifold
     , workflowEventLogCoreFixtureContractValidatesReplay
-    , workflowEventLogCoreTransitionContractsMatchFacades
+    , workflowEventLogCoreTransitionContractsUseDirectReplay
     , workflowEventLogFailureAuditClassifiesRetryRecommendation
     ]
 
@@ -493,14 +492,15 @@ workflowEventLogCoreFixtureContractValidatesReplay = do
       Right summary -> WorkflowEventLogCore.validateEventLogFixtureContract @MoifoldSpec contract summary == Right ()
       Left _ -> False
 
-workflowEventLogCoreTransitionContractsMatchFacades :: IO Bool
-workflowEventLogCoreTransitionContractsMatchFacades = do
+workflowEventLogCoreTransitionContractsUseDirectReplay :: IO Bool
+workflowEventLogCoreTransitionContractsUseDirectReplay = do
   let repo = RepoName "soulomoon/mlf2"
       prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
       initialized = PrReviewInitialized prConfig (ThreadId "worker") (ThreadId "reviewer")
       noUnresolved = PrReviewNoUnresolvedFound (CommitSha "abc123") (TurnId "reviewer-turn")
       moifoldCoreInitial = WorkflowEventLogCore.initializeWorkflowEvent @MoifoldSpec id initialized
-      moifoldFacadeInitial = WorkflowEventLog.initializeMoifoldWorkflow initialized
+      moifoldReplayInitial = WorkflowEventLogCore.replayWorkflowEventLogDetailed @MoifoldSpec id [initialized]
+      moifoldReplayApplied = WorkflowEventLogCore.replayWorkflowEventLogDetailed @MoifoldSpec id [initialized, noUnresolved]
       docsConfig =
         DocsMigration.DocsMigrationConfig
           { DocsMigration.docsMigrationSource = "docs/source.md"
@@ -512,21 +512,23 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
       docsCoreInitial = WorkflowEventLogCore.initializeWorkflowEvent @DocsMigration.DocsMigrationSpec id docsInitialized
   results <-
     sequence
-      [ assert "workflow event-log core initialize matches moifold facade" $
-          case (moifoldCoreInitial, moifoldFacadeInitial) of
-            (Right (coreState, coreEffects), Right (facadeState, facadeEffects)) ->
-              someDomain coreState == someDomain facadeState
-                && somePhase coreState == somePhase facadeState
-                && coreEffects == facadeEffects
+      [ assert "workflow event-log core initialize matches direct replay summary" $
+          case (moifoldCoreInitial, moifoldReplayInitial) of
+            (Right (coreState, coreEffects), Right summary) ->
+              someDomain coreState == someDomain summary.workflowReplaySummaryState
+                && somePhase coreState == somePhase summary.workflowReplaySummaryState
+                && [coreEffects] == summary.workflowReplaySummaryEffects
+                && summary.workflowReplaySummaryEventCount == 1
             _ -> False
-      , assert "workflow event-log core apply matches moifold facade" $
-          case (moifoldCoreInitial, moifoldFacadeInitial) of
-            (Right (coreState, _), Right (facadeState, _)) ->
-              case (WorkflowEventLogCore.applyWorkflowEvent @MoifoldSpec id coreState noUnresolved, WorkflowEventLog.applyMoifoldWorkflowEvent facadeState noUnresolved) of
-                (Right (coreState', coreEffects), Right (facadeState', facadeEffects)) ->
-                  someDomain coreState' == someDomain facadeState'
-                    && somePhase coreState' == somePhase facadeState'
-                    && coreEffects == facadeEffects
+      , assert "workflow event-log core apply matches direct replay summary" $
+          case (moifoldCoreInitial, moifoldReplayApplied) of
+            (Right (coreState, initialEffects), Right summary) ->
+              case WorkflowEventLogCore.applyWorkflowEvent @MoifoldSpec id coreState noUnresolved of
+                Right (coreState', coreEffects) ->
+                  someDomain coreState' == someDomain summary.workflowReplaySummaryState
+                    && somePhase coreState' == somePhase summary.workflowReplaySummaryState
+                    && [initialEffects, coreEffects] == summary.workflowReplaySummaryEffects
+                    && summary.workflowReplaySummaryEventCount == 2
                 _ -> False
             _ -> False
       , assert "workflow event-log core transition failure records moifold state and event labels" $
