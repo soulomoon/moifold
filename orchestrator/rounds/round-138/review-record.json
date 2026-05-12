@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-138-workflow-indexed-spec-permission-core-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/WorkflowIndexedSpec.hs moved its single validateWorkflowEffectPlanCore @MoifoldSpec assertion from the Workflow.Permission facade qualifier to the Permission.Core owner qualifier; no WorkflowPermission use remains there; broad scans leave exact facade import/use only in the two excluded tests; watcher-core-test, cabal build all, and diff checks passed."
+}

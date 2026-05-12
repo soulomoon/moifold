@@ -180,7 +180,7 @@ import CodexWatcher.Workflow.Moifold.PrReview.Worker.Indexed
   , PrReviewWorkerIndexedUninitialized
   )
 import CodexWatcher.Workflow.Observation.Agent qualified as WorkflowObservationAgent
-import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
+import CodexWatcher.Workflow.Permission.Core qualified as WorkflowPermissionCore
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), WorkflowSpec (..), legacyObservedPlannedTransition, moifoldPlannedTransitionFromEffects, workflowPlanObservation)
 import Control.Exception (try)
@@ -4657,7 +4657,7 @@ workflowPrReviewCheckingIndexedSpecPreservesTerminalAndPermissionLaws = do
             , IndexedWorkflow.indexedWorkflowValidateEffects @PrReviewCheckingIndexedSpec wrongPhaseIndexedState wrongPhasePlan
             , workflowEffectAllowed @MoifoldSpec wrongPhaseState (SomeEffect (StartWorkerTurn evidence workerThread))
             , IndexedWorkflow.indexedWorkflowEffectAllowed @PrReviewCheckingIndexedSpec wrongPhaseIndexedState wrongPhaseEffect
-            , WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec wrongPhaseState checkingEffects
+            , WorkflowPermissionCore.validateWorkflowEffectPlanCore @MoifoldSpec wrongPhaseState checkingEffects
             )
             of
             (Left compatibilityPlanError, Left indexedPlanError, Left compatibilityEffectError, Left indexedEffectError, Left coreError) ->
