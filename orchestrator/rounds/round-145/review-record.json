@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-145-workflow-docs-migration-spec-appserverturn-direct-owner-migration",
+  "roadmap_item_id": "round-145-workflow-docs-migration-spec-appserverturn-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: selected test no longer imports CodexWatcher.AppServerClient, now imports AppServerTurn from CodexWatcher.Workflow.Agent.Codex.Client; selected test diff is import-only; no out-of-scope implementation, package, docs, or public facade files changed; watcher-core-test, cabal build all, and diff checks passed."
+}
