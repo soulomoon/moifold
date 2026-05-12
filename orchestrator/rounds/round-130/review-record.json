@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-130-workflow-docs-migration-spec-eventlog-direct-owner-import-convergence",
+  "roadmap_item_id": "round-130-workflow-docs-migration-spec-eventlog-direct-owner-import-convergence",
+  "decision": "approved",
+  "evidence_summary": "Approved: full watcher-core-test and cabal build all passed; selected WorkflowDocsMigrationSpec exact EventLog facade import and WorkflowEventLog qualifier are gone; direct Workflow.Audit and Workflow.EventLog.Core owner imports are present; diff is import/qualifier-only; broad scans leave only out-of-scope facade references; no worker-plan.json exists."
+}

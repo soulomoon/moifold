@@ -77,12 +77,13 @@ import CodexWatcher.WatcherRuntimeStatus
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as WorkflowAgentCodexProtocol
+import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
+import CodexWatcher.Workflow.EventLog.Core qualified as WorkflowEventLogCore
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
@@ -284,7 +285,7 @@ workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions = 
         ]
       fullEvents = events <> [expectedEvent]
       directReplay = DocsMigration.replayDocsMigrationEvents fullEvents
-      detailedReplay = WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id fullEvents
+      detailedReplay = WorkflowEventLogCore.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id fullEvents
       dryRunResult = DocsMigration.runDocsMigrationObservedDryRun events observation
       expectedActions =
         [ DocsMigration.WriteDocsMigrationDraftAction "docs/target.md" "draft markdown"
@@ -365,9 +366,9 @@ workflowDocsMigrationFacadeLawPreservesObservationReplayEffectsAndPermissions = 
                     && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
                     && null preReports
                     && postReports == dryRunTick.docsMigrationDaemonActionReports
-                    && null (WorkflowEventLog.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
-                    && WorkflowEventLog.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit == dryRunTick.docsMigrationDaemonActionReports
-                    && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
+                    && null (WorkflowAudit.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
+                    && WorkflowAudit.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit == dryRunTick.docsMigrationDaemonActionReports
+                    && WorkflowAudit.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
                     && reportActions == expectedActions
                     && compiledActions == expectedActions
             Left _ -> False
@@ -738,9 +739,9 @@ workflowDocsMigrationIndexedSpecPreservesPermissionsAndFixtureCodec = do
           all codecRoundTripOk fixture
             && case decoded of
               Right decodedEvents ->
-                case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id decodedEvents of
+                case WorkflowEventLogCore.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id decodedEvents of
                   Right summary ->
-                    WorkflowEventLog.validateEventLogFixtureContract
+                    WorkflowEventLogCore.validateEventLogFixtureContract
                       @DocsMigration.DocsMigrationSpec
                       DocsMigration.docsMigrationEventLogFixtureContract
                       summary
@@ -815,7 +816,7 @@ workflowDocsMigrationIndexedDryRunAndDaemonParity = do
           && reportActions dryRunTick == expectedActions
           && all ((== DryRunActions) . DocsMigration.docsMigrationActionReportMode) dryRunTick.docsMigrationDaemonActionReports
           && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
-          && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
+          && WorkflowAudit.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
           && DocsMigration.docsMigrationDaemonEvent executeTick == expectedEvent
           && DocsMigration.docsMigrationDaemonState executeTick == expectedState
           && DocsMigration.docsMigrationDaemonCommittedEvents executeTick == [expectedEvent]
@@ -823,7 +824,7 @@ workflowDocsMigrationIndexedDryRunAndDaemonParity = do
           && reportActions executeTick == expectedActions
           && all ((== ExecuteActions) . DocsMigration.docsMigrationActionReportMode) executeTick.docsMigrationDaemonActionReports
           && all DocsMigration.docsMigrationActionReportExecuted executeTick.docsMigrationDaemonActionReports
-          && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
+          && WorkflowAudit.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
           && executedCalls == ["write:docs/target.md:draft markdown", "validate:docs/target.md"]
           && reportActions executeTick == reportActions dryRunTick
           && docsMigrationIndexedTransitionEvent indexedPlanned == expectedEvent
@@ -913,9 +914,9 @@ workflowDocsMigrationEventCodecFixtureContract = do
     all codecRoundTripOk fixture
       && case decoded of
         Right decodedEvents ->
-          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id decodedEvents of
+          case WorkflowEventLogCore.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id decodedEvents of
             Right summary ->
-              WorkflowEventLog.validateEventLogFixtureContract
+              WorkflowEventLogCore.validateEventLogFixtureContract
                 @DocsMigration.DocsMigrationSpec
                 DocsMigration.docsMigrationEventLogFixtureContract
                 summary
@@ -947,26 +948,26 @@ workflowDocsMigrationFixtureFailureReportsThroughCore = do
   results <-
     sequence
       [ assert "workflow docs-migration fixture failures report through core replay" $
-          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id badEvents of
+          case WorkflowEventLogCore.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id badEvents of
             Left failure ->
-              WorkflowEventLog.workflowReplayFailureEventIndex failure == 2
-                && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-validation-passed"
-                && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "ready"
-                && "ready" `Text.isInfixOf` WorkflowEventLog.workflowReplayFailureReason failure
+              WorkflowEventLogCore.workflowReplayFailureEventIndex failure == 2
+                && WorkflowEventLogCore.workflowReplayFailureEventLabel failure == "docs-migration-validation-passed"
+                && WorkflowEventLogCore.workflowReplayFailurePriorStateLabel failure == Just "ready"
+                && "ready" `Text.isInfixOf` WorkflowEventLogCore.workflowReplayFailureReason failure
             Right _summary -> False
       , assert "workflow docs-migration terminal states reject blocked transitions" $
-          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id terminalEvents of
+          case WorkflowEventLogCore.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id terminalEvents of
             Left failure ->
-              WorkflowEventLog.workflowReplayFailureEventIndex failure == length terminalEvents
-                && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-blocked"
-                && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "complete"
+              WorkflowEventLogCore.workflowReplayFailureEventIndex failure == length terminalEvents
+                && WorkflowEventLogCore.workflowReplayFailureEventLabel failure == "docs-migration-blocked"
+                && WorkflowEventLogCore.workflowReplayFailurePriorStateLabel failure == Just "complete"
             Right _summary -> False
       , assert "workflow docs-migration blocked terminal state rejects completion transitions" $
-          case WorkflowEventLog.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id blockedTerminalEvents of
+          case WorkflowEventLogCore.replayWorkflowEventLogDetailed @DocsMigration.DocsMigrationSpec id blockedTerminalEvents of
             Left failure ->
-              WorkflowEventLog.workflowReplayFailureEventIndex failure == length blockedTerminalEvents
-                && WorkflowEventLog.workflowReplayFailureEventLabel failure == "docs-migration-completed"
-                && WorkflowEventLog.workflowReplayFailurePriorStateLabel failure == Just "blocked"
+              WorkflowEventLogCore.workflowReplayFailureEventIndex failure == length blockedTerminalEvents
+                && WorkflowEventLogCore.workflowReplayFailureEventLabel failure == "docs-migration-completed"
+                && WorkflowEventLogCore.workflowReplayFailurePriorStateLabel failure == Just "blocked"
             Right _summary -> False
       ]
   pure (and results)
@@ -1032,9 +1033,9 @@ workflowDocsMigrationUsesCoreExecutionContracts = do
           && not (any DocsMigration.docsMigrationActionReportExecuted dryRunTick.docsMigrationDaemonActionReports)
           && length (WorkflowExecution.workflowGenericCompiledActions dryRunTick.docsMigrationDaemonCompiledEffects) == 2
           && reportActions dryRunTick.docsMigrationDaemonActionReports == expectedActionOrder
-          && null (WorkflowEventLog.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
-          && length (WorkflowEventLog.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit) == 2
-          && WorkflowEventLog.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
+          && null (WorkflowAudit.workflowAuditPreCommitReports dryRunTick.docsMigrationDaemonAudit)
+          && length (WorkflowAudit.workflowAuditPostCommitReports dryRunTick.docsMigrationDaemonAudit) == 2
+          && WorkflowAudit.workflowAuditCommittedEventLabel dryRunTick.docsMigrationDaemonAudit == Nothing
           && DocsMigration.docsMigrationDaemonEvent executeTick == expectedEvent
           && DocsMigration.docsMigrationDaemonState executeTick == expectedState
           && DocsMigration.docsMigrationDaemonCommittedEvents executeTick == [expectedEvent]
@@ -1043,7 +1044,7 @@ workflowDocsMigrationUsesCoreExecutionContracts = do
           && WorkflowExecution.workflowGenericCompiledActions executeTick.docsMigrationDaemonCompiledEffects == WorkflowExecution.workflowGenericCompiledActions dryRunTick.docsMigrationDaemonCompiledEffects
           && reportActions executeTick.docsMigrationDaemonActionReports == reportActions dryRunTick.docsMigrationDaemonActionReports
           && executedCalls == ["write:docs/target.md:draft markdown", "validate:docs/target.md"]
-          && null (WorkflowEventLog.workflowAuditPreCommitReports executeTick.docsMigrationDaemonAudit)
-          && reportActions (WorkflowEventLog.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == expectedActionOrder
-          && WorkflowEventLog.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
+          && null (WorkflowAudit.workflowAuditPreCommitReports executeTick.docsMigrationDaemonAudit)
+          && reportActions (WorkflowAudit.workflowAuditPostCommitReports executeTick.docsMigrationDaemonAudit) == expectedActionOrder
+          && WorkflowAudit.workflowAuditCommittedEventLabel executeTick.docsMigrationDaemonAudit == Just "docs-migration-draft-produced"
       _ -> False
