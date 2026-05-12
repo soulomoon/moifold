@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-132-workflow-execution-audit-eventlog-direct-owner-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/WorkflowExecutionSpec.hs moved only the exact Workflow.EventLog facade audit/recommendation references to Workflow.Audit, retained EventLog.Commit.Core and EventLog.File.Core owner imports, left out-of-scope surfaces untouched, no worker-plan.json exists, state lineage is round-132 review with worker_mode none and merge_ready false, focused scans and baseline Cabal/diff checks passed."
+}
