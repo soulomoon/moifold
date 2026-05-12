@@ -8,7 +8,6 @@ module PrReviewLaunchCliSpec
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..))
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..), RepoName (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.LaunchCli (PrReviewWatcherLaunchPlan (..), launchPrReviewWatcher, prReviewWatcherLaunchPlan)
@@ -16,6 +15,7 @@ import CodexWatcher.Runtime.File (readJsonValue)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Store (writeRuntimeLease)
 import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import Control.Exception (bracket, catch, evaluate, finally, mask)
 import Data.Aeson (Value (..), object, (.=))
 import Data.Text (Text)

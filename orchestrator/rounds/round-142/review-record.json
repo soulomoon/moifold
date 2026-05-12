@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-142-pr-review-launch-cli-spec-endpoint-direct-owner-migration",
+  "roadmap_item_id": "round-142-pr-review-launch-cli-spec-endpoint-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: the only implementation-code change moves test/PrReviewLaunchCliSpec.hs to the direct Codex transport AppServerEndpoint owner import; selected scans, broad AppServerClient scan, git diff checks, cabal test watcher-core-test, and cabal build all passed."
+}
