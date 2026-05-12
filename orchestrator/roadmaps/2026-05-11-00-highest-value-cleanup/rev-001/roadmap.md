@@ -1394,6 +1394,23 @@ records another concrete internal direct-owner import migration under
 direction 012 and preserves the steering signal: future selections should
 prefer lawful concrete migration or removal slices over readiness-only gate
 work where evidence already makes the slice lawful.
+`round-140` completed the
+`round-140-test-support-appserver-endpoint-direct-owner-migration` slice at
+merged commit `2bf7bee` by moving only `test/TestSupport/AppServer.hs` off
+the exact `CodexWatcher.AppServerClient (AppServerEndpoint (..))`
+compatibility-facade import. The endpoint-backed fake app-server helper now
+imports `AppServerEndpoint (..)` from the direct transport owner
+`CodexWatcher.Workflow.Agent.Codex.Transport`; helper exports, request
+recording, server startup, JSON-RPC helpers, and
+`AppServerEndpoint "127.0.0.1" port "/"` endpoint construction were preserved.
+Review evidence records that the broad `CodexWatcher.AppServerClient` scan no
+longer lists `test/TestSupport/AppServer.hs`, remaining hits are out of scope,
+and `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+`git diff --cached --check` passed. This records another concrete internal
+direct-owner import migration under direction 010 and reinforces the steering
+signal: future selections should prefer lawful concrete migration or removal
+slices over readiness-only gate work where evidence already makes the slice
+lawful.
 Milestone 003 remains in progress: the only remaining exact Permission facade
 import/use in current code is intentionally `test/FacadeImportPolicySpec.hs`,
 the explicit facade/policy parity owner. Public facade/exposure, Cabal
@@ -1938,6 +1955,29 @@ Candidate directions:
   removal/deprecation, Cabal/API exposure cleanup, docs cleanup, package
   descriptor cleanup, milestone completion, release approval, terminal
   completion, or public compatibility removal.
+  `round-140` completed the
+  `round-140-test-support-appserver-endpoint-direct-owner-migration` slice at
+  merged commit `2bf7bee` by moving only `test/TestSupport/AppServer.hs` from
+  the public `CodexWatcher.AppServerClient` facade to the direct transport
+  owner import
+  `CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))`.
+  The accepted change was import-only: helper exports, request recording,
+  websocket server startup, JSON-RPC result/error helpers, endpoint
+  construction, production files, other tests/test support, package
+  descriptors, docs/policy, public facade modules, and direct owner modules
+  were preserved. Verification passed with focused selected-file scans,
+  helper export and endpoint-construction scans, a broad
+  `CodexWatcher.AppServerClient` scan showing `test/TestSupport/AppServer.hs`
+  removed from remaining facade importers, `cabal test watcher-core-test`,
+  `cabal build all`, `git diff --check`, and `git diff --cached --check`.
+  Direction 010 remains in progress: public facade/exposure, Cabal exposure,
+  package descriptor cleanup, docs/policy cleanup, remaining test-policy and
+  out-of-scope test imports, milestone completion, release approval, terminal
+  completion, and public compatibility removal remain unapproved. This does
+  NOT approve public facade removal/deprecation, Cabal/API exposure cleanup,
+  public API cleanup, package descriptor cleanup, docs/policy cleanup,
+  milestone completion, release approval, terminal completion, or public
+  compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
