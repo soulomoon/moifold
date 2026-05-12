@@ -1226,6 +1226,33 @@ of scope. This does NOT approve public facade removal/deprecation, Cabal
 exposure removal, public API cleanup, package descriptor cleanup, remaining
 EventLog facade migration, Workflow.Permission migration, release approval,
 milestone completion, terminal completion, or public compatibility removal.
+`round-133` completed the
+`round-133-workflow-indexed-audit-eventlog-direct-owner-import-convergence`
+slice at merged commit `bfcf423` by moving only
+`test/WorkflowIndexedSpec.hs` off the exact
+`CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` facade import.
+Existing workflow indexed audit accessors and `WorkflowDaemonStop` now use
+direct `CodexWatcher.Workflow.Audit` owner references; direct
+`CodexWatcher.Workflow.EventLog.Commit.Core` and
+`CodexWatcher.Workflow.EventLog.File.Core` owner imports stayed unchanged; and
+`test/WorkflowIndexedSpec.hs` no longer has stale `WorkflowEventLog.` audit or
+recommendation uses. Verification passed with `cabal test watcher-core-test`,
+`cabal build all`, `git diff --check`, selected-file absence scans, selected
+owner import scans, and broad exact EventLog facade/stale-use scans. No files
+were staged in review, so the cached diff check was skipped as not applicable.
+Remaining exact EventLog facade imports are out-of-scope tests:
+`test/FacadeImportPolicySpec.hs` and `test/WorkflowEventLogSpec.hs`. This
+records another concrete test-side migration under direction 012 and preserves
+the steering signal: future selections should prefer lawful,
+behavior-preserving concrete migration or removal slices over readiness-only
+rounds where accepted evidence is sufficient. Milestone 003 remains in
+progress: remaining policy/facade and mixed tests, docs/policy references,
+public facade/exposure, Cabal exposure, and Workflow.Permission migration
+remain out of scope. This does NOT approve public facade removal/deprecation,
+Cabal exposure removal, public API cleanup, package descriptor cleanup,
+remaining EventLog facade migration, Workflow.Permission migration, release
+approval, milestone completion, terminal completion, or public compatibility
+removal.
 
 Candidate directions:
 
@@ -1973,6 +2000,34 @@ Candidate directions:
   facade/stale-use scans. The only remaining exact EventLog facade imports
   are out-of-scope tests: `test/FacadeImportPolicySpec.hs`,
   `test/WorkflowEventLogSpec.hs`, and `test/WorkflowIndexedSpec.hs`.
+  Direction 012 remains in progress, but the coordination preference remains
+  concrete: future selections should favor lawful behavior-preserving
+  migration/removal slices over readiness-only rounds when evidence is
+  sufficient. Docs/policy references, public facade/exposure, Cabal exposure,
+  remaining EventLog facade migration, and Workflow.Permission migration
+  remain unapproved. This does not approve public facade removal/deprecation,
+  Cabal exposure removal, public API cleanup, package descriptor cleanup,
+  remaining EventLog facade migration, Workflow.Permission migration, release
+  approval, milestone completion, terminal completion, or public compatibility
+  removal.
+  `round-133` completed another concrete test-side direct-owner import
+  migration at `bfcf423` by moving only `test/WorkflowIndexedSpec.hs` off the
+  exact `CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` facade
+  import. Existing workflow indexed audit field accessors and
+  `WorkflowDaemonStop` now use `CodexWatcher.Workflow.Audit` direct-owner
+  references, while existing direct
+  `CodexWatcher.Workflow.EventLog.Commit.Core` and
+  `CodexWatcher.Workflow.EventLog.File.Core` owner imports, assertions,
+  helper definitions, aggregate wiring, event schemas, package descriptors,
+  docs, runtime files, and public facade exposure were preserved. Verification
+  passed with `cabal test watcher-core-test`, `cabal build all`, diff checks,
+  selected-file absence scans proving `test/WorkflowIndexedSpec.hs` has no
+  exact EventLog facade import or stale `WorkflowEventLog.`
+  audit/recommendation uses, selected owner import scans, and broad exact
+  EventLog facade/stale-use scans. No files were staged in review, so the
+  cached diff check was skipped as not applicable. The only remaining exact
+  EventLog facade imports are out-of-scope tests:
+  `test/FacadeImportPolicySpec.hs` and `test/WorkflowEventLogSpec.hs`.
   Direction 012 remains in progress, but the coordination preference remains
   concrete: future selections should favor lawful behavior-preserving
   migration/removal slices over readiness-only rounds when evidence is
