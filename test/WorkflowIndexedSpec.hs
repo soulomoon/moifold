@@ -20,7 +20,7 @@ where
 
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))
 import CodexWatcher.ChildDaemon (readPidFile, restoreOwnedPidFile)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
