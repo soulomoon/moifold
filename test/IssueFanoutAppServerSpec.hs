@@ -8,7 +8,6 @@ module IssueFanoutAppServerSpec
   ) where
 
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..))
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
 import CodexWatcher.Cli.Command.IssueFanout
   ( IssueImplementerChildLaunch (..)
   , IssueImplementerChildStartResult (..)
@@ -27,6 +26,7 @@ import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.File (readJsonValue)
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import Control.Exception (bracket, catch, evaluate, finally, mask)
 import Data.Aeson (Value (..), object, (.=))
 import Data.Text (Text)
