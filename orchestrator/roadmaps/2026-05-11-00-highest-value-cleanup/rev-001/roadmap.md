@@ -2135,6 +2135,29 @@ Candidate directions:
   facade removal/deprecation, Cabal/API exposure cleanup, public API cleanup,
   package descriptor cleanup, docs/policy cleanup, milestone completion,
   release approval, terminal completion, or public compatibility removal.
+  `round-146` completed the
+  `round-146-workflow-agent-spec-appserverturn-direct-owner-migration` slice at
+  merged commit `399d574` by moving only `test/WorkflowAgentSpec.hs` from the
+  public `CodexWatcher.AppServerClient` facade to the direct client owner
+  import
+  `CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))`.
+  The accepted change was import-only: workflow agent role assertions,
+  worker/reviewer turn-classifier coverage, observation-kernel assertions,
+  app-server turn-read assertions, `workflowAgentTests`, test bodies, helpers,
+  fixtures, production files, other tests and test support, package
+  descriptors, docs/policy, public facade modules, and direct owner modules
+  were preserved. Verification passed with focused selected-file scans, a broad
+  `CodexWatcher.AppServerClient` scan showing `test/WorkflowAgentSpec.hs`
+  removed from remaining facade importers, `cabal test watcher-core-test`,
+  `cabal build all`, `git diff --check`, and `git diff --cached --check`.
+  Direction 010 remains in progress: public facade/exposure, Cabal exposure,
+  package descriptor cleanup, docs/policy cleanup, broader workflow specs,
+  `test/Main.hs`, remaining test support surfaces, milestone completion,
+  release approval, terminal completion, and public compatibility removal
+  remain unapproved. This does NOT approve public facade removal/deprecation,
+  Cabal/API exposure cleanup, public API cleanup, package descriptor cleanup,
+  docs/policy cleanup, milestone completion, release approval, terminal
+  completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
