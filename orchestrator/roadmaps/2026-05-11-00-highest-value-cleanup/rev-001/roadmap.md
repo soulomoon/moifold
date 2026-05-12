@@ -1176,6 +1176,30 @@ facade removal/deprecation, Cabal exposure removal, public API cleanup,
 package descriptor cleanup, remaining EventLog facade migration,
 Workflow.Permission migration, release approval, milestone completion,
 terminal completion, or public compatibility removal.
+`round-131` completed the
+`round-131-main-audit-eventlog-direct-owner-import-convergence` slice at
+merged commit `9107ffe` by moving only `test/Main.hs` daemon audit assertions
+off the exact `CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog`
+facade import. The daemon audit assertions now use direct
+`CodexWatcher.Workflow.Audit` owner references for existing audit accessors
+and `WorkflowDaemonContinue`; `test/Main.hs` no longer has stale
+`WorkflowEventLog.` daemon-audit uses. Verification passed with
+`cabal test watcher-core-test`, `cabal build all`, `git diff --check`,
+`git diff --cached --check`, selected-file absence scans, and broad exact
+EventLog facade scans. Remaining exact EventLog facade imports are only
+out-of-scope tests: `test/FacadeImportPolicySpec.hs`,
+`test/WorkflowEventLogSpec.hs`, `test/WorkflowIndexedSpec.hs`, and
+`test/WorkflowExecutionSpec.hs`. This records another concrete test-side
+migration under direction 012 and preserves the steering signal: future
+selections should prefer lawful, behavior-preserving concrete migration or
+removal slices over readiness-only rounds where accepted evidence is
+sufficient. Milestone 003 remains in progress: remaining test imports,
+docs/policy references, public facade/exposure, Cabal exposure, and
+Workflow.Permission migration remain out of scope. This does NOT approve
+public facade removal/deprecation, Cabal exposure removal, public API cleanup,
+package descriptor cleanup, remaining EventLog facade migration,
+Workflow.Permission migration, release approval, milestone completion,
+terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -1882,6 +1906,30 @@ Candidate directions:
   descriptor cleanup, remaining EventLog facade migration, Workflow.Permission
   migration, release approval, milestone completion, terminal completion, or
   public compatibility removal.
+  `round-131` completed another concrete test-side direct-owner import
+  migration at `9107ffe` by moving only `test/Main.hs` daemon audit assertions
+  off the exact `CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog`
+  facade import. Existing daemon audit field accessors and
+  `WorkflowDaemonContinue` now use `CodexWatcher.Workflow.Audit` direct-owner
+  references, while existing assertions, helper definitions, aggregate wiring,
+  event schemas, package descriptors, docs, runtime files, and public facade
+  exposure were preserved. Verification passed with `cabal test
+  watcher-core-test`, `cabal build all`, diff checks, selected-file absence
+  scans proving `test/Main.hs` has no exact EventLog facade import or stale
+  `WorkflowEventLog.` daemon-audit uses, and a broad exact EventLog facade
+  scan. The only remaining exact EventLog facade imports are out-of-scope
+  tests: `test/FacadeImportPolicySpec.hs`, `test/WorkflowEventLogSpec.hs`,
+  `test/WorkflowIndexedSpec.hs`, and `test/WorkflowExecutionSpec.hs`.
+  Direction 012 remains in progress, but the coordination preference remains
+  concrete: future selections should favor lawful behavior-preserving
+  migration/removal slices over readiness-only rounds when evidence is
+  sufficient. Docs/policy references, public facade/exposure, Cabal exposure,
+  remaining EventLog facade migration, and Workflow.Permission migration
+  remain unapproved. This does not approve public facade removal/deprecation,
+  Cabal exposure removal, public API cleanup, package descriptor cleanup,
+  remaining EventLog facade migration, Workflow.Permission migration, release
+  approval, milestone completion, terminal completion, or public compatibility
+  removal.
 
 ### 4. [pending] Large Runtime Module Decomposition
 
