@@ -53,7 +53,6 @@ where
 
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
 import CodexWatcher.ChildDaemon (readPidFile, restoreOwnedPidFile)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
@@ -109,6 +108,7 @@ import CodexWatcher.Runtime.Paths
 import CodexWatcher.WatcherRuntimeStatus
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))
 import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as WorkflowAgentCodexProtocol
 import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon

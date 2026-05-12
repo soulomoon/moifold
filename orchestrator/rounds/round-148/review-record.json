@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-148-test-support-workflow-appserverturn-direct-owner-migration",
+  "roadmap_item_id": "round-148-test-support-workflow-appserverturn-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: test/TestSupport/Workflow.hs moved AppServerTurn (..) to the direct Codex client owner import only; facade guard, direct-owner evidence scan, selected helper/export anchor scan, broad remaining-user scan, diff scope checks, watcher-core-test, cabal build all, and diff whitespace checks passed; remaining AppServerClient users are out of scope."
+}
