@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-134-workflow-eventlog-spec-core-audit-direct-owner-split",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: WorkflowEventLogSpec now uses EventLog.Core and Workflow.Audit direct owners except for the two intentional Moifold bridge-wrapper facade calls; no out-of-scope project files changed; focused scans, cabal test watcher-core-test, cabal build all, and diff checks passed."
+}

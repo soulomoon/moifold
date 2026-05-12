@@ -81,8 +81,10 @@ import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
+import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
+import CodexWatcher.Workflow.EventLog.Core qualified as WorkflowEventLogCore
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
@@ -461,7 +463,7 @@ workflowEventLogCoreDetailedReplayMatchesMoifold = do
         , PrReviewCleanFound cleanEvidence []
         ]
       direct = replayEventLog events
-      detailed = WorkflowEventLog.replayWorkflowEventLogDetailed @MoifoldSpec id events
+      detailed = WorkflowEventLogCore.replayWorkflowEventLogDetailed @MoifoldSpec id events
   assert "workflow event-log core detailed replay matches moifold replay" $
     case (direct, detailed) of
       (Right replay, Right summary) ->
@@ -482,13 +484,13 @@ workflowEventLogCoreFixtureContractValidatesReplay = do
         , PrReviewCleanFound (CleanReviewEvidence (CommitSha "abc123") "LGTM") []
         ]
       contract =
-        WorkflowEventLog.EventLogFixtureContract
-          { WorkflowEventLog.fixtureExpectedStateLabel = "PrReview/WaitingMergeability"
-          , WorkflowEventLog.fixtureExpectedEventCount = Just 3
+        WorkflowEventLogCore.EventLogFixtureContract
+          { WorkflowEventLogCore.fixtureExpectedStateLabel = "PrReview/WaitingMergeability"
+          , WorkflowEventLogCore.fixtureExpectedEventCount = Just 3
           }
   assert "workflow event-log core fixture contract validates replay summary" $
-    case WorkflowEventLog.replayWorkflowEventLogDetailed @MoifoldSpec id events of
-      Right summary -> WorkflowEventLog.validateEventLogFixtureContract @MoifoldSpec contract summary == Right ()
+    case WorkflowEventLogCore.replayWorkflowEventLogDetailed @MoifoldSpec id events of
+      Right summary -> WorkflowEventLogCore.validateEventLogFixtureContract @MoifoldSpec contract summary == Right ()
       Left _ -> False
 
 workflowEventLogCoreTransitionContractsMatchFacades :: IO Bool
@@ -497,7 +499,7 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
       prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
       initialized = PrReviewInitialized prConfig (ThreadId "worker") (ThreadId "reviewer")
       noUnresolved = PrReviewNoUnresolvedFound (CommitSha "abc123") (TurnId "reviewer-turn")
-      moifoldCoreInitial = WorkflowEventLog.initializeWorkflowEvent @MoifoldSpec id initialized
+      moifoldCoreInitial = WorkflowEventLogCore.initializeWorkflowEvent @MoifoldSpec id initialized
       moifoldFacadeInitial = WorkflowEventLog.initializeMoifoldWorkflow initialized
       docsConfig =
         DocsMigration.DocsMigrationConfig
@@ -507,7 +509,7 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
           }
       docsInitialized = DocsMigration.DocsMigrationInitialized docsConfig
       docsTurnStarted = DocsMigration.DocsMigrationTurnStarted (ThreadId "docs-thread") (TurnId "docs-turn")
-      docsCoreInitial = WorkflowEventLog.initializeWorkflowEvent @DocsMigration.DocsMigrationSpec id docsInitialized
+      docsCoreInitial = WorkflowEventLogCore.initializeWorkflowEvent @DocsMigration.DocsMigrationSpec id docsInitialized
   results <-
     sequence
       [ assert "workflow event-log core initialize matches moifold facade" $
@@ -520,7 +522,7 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
       , assert "workflow event-log core apply matches moifold facade" $
           case (moifoldCoreInitial, moifoldFacadeInitial) of
             (Right (coreState, _), Right (facadeState, _)) ->
-              case (WorkflowEventLog.applyWorkflowEvent @MoifoldSpec id coreState noUnresolved, WorkflowEventLog.applyMoifoldWorkflowEvent facadeState noUnresolved) of
+              case (WorkflowEventLogCore.applyWorkflowEvent @MoifoldSpec id coreState noUnresolved, WorkflowEventLog.applyMoifoldWorkflowEvent facadeState noUnresolved) of
                 (Right (coreState', coreEffects), Right (facadeState', facadeEffects)) ->
                   someDomain coreState' == someDomain facadeState'
                     && somePhase coreState' == somePhase facadeState'
@@ -530,11 +532,11 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
       , assert "workflow event-log core transition failure records moifold state and event labels" $
           case moifoldCoreInitial of
             Right (state, _) ->
-              case WorkflowEventLog.applyWorkflowEvent @MoifoldSpec id state initialized of
+              case WorkflowEventLogCore.applyWorkflowEvent @MoifoldSpec id state initialized of
                 Left failure ->
-                  WorkflowEventLog.workflowTransitionEventLabel failure == "pr_review_initialized"
-                    && WorkflowEventLog.workflowTransitionPriorStateLabel failure == Just (workflowStateLabel @MoifoldSpec state)
-                    && not (Text.null (WorkflowEventLog.workflowTransitionReason failure))
+                  WorkflowEventLogCore.workflowTransitionEventLabel failure == "pr_review_initialized"
+                    && WorkflowEventLogCore.workflowTransitionPriorStateLabel failure == Just (workflowStateLabel @MoifoldSpec state)
+                    && not (Text.null (WorkflowEventLogCore.workflowTransitionReason failure))
                 Right _ -> False
             Left _ -> False
       , assert "workflow event-log core initializes docs-migration workflow" $
@@ -546,7 +548,7 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
       , assert "workflow event-log core applies docs-migration workflow" $
           case docsCoreInitial of
             Right (state, _) ->
-              case WorkflowEventLog.applyWorkflowEvent @DocsMigration.DocsMigrationSpec id state docsTurnStarted of
+              case WorkflowEventLogCore.applyWorkflowEvent @DocsMigration.DocsMigrationSpec id state docsTurnStarted of
                 Right (state', effects) ->
                   state' == DocsMigration.DocsMigrationTurnActive docsConfig (WorkflowAgent.TurnRef (ThreadId "docs-thread") (TurnId "docs-turn"))
                     && effects == []
@@ -555,11 +557,11 @@ workflowEventLogCoreTransitionContractsMatchFacades = do
       , assert "workflow event-log core transition failure records docs-migration state and event labels" $
           case docsCoreInitial of
             Right (state, _) ->
-              case WorkflowEventLog.applyWorkflowEvent @DocsMigration.DocsMigrationSpec id state (DocsMigration.DocsMigrationValidationPassed "too early") of
+              case WorkflowEventLogCore.applyWorkflowEvent @DocsMigration.DocsMigrationSpec id state (DocsMigration.DocsMigrationValidationPassed "too early") of
                 Left failure ->
-                  WorkflowEventLog.workflowTransitionEventLabel failure == "docs-migration-validation-passed"
-                    && WorkflowEventLog.workflowTransitionPriorStateLabel failure == Just "ready"
-                    && "ready" `Text.isInfixOf` WorkflowEventLog.formatWorkflowTransitionFailure failure
+                  WorkflowEventLogCore.workflowTransitionEventLabel failure == "docs-migration-validation-passed"
+                    && WorkflowEventLogCore.workflowTransitionPriorStateLabel failure == Just "ready"
+                    && "ready" `Text.isInfixOf` WorkflowEventLogCore.formatWorkflowTransitionFailure failure
                 Right _ -> False
             Left _ -> False
       ]
@@ -575,7 +577,8 @@ workflowEventLogFailureAuditClassifiesRetryRecommendation = do
       observation = DaemonIssuePlanningObservation (ObservedPlanningTurnStarted (ThreadId "planner-thread") (TurnId "planner-turn"))
       classification = FailureClassification TransientFailure "network EOF"
       audit =
-        WorkflowEventLog.workflowFailureAudit @MoifoldSpec
+        WorkflowAudit.workflowFailureAudit @MoifoldSpec
+          failureIsRetryable
           priorState
           (Just observation)
           Nothing
@@ -584,7 +587,7 @@ workflowEventLogFailureAuditClassifiesRetryRecommendation = do
           []
           classification
   assert "workflow event-log failure audit classifies retry recommendation" $
-    WorkflowEventLog.workflowAuditPriorStateLabel audit == "IssuePlanning/Initialized"
-      && maybe False ("ObservedPlanningTurnStarted" `Text.isInfixOf`) (WorkflowEventLog.workflowAuditObservationLabel audit)
-      && WorkflowEventLog.workflowAuditFailureClassification audit == Just classification
-      && WorkflowEventLog.workflowAuditNextDaemonRecommendation audit == WorkflowEventLog.WorkflowDaemonRetry
+    WorkflowAudit.workflowAuditPriorStateLabel audit == "IssuePlanning/Initialized"
+      && maybe False ("ObservedPlanningTurnStarted" `Text.isInfixOf`) (WorkflowAudit.workflowAuditObservationLabel audit)
+      && WorkflowAudit.workflowAuditFailureClassification audit == Just classification
+      && WorkflowAudit.workflowAuditNextDaemonRecommendation audit == WorkflowAudit.WorkflowDaemonRetry
