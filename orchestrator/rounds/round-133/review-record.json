@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-133-workflow-indexed-audit-eventlog-direct-owner-import-convergence",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: selected-file diff only migrates WorkflowIndexedSpec audit accessors and WorkflowDaemonStop from WorkflowEventLog to WorkflowAudit, preserves WorkflowEventLogCommit/FileCore imports, leaves public facades and compatibility surfaces untouched, has no worker-plan.json, and passes cabal test watcher-core-test, cabal build all, and git diff --check."
+}

@@ -81,7 +81,7 @@ import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
+import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
@@ -1228,11 +1228,11 @@ workflowIssuePlanningIndexedDaemonDryRunMatchesCompatibility = do
               tick.daemonObservedCommittedEvents == []
                 && tick.daemonObservedActionReports == expectedReports
                 && tick.daemonObservedCompatibilityWrites == expectedWrites
-                && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
-                && WorkflowEventLog.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
-                && WorkflowEventLog.workflowAuditFinalStateLabel audit == Just "IssuePlanning/PlanMode"
-                && WorkflowEventLog.workflowAuditPreCommitReports audit == expectedReports
-                && WorkflowEventLog.workflowAuditPostCommitReports audit == []
+                && WorkflowAudit.workflowAuditCommittedEventLabel audit == Nothing
+                && WorkflowAudit.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
+                && WorkflowAudit.workflowAuditFinalStateLabel audit == Just "IssuePlanning/PlanMode"
+                && WorkflowAudit.workflowAuditPreCommitReports audit == expectedReports
+                && WorkflowAudit.workflowAuditPostCommitReports audit == []
           , assert "indexed issue-planning daemon dry-run does not mutate runtime state" (null calls)
           ]
       pure (and results)
@@ -1301,9 +1301,9 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility = do
                 && all (`elem` calls) expectedWriteCalls
                 && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
           , assert "indexed issue-planning daemon execute keeps audit surfaces stable" $
-              WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started"
-                && WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
-                && WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit == []
+              WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started"
+                && WorkflowAudit.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
+                && WorkflowAudit.workflowAuditPostCommitReports tick.daemonObservedAudit == []
           ]
       pure (and results)
     (Left failure, _, _) -> do
@@ -1366,7 +1366,7 @@ workflowIssuePlanningIndexedDaemonDryRunMatchesActiveTurnCompatibility = do
                   && tick.daemonObservedActionReports == expectedReports
                   && tick.daemonObservedCompatibilityWrites == expectedWrites
                   && writeCheck expectedWrites
-                  && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
+                  && WorkflowAudit.workflowAuditCommittedEventLabel audit == Nothing
             , assert ("indexed issue-planning daemon dry-run active " <> caseName <> " does not mutate runtime state") (null calls)
             ]
         pure (and results)
@@ -1416,9 +1416,9 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesActiveTurnCompatibility = do
                   && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
                   && callBefore expectedAppend FakeSleep calls
             , assert "indexed issue-planning daemon execute active issue requests keeps audit labels" $
-                WorkflowEventLog.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
-                  && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_issues_requested"
-                  && WorkflowEventLog.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just "IssuePlanning/Initialized"
+                WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
+                  && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_issues_requested"
+                  && WorkflowAudit.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just "IssuePlanning/Initialized"
             ]
         pure (and results)
       Left failure -> do
@@ -1458,9 +1458,9 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesActiveTurnCompatibility = do
                   && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
                   && callBefore expectedAppend FakeSleep calls
             , assert "indexed issue-planning daemon execute active graph update keeps audit labels" $
-                WorkflowEventLog.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
-                  && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_graph_updated"
-                  && WorkflowEventLog.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just "IssuePlanning/Initialized"
+                WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
+                  && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_graph_updated"
+                  && WorkflowAudit.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just "IssuePlanning/Initialized"
             ]
         pure (and results)
       Left failure -> do
@@ -1570,9 +1570,9 @@ workflowIssuePlanningIndexedDaemonRejectsInvalidActiveTurnRoutingLikeCompatibili
                   && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
                   && callBefore expectedAppend FakeStop calls
             , assert "indexed issue-planning daemon invalid graph keeps audit labels" $
-                WorkflowEventLog.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
-                  && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "watcher_blocked"
-                  && WorkflowEventLog.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just "IssuePlanning/Blocked"
+                WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
+                  && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "watcher_blocked"
+                  && WorkflowAudit.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just "IssuePlanning/Blocked"
             ]
         pure (and results)
       (Left failure, _, _) -> do
@@ -1759,9 +1759,9 @@ workflowIssuePlanningIndexedDaemonDryRunMatchesTerminalAndRetryCompatibility = d
                   && tick.daemonObservedCompiledEffects == expectedCompiled
                   && tick.daemonObservedActionReports == expectedReports
                   && tick.daemonObservedCompatibilityWrites == expectedWrites
-                  && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
-                  && WorkflowEventLog.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
-                  && WorkflowEventLog.workflowAuditFinalStateLabel audit == Just expectedTargetLabel
+                  && WorkflowAudit.workflowAuditCommittedEventLabel audit == Nothing
+                  && WorkflowAudit.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
+                  && WorkflowAudit.workflowAuditFinalStateLabel audit == Just expectedTargetLabel
             , assert ("indexed issue-planning daemon dry-run " <> caseName <> " does not mutate runtime state") (null calls)
             ]
         pure (and checks)
@@ -1887,9 +1887,9 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesTerminalAndRetryCompatibility = 
                   && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
                   && postCallOk
             , assert ("indexed issue-planning daemon execute " <> caseName <> " keeps audit labels") $
-                WorkflowEventLog.workflowAuditPriorStateLabel tick.daemonObservedAudit == workflowStateLabel @MoifoldSpec state
-                  && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just (eventName expectedEvent)
-                  && WorkflowEventLog.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just expectedTargetLabel
+                WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == workflowStateLabel @MoifoldSpec state
+                  && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just (eventName expectedEvent)
+                  && WorkflowAudit.workflowAuditFinalStateLabel tick.daemonObservedAudit == Just expectedTargetLabel
             ]
         pure (and checks)
       (Left failure, _) -> do
@@ -2615,11 +2615,11 @@ workflowPrReviewMergeabilityIndexedDaemonDryRunMatchesCompatibility = do
                   tick.daemonObservedCommittedEvents == []
                     && tick.daemonObservedCompatibilityWrites
                       == compatibilityStateWrites (runtimeStateDirPath runtimeConfig.effectRuntimeStateDir) tick.daemonObservedState
-                    && WorkflowEventLog.workflowAuditCommittedEventLabel audit == Nothing
-                    && WorkflowEventLog.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
-                    && WorkflowEventLog.workflowAuditFinalStateLabel audit == Just "PrReview/Merging"
-                    && WorkflowEventLog.workflowAuditPreCommitReports audit == expectedReports
-                    && WorkflowEventLog.workflowAuditPostCommitReports audit == []
+                    && WorkflowAudit.workflowAuditCommittedEventLabel audit == Nothing
+                    && WorkflowAudit.workflowAuditPriorStateLabel audit == workflowStateLabel @MoifoldSpec state
+                    && WorkflowAudit.workflowAuditFinalStateLabel audit == Just "PrReview/Merging"
+                    && WorkflowAudit.workflowAuditPreCommitReports audit == expectedReports
+                    && WorkflowAudit.workflowAuditPostCommitReports audit == []
               , assert "indexed daemon dry-run performs no runtime calls" (null calls)
               ]
           pure (and results)
@@ -2680,9 +2680,9 @@ workflowPrReviewMergeabilityIndexedDaemonExecuteMatchesCompatibility = do
                     && length [() | FakeWriteJson {} <- calls] == length expectedWrites
                     && all (\write -> FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write) `elem` calls) expectedWrites
               , assert "indexed daemon execute keeps audit and post-commit surfaces stable" $
-                  WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "pr_review_mergeability_clean"
-                    && WorkflowEventLog.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
-                    && WorkflowEventLog.workflowAuditPostCommitReports tick.daemonObservedAudit == []
+                  WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "pr_review_mergeability_clean"
+                    && WorkflowAudit.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
+                    && WorkflowAudit.workflowAuditPostCommitReports tick.daemonObservedAudit == []
                     && not (any isFakeAppServer calls)
               ]
           pure (and results)
@@ -2744,10 +2744,10 @@ workflowPrReviewMergeabilityIndexedDaemonFailureMatchesCompatibility = do
                     DaemonActionFailed (PlannedCommand GhPrCleanReviewAndMerge {}) _report -> True
                     _ -> False
               , assert "indexed daemon merge failure keeps failure audit shape" $
-                  (WorkflowEventLog.workflowAuditPriorStateLabel <$> audit) == Just (workflowStateLabel @MoifoldSpec state)
-                    && (WorkflowEventLog.workflowAuditCommittedEventLabel <$> audit) == Just Nothing
-                    && (WorkflowEventLog.workflowAuditFinalStateLabel <$> audit) == Just Nothing
-                    && (WorkflowEventLog.workflowAuditNextDaemonRecommendation <$> audit) == Just WorkflowEventLog.WorkflowDaemonStop
+                  (WorkflowAudit.workflowAuditPriorStateLabel <$> audit) == Just (workflowStateLabel @MoifoldSpec state)
+                    && (WorkflowAudit.workflowAuditCommittedEventLabel <$> audit) == Just Nothing
+                    && (WorkflowAudit.workflowAuditFinalStateLabel <$> audit) == Just Nothing
+                    && (WorkflowAudit.workflowAuditNextDaemonRecommendation <$> audit) == Just WorkflowAudit.WorkflowDaemonStop
               , assert "indexed daemon merge failure does not append or write compatibility" $
                   not (any isAppend calls)
                     && not (any isWrite calls)
@@ -3254,7 +3254,7 @@ runIssueImplementDaemonProjectionCase executionMode testCase = do
               [ assert (title "does not commit or mutate") $
                   tick.daemonObservedCommittedEvents == []
                     && tick.daemonObservedActionReports == dryRunCompiledEffectPlan expectedCompiled
-                    && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing
+                    && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Nothing
                     && null calls
               ]
           ExecuteActions ->
@@ -3264,7 +3264,7 @@ runIssueImplementDaemonProjectionCase executionMode testCase = do
                     && expectedAppend `elem` calls
                     && all (`elem` calls) expectedWriteCalls
                     && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
-                    && WorkflowEventLog.workflowAuditCommittedEventLabel tick.daemonObservedAudit /= Nothing
+                    && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit /= Nothing
               ]
       commonResults <-
         sequence
