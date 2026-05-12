@@ -8,12 +8,12 @@ module RunnerGuardSpec
   ( runnerGuardActiveTurnInspectionTests
   ) where
 
-import CodexWatcher.AppServerClient
+import CodexWatcher.Workflow.Agent.Codex.Client
   ( AppServerClientFailure (..)
-  , AppServerEndpoint
   , JsonRpcError (..)
   , formatAppServerClientFailure
   )
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import CodexWatcher.Core.Ids (RepoName (..), RequestId (..), ThreadId (..), TurnId (..), unThreadId, unTurnId)
 import CodexWatcher.Core.Kinds (Domain (IssuePlanning))
 import CodexWatcher.Core.Limits (StaleSeconds, unStaleSeconds)

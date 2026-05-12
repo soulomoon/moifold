@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-144-runner-guard-spec-appserverclient-direct-owner-migration",
+  "roadmap_item_id": "round-144-runner-guard-spec-appserverclient-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: test/RunnerGuardSpec.hs now imports AppServerClientFailure, JsonRpcError, and formatAppServerClientFailure from CodexWatcher.Workflow.Agent.Codex.Client and AppServerEndpoint from CodexWatcher.Workflow.Agent.Codex.Transport; the diff is import-only, no out-of-scope implementation files changed, and all required scans, watcher-core-test, cabal build all, and diff checks passed."
+}
