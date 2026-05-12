@@ -181,7 +181,6 @@ import CodexWatcher.Workflow.Moifold.PrReview.Worker.Indexed
   , PrReviewWorkerIndexedUninitialized
   )
 import CodexWatcher.Workflow.Observation.Agent qualified as WorkflowObservationAgent
-import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), WorkflowSpec (..), legacyObservedPlannedTransition, moifoldPlannedTransitionFromEffects, workflowPlanObservation)
 import Control.Exception (try)
