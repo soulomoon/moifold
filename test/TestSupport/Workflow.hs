@@ -114,7 +114,6 @@ import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
 import CodexWatcher.Workflow.DocsMigration qualified as DocsMigration
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
 import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogCommit
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-129-workflow-agent-support-eventlog-import-removal",
+  "roadmap_item_id": "round-129-workflow-agent-support-eventlog-import-removal",
+  "decision": "approved",
+  "evidence_summary": "Approved after loading rev-001 verification, confirming the selected files no longer import or use the exact WorkflowEventLog facade, preserving direct owner imports and out-of-scope facade surfaces, passing the focused watcher-core-test REPL check, cabal test watcher-core-test, cabal build all, diff hygiene checks, final selected-file diff review, git status review, and confirming no worker-plan.json exists."
+}
