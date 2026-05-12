@@ -1374,19 +1374,35 @@ direct-owner import migration under direction 012 and preserves the steering
 signal: future selections should prefer lawful concrete migration or removal
 slices over readiness-only gate work where evidence already makes the slice
 lawful.
-Milestone 003 remains in progress: the exact remaining Permission facade
-imports and use sites are intentionally only `test/FacadeImportPolicySpec.hs`
-and `test/WorkflowExecutionSpec.hs`. `WorkflowExecutionSpec` is the remaining
-non-policy concrete Permission migration candidate, while
-`FacadeImportPolicySpec` remains explicit facade/policy parity coverage. The
-explicit EventLog facade parity owner, docs/policy references, public
-facade/exposure, Cabal exposure, package descriptor cleanup, remaining
-Permission facade migration, release approval, milestone completion, terminal
-completion, and public compatibility removal remain unapproved. This does NOT
-approve public facade removal/deprecation, Cabal exposure removal, public API
-cleanup, package descriptor cleanup, docs/policy cleanup, remaining Permission
-facade migration, release approval, milestone completion, terminal completion,
-or public compatibility removal.
+`round-139` completed the
+`round-139-workflow-execution-spec-permission-direct-owner-migration` slice at
+merged commit `5cc9be9` by moving only `test/WorkflowExecutionSpec.hs` off the
+exact `CodexWatcher.Workflow.Permission qualified as WorkflowPermission`
+facade import/use. The selected `validateMoifoldEffectPlan` assertions now use
+direct `validatePhaseActionPlan`, and the selected
+`validateWorkflowEffectPlanCore @MoifoldSpec` call heads now use direct
+`CodexWatcher.Workflow.Permission.Core qualified as WorkflowPermissionCore`.
+Workflow execution assertions, fixtures, permission-error expectations,
+aggregate wiring, production/app files, package descriptors, docs/policy,
+public facade modules, and `test/FacadeImportPolicySpec.hs` were preserved.
+Verification passed with the selected-file scan showing no old Permission
+facade import or `WorkflowPermission.` use in `test/WorkflowExecutionSpec.hs`,
+the broad scan leaving exact Permission facade import/use only in
+`test/FacadeImportPolicySpec.hs`, `cabal test watcher-core-test`,
+`cabal build all`, `git diff --check`, and `git diff --cached --check`. This
+records another concrete internal direct-owner import migration under
+direction 012 and preserves the steering signal: future selections should
+prefer lawful concrete migration or removal slices over readiness-only gate
+work where evidence already makes the slice lawful.
+Milestone 003 remains in progress: the only remaining exact Permission facade
+import/use in current code is intentionally `test/FacadeImportPolicySpec.hs`,
+the explicit facade/policy parity owner. Public facade/exposure, Cabal
+exposure, package descriptor cleanup, docs/policy cleanup, release approval,
+milestone completion, terminal completion, and public compatibility removal
+remain unapproved. This does NOT approve public facade removal/deprecation,
+Cabal exposure removal, public API cleanup, package descriptor cleanup,
+docs/policy cleanup, release approval, milestone completion, terminal
+completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -2310,7 +2326,33 @@ Candidate directions:
   removal/deprecation, Cabal exposure removal, public API cleanup, package
   descriptor cleanup, docs/policy cleanup, remaining Permission facade
   migration, release approval, milestone completion, terminal completion, or
-  public compatibility removal.
+  public compatibility removal. `round-139` completed another concrete
+  test-side direct-owner import migration at `5cc9be9` by moving only
+  `test/WorkflowExecutionSpec.hs` off the exact
+  `CodexWatcher.Workflow.Permission qualified as WorkflowPermission` facade
+  import/use. The selected `validateMoifoldEffectPlan` assertions now use
+  direct `validatePhaseActionPlan`, and the selected
+  `validateWorkflowEffectPlanCore @MoifoldSpec` call heads now use direct
+  `CodexWatcher.Workflow.Permission.Core qualified as WorkflowPermissionCore`.
+  The selected file now has no old Permission facade import or
+  `WorkflowPermission.` use, while workflow execution assertions, fixtures,
+  permission-error expectations, aggregate wiring, production/app files,
+  package descriptors, docs/policy, public facade modules, and
+  `test/FacadeImportPolicySpec.hs` were preserved. Verification passed with
+  the selected-file scan, broad exact Permission facade import/use scan,
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+  `git diff --cached --check`. The only remaining exact Permission facade
+  import/use in current code is intentionally `test/FacadeImportPolicySpec.hs`,
+  the explicit facade/policy parity owner. Direction 012 remains in progress,
+  but the coordination preference stays concrete: future selections should
+  prefer lawful concrete migration/removal slices over readiness-only gate work
+  where evidence already makes the slice lawful. Public facade/exposure, Cabal
+  exposure, package descriptor cleanup, docs/policy cleanup, release approval,
+  milestone completion, terminal completion, and public compatibility removal
+  remain unapproved. This does not approve public facade removal/deprecation,
+  Cabal exposure removal, public API cleanup, package descriptor cleanup,
+  docs/policy cleanup, release approval, milestone completion, terminal
+  completion, or public compatibility removal.
 
 ### 4. [pending] Large Runtime Module Decomposition
 
