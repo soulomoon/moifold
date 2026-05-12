@@ -1411,6 +1411,24 @@ direct-owner import migration under direction 010 and reinforces the steering
 signal: future selections should prefer lawful concrete migration or removal
 slices over readiness-only gate work where evidence already makes the slice
 lawful.
+`round-141` completed the
+`round-141-issue-fanout-appserver-spec-endpoint-direct-owner-migration` slice
+at merged commit `59a8351` by moving only `test/IssueFanoutAppServerSpec.hs`
+off the exact `CodexWatcher.AppServerClient (AppServerEndpoint (..))`
+compatibility-facade import. The issue-fanout app-server tests now import
+`AppServerEndpoint (..)` from the direct transport owner
+`CodexWatcher.Workflow.Agent.Codex.Transport`; execute, child-argument
+rendering, retry classification, child-start classification, JSON-RPC
+failure, and decode-failure assertions were preserved. Review evidence records
+that the selected file no longer imports the facade, the broad
+`CodexWatcher.AppServerClient` scan no longer lists
+`test/IssueFanoutAppServerSpec.hs`, remaining hits are out of scope, and
+`cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+`git diff --cached --check` passed. This records another concrete internal
+direct-owner import migration under direction 010 and preserves the steering
+signal: future selections should prefer lawful concrete migration or removal
+slices over readiness-only gate work where evidence already makes the slice
+lawful.
 Milestone 003 remains in progress: the only remaining exact Permission facade
 import/use in current code is intentionally `test/FacadeImportPolicySpec.hs`,
 the explicit facade/policy parity owner. Public facade/exposure, Cabal
@@ -1978,6 +1996,29 @@ Candidate directions:
   public API cleanup, package descriptor cleanup, docs/policy cleanup,
   milestone completion, release approval, terminal completion, or public
   compatibility removal.
+  `round-141` completed the
+  `round-141-issue-fanout-appserver-spec-endpoint-direct-owner-migration`
+  slice at merged commit `59a8351` by moving only
+  `test/IssueFanoutAppServerSpec.hs` from the public
+  `CodexWatcher.AppServerClient` facade to the direct transport owner import
+  `CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))`.
+  The accepted change was import-only: issue-fanout app-server execute,
+  child-argument rendering, retry classification, child-start classification,
+  JSON-RPC failure, decode-failure assertions, production files, other tests
+  and test support, package descriptors, docs/policy, public facade modules,
+  and direct owner modules were preserved. Verification passed with focused
+  selected-file scans, issue-fanout app-server assertion reachability scans, a
+  broad `CodexWatcher.AppServerClient` scan showing
+  `test/IssueFanoutAppServerSpec.hs` removed from remaining facade importers,
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+  `git diff --cached --check`. Direction 010 remains in progress: public
+  facade/exposure, Cabal exposure, package descriptor cleanup, docs/policy
+  cleanup, remaining test-policy and out-of-scope test imports, milestone
+  completion, release approval, terminal completion, and public compatibility
+  removal remain unapproved. This does NOT approve public facade
+  removal/deprecation, Cabal/API exposure cleanup, public API cleanup, package
+  descriptor cleanup, docs/policy cleanup, milestone completion, release
+  approval, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
