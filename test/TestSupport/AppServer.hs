@@ -9,7 +9,7 @@ module TestSupport.AppServer
   , jsonRpcError
   ) where
 
-import CodexWatcher.AppServerClient (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Exception (SomeException, bracketOnError, catch, finally)
 import Data.Aeson

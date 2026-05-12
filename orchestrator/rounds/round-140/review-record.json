@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-140-test-support-appserver-endpoint-direct-owner-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/TestSupport/AppServer.hs replaced the exact CodexWatcher.AppServerClient AppServerEndpoint import with the direct CodexWatcher.Workflow.Agent.Codex.Transport owner import; helper exports and endpoint construction stayed unchanged; broad AppServerClient scan no longer lists the selected file and remaining hits are out of scope; only test/TestSupport/AppServer.hs changed outside orchestrator state/artifacts; watcher-core-test, cabal build all, and diff checks passed."
+}
