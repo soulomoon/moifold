@@ -1155,6 +1155,27 @@ NOT approve public facade removal/deprecation, Cabal exposure removal, public
 API cleanup, package descriptor cleanup, remaining EventLog facade migration,
 Workflow.Permission migration, release approval, milestone completion,
 terminal completion, or public compatibility removal.
+`round-130` completed the
+`round-130-workflow-docs-migration-spec-eventlog-direct-owner-import-convergence`
+slice at merged commit `64680dc` by moving only
+`test/WorkflowDocsMigrationSpec.hs` off the exact
+`CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` facade import to
+direct `CodexWatcher.Workflow.Audit` and
+`CodexWatcher.Workflow.EventLog.Core` owner imports for existing audit,
+replay, fixture, and replay-failure helper usage. The focused DocsMigration
+REPL aggregate, `cabal test watcher-core-test`, `cabal build all`, diff
+checks, selected-file facade scans, broad facade scans, and no-worker-plan
+checks passed. This records another concrete test-side migration under
+direction 012 and preserves the steering signal: future selections should keep
+preferring lawful, behavior-preserving concrete migration or removal slices
+where accepted evidence is sufficient. Milestone 003 remains in progress:
+remaining exact EventLog facade references in other tests, docs/policy
+references, public facade/exposure, and Cabal exposure stay out of scope, and
+Workflow.Permission migration remains unapproved. This does NOT approve public
+facade removal/deprecation, Cabal exposure removal, public API cleanup,
+package descriptor cleanup, remaining EventLog facade migration,
+Workflow.Permission migration, release approval, milestone completion,
+terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -1841,6 +1862,26 @@ Candidate directions:
   cleanup, remaining EventLog facade migration, Workflow.Permission migration,
   release approval, milestone completion, terminal completion, or public
   compatibility removal.
+  `round-130` completed a concrete test-side direct-owner import migration at
+  `64680dc` by moving only `test/WorkflowDocsMigrationSpec.hs` off the exact
+  `CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` facade
+  import. Existing replay, fixture, and replay-failure helper calls now use
+  `CodexWatcher.Workflow.EventLog.Core`, existing audit accessors now use
+  `CodexWatcher.Workflow.Audit`, and the DocsMigration assertions, fixtures,
+  aggregate wiring, event schemas, and public facade exposure were preserved.
+  The focused DocsMigration REPL aggregate, `cabal test watcher-core-test`,
+  `cabal build all`, diff checks, selected-file facade scans, broad facade
+  scans, and no-worker-plan checks passed. Direction 012 remains in progress,
+  but the coordination preference is unchanged and reinforced: future
+  selections should favor additional lawful concrete migration/removal slices
+  over readiness-only rounds when evidence is sufficient. Remaining exact
+  EventLog facade imports in other tests, docs/policy references, public
+  facade/exposure, and Cabal exposure remain out of scope, and
+  Workflow.Permission migration remains unapproved. This does not approve
+  public facade removal/deprecation, Cabal exposure removal, package
+  descriptor cleanup, remaining EventLog facade migration, Workflow.Permission
+  migration, release approval, milestone completion, terminal completion, or
+  public compatibility removal.
 
 ### 4. [pending] Large Runtime Module Decomposition
 
