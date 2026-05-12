@@ -30,8 +30,6 @@
   "round_artifacts": {},
   "last_completed_round": "round-147",
   "resume_error": null,
-  "resume_errors": {
-    "controller": "missing required orchestrator/active-roadmap-bundle.md; migration-needed before run-orchestrator-loop can interpret active roadmap bundle"
-  },
+  "resume_errors": {},
   "retry": null
 }
