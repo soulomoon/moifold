@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-012-eventlog-permission-bridge-split-readiness",
+  "extracted_item_id": "round-139-workflow-execution-spec-permission-direct-owner-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: test/WorkflowExecutionSpec.hs removed the exact Workflow.Permission facade import, added the Permission.Core owner import, replaced validateMoifoldEffectPlan with direct validatePhaseActionPlan, and moved validateWorkflowEffectPlanCore @MoifoldSpec calls to WorkflowPermissionCore; no WorkflowPermission use remains there; broad scans leave exact facade import/use only in test/FacadeImportPolicySpec.hs; watcher-core-test, cabal build all, and diff checks passed."
+}

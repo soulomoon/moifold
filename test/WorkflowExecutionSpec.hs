@@ -180,7 +180,7 @@ import CodexWatcher.Workflow.Moifold.PrReview.Worker.Indexed
   , PrReviewWorkerIndexedUninitialized
   )
 import CodexWatcher.Workflow.Observation.Agent qualified as WorkflowObservationAgent
-import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
+import CodexWatcher.Workflow.Permission.Core qualified as WorkflowPermissionCore
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (MoifoldSpec, PlannedTransition (..), WorkflowSpec (..), legacyObservedPlannedTransition, moifoldPlannedTransitionFromEffects, workflowPlanObservation)
 import Control.Exception (try)
@@ -352,7 +352,7 @@ workflowPrReviewMergeabilityPlannedTransitionKeepsMergePreCommitEffect = do
               && hasEffect MergePullRequestTag planned.plannedPreCommitEffects
               && null planned.plannedPostCommitEffects
               && planned.plannedPreCommitEffects <> planned.plannedPostCommitEffects == observed.observedEffects
-              && WorkflowPermission.validateMoifoldEffectPlan state planned.plannedPreCommitEffects == Right ()
+              && validatePhaseActionPlan state planned.plannedPreCommitEffects == Right ()
       Left _ -> False
 
 
@@ -446,12 +446,17 @@ workflowPrReviewMergeabilityFacadeLawPreservesObservationReplayEffectsAndPermiss
             _ -> False
       , assert "workflow PR-review mergeability law permission accepts merge from mergeability state" $
           validatePhaseActionPlan state expectedEffects == Right ()
-            && WorkflowPermission.validateMoifoldEffectPlan state expectedEffects == Right ()
-            && isRightUnit (WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec state expectedEffects)
+            && validatePhaseActionPlan state expectedEffects == Right ()
+            && isRightUnit (WorkflowPermissionCore.validateWorkflowEffectPlanCore @MoifoldSpec state expectedEffects)
       , assert "workflow PR-review mergeability law permission rejects merge outside mergeability state" $
-          case (validatePhaseActionPlan deniedState expectedEffects, WorkflowPermission.validateMoifoldEffectPlan deniedState expectedEffects, WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec deniedState expectedEffects) of
-            (Left directError, Left facadeError, Left coreError) ->
-              facadeError == directError
+          case
+            ( validatePhaseActionPlan deniedState expectedEffects
+            , validatePhaseActionPlan deniedState expectedEffects
+            , WorkflowPermissionCore.validateWorkflowEffectPlanCore @MoifoldSpec deniedState expectedEffects
+            )
+          of
+            (Left directError, Left phaseError, Left coreError) ->
+              phaseError == directError
                 && coreError.workflowPermissionEffectLabel == "MergePullRequest"
                 && "effect is not allowed" `Text.isInfixOf` coreError.workflowPermissionReason
             _ -> False
