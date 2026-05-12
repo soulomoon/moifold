@@ -1252,7 +1252,31 @@ remain out of scope. This does NOT approve public facade removal/deprecation,
 Cabal exposure removal, public API cleanup, package descriptor cleanup,
 remaining EventLog facade migration, Workflow.Permission migration, release
 approval, milestone completion, terminal completion, or public compatibility
-removal.
+removal. `round-134` completed the
+`round-134-workflow-eventlog-spec-core-audit-direct-owner-split` slice at
+merged commit `b6db163` by moving only `test/WorkflowEventLogSpec.hs`
+reusable EventLog core assertions to
+`CodexWatcher.Workflow.EventLog.Core` and workflow audit assertions to
+`CodexWatcher.Workflow.Audit`. The only remaining facade-qualified calls in
+that spec are intentional Moifold bridge-wrapper parity checks:
+`WorkflowEventLog.initializeMoifoldWorkflow` and
+`WorkflowEventLog.applyMoifoldWorkflowEvent`. Verification passed with the
+focused `WorkflowEventLog.` scan, broad exact EventLog facade import scan,
+`git diff --check`, `git diff --cached --check`,
+`cabal test watcher-core-test`, and `cabal build all`. Remaining exact
+EventLog facade imports are now `test/FacadeImportPolicySpec.hs` and
+`test/WorkflowEventLogSpec.hs`; `WorkflowEventLogSpec` remains only because
+of the two bridge-wrapper calls. This records another concrete test-side
+migration under direction 012 and preserves the steering signal: future
+selections should prefer lawful, behavior-preserving concrete migration or
+removal slices over readiness-only rounds where accepted evidence is
+sufficient. Milestone 003 remains in progress: remaining policy/facade bridge
+coverage, docs/policy references, public facade/exposure, Cabal exposure, and
+Workflow.Permission migration remain out of scope. This does NOT approve
+public facade removal/deprecation, Cabal exposure removal, public API cleanup,
+package descriptor cleanup, remaining EventLog facade migration,
+Workflow.Permission migration, release approval, milestone completion,
+terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -2038,6 +2062,31 @@ Candidate directions:
   remaining EventLog facade migration, Workflow.Permission migration, release
   approval, milestone completion, terminal completion, or public compatibility
   removal.
+  `round-134` completed another concrete test-side direct-owner import
+  migration at `b6db163` by moving only `test/WorkflowEventLogSpec.hs`
+  reusable EventLog core assertions to
+  `CodexWatcher.Workflow.EventLog.Core` and workflow audit assertions to
+  `CodexWatcher.Workflow.Audit`. The existing behavior assertions, fixture
+  contracts, replay and transition parity, event schemas, package descriptors,
+  docs, runtime files, and public facade exposure were preserved. The only
+  remaining `WorkflowEventLog.` uses in the spec are the intentional Moifold
+  bridge-wrapper parity calls to `initializeMoifoldWorkflow` and
+  `applyMoifoldWorkflowEvent`. Verification passed with the focused
+  `WorkflowEventLog.` scan, broad exact EventLog facade import scan,
+  `git diff --check`, `git diff --cached --check`,
+  `cabal test watcher-core-test`, and `cabal build all`. The remaining exact
+  EventLog facade imports are `test/FacadeImportPolicySpec.hs` and
+  `test/WorkflowEventLogSpec.hs`; `WorkflowEventLogSpec` remains only because
+  of the two bridge-wrapper calls. Direction 012 remains in progress, but the
+  coordination preference remains concrete: future selections should favor
+  lawful behavior-preserving migration/removal slices over readiness-only
+  rounds when evidence is sufficient. Docs/policy references, public
+  facade/exposure, Cabal exposure, remaining EventLog facade migration, and
+  Workflow.Permission migration remain unapproved. This does not approve
+  public facade removal/deprecation, Cabal exposure removal, public API
+  cleanup, package descriptor cleanup, remaining EventLog facade migration,
+  Workflow.Permission migration, release approval, milestone completion,
+  terminal completion, or public compatibility removal.
 
 ### 4. [pending] Large Runtime Module Decomposition
 
