@@ -1134,7 +1134,27 @@ Cabal exposure stay out of scope, and Workflow.Permission migration remains
 unapproved. This does NOT approve test-policy/support migration, facade
 deprecation/removal, Cabal exposure removal, public API cleanup, package
 descriptor cleanup, Workflow.Permission migration, release approval, milestone
-completion, terminal completion, or public compatibility removal.
+completion, terminal completion, or public compatibility removal. `round-129`
+completed the `round-129-workflow-agent-support-eventlog-import-removal` slice
+at merged commit `d52fdfc` by removing only the unused exact
+`CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` imports from
+`test/WorkflowAgentSpec.hs` and `test/TestSupport/Workflow.hs`, while
+preserving direct `CodexWatcher.Workflow.EventLog.Commit.Core` and
+`CodexWatcher.Workflow.EventLog.File.Core` owner imports and workflow test
+behavior. Validation passed with the focused `workflowAgentTests` REPL
+preflight, `cabal test watcher-core-test`, `cabal build all`, diff checks, and
+selected/broad import scans. This records a concrete internal facade-import
+removal under direction 012 and moves the current coordination signal away from
+broad gate-only accumulation when existing evidence is sufficient: prefer
+additional lawful, behavior-preserving removal or migration slices over new
+readiness-only rounds for already-proven candidates. Milestone 003 remains in
+progress: remaining exact EventLog facade references in other out-of-scope
+tests, docs/policy references, public facade/exposure, and Cabal exposure stay
+out of scope, and Workflow.Permission migration remains unapproved. This does
+NOT approve public facade removal/deprecation, Cabal exposure removal, public
+API cleanup, package descriptor cleanup, remaining EventLog facade migration,
+Workflow.Permission migration, release approval, milestone completion,
+terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -1800,6 +1820,25 @@ Candidate directions:
   Workflow.Permission bridge migration remains unapproved. This does not
   approve test-policy/support migration, facade deprecation/removal, Cabal
   exposure removal, package descriptor cleanup, Workflow.Permission migration,
+  release approval, milestone completion, terminal completion, or public
+  compatibility removal. `round-129` completed a concrete internal
+  facade-import removal at `d52fdfc` by deleting only the unused exact
+  `CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` imports from
+  `test/WorkflowAgentSpec.hs` and `test/TestSupport/Workflow.hs`. Direct
+  `CodexWatcher.Workflow.EventLog.Commit.Core` and
+  `CodexWatcher.Workflow.EventLog.File.Core` owner imports stayed in place,
+  workflow test behavior was preserved, and the focused `workflowAgentTests`
+  REPL preflight, `cabal test watcher-core-test`, `cabal build all`, diff
+  checks, and selected/broad import scans passed. This is an internal
+  facade-import removal only, not public facade removal. Direction 012 remains
+  in progress, but future selections should favor additional concrete
+  removal/migration slices over broad readiness-only rounds where accepted
+  evidence already proves the candidate lawful. Remaining exact EventLog facade
+  imports in other out-of-scope tests, docs/policy references, public
+  facade/exposure, and Cabal exposure remain out of scope, and
+  Workflow.Permission migration remains unapproved. This does not approve
+  public facade removal/deprecation, Cabal exposure removal, package descriptor
+  cleanup, remaining EventLog facade migration, Workflow.Permission migration,
   release approval, milestone completion, terminal completion, or public
   compatibility removal.
 
