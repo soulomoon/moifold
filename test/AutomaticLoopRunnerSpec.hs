@@ -8,7 +8,6 @@ module AutomaticLoopRunnerSpec
   ( automaticLoopRunnerTests
   ) where
 
-import CodexWatcher.AppServerClient (AppServerClientFailure (..), AppServerEndpoint)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure, runAutomaticLoop)
 import CodexWatcher.Cli.Types (LoopCli (..))
 import CodexWatcher.Core.Ids (RepoName (..), ThreadId (..), unThreadId)
@@ -17,6 +16,8 @@ import CodexWatcher.Daemon (DaemonFailure (..))
 import CodexWatcher.DaemonLoop (DaemonLoopFailure (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.EventLog.Types (WatcherEvent (..))
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import Control.Exception (bracket, try)
 import Control.Monad (when)
 import Data.Aeson
