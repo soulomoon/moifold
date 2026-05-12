@@ -2158,6 +2158,30 @@ Candidate directions:
   Cabal/API exposure cleanup, public API cleanup, package descriptor cleanup,
   docs/policy cleanup, milestone completion, release approval, terminal
   completion, or public compatibility removal.
+  `round-147` completed the
+  `round-147-workflow-indexed-spec-appserverturn-direct-owner-migration` slice
+  at merged commit `1c7035e` by moving only `test/WorkflowIndexedSpec.hs` off
+  `CodexWatcher.AppServerClient` for `AppServerTurn (..)` onto
+  `CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..))`.
+  The accepted change was import-only: indexed PR-review worker/reviewer
+  classifier-backed outcome assertions, helper type signatures,
+  `workflowIndexedTests`, test bodies, helpers, fixtures, production files,
+  other tests and test support, package descriptors, docs/policy, public
+  facade modules, and direct owner modules were preserved. Verification passed
+  with focused selected-file scans, direct-owner export/facade scans, selected
+  behavioral anchor scans, a broad `CodexWatcher.AppServerClient` scan showing
+  `test/WorkflowIndexedSpec.hs` removed from remaining facade importers,
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+  `git diff --cached --check`. Direction 010 remains in progress, and future
+  selections should continue to prefer lawful concrete migration/removal slices
+  over readiness-only gate work when the active roadmap permits it. Public
+  facade/exposure, Cabal exposure, package descriptor cleanup, docs/policy
+  cleanup, broader workflow specs, `test/Main.hs`, remaining test support
+  surfaces, milestone completion, release approval, terminal completion, and
+  public compatibility removal remain unapproved. This does NOT approve public
+  facade removal/deprecation, Cabal/API exposure cleanup, public API cleanup,
+  package descriptor cleanup, docs/policy cleanup, milestone completion,
+  release approval, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
