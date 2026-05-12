@@ -1276,7 +1276,34 @@ Workflow.Permission migration remain out of scope. This does NOT approve
 public facade removal/deprecation, Cabal exposure removal, public API cleanup,
 package descriptor cleanup, remaining EventLog facade migration,
 Workflow.Permission migration, release approval, milestone completion,
-terminal completion, or public compatibility removal.
+terminal completion, or public compatibility removal. `round-135` completed
+the `round-135-workflow-eventlog-spec-facade-import-removal` slice at merged
+commit `503c2c8` by removing the remaining exact
+`CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` facade import
+from `test/WorkflowEventLogSpec.hs` and keeping that behavior spec on direct
+`CodexWatcher.Workflow.EventLog.Core` owner calls. The explicit facade parity
+owner `test/FacadeImportPolicySpec.hs` remained untouched and still owns
+facade parity coverage for `replayMoifoldWorkflowEvents`,
+`replayWorkflowEventLog @MoifoldSpec`, `initializeMoifoldWorkflow`, and
+`applyMoifoldWorkflowEvent`. Verification passed with the selected-file
+`WorkflowEventLog.` scan reporting no matches, the exact facade import scan
+reporting only `test/FacadeImportPolicySpec.hs`, an empty
+`git diff -- test/FacadeImportPolicySpec.hs`, `cabal test watcher-core-test`,
+`cabal build all`, `git diff --check`, and `git diff --cached --check`.
+Remaining exact EventLog facade imports are now only
+`test/FacadeImportPolicySpec.hs`. This records another concrete test-side
+migration under direction 012 and preserves the steering signal: future
+selections should prefer lawful concrete migration or removal slices over
+readiness-only gate work where evidence already makes the slice lawful.
+Milestone 003 remains in progress: remaining policy/facade bridge coverage,
+docs/policy references, public facade/exposure, Cabal exposure, package
+descriptor cleanup, Workflow.Permission migration, release approval, milestone
+completion, terminal completion, and public compatibility removal remain
+unapproved. This does NOT approve public facade removal/deprecation, Cabal
+exposure removal, public API cleanup, package descriptor cleanup, remaining
+EventLog facade migration beyond the explicit parity owner, Workflow.Permission
+migration, release approval, milestone completion, terminal completion, or
+public compatibility removal.
 
 Candidate directions:
 
@@ -2085,6 +2112,31 @@ Candidate directions:
   Workflow.Permission migration remain unapproved. This does not approve
   public facade removal/deprecation, Cabal exposure removal, public API
   cleanup, package descriptor cleanup, remaining EventLog facade migration,
+  Workflow.Permission migration, release approval, milestone completion,
+  terminal completion, or public compatibility removal.
+  `round-135` completed another concrete test-side direct-owner import
+  migration at `503c2c8` by removing the remaining exact
+  `CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog` facade import
+  from `test/WorkflowEventLogSpec.hs`. That behavior spec now stays on direct
+  `CodexWatcher.Workflow.EventLog.Core` owner calls, while
+  `test/FacadeImportPolicySpec.hs` was untouched and remains the explicit
+  facade parity owner for `replayMoifoldWorkflowEvents`,
+  `replayWorkflowEventLog @MoifoldSpec`, `initializeMoifoldWorkflow`, and
+  `applyMoifoldWorkflowEvent`. Verification passed with the selected-file
+  `WorkflowEventLog.` scan reporting no matches, the exact facade import scan
+  reporting only `test/FacadeImportPolicySpec.hs`, an empty
+  `git diff -- test/FacadeImportPolicySpec.hs`, `cabal test watcher-core-test`,
+  `cabal build all`, `git diff --check`, and `git diff --cached --check`.
+  The remaining exact EventLog facade imports are now only
+  `test/FacadeImportPolicySpec.hs`. Direction 012 remains in progress, but
+  the coordination preference is now sharper: future selections should prefer
+  lawful concrete migration/removal slices over readiness-only gate work where
+  evidence already makes the slice lawful. Docs/policy references, public
+  facade/exposure, Cabal exposure, package descriptor cleanup, the explicit
+  parity-owner facade import, and Workflow.Permission migration remain
+  unapproved. This does not approve public facade removal/deprecation, Cabal
+  exposure removal, public API cleanup, package descriptor cleanup, remaining
+  EventLog facade migration beyond the explicit parity owner,
   Workflow.Permission migration, release approval, milestone completion,
   terminal completion, or public compatibility removal.
 
