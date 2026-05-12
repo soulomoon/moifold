@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-146-workflow-agent-spec-appserverturn-direct-owner-migration",
+  "roadmap_item_id": "round-146-workflow-agent-spec-appserverturn-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved import-only WorkflowAgentSpec migration from CodexWatcher.AppServerClient to CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..)); required scans, selected-file diff inspection, cabal test watcher-core-test, cabal build all, git diff --check, and git diff --cached --check passed. Remaining AppServerClient users are recorded as out of scope."
+}
