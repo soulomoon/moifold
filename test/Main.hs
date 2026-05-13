@@ -15,7 +15,13 @@ module Main (main) where
 
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ActionExecutor
-import CodexWatcher.AppServerClient
+  ( ActionExecutionMode (..)
+  , ActionExecutionReport (..)
+  , ActionExecutionResult (..)
+  , ActionExecutor (..)
+  , dryRunCompiledEffectPlan
+  , executeCompiledEffectPlan
+  )
 import CodexWatcher.ChildDaemon (readPidFile, restoreOwnedPidFile)
 import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
@@ -70,6 +76,9 @@ import CodexWatcher.Domain.PrReview.Types
 import CodexWatcher.Runtime.Paths
 import CodexWatcher.WatcherRuntimeStatus
 import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
+import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure (..), AppServerTurn (..))
+import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
+import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
 import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as IssueImplementIndexed
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (PlannedTransition (..))

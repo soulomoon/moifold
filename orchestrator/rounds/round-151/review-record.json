@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-151-main-appserverclient-direct-owner-import-migration",
+  "roadmap_item_id": "round-151-main-appserverclient-direct-owner-import-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: test/Main.hs no longer imports the exact CodexWatcher.AppServerClient facade; AppServerTurn and AppServerClientFailure come from CodexWatcher.Workflow.Agent.Codex.Client, AppServerEndpoint from Transport, AppServerInterpreter from Interpreter, and AppServerRequest remains from CodexWatcher.AppServerProtocol. The diff is import-only in test/Main.hs, remaining facade references are limited to the facade module, Cabal exposure, docs, and policy strings, and watcher-core-test, cabal build all, git diff --check, and git diff --cached --check passed."
+}
