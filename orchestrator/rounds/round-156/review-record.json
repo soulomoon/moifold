@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-156-pr-review-launch-cli-spec-github-id-direct-owner-migration",
+  "roadmap_item_id": "round-156-pr-review-launch-cli-spec-github-id-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "APPROVED: selected test file migrated from CodexWatcher.Core.Ids to CodexWatcher.Workflow.GitHub.Ids for BranchName, IssueNumber, PrNumber, and RepoName with import-only test diff; watcher-core-test, cabal build all, diff whitespace checks, focused import scans, and scope/name-status checks passed."
+}
