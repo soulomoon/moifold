@@ -673,7 +673,22 @@ test-only direct-owner import convergence and does not approve public facade
 deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
 cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
 approval, milestone completion, terminal completion, or public compatibility
-removal.
+removal. `round-156` completed a narrow one-file GitHub-id direct-owner
+`direction-011-core-ids-import-convergence` slice at merged commit `49e5f07`
+by moving only `test/PrReviewLaunchCliSpec.hs` from
+`CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..),
+RepoName (..))` to direct
+`CodexWatcher.Workflow.GitHub.Ids (BranchName (..), IssueNumber (..),
+PrNumber (..), RepoName (..))`, preserving existing PR-review launch CLI
+execute, dry-run endpoint rendering, runtime-owner skip, JSON-RPC failure, and
+decode-failure coverage, leaving package descriptors and public compatibility
+facade exposure unchanged, and passing `cabal test watcher-core-test`,
+`cabal build all`, `git diff --check`, `git diff --cached --check`, focused
+import scans, and scope checks. This status records one test-only direct-owner
+import convergence and does not approve public facade deprecation/removal,
+Cabal exposure cleanup, docs cleanup, package descriptor cleanup, broader
+Core.Ids migration, runtime compatibility cleanup, release approval, milestone
+completion, terminal completion, or public compatibility removal.
 
 `round-104` completed the artifact-only
 `round-104-eventlog-permission-bridge-split-readiness` evidence round at
@@ -2462,7 +2477,23 @@ Candidate directions:
   approve broader Core.Ids migration, public facade deprecation/removal, Cabal
   exposure cleanup, docs cleanup, package descriptor cleanup, runtime
   compatibility cleanup, release approval, milestone completion, terminal
-  completion, or public compatibility removal.
+  completion, or public compatibility removal. `round-156` completed the
+  `round-156-pr-review-launch-cli-spec-github-id-direct-owner-migration` slice
+  at `49e5f07` by moving only `test/PrReviewLaunchCliSpec.hs` from
+  `CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..),
+  RepoName (..))` to
+  `CodexWatcher.Workflow.GitHub.Ids (BranchName (..), IssueNumber (..),
+  PrNumber (..), RepoName (..))`. Existing PR-review launch CLI execute,
+  dry-run endpoint rendering, runtime-owner skip, JSON-RPC failure, and
+  decode-failure coverage was preserved, package descriptors and public
+  compatibility facade exposure were unchanged, and validation passed with
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`,
+  `git diff --cached --check`, focused import scans, and scope checks. This
+  records one test-only direct-owner import convergence and does not approve
+  broader Core.Ids migration, public facade deprecation/removal, Cabal exposure
+  cleanup, docs cleanup, package descriptor cleanup, runtime compatibility
+  cleanup, release approval, milestone completion, terminal completion, or
+  public compatibility removal.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
