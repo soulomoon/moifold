@@ -11,7 +11,8 @@ import CodexWatcher.EffectInterpreter
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Runtime.Paths (RuntimeCwd (..), RuntimeStateDir (..), RuntimeWorkdir (..))
 import CodexWatcher.TurnOutput
-import CodexWatcher.Core.Ids (IssueNumber, RepoName, RequestId (..))
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber, RepoName)
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
 defaultEffectRuntimeConfig =
