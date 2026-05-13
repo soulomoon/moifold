@@ -17,15 +17,13 @@ module CodexWatcher.EffectInterpreter
   ) where
 
 import CodexWatcher.AppServerProtocol (AppServerRequest)
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, nextRequestId)
+import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)
   , CommitSha
   , IssueNumber (..)
   , PrNumber (..)
   , RepoName
-  , RequestId
-  , ThreadId
-  , nextRequestId
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig, ReviewEvidence)
