@@ -14,7 +14,6 @@ module CodexWatcher.Workflow.Moifold.PrReview
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
 import CodexWatcher.Observation (ObservedTick, invalidObservation, observedFromDecision)
 import CodexWatcher.StateMachine (Event (..), step)
-import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId (..), ThreadId, TurnId)
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
@@ -24,6 +23,8 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceFromThreads
   )
 import CodexWatcher.EventLog.Types (WatcherEvent (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha, ReviewThreadId (..))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
