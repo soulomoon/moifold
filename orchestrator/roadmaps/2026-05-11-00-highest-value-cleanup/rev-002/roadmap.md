@@ -176,22 +176,22 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 184 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 185 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 184 migrated only `src/CodexWatcher/Healthcheck.hs` from
+round 185 migrated only
+`src/CodexWatcher/Domain/IssuePlanning/Loop.hs` from
 `CodexWatcher.Core.Ids` to direct
-`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId)` and
-`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber, RepoName)`
-imports. `cabal build all`, full `cabal test watcher-core-test`,
-`git diff --check`, selected-file
-absence/direct-owner scans, broad remaining `Core.Ids` classification, and
-focused `HealthcheckSpec` / `RuntimeCompatibilityFixtureSpec` evidence
-passed. The diff was import-only; healthcheck JSON shapes, summary paths,
-reader set, command rendering, app-server thread checks, runtime-state
-semantics, compatibility file names, repair behavior, public facade exposure,
-Cabal, docs, and behavior were unchanged.
-Remaining production users still include
-`src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId, nextRequestId)`
+and `CodexWatcher.Workflow.GitHub.Ids (IssueNumber, RepoName)` imports.
+`cabal build all`, full `cabal test watcher-core-test`, `git diff --check`,
+`git diff --cached --check`, selected-file no-`Core.Ids` scan,
+selected-file direct-owner scan, broad remaining `Core.Ids` classification,
+and focused planning-loop evidence passed. The diff was import-only; request-id
+progression, planner thread/turn handling, repo/issue rendering, event append
+order, daemon transition behavior, app-server turn classification, failure
+text, public facade exposure, Cabal, docs, runtime compatibility files, and
+behavior were unchanged.
+The remaining production user is
 `src/CodexWatcher/Domain/IssueImplement/Loop.hs`. This status does not approve
 public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
 runtime compatibility cleanup, release approval, milestone completion, terminal
@@ -279,8 +279,11 @@ Candidate directions:
   Boundary notes: no daemon-loop state transition, event append order,
   app-server turn classification, request-id progression, or command rendering
   change.
-  Extraction notes: prefer one-file import-only slices; classify any remaining
-  loop import as a behavior blocker rather than deferring the whole milestone.
+  Extraction notes: `src/CodexWatcher/Domain/IssuePlanning/Loop.hs` was
+  completed by round 185 as an import-only direct-owner migration.
+  `src/CodexWatcher/Domain/IssueImplement/Loop.hs` remains for a later round.
+  Prefer one-file import-only slices; classify any remaining loop import as a
+  behavior blocker rather than deferring the whole milestone.
 
 - Direction id: `direction-011f-core-ids-cli-production-imports`
   Summary: Split `Core.Ids` imports in CLI parser/types/fanout modules:
