@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-155-observe-command-spec-core-ids-split-import-migration",
+  "roadmap_item_id": "round-155-observe-command-spec-core-ids-split-import-migration",
+  "decision": "approved",
+  "evidence_summary": "APPROVED: test/ObserveCommandSpec.hs is import-only, replaces the Core.Ids facade import with direct GitHub and agent id owner imports, preserves test bodies, and passes watcher-core-test, cabal build all, diff whitespace checks, focused import scans, and scope checks."
+}

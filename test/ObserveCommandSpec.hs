@@ -9,10 +9,11 @@ module ObserveCommandSpec
 
 import CodexWatcher.Cli.Command.Observe (observeOnce)
 import CodexWatcher.Cli.Types (ObserveOnceCli (..))
-import CodexWatcher.Core.Ids (RepoName (..), ThreadId (..), TurnId (..), unThreadId)
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.EventLog.Types (WatcherEvent (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..), unThreadId)
+import CodexWatcher.Workflow.GitHub.Ids (RepoName (..))
 import Control.Exception (bracket, catch, evaluate, finally, mask)
 import Control.Monad (when)
 import Data.Aeson
