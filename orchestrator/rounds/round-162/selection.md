@@ -1,0 +1,29 @@
+### Selected Extraction
+- Milestone: Import Convergence And Package-Boundary Cleanup
+- Milestone id: `milestone-003-import-convergence-package-boundaries`
+- Direction id: `direction-011-core-ids-import-convergence`
+- Extracted item id: `round-162-issue-planning-watcher-core-ids-split-import-migration`
+- Extracted item summary: Migrate only `src/CodexWatcher/Domain/IssuePlanning/Watcher.hs` from the combined `CodexWatcher.Core.Ids` compatibility facade to direct GitHub-id and agent-id owner imports for its existing `IssueNumber`, `ThreadId`, and `TurnId` uses, preserving issue-planning observation and planning-graph validation behavior while leaving public compatibility surfaces exposed.
+- Roadmap id: `2026-05-11-00-highest-value-cleanup`
+- Roadmap revision: `rev-001`
+- Roadmap dir: `orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001`
+
+### Boundaries
+- In scope: edit only `src/CodexWatcher/Domain/IssuePlanning/Watcher.hs` to replace `CodexWatcher.Core.Ids (IssueNumber (..), ThreadId, TurnId)` with direct owner imports from `CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..))` and `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)`; preserve `IssuePlanningObservation`, `issuePlanningObserve`, `selectIssueImplementationStarts`, planning-graph validation, issue-number rendering, and all existing error text.
+- Out of scope: other `Core.Ids` users including `EventLogRepair.hs`, PR-review loop/protocol/launch modules, issue-planning loop/fanout modules, issue-implementation modules, daemon/healthcheck/runtime modules, CLI modules, test rewrites, package descriptor cleanup, public facade deletion or deprecation, Cabal exposed-module changes, docs or policy-string edits, `CodexWatcher.Core.Ids` facade changes, broader `Core.Ids` migration, runtime compatibility cleanup, milestone completion, terminal completion, release approval, or public compatibility removal.
+- Concurrent batch context: none. The active controller state has `max_parallel_rounds: 1`, and this one-file production migration should run serially after round 161.
+
+### Scheduler Fields
+```json
+{
+  "depends_on_round_ids": [],
+  "merge_after_item_ids": [],
+  "parallel_group": null,
+  "merge_ready": false
+}
+```
+
+### Rationale
+Milestone 003 is dependency-ready because milestone 001 is complete, and direction 011 remains in progress after round 161 migrated `src/CodexWatcher/Domain/PrReview/Watcher.hs` while production `CodexWatcher.Core.Ids` imports still remain. The operator steering asks for concrete migration or removal-enabling code slices over readiness-only gate work when lawful, and no exact gate currently permits public deprecation, facade removal, or Cabal exposure cleanup.
+
+`src/CodexWatcher/Domain/IssuePlanning/Watcher.hs` is the smallest next production watcher slice visible in the remaining `Core.Ids` importer set: it imports GitHub-owned `IssueNumber` plus agent-owned `ThreadId` and `TurnId` through the combined compatibility facade, and the direct owner modules already expose the same types, constructor, and accessor needed by this module. Existing watcher-core coverage exercises issue-planning observations, planning-graph validation, issue-number error rendering, and implementation-start selection, so the downstream planner can keep the implementation import-only and verify behavior without adding another readiness-only round. This advances removal-enabling import convergence while reserving broader migration, deprecation, removal, and terminal decisions for later exact gates.
