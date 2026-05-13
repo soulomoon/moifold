@@ -29,13 +29,14 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.File (readJsonValue)
 import CodexWatcher.Runtime.Json (commandJsonValue)
 import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
-import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.State (someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..), formatAppServerClientFailure, parseThreadReadTurns)
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerClientOptions (..), AppServerEndpoint, defaultAppServerClientOptions, sendOneAppServerRequest)
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.Workflow.GitHub.Command qualified as GitHubCommand
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), PrNumber (..), RepoName (..))
 import CodexWatcher.Workflow.GitHub.Remote (parseGhPrView, parseGitBranch, parseGitSha, parseLsRemoteBranch, remotePullRequestIsMerged)
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)

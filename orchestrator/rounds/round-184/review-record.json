@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-003-core-ids-production-import-burndown",
+  "direction_id": "direction-011d-core-ids-healthcheck-production-import",
+  "extracted_item_id": "round-184-healthcheck-core-ids-import-migration-or-classification",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only Healthcheck.hs migration from CodexWatcher.Core.Ids to direct Agent/GitHub id owner imports. cabal build all, cabal test watcher-core-test, git diff --check, selected-file import scans, broad Core.Ids classification, and focused HealthcheckSpec/RuntimeCompatibilityFixtureSpec evidence all passed."
+}
