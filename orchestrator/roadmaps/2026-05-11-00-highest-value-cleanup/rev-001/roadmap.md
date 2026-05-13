@@ -789,6 +789,23 @@ convergence and does not approve public facade deprecation/removal, Cabal
 exposure cleanup, docs cleanup, package descriptor cleanup, broader Core.Ids
 migration, runtime compatibility cleanup, release approval, milestone
 completion, terminal completion, or public compatibility removal.
+`round-163` completed a narrow one-file production split-import
+`direction-011-core-ids-import-convergence` slice at merged commit
+`0a92e35` by moving only `src/CodexWatcher/Domain/PrReview/Protocol.hs` from
+`CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, ThreadId, TurnId)` to
+direct `CodexWatcher.Workflow.GitHub.Ids (CommitSha, ReviewThreadId)` and
+`CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)`, preserving PR-review
+protocol session types, worker and reviewer outcomes, turn-start/wait/emit
+helpers, protocol runners, event construction, function bodies, package
+descriptors, tests, docs, runtime compatibility files, and public
+compatibility facade exposure unchanged, and passing `cabal build all`,
+`cabal test watcher-core-test`, `git diff --check`,
+`git diff --cached --check`, focused import scans, package exposure checks,
+and diff review. This status records one production direct-owner import
+convergence and does not approve public facade deprecation/removal, Cabal
+exposure cleanup, docs cleanup, package descriptor cleanup, broader Core.Ids
+migration, runtime compatibility cleanup, release approval, milestone
+completion, terminal completion, or public compatibility removal.
 
 `round-104` completed the artifact-only
 `round-104-eventlog-permission-bridge-split-readiness` evidence round at
@@ -2695,6 +2712,24 @@ Candidate directions:
   `git diff --cached --check`, focused import scans, scope checks, and facade
   availability checks. This records one production direct-owner import
   convergence and does not approve broader Core.Ids migration, public facade
+  deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
+  cleanup, runtime compatibility cleanup, release approval, milestone
+  completion, terminal completion, or public compatibility removal.
+  `round-163` completed the
+  `round-163-pr-review-protocol-core-ids-split-import-migration` slice at
+  `0a92e35` by moving only `src/CodexWatcher/Domain/PrReview/Protocol.hs`
+  from
+  `CodexWatcher.Core.Ids (CommitSha, ReviewThreadId, ThreadId, TurnId)` to
+  `CodexWatcher.Workflow.GitHub.Ids (CommitSha, ReviewThreadId)` and
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)`. PR-review protocol
+  session types, worker and reviewer outcomes, turn-start/wait/emit helpers,
+  protocol runners, event construction, and all function bodies were
+  preserved, package descriptors, tests, docs, runtime compatibility files, and
+  public compatibility facade exposure were unchanged, and validation passed
+  with `cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+  `git diff --cached --check`, focused import scans, package exposure checks,
+  and diff review. This records one production direct-owner import convergence
+  and does not approve broader Core.Ids migration, public facade
   deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
   cleanup, runtime compatibility cleanup, release approval, milestone
   completion, terminal completion, or public compatibility removal.
