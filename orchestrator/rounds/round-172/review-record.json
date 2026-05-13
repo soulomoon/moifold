@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-172-runner-guard-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "APPROVED: state lineage matches round 172 review metadata; RunnerGuard.hs changed only the Core.Ids import to direct Agent.Ids and GitHub.Ids owner imports; no behavior, JSON, app-server sequencing, parser/replay/prompt, Cabal, docs, tests, fixtures, runtime compatibility, roadmap, or public facade exposure changed; cabal build all, cabal test watcher-core-test, and git diff --check passed; cached diff check skipped because no staged changes; remaining Core.Ids users are outside this round and do not indicate completion or removal."
+}
