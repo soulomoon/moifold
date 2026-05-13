@@ -176,27 +176,26 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 178 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 179 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 178 migrated only `src/CodexWatcher/GoldenReplay.hs` from
-`CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..),
-PrNumber (..), RepoName (..), ThreadId (..), TurnId (..))` to direct
-`CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..),
-IssueNumber (..), PrNumber (..), RepoName (..))` and
-`CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))`, with
-`cabal build all`, full `cabal test watcher-core-test`, focused built-test
-golden replay/bootstrap validation, `git diff --check`, selected-file import
-scans, direct-owner scans, and the broad remaining-user scan passing. The diff
-was import-only; function bodies, exports, constructors, snapshot
-normalization, replay warnings, bootstrap events, old fixture behavior,
-package descriptors, public facade exposure, and behavior were unchanged.
+round 179 migrated only `src/CodexWatcher/Cli/Parser/Common.hs` from
+`CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..),
+ReviewThreadId (..), ThreadId (..), TurnId (..))` to direct
+`CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName (..),
+ReviewThreadId (..))` and `CodexWatcher.Workflow.Agent.Ids (ThreadId (..),
+TurnId (..))`, with `cabal build all`, full `cabal test watcher-core-test`,
+`git diff --check`, selected-file import scans, direct-owner scans, and the
+broad remaining-user classification passing. The diff was import-only; parser
+exports, helper bodies, option/help/metavar/default/error text, command
+rendering, dry-run text, child args, fanout manifest behavior, package
+descriptors, public facade exposure, and behavior were unchanged.
 Remaining production users still include
 `src/CodexWatcher/EventLog/Types.hs`,
 `src/CodexWatcher/Runtime/Compatibility.hs`,
 `src/CodexWatcher/Healthcheck.hs`,
 `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
 `src/CodexWatcher/Domain/IssueImplement/Loop.hs`,
-`src/CodexWatcher/Cli/Parser/Common.hs`, `src/CodexWatcher/Cli/Types.hs`, and
+`src/CodexWatcher/Cli/Types.hs`, and
 `src/CodexWatcher/Cli/Command/IssueFanout.hs`. This status does not approve
 public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
 runtime compatibility cleanup, release approval, milestone completion, terminal
@@ -288,6 +287,10 @@ Candidate directions:
   child args, or runtime command behavior change.
   Extraction notes: direct-owner import movement only; add a package
   dependency only if the compiler proves the target needs it.
+  `src/CodexWatcher/Cli/Parser/Common.hs` was completed by round 179 as an
+  import-only direct-owner migration. `src/CodexWatcher/Cli/Types.hs` and
+  `src/CodexWatcher/Cli/Command/IssueFanout.hs` remain production users for
+  later `direction-011f` slices.
 
 - Direction id: `direction-011g-core-ids-production-closeout-classification`
   Summary: Close the production Core.Ids burndown by scanning and classifying
