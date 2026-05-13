@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-170-issue-implement-watcher-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration in src/CodexWatcher/Domain/IssueImplement/Watcher.hs from CodexWatcher.Core.Ids to direct Workflow.Agent.Ids and Workflow.GitHub.Ids owner imports. Focused scans, package exposure scan, cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed."
+}

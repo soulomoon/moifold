@@ -16,12 +16,13 @@ import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Observation
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, ThreadId, TurnId)
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..), ThreadActivity (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, ReviewEvidence)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber)
 import Data.Text (Text)
 
 data IssueFinalReviewOutcome
