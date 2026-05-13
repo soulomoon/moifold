@@ -161,7 +161,7 @@ Candidate directions:
   Boundary notes: runtime cleanup decisions remain pending in milestone 008.
   Extraction notes: no further extraction from this completed milestone.
 
-### 3. [in-progress] Core.Ids Production Import Burndown
+### 3. [completed] Core.Ids Production Import Burndown
 
 Milestone id: `milestone-003-core-ids-production-import-burndown`
 Depends on: `milestone-001-test-topology-inventory`
@@ -176,26 +176,23 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 185 landed
-many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 185 migrated only
-`src/CodexWatcher/Domain/IssuePlanning/Loop.hs` from
+Current status: completed by rounds 098 through 103 and 152 through 186.
+Latest evidence: round 186 migrated
+`src/CodexWatcher/Domain/IssueImplement/Loop.hs` from
 `CodexWatcher.Core.Ids` to direct
-`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId, nextRequestId)`
-and `CodexWatcher.Workflow.GitHub.Ids (IssueNumber, RepoName)` imports.
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
+PrNumber)` imports. The reviewer approved the import-only diff after
 `cabal build all`, full `cabal test watcher-core-test`, `git diff --check`,
-`git diff --cached --check`, selected-file no-`Core.Ids` scan,
-selected-file direct-owner scan, broad remaining `Core.Ids` classification,
-and focused planning-loop evidence passed. The diff was import-only; request-id
-progression, planner thread/turn handling, repo/issue rendering, event append
-order, daemon transition behavior, app-server turn classification, failure
-text, public facade exposure, Cabal, docs, runtime compatibility files, and
-behavior were unchanged.
-The remaining production user is
-`src/CodexWatcher/Domain/IssueImplement/Loop.hs`. This status does not approve
-public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
-runtime compatibility cleanup, release approval, milestone completion, terminal
-completion, or public compatibility removal.
+selected-file no-`Core.Ids` scan, selected-file direct-owner scan, broad
+remaining `Core.Ids` classification, and focused issue-implementation behavior
+evidence all passed. The broad scan found no remaining production `Core.Ids`
+users under `src/` beyond `src/CodexWatcher/Core/Ids.hs`, the public
+compatibility facade. Remaining matches are tests/fixtures, docs, and Cabal
+exposure outside this milestone. This status does not approve public facade
+deprecation/removal, Cabal exposure cleanup, docs cleanup, runtime
+compatibility cleanup, release approval, terminal completion, or public
+compatibility removal.
 
 Candidate directions:
 
@@ -281,9 +278,12 @@ Candidate directions:
   change.
   Extraction notes: `src/CodexWatcher/Domain/IssuePlanning/Loop.hs` was
   completed by round 185 as an import-only direct-owner migration.
-  `src/CodexWatcher/Domain/IssueImplement/Loop.hs` remains for a later round.
-  Prefer one-file import-only slices; classify any remaining loop import as a
-  behavior blocker rather than deferring the whole milestone.
+  `src/CodexWatcher/Domain/IssueImplement/Loop.hs` was completed by round 186
+  as an import-only direct-owner migration. Direction-011e domain-loop
+  production imports are complete. This does not approve public facade
+  deprecation/removal, Cabal cleanup, docs cleanup, runtime compatibility
+  cleanup, release approval, terminal completion, or public compatibility
+  removal.
 
 - Direction id: `direction-011f-core-ids-cli-production-imports`
   Summary: Split `Core.Ids` imports in CLI parser/types/fanout modules:
@@ -319,8 +319,15 @@ Candidate directions:
   are roadmap artifacts only.
   Boundary notes: no production code, public facade, Cabal, docs, or runtime
   compatibility-file change unless selected separately.
-  Extraction notes: record migrated files, blocker files with reasons, public
-  compatibility surfaces, runtime-compat surfaces, and the exact source scan.
+  Extraction notes: round 186 reviewer evidence supplied the closeout
+  production scan/classification: no remaining production `Core.Ids` users
+  under `src/` beyond `src/CodexWatcher/Core/Ids.hs`, the public compatibility
+  facade. Remaining matches are tests/fixtures, docs, and Cabal exposure
+  outside milestone 003. A separate artifact-only closeout round is not needed
+  for milestone 003, but this does not approve public facade
+  deprecation/removal, Cabal cleanup, docs cleanup, runtime compatibility
+  cleanup, release approval, terminal completion, or public compatibility
+  removal.
 
 ### 4. [pending] Core.Ids Test And Fixture Import Burndown
 
