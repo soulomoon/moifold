@@ -2207,6 +2207,29 @@ Candidate directions:
   Cabal/API exposure cleanup, public API cleanup, package descriptor cleanup,
   docs/policy cleanup, milestone completion, release approval, terminal
   completion, or public compatibility removal.
+  `round-149` completed the
+  `round-149-workflow-event-log-spec-appserverclient-import-cleanup` slice at
+  merged commit `fda8171` by removing only the stale
+  `import CodexWatcher.AppServerClient` line from
+  `test/WorkflowEventLogSpec.hs`, with no replacement import and no test-body
+  changes. The accepted change was import-only: workflow event-log assertions,
+  helpers, fixtures, production files, other tests, package descriptors,
+  docs/policy, public facade modules, and direct owner modules were preserved.
+  Verification passed with focused selected-file scans proving the file no
+  longer imports the facade or references selected AppServerClient-owned
+  symbols, a broad `CodexWatcher.AppServerClient` scan showing
+  `test/WorkflowEventLogSpec.hs` removed from remaining facade importers,
+  `cabal test watcher-core-test`, `cabal build all`, `git diff --check`, and
+  `git diff --cached --check`. Direction 010 remains in progress, and future
+  selections should continue to prefer lawful concrete migration/removal
+  slices over readiness-only gate work when the active roadmap permits it.
+  Public facade/exposure, Cabal exposure, package descriptor cleanup,
+  docs/policy cleanup, `test/Main.hs`, remaining test and test support
+  surfaces, milestone completion, release approval, terminal completion, and
+  public compatibility removal remain unapproved. This does NOT approve public
+  facade removal/deprecation, Cabal/API exposure cleanup, public API cleanup,
+  package descriptor cleanup, docs/policy cleanup, milestone completion,
+  release approval, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011-core-ids-import-convergence`
   Summary: Split remaining safe `CodexWatcher.Core.Ids` users onto direct
