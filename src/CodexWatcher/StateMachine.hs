@@ -22,7 +22,6 @@ module CodexWatcher.StateMachine
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..), PrNumber (..), ReviewThreadId, ThreadId)
 import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..), SActionKind (..), ThreadActivity (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason)
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
@@ -42,6 +41,8 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceThreadComments
   , reviewEvidenceThreadIds
   )
+import CodexWatcher.Workflow.Agent.Ids (ThreadId)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha, IssueNumber (..), PrNumber (..), ReviewThreadId)
 import Control.Monad (guard)
 import Data.Foldable qualified as Foldable
 import Data.Char (isDigit)

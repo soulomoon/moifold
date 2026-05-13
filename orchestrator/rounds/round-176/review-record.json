@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-176-state-machine-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration of src/CodexWatcher/StateMachine.hs from CodexWatcher.Core.Ids to direct Workflow.Agent.Ids and Workflow.GitHub.Ids imports. cabal build all, cabal test watcher-core-test, git diff --check, focused selected-file scan, and broad remaining-user scan passed; cached diff check was skipped because no staged changes. No behavior, exports, package descriptors, compatibility files, docs, roadmap files, public facade exposure, deprecation, removal, or completion claim changed."
+}
