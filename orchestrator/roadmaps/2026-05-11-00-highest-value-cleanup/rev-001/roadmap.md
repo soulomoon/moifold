@@ -3099,6 +3099,26 @@ Candidate directions:
   approval, milestone completion, terminal completion, or public compatibility
   removal.
 
+- `round-174` completed the
+  `round-174-issue-implement-indexed-core-ids-split-import-migration` slice at
+  `5514dd35d2e190f251f23feb285cf0118aeedb8d` by moving only
+  `src/CodexWatcher/Workflow/Moifold/IssueImplement/Indexed.hs` from
+  `CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, ThreadId, TurnId)`
+  to direct
+  `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber)` and
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)`. Indexed workflow
+  exports, state/effect/event/observation types, projections, transitions,
+  constructors, deriving clauses, function bodies, package exposure, and
+  public compatibility facade availability were unchanged, and validation
+  passed with `cabal build all`, `cabal test watcher-core-test`,
+  `git diff --check`, focused scans, and remaining Core.Ids user scan;
+  `git diff --cached --check` was skipped because there were no staged
+  changes. This records one production direct-owner import convergence and
+  does not approve broader Core.Ids migration, public facade
+  deprecation/removal, Cabal exposure cleanup, docs cleanup, package
+  descriptor cleanup, runtime compatibility cleanup, release approval,
+  milestone completion, terminal completion, or public compatibility removal.
+
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
   `Workflow.Permission` mixed moifold bridge behavior.
