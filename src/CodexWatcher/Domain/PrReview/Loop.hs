@@ -20,11 +20,12 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.GhGit
 import CodexWatcher.Domain.PrReview.Watcher
 import CodexWatcher.Runtime.Paths (runtimeWorkdirPath)
-import CodexWatcher.Core.Ids (CommitSha, PrNumber (..), ThreadId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..), ReviewEvidence (..), ReviewFinding (..), reviewEvidenceFromSummaries)
 import CodexWatcher.Workflow.Moifold.PrReview.Agent qualified as WorkflowPrReviewAgent
+import CodexWatcher.Workflow.Agent.Ids (ThreadId)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber (..))
 import CodexWatcher.Workflow.Observation.Agent (classifiedAgentTurnObservationPayload)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
