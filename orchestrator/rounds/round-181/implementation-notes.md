@@ -1,0 +1,13 @@
+### Changes Made
+- `src/CodexWatcher/Cli/Command/IssueFanout.hs`: replaced the `CodexWatcher.Core.Ids` compatibility-facade import with direct owner imports from `CodexWatcher.Workflow.Agent.Ids` for `RequestId`/`ThreadId` and `CodexWatcher.Workflow.GitHub.Ids` for `BranchName`/`IssueNumber`/`RepoName`. The source change is import-only.
+
+### Tests
+- `cabal build all`: passed. Rebuilt `CodexWatcher.Cli.Command.IssueFanout` and the `moifold` executable after the import change.
+- `cabal test watcher-core-test`: passed. The test target compiled `IssueFanoutAppServerSpec` and passed the focused fanout/CLI behavior coverage, including deterministic request ids `8000`/`8001`, persisted app-server thread ids, launch manifests, child args for root and non-root endpoints, JSON-RPC/decode failure formatting, retryable clone failure classification, dry-run child command shape, and launch write ordering.
+- `git diff --check`: passed.
+- Selected-file no-`Core.Ids` scan: `! rg -n 'CodexWatcher\.Core\.Ids' src/CodexWatcher/Cli/Command/IssueFanout.hs` passed with no matches.
+- Selected-file direct-owner import scan: `rg -n 'CodexWatcher\.Workflow\.Agent\.Ids|CodexWatcher\.Workflow\.GitHub\.Ids|BranchName|unBranchName|IssueNumber|RepoName|RequestId|ThreadId' src/CodexWatcher/Cli/Command/IssueFanout.hs` found direct imports at lines 52-53 and the existing identifier/accessor uses, including `RequestId <$> [8000 ..]`, `unBranchName`, `unRepoName`, and `unThreadId`.
+- Broad remaining `Core.Ids` scan: `rg -n 'CodexWatcher\.Core\.Ids' src app test docs moifold.cabal agent-workflow-* packages 2>/dev/null || true` completed. Remaining production imports are `src/CodexWatcher/Runtime/Compatibility.hs`, `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`, `src/CodexWatcher/Domain/IssueImplement/Loop.hs`, `src/CodexWatcher/EventLog/Types.hs`, and `src/CodexWatcher/Healthcheck.hs`. Test imports remain in `test/FacadeImportPolicySpec.hs`, `test/WorkflowEventLogSpec.hs`, `test/RuntimeSpec.hs`, `test/CliSpec.hs`, `test/Main.hs`, `test/WorkflowIndexedSpec.hs`, `test/RuntimeCompatibilityFixtureSpec.hs`, `test/WorkflowAgentSpec.hs`, `test/WorkflowExecutionSpec.hs`, and `test/TestSupport/Workflow.hs`. Docs mentions remain under `docs/agentic-workflow-framework/`. `moifold.cabal` still exposes `CodexWatcher.Core.Ids`. The public facade module remains at `src/CodexWatcher/Core/Ids.hs`. No `app/`, `agent-workflow-*`, or `packages/` remaining users were reported by the scan.
+
+### Notes
+No staging or commit was performed. Existing controller-owned changes in `orchestrator/state.json` and round control files were preserved.
