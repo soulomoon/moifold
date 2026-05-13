@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-174-issue-implement-indexed-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration in src/CodexWatcher/Workflow/Moifold/IssueImplement/Indexed.hs from CodexWatcher.Core.Ids to direct GitHub and Agent ID owner imports. Diff changes only imports, selected file no longer imports Core.Ids, remaining Core.Ids users are outside this round, and cabal build all, cabal test watcher-core-test, and git diff --check passed; cached diff check skipped because nothing was staged."
+}

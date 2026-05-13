@@ -93,7 +93,6 @@ module CodexWatcher.Workflow.Moifold.IssueImplement.Indexed
   , projectIssueImplementationTurnStartedObservation
   ) where
 
-import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, ThreadId, TurnId)
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Domain.IssueImplement.Watcher
@@ -103,6 +102,8 @@ import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, ReviewEvidence)
 import CodexWatcher.Effects (EffectPlan, SomeEffect)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber)
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Observation (DaemonObservation, ObservedPolicyTick (..))
 import CodexWatcher.Workflow.Observation qualified as WorkflowObservation
