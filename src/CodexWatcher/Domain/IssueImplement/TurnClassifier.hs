@@ -13,8 +13,9 @@ module CodexWatcher.Domain.IssueImplement.TurnClassifier
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId)
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
-import CodexWatcher.Core.Ids (CommitSha (..), PrNumber, ThreadId)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..), PrNumber)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), reviewEvidenceFromSummaries)
 import Data.Aeson (FromJSON (..), eitherDecodeStrict', withObject, (.:), (.:?))
