@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-003-core-ids-production-import-burndown",
+  "direction_id": "direction-011a-core-ids-eventlog-types-production-import",
+  "extracted_item_id": "round-182-eventlog-types-core-ids-split-import-migration",
+  "roadmap_item_id": "round-182-eventlog-types-core-ids-split-import-migration",
+  "decision": "approved",
+  "evidence_summary": "Import-only EventLog.Types Core.Ids split approved: build, watcher-core-test, diff check, selected-file scans, broad remaining-user classification, and focused WorkflowEventLogSpec evidence passed."
+}

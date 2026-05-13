@@ -14,16 +14,6 @@ module CodexWatcher.EventLog.Types
   ) where
 
 import CodexWatcher.Effects
-import CodexWatcher.Core.Ids
-  ( BranchName (..)
-  , CommitSha (..)
-  , IssueNumber (..)
-  , PrNumber (..)
-  , RepoName (..)
-  , ReviewThreadId (..)
-  , ThreadId (..)
-  , TurnId (..)
-  )
 import CodexWatcher.Core.Limits (MaxParallel, mkMaxParallel, unMaxParallel)
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (SomeWatcherState)
@@ -45,6 +35,15 @@ import CodexWatcher.Workflow.Codec
   , WorkflowEventTypeLabel (..)
   , WorkflowMetadataLabel (..)
   , WorkflowSchemaVersion (..)
+  )
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids
+  ( BranchName (..)
+  , CommitSha (..)
+  , IssueNumber (..)
+  , PrNumber (..)
+  , RepoName (..)
+  , ReviewThreadId (..)
   )
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value (..), object, withObject, (.:), (.:?), (.!=), (.=))
 import Data.Aeson.Key qualified as Key
