@@ -30,13 +30,14 @@ import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
-import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), RepoName (..), ThreadId (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Scope (planningGraphScopeContains)
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..), PlanningGraph)
 import CodexWatcher.WatcherRuntimeStatus (WatcherRuntimeStatus (..), WatcherTerminalReason (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..))
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), IssueNumber (..), RepoName (..))
 import Data.Aeson (Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
 import Data.Char (isAlphaNum)
