@@ -14,7 +14,6 @@ module CodexWatcher.EventLog.Replay
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Ids (IssueNumber (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds (Domain (..), KnownDomain, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason, StopReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), isTerminalState, someDomain, somePhase)
@@ -27,6 +26,8 @@ import CodexWatcher.Domain.IssuePlanning.Types
   , PlanningGraph (..)
   )
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), ReviewEvidence, reviewEvidenceFromThreads)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..))
 import Data.List (find, intersect)
 import Data.Text (Text)
 import Data.Text qualified as Text

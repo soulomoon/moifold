@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-177-event-log-replay-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration of src/CodexWatcher/EventLog/Replay.hs from CodexWatcher.Core.Ids to direct Workflow.GitHub.Ids and Workflow.Agent.Ids imports. cabal build all, focused watcher-core-test matcher, full watcher-core-test, git diff --check, focused selected-file scans, direct owner scan, and broad remaining-user scan passed; cached diff check was skipped because no staged changes. No function bodies, exports, constructors, replay behavior, event JSON shape, old-log parsing behavior, package descriptors, runtime compatibility files, docs, roadmap files, public facade exposure, deprecation, removal, or completion claim changed."
+}
