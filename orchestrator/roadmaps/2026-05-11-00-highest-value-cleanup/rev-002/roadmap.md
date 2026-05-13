@@ -176,22 +176,21 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 182 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 183 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 182 migrated only `src/CodexWatcher/EventLog/Types.hs` from
+round 183 migrated only `src/CodexWatcher/Runtime/Compatibility.hs` from
 `CodexWatcher.Core.Ids` to direct
 `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)` and
 `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
 PrNumber, RepoName, ReviewThreadId)` imports. `cabal build all`, full
 `cabal test watcher-core-test`, `git diff --check`, selected-file
 absence/direct-owner scans, broad remaining `Core.Ids` classification, and
-focused `WorkflowEventLogSpec` evidence passed. The diff was import-only;
-event constructors, JSON type labels, schema version, metadata labels, codec
-field names, old fixtures, replay logic, runtime compatibility files,
-healthcheck behavior, domain loops, public facade exposure, Cabal, docs, and
-behavior were unchanged.
+focused runtime compatibility fixture/runtime/healthcheck evidence passed. The
+diff was import-only; compatibility file names, JSON shapes, write timing,
+repair behavior, healthcheck behavior, runtime state semantics, event
+schemas/replay, public facade exposure, Cabal, docs, and behavior were
+unchanged.
 Remaining production users still include
-`src/CodexWatcher/Runtime/Compatibility.hs`,
 `src/CodexWatcher/Healthcheck.hs`,
 `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
 `src/CodexWatcher/Domain/IssueImplement/Loop.hs`. This status does not approve
@@ -242,8 +241,13 @@ Candidate directions:
   Parallel hints: serial with healthcheck and runtime cleanup milestones.
   Boundary notes: no compatibility file deletion, rename, write timing change,
   JSON shape migration, or repair/healthcheck behavior change.
-  Extraction notes: if safe, split imports only; if not safe, record exact
-  runtime-compat classification and blockers so milestone 003 can close.
+  Extraction notes: completed by round 183 as an import-only direct-owner
+  migration. Keep this as status evidence only; it does not approve
+  compatibility file deletion or rename, write timing changes, JSON shape
+  migration, repair behavior changes, healthcheck behavior changes, public
+  facade deprecation/removal, Cabal cleanup, docs cleanup, runtime
+  compatibility cleanup, release approval, milestone completion, terminal
+  completion, or public compatibility removal.
 
 - Direction id: `direction-011d-core-ids-healthcheck-production-import`
   Summary: Move or classify the remaining `src/CodexWatcher/Healthcheck.hs`
