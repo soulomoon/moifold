@@ -18,7 +18,8 @@ import CodexWatcher.Cli.Parser.Common
   , workdirOptionDefault
   )
 import CodexWatcher.Cli.Types (ObserveOnceCli (..))
-import CodexWatcher.Core.Ids (CommitSha (..), PrNumber (..), TurnId (..))
+import CodexWatcher.Workflow.Agent.Ids (TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..), PrNumber (..))
 import Options.Applicative
 
 observeOnceParser :: Parser ObserveOnceCli

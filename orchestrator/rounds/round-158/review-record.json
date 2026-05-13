@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-158-observe-parser-core-ids-split-import-migration",
+  "roadmap_item_id": "round-158-observe-parser-core-ids-split-import-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: Observe parser production diff only replaces CodexWatcher.Core.Ids import with direct GitHub and agent id owner imports; parser body and compatibility surfaces are unchanged; cabal build all, cabal test watcher-core-test, git diff --check, git diff --cached --check, focused import scans, and scope checks passed."
+}
