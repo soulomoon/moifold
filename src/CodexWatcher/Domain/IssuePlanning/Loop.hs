@@ -26,7 +26,6 @@ import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeCwdPath, runtimeStateDirFile)
-import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), RequestId (..), ThreadId (..), TurnId (..), nextRequestId)
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..))
 import CodexWatcher.Domain.IssuePlanning.Types
@@ -38,6 +37,8 @@ import CodexWatcher.Domain.IssuePlanning.Types
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..), nextRequestId)
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName (..))
 import Control.Monad (filterM)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
