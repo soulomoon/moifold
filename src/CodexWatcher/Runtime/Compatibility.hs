@@ -11,16 +11,6 @@ module CodexWatcher.Runtime.Compatibility
   , writeCompatibility
   ) where
 
-import CodexWatcher.Core.Ids
-  ( BranchName (..)
-  , CommitSha (..)
-  , IssueNumber (..)
-  , PrNumber (..)
-  , RepoName (..)
-  , ReviewThreadId (..)
-  , ThreadId (..)
-  , TurnId (..)
-  )
 import CodexWatcher.Core.Limits (MaxParallel (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
@@ -38,6 +28,15 @@ import CodexWatcher.Domain.PrReview.Types
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids
+  ( BranchName (..)
+  , CommitSha (..)
+  , IssueNumber (..)
+  , PrNumber (..)
+  , RepoName (..)
+  , ReviewThreadId (..)
+  )
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
