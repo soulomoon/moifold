@@ -877,7 +877,25 @@ direct-owner import convergence and does not approve public facade
 deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
 cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
 approval, milestone completion, terminal completion, or public compatibility
-removal.
+removal. `round-168` completed a narrow one-file production split-import
+`direction-011-core-ids-import-convergence` slice at merged commit `797af71`
+by moving only `src/CodexWatcher/Domain/PrReview/LaunchCli.hs` from
+`CodexWatcher.Core.Ids (BranchName (..), PrNumber (..), RepoName (..),
+RequestId (..), ThreadId (..))` to direct
+`CodexWatcher.Workflow.GitHub.Ids (BranchName (..), PrNumber (..),
+RepoName (..))` and `CodexWatcher.Workflow.Agent.Ids (RequestId (..),
+ThreadId (..))`, preserving PR-review launch planning, config JSON rendering,
+thread startup, runtime-owner handling, compatibility writes, command
+rendering, output text, all function bodies, package descriptors, tests, docs,
+runtime compatibility files, and public `Core.Ids` facade exposure unchanged,
+and passing `cabal build all`, `cabal test watcher-core-test`,
+`git diff --check`, `git diff --cached --check`, focused import scans,
+remaining Core.Ids user scan, and package exposure checks. This status records
+one production direct-owner import convergence and does not approve public
+facade deprecation/removal, Cabal exposure cleanup, docs cleanup, package
+descriptor cleanup, broader Core.Ids migration, runtime compatibility cleanup,
+release approval, milestone completion, terminal completion, or public
+compatibility removal.
 
 `round-104` completed the artifact-only
 `round-104-eventlog-permission-bridge-split-readiness` evidence round at
@@ -2878,6 +2896,26 @@ Candidate directions:
   facade deprecation/removal, Cabal exposure cleanup, docs cleanup, package
   descriptor cleanup, runtime compatibility cleanup, release approval,
   milestone completion, terminal completion, or public compatibility removal.
+  `round-168` completed the
+  `round-168-pr-review-launch-cli-core-ids-split-import-migration` slice at
+  `797af71` by moving only
+  `src/CodexWatcher/Domain/PrReview/LaunchCli.hs` from
+  `CodexWatcher.Core.Ids (BranchName (..), PrNumber (..), RepoName (..),
+  RequestId (..), ThreadId (..))` to direct
+  `CodexWatcher.Workflow.GitHub.Ids (BranchName (..), PrNumber (..),
+  RepoName (..))` and `CodexWatcher.Workflow.Agent.Ids (RequestId (..),
+  ThreadId (..))`. PR-review launch planning, config JSON rendering, thread
+  startup, runtime-owner handling, compatibility writes, command rendering,
+  output text, all function bodies, package descriptors, tests, docs, runtime
+  compatibility files, and public Core.Ids facade exposure were unchanged, and
+  validation passed with `cabal build all`, `cabal test watcher-core-test`,
+  `git diff --check`, `git diff --cached --check`, focused import scans,
+  remaining Core.Ids user scan, and package exposure checks. This records one
+  production direct-owner import convergence and does not approve broader
+  Core.Ids migration, public facade deprecation/removal, Cabal exposure
+  cleanup, docs cleanup, package descriptor cleanup, runtime compatibility
+  cleanup, release approval, milestone completion, terminal completion, or
+  public compatibility removal.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
