@@ -643,6 +643,21 @@ test-only direct-owner import convergence and does not approve public facade
 deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
 cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
 approval, milestone completion, terminal completion, or public compatibility
+removal. `round-154` completed a narrow one-file split-import
+`direction-011-core-ids-import-convergence` slice at merged commit `5839671`
+by moving only `test/AutomaticLoopRunnerSpec.hs` from
+`CodexWatcher.Core.Ids (RepoName (..), ThreadId (..), unThreadId)` to direct
+`CodexWatcher.Workflow.GitHub.Ids (RepoName (..))` and
+`CodexWatcher.Workflow.Agent.Ids (ThreadId (..), unThreadId)`, preserving
+existing automatic-loop runner execute, dry-run, retry-classification,
+request-id, thread-id, and endpoint-backed app-server assertions, leaving
+package descriptors and public compatibility facade exposure unchanged, and
+passing `cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+`git diff --cached --check`, and focused import scans. This status records one
+test-only direct-owner import convergence and does not approve public facade
+deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
+cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
+approval, milestone completion, terminal completion, or public compatibility
 removal.
 
 `round-104` completed the artifact-only
@@ -2402,7 +2417,22 @@ Candidate directions:
   Core.Ids migration, public facade deprecation/removal, Cabal exposure
   cleanup, docs cleanup, package descriptor cleanup, runtime compatibility
   cleanup, release approval, milestone completion, terminal completion, or
-  public compatibility removal.
+  public compatibility removal. `round-154` completed the
+  `round-154-automatic-loop-runner-spec-core-ids-split-import-migration`
+  slice at `5839671` by moving only `test/AutomaticLoopRunnerSpec.hs` from
+  `CodexWatcher.Core.Ids (RepoName (..), ThreadId (..), unThreadId)` to
+  `CodexWatcher.Workflow.GitHub.Ids (RepoName (..))` and
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId (..), unThreadId)`. Existing
+  automatic-loop runner execute, dry-run, retry-classification, request-id,
+  thread-id, and endpoint-backed app-server assertions were preserved, package
+  descriptors and public compatibility facade exposure were unchanged, and
+  validation passed with `cabal build all`, `cabal test watcher-core-test`,
+  `git diff --check`, `git diff --cached --check`, and focused import scans.
+  This records one test-only direct-owner import convergence and does not
+  approve broader Core.Ids migration, public facade deprecation/removal, Cabal
+  exposure cleanup, docs cleanup, package descriptor cleanup, runtime
+  compatibility cleanup, release approval, milestone completion, terminal
+  completion, or public compatibility removal.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
