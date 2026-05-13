@@ -29,10 +29,11 @@ import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure, AppServ
 import CodexWatcher.Daemon (DaemonFailure (..), DaemonObservation, DaemonObservedTickResult, DaemonOptions)
 import CodexWatcher.EventLog.Types (EventReplayResult, WatcherEvent)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..))
-import CodexWatcher.Core.Ids (CommitSha, PrNumber, ThreadId, TurnId (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.PrReview.Types (PrConfig, ReviewEvidence)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 

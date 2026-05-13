@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-169-daemon-loop-types-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved one-file import-only migration in src/CodexWatcher/DaemonLoop/Types.hs from CodexWatcher.Core.Ids to direct CodexWatcher.Workflow.Agent.Ids and CodexWatcher.Workflow.GitHub.Ids imports. Baseline build, watcher-core-test, diff whitespace checks, focused selected-file import scans, remaining Core.Ids user scan, and package exposure checks passed; public CodexWatcher.Core.Ids exposure remains unchanged."
+}
