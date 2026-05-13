@@ -896,6 +896,23 @@ facade deprecation/removal, Cabal exposure cleanup, docs cleanup, package
 descriptor cleanup, broader Core.Ids migration, runtime compatibility cleanup,
 release approval, milestone completion, terminal completion, or public
 compatibility removal.
+`round-169` completed a narrow one-file production split-import
+`direction-011-core-ids-import-convergence` slice at merged commit `80a6c56`
+by moving only `src/CodexWatcher/DaemonLoop/Types.hs` from
+`CodexWatcher.Core.Ids (CommitSha, PrNumber, ThreadId, TurnId (..))` to
+direct `CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber)` and
+`CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId (..))`, preserving
+daemon-loop type definitions, constructors, helpers, exports, public
+compatibility facades, package descriptors, docs, tests, runtime behavior,
+and public `Core.Ids` facade exposure unchanged, and passing
+`cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+`git diff --cached --check`, focused import scans, remaining Core.Ids user
+scan, and package exposure checks. This status records concrete production
+direct-owner import convergence and does not approve public facade
+deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
+cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
+approval, milestone completion, terminal completion, or public compatibility
+removal.
 
 `round-104` completed the artifact-only
 `round-104-eventlog-permission-bridge-split-readiness` evidence round at
@@ -2916,6 +2933,22 @@ Candidate directions:
   cleanup, docs cleanup, package descriptor cleanup, runtime compatibility
   cleanup, release approval, milestone completion, terminal completion, or
   public compatibility removal.
+  `round-169` completed the
+  `round-169-daemon-loop-types-core-ids-split-import-migration` slice at
+  `80a6c56` by moving only `src/CodexWatcher/DaemonLoop/Types.hs` from
+  `CodexWatcher.Core.Ids (CommitSha, PrNumber, ThreadId, TurnId (..))` to
+  direct `CodexWatcher.Workflow.GitHub.Ids (CommitSha, PrNumber)` and
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId (..))`. Daemon-loop
+  type definitions, constructors, helpers, exports, public compatibility
+  facades, package descriptors, docs, tests, runtime behavior, and public
+  Core.Ids facade exposure were unchanged, and validation passed with
+  `cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+  `git diff --cached --check`, focused import scans, remaining Core.Ids user
+  scan, and package exposure checks. This records one production direct-owner
+  import convergence and does not approve broader Core.Ids migration, public
+  facade deprecation/removal, Cabal exposure cleanup, docs cleanup, package
+  descriptor cleanup, runtime compatibility cleanup, release approval,
+  milestone completion, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
