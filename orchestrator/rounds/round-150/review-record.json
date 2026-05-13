@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-010-appserverclient-import-convergence",
+  "extracted_item_id": "round-150-workflow-execution-spec-stale-appserverclient-import-removal",
+  "roadmap_item_id": "round-150-workflow-execution-spec-stale-appserverclient-import-removal",
+  "decision": "approved",
+  "evidence_summary": "Approved: test/WorkflowExecutionSpec.hs removed only the stale CodexWatcher.AppServerClient import with no replacement import and no test-body changes; selected-file facade and AppServerClient-owned symbol guards passed; broad remaining-user scan recorded only out-of-scope Cabal, facade, other-test, and docs hits; watcher-core-test, cabal build all, and diff whitespace checks passed."
+}
