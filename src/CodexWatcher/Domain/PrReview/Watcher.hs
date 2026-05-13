@@ -18,7 +18,6 @@ import CodexWatcher.GhGit
 import CodexWatcher.Observation
 import CodexWatcher.Domain.PrReview.Protocol
 import CodexWatcher.StateMachine
-import CodexWatcher.Core.Ids (CommitSha, ReviewThreadId (..), TurnId)
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
@@ -38,6 +37,8 @@ import CodexWatcher.Workflow.Moifold.PrReview.Mergeability
   ( PrReviewMergeabilityObservation (..)
   , observePrReviewMergeability
   )
+import CodexWatcher.Workflow.Agent.Ids (TurnId)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha, ReviewThreadId (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 

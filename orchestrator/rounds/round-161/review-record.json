@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-161-pr-review-watcher-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration of src/CodexWatcher/Domain/PrReview/Watcher.hs from CodexWatcher.Core.Ids to direct GitHub and Agent ID owner imports. cabal build all, cabal test watcher-core-test, diff hygiene, scope checks, and focused import scans passed; public compatibility facades remain present and exposed."
+}
