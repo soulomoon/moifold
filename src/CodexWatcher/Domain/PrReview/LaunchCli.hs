@@ -20,6 +20,7 @@ import CodexWatcher.Cli.Types
 import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..), defaultAppServerClientOptions, startThreadWithEndpoint)
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..))
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
@@ -28,7 +29,6 @@ import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Store (readRuntimeOwnerMarker)
 import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..))
 import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
-import CodexWatcher.Core.Ids (BranchName (..), PrNumber (..), RepoName (..), RequestId (..), ThreadId (..))
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Limits (PollSeconds)
 import CodexWatcher.Core.Reason (BlockedReason (..))
@@ -36,6 +36,7 @@ import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), somePh
 import CodexWatcher.Core.Thread (ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), PrNumber (..), RepoName (..))
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
 import CodexWatcher.WatcherRuntimeStatus
 import Control.Monad (when)
