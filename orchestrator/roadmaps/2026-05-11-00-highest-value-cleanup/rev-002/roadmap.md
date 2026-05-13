@@ -176,22 +176,21 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 183 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 184 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 183 migrated only `src/CodexWatcher/Runtime/Compatibility.hs` from
+round 184 migrated only `src/CodexWatcher/Healthcheck.hs` from
 `CodexWatcher.Core.Ids` to direct
-`CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)` and
-`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
-PrNumber, RepoName, ReviewThreadId)` imports. `cabal build all`, full
-`cabal test watcher-core-test`, `git diff --check`, selected-file
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber, RepoName)`
+imports. `cabal build all`, full `cabal test watcher-core-test`,
+`git diff --check`, selected-file
 absence/direct-owner scans, broad remaining `Core.Ids` classification, and
-focused runtime compatibility fixture/runtime/healthcheck evidence passed. The
-diff was import-only; compatibility file names, JSON shapes, write timing,
-repair behavior, healthcheck behavior, runtime state semantics, event
-schemas/replay, public facade exposure, Cabal, docs, and behavior were
-unchanged.
+focused `HealthcheckSpec` / `RuntimeCompatibilityFixtureSpec` evidence
+passed. The diff was import-only; healthcheck JSON shapes, summary paths,
+reader set, command rendering, app-server thread checks, runtime-state
+semantics, compatibility file names, repair behavior, public facade exposure,
+Cabal, docs, and behavior were unchanged.
 Remaining production users still include
-`src/CodexWatcher/Healthcheck.hs`,
 `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
 `src/CodexWatcher/Domain/IssueImplement/Loop.hs`. This status does not approve
 public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
@@ -259,8 +258,12 @@ Candidate directions:
   Parallel hints: serial with runtime compatibility work.
   Boundary notes: no healthcheck JSON shape, summary path, reader set, command
   rendering, or app-server behavior change.
-  Extraction notes: import split only when focused healthcheck checks make the
-  move safe; otherwise classify the blocker with the exact missing evidence.
+  Extraction notes: completed by round 184 as an import-only direct-owner
+  migration. Keep this as status evidence only; it does not approve
+  healthcheck behavior edits, runtime compatibility-file deletion or rename,
+  repair behavior changes, public facade deprecation/removal, Cabal cleanup,
+  docs cleanup, runtime compatibility cleanup, release approval, milestone
+  completion, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011e-core-ids-domain-loop-production-imports`
   Summary: Split `Core.Ids` imports in
