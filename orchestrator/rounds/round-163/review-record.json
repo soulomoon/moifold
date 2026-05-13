@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-163-pr-review-protocol-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved after cabal build all, cabal test watcher-core-test, diff whitespace checks, focused Core.Ids import scans, package exposure scan, and integrated diff review confirmed an import-only Protocol.hs migration with public facades still exposed."
+}
