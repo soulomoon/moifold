@@ -19,21 +19,14 @@ module CodexWatcher.GoldenReplay
 
 import CodexWatcher.EventLog.Types (WatcherEvent (..))
 import CodexWatcher.Snapshot
-import CodexWatcher.Core.Ids
-  ( BranchName (..)
-  , CommitSha (..)
-  , IssueNumber (..)
-  , PrNumber (..)
-  , RepoName (..)
-  , ThreadId (..)
-  , TurnId (..)
-  )
 import CodexWatcher.Core.Kinds (Domain (..), KnownPhase, Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..))
 import CodexWatcher.Core.Thread (ActiveTurn (..), ReviewerThread (..), WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), MergeCommit (..), PrConfig (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RepoName (..))
 import Control.Applicative (asum)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)

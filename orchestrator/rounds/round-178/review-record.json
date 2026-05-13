@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-003-core-ids-production-import-burndown",
+  "direction_id": "direction-011b-core-ids-golden-replay-production-import",
+  "extracted_item_id": "round-178-golden-replay-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only GoldenReplay migration from CodexWatcher.Core.Ids to direct Agent/GitHub id owner imports. cabal build all, cabal test watcher-core-test, focused golden replay/bootstrap executable evidence, git diff checks, selected-file import scans, and broad remaining-user scan passed. Approval is limited to this production import migration and does not approve facade removal, Cabal/docs/runtime cleanup, release, milestone completion, or terminal completion."
+}
