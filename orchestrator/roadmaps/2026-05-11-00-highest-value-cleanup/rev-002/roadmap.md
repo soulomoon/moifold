@@ -176,21 +176,21 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 181 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 182 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 181 migrated only `src/CodexWatcher/Cli/Command/IssueFanout.hs` from
+round 182 migrated only `src/CodexWatcher/EventLog/Types.hs` from
 `CodexWatcher.Core.Ids` to direct
-`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId)` and
-`CodexWatcher.Workflow.GitHub.Ids (BranchName, IssueNumber, RepoName)`
-imports. `cabal build all`, full `cabal test watcher-core-test`, `git diff
---check`, selected-file absence/direct-owner scans, and the broad remaining
-`Core.Ids` classification passed. The diff was import-only; fanout planning,
-active issue discovery, child launch state writes, request-id progression,
-command rendering, dry-run text, process execution, parser/type modules,
-public facade exposure, Cabal, docs, runtime compatibility files, and behavior
-were unchanged.
+`CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
+PrNumber, RepoName, ReviewThreadId)` imports. `cabal build all`, full
+`cabal test watcher-core-test`, `git diff --check`, selected-file
+absence/direct-owner scans, broad remaining `Core.Ids` classification, and
+focused `WorkflowEventLogSpec` evidence passed. The diff was import-only;
+event constructors, JSON type labels, schema version, metadata labels, codec
+field names, old fixtures, replay logic, runtime compatibility files,
+healthcheck behavior, domain loops, public facade exposure, Cabal, docs, and
+behavior were unchanged.
 Remaining production users still include
-`src/CodexWatcher/EventLog/Types.hs`,
 `src/CodexWatcher/Runtime/Compatibility.hs`,
 `src/CodexWatcher/Healthcheck.hs`,
 `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
@@ -211,8 +211,11 @@ Candidate directions:
   Parallel hints: serial with golden replay and runtime compatibility work.
   Boundary notes: no event constructor, codec, schema-version, metadata label,
   JSON field, or export change.
-  Extraction notes: import split only unless a planner records exact behavior
-  evidence and reviewer approval for a narrower paired change.
+  Extraction notes: completed by round 182 as an import-only direct-owner
+  migration. Keep this as status evidence only; it does not approve event
+  behavior edits, fixture edits, public facade deprecation/removal, Cabal
+  cleanup, docs cleanup, runtime compatibility cleanup, release approval,
+  milestone completion, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011b-core-ids-golden-replay-production-import`
   Summary: Move `src/CodexWatcher/GoldenReplay.hs` from `Core.Ids` to direct id
