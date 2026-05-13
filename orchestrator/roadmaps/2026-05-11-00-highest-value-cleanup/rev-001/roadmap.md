@@ -1001,6 +1001,25 @@ direct-owner import convergence and does not approve public facade
 deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
 cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
 approval, milestone completion, terminal completion, or public compatibility
+removal. `round-176` completed a narrow one-file production split-import
+`direction-011-core-ids-import-convergence` slice at merged commit
+`b66f03c6c8947a99dd7119d9d7ae6a977c253a89` by moving only
+`src/CodexWatcher/StateMachine.hs` from
+`CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..),
+PrNumber (..), ReviewThreadId, ThreadId)` to direct
+`CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha,
+IssueNumber (..), PrNumber (..), ReviewThreadId)` and
+`CodexWatcher.Workflow.Agent.Ids (ThreadId)`, preserving state-machine
+events, decisions, validation, branch-attempt parsing/rendering, PR mismatch
+text, review-thread resolution, exports, constructors, package exposure, and
+public compatibility facade availability unchanged, and passing
+`cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+focused scans, and remaining Core.Ids user scan; cached diff was skipped
+because there were no staged changes. This status records concrete production
+direct-owner import convergence and does not approve public facade
+deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
+cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
+approval, milestone completion, terminal completion, or public compatibility
 removal.
 
 `round-104` completed the artifact-only
@@ -3160,6 +3179,27 @@ Candidate directions:
   deprecation/removal, Cabal exposure cleanup, docs cleanup, package
   descriptor cleanup, runtime compatibility cleanup, release approval,
   milestone completion, terminal completion, or public compatibility removal.
+
+- `round-176` completed the
+  `round-176-state-machine-core-ids-split-import-migration` slice at
+  `b66f03c6c8947a99dd7119d9d7ae6a977c253a89` by moving only
+  `src/CodexWatcher/StateMachine.hs` from
+  `CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..),
+  PrNumber (..), ReviewThreadId, ThreadId)` to direct
+  `CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha,
+  IssueNumber (..), PrNumber (..), ReviewThreadId)` and
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId)`. State-machine events,
+  decisions, validation, branch-attempt parsing/rendering, PR mismatch text,
+  review-thread resolution, exports, constructors, package exposure, and
+  public compatibility facade availability were unchanged, and validation
+  passed with `cabal build all`, `cabal test watcher-core-test`,
+  `git diff --check`, focused scans, and remaining Core.Ids user scan; cached
+  diff was skipped because there were no staged changes. This records one
+  production direct-owner import convergence and does not approve broader
+  Core.Ids migration, public facade deprecation/removal, Cabal exposure
+  cleanup, docs cleanup, package descriptor cleanup, runtime compatibility
+  cleanup, release approval, milestone completion, terminal completion, or
+  public compatibility removal.
 
 - Direction id: `direction-012-eventlog-permission-bridge-split-readiness`
   Summary: Prepare exact split evidence for `Workflow.EventLog` and
