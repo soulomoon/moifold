@@ -9,7 +9,7 @@ module AppServerProbeSpec
 
 import CodexWatcher.Cli.Command.AppServerProbe (probeAppServer)
 import CodexWatcher.Cli.Types (AppServerProbeCli (..))
-import CodexWatcher.Core.Ids (ThreadId (..), unThreadId)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), unThreadId)
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import Control.Exception (catch, evaluate, finally, mask)
 import Data.Aeson

@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-152-appserver-probe-spec-agent-id-direct-owner-migration",
+  "roadmap_item_id": "round-152-appserver-probe-spec-agent-id-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Approved: cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed; AppServerProbeSpec now imports ThreadId from CodexWatcher.Workflow.Agent.Ids; CodexWatcher.Core.Ids remains defined and exposed; changed paths are limited to controller state, round artifacts, and the selected test file."
+}
