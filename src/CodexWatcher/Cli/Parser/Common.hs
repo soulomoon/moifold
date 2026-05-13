@@ -38,13 +38,6 @@ module CodexWatcher.Cli.Parser.Common
   ) where
 
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
-import CodexWatcher.Core.Ids
-  ( IssueNumber (..)
-  , RepoName (..)
-  , ReviewThreadId (..)
-  , ThreadId (..)
-  , TurnId (..)
-  )
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Limits
   ( MaxParallel
@@ -54,6 +47,8 @@ import CodexWatcher.Core.Limits
   , mkPollSeconds
   , mkStaleSeconds
   )
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName (..), ReviewThreadId (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Options.Applicative

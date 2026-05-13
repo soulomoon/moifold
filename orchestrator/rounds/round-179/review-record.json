@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-003-core-ids-production-import-burndown",
+  "direction_id": "direction-011f-core-ids-cli-production-imports",
+  "extracted_item_id": "round-179-cli-parser-common-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved: src/CodexWatcher/Cli/Parser/Common.hs has an import-only migration from CodexWatcher.Core.Ids to direct Agent.Ids and GitHub.Ids owner imports; cabal build all, cabal test watcher-core-test, git diff --check, selected-file scans, direct-owner scans, and broad remaining-user classification all passed. No staged changes were present, so cached diff check was skipped."
+}
