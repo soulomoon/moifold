@@ -176,17 +176,24 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 177 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 178 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 177 migrated only `src/CodexWatcher/EventLog/Replay.hs` from
-`CodexWatcher.Core.Ids (IssueNumber (..), ThreadId (..), TurnId (..))` to
-direct `CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..))` and
+round 178 migrated only `src/CodexWatcher/GoldenReplay.hs` from
+`CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..),
+PrNumber (..), RepoName (..), ThreadId (..), TurnId (..))` to direct
+`CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..),
+IssueNumber (..), PrNumber (..), RepoName (..))` and
 `CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))`, with
-`cabal build all`, focused replay/event-log validation, full
-`cabal test watcher-core-test`, `git diff --check`, focused import scans, and
-the broad remaining-user scan passing. Remaining production users still include
-`src/CodexWatcher/EventLog/Types.hs`, `src/CodexWatcher/GoldenReplay.hs`,
-`src/CodexWatcher/Runtime/Compatibility.hs`, `src/CodexWatcher/Healthcheck.hs`,
+`cabal build all`, full `cabal test watcher-core-test`, focused built-test
+golden replay/bootstrap validation, `git diff --check`, selected-file import
+scans, direct-owner scans, and the broad remaining-user scan passing. The diff
+was import-only; function bodies, exports, constructors, snapshot
+normalization, replay warnings, bootstrap events, old fixture behavior,
+package descriptors, public facade exposure, and behavior were unchanged.
+Remaining production users still include
+`src/CodexWatcher/EventLog/Types.hs`,
+`src/CodexWatcher/Runtime/Compatibility.hs`,
+`src/CodexWatcher/Healthcheck.hs`,
 `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
 `src/CodexWatcher/Domain/IssueImplement/Loop.hs`,
 `src/CodexWatcher/Cli/Parser/Common.hs`, `src/CodexWatcher/Cli/Types.hs`, and
@@ -219,8 +226,11 @@ Candidate directions:
   Parallel hints: serial with EventLog.Types and runtime compatibility work.
   Boundary notes: no snapshot normalization, replay warning, bootstrap event,
   or old fixture behavior change.
-  Extraction notes: keep direct-owner import movement separate from any replay
-  behavior or fixture edits.
+  Extraction notes: completed by round 178 as an import-only direct-owner
+  migration. Keep this as status evidence only; it does not approve replay
+  behavior edits, fixture edits, public facade deprecation/removal, Cabal
+  cleanup, docs cleanup, runtime compatibility cleanup, release approval,
+  milestone completion, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011c-core-ids-runtime-compatibility-production-classification`
   Summary: Migrate or classify `src/CodexWatcher/Runtime/Compatibility.hs`
