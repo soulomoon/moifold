@@ -15,7 +15,7 @@ import CodexWatcher.Cli.Command.IssueFanout
   , retryableLaunchCommandFailure
   , runIssueImplementerLaunchesDetailed
   )
-import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), unIssueNumber)
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName (..), unIssueNumber)
 import CodexWatcher.Domain.IssuePlanning.Fanout
   ( IssueImplementerLaunchPlan (..)
   , IssuePlanningFanoutConfig (..)

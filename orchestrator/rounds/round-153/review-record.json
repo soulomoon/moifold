@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-153-issue-fanout-appserver-spec-github-id-direct-owner-migration",
+  "roadmap_item_id": "round-153-issue-fanout-appserver-spec-github-id-direct-owner-migration",
+  "decision": "approved",
+  "evidence_summary": "Import-only migration in test/IssueFanoutAppServerSpec.hs from CodexWatcher.Core.Ids to CodexWatcher.Workflow.GitHub.Ids for IssueNumber, RepoName, and unIssueNumber. cabal build all, cabal test watcher-core-test, git diff --check, git diff --cached --check, focused import scans, facade exposure scan, and changed-path scope checks passed."
+}
