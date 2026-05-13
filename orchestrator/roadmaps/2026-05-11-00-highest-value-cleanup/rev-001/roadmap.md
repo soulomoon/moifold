@@ -912,6 +912,23 @@ direct-owner import convergence and does not approve public facade
 deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
 cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
 approval, milestone completion, terminal completion, or public compatibility
+removal. `round-170` completed a narrow one-file production split-import
+`direction-011-core-ids-import-convergence` slice at merged commit `cbf9cf6`
+by moving only `src/CodexWatcher/Domain/IssueImplement/Watcher.hs` from
+`CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, ThreadId, TurnId)` to
+direct `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber)` and
+`CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)`, preserving
+issue-implementation observation constructors, event construction,
+state-machine decisions, error text, declarations, function bodies, package
+descriptors, compatibility files, public facade modules, and public `Core.Ids`
+facade exposure unchanged, and passing `cabal build all`,
+`cabal test watcher-core-test`, `git diff --check`,
+`git diff --cached --check`, focused import scans, remaining Core.Ids user
+scan, and package exposure checks. This status records concrete production
+direct-owner import convergence and does not approve public facade
+deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
+cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
+approval, milestone completion, terminal completion, or public compatibility
 removal.
 
 `round-104` completed the artifact-only
@@ -2942,6 +2959,25 @@ Candidate directions:
   type definitions, constructors, helpers, exports, public compatibility
   facades, package descriptors, docs, tests, runtime behavior, and public
   Core.Ids facade exposure were unchanged, and validation passed with
+  `cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+  `git diff --cached --check`, focused import scans, remaining Core.Ids user
+  scan, and package exposure checks. This records one production direct-owner
+  import convergence and does not approve broader Core.Ids migration, public
+  facade deprecation/removal, Cabal exposure cleanup, docs cleanup, package
+  descriptor cleanup, runtime compatibility cleanup, release approval,
+  milestone completion, terminal completion, or public compatibility removal.
+  `round-170` completed the
+  `round-170-issue-implement-watcher-core-ids-split-import-migration` slice at
+  `cbf9cf6` by moving only
+  `src/CodexWatcher/Domain/IssueImplement/Watcher.hs` from
+  `CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, ThreadId, TurnId)`
+  to direct
+  `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber)` and
+  `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)`.
+  Issue-implementation observation constructors, event construction,
+  state-machine decisions, error text, declarations, function bodies, package
+  descriptors, compatibility files, public facade modules, and public Core.Ids
+  facade exposure were unchanged, and validation passed with
   `cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
   `git diff --cached --check`, focused import scans, remaining Core.Ids user
   scan, and package exposure checks. This records one production direct-owner
