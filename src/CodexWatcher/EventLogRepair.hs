@@ -14,9 +14,10 @@ module CodexWatcher.EventLogRepair
 
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
-import CodexWatcher.Core.Ids (IssueNumber (..), PrNumber (..), TurnId (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Workflow.Agent.Ids (TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), PrNumber (..))
 import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
