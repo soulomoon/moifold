@@ -176,26 +176,25 @@ Parallel lane: production Core.Ids lane
 Coordination notes: this milestone is about production imports only. It does
 not include test/fixture imports, public facade removal, Cabal exposure cleanup,
 docs cleanup, or runtime compatibility-file cleanup.
-Current status: in progress. Rounds 098 through 103 and 152 through 180 landed
+Current status: in progress. Rounds 098 through 103 and 152 through 181 landed
 many `direction-011-core-ids-import-convergence` slices. Latest evidence:
-round 180 migrated only `src/CodexWatcher/Cli/Types.hs` from
-`CodexWatcher.Core.Ids` to direct `CodexWatcher.Workflow.Agent.Ids (ThreadId,
-TurnId)` and `CodexWatcher.Workflow.GitHub.Ids (CommitSha, IssueNumber,
-PrNumber, RepoName, ReviewThreadId)`. `BranchName` was not imported because it
-is unused in that file. `cabal build all`, full `cabal test
-watcher-core-test`, `git diff --check`, selected-file import scans,
-direct-owner scans, and the broad remaining-user classification passed. The
-diff was import-only; CLI exports, data declarations, record fields, derived
-instances, `CliDomain`, parser/rendering behavior, option names/errors,
-dry-run text, fanout-adjacent plumbing, child args, package descriptors, public
-facade exposure, and behavior were unchanged.
+round 181 migrated only `src/CodexWatcher/Cli/Command/IssueFanout.hs` from
+`CodexWatcher.Core.Ids` to direct
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, IssueNumber, RepoName)`
+imports. `cabal build all`, full `cabal test watcher-core-test`, `git diff
+--check`, selected-file absence/direct-owner scans, and the broad remaining
+`Core.Ids` classification passed. The diff was import-only; fanout planning,
+active issue discovery, child launch state writes, request-id progression,
+command rendering, dry-run text, process execution, parser/type modules,
+public facade exposure, Cabal, docs, runtime compatibility files, and behavior
+were unchanged.
 Remaining production users still include
 `src/CodexWatcher/EventLog/Types.hs`,
 `src/CodexWatcher/Runtime/Compatibility.hs`,
 `src/CodexWatcher/Healthcheck.hs`,
 `src/CodexWatcher/Domain/IssuePlanning/Loop.hs`,
-`src/CodexWatcher/Domain/IssueImplement/Loop.hs`,
-`src/CodexWatcher/Cli/Command/IssueFanout.hs`. This status does not approve
+`src/CodexWatcher/Domain/IssueImplement/Loop.hs`. This status does not approve
 public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
 runtime compatibility cleanup, release approval, milestone completion, terminal
 completion, or public compatibility removal.
@@ -289,8 +288,12 @@ Candidate directions:
   `src/CodexWatcher/Cli/Parser/Common.hs` was completed by round 179 as an
   import-only direct-owner migration. `src/CodexWatcher/Cli/Types.hs` was
   completed by round 180 as an import-only direct-owner migration.
-  `src/CodexWatcher/Cli/Command/IssueFanout.hs` remains a production user for
-  a later `direction-011f` slice.
+  `src/CodexWatcher/Cli/Command/IssueFanout.hs` was completed by round 181 as
+  an import-only direct-owner migration. Direction-011f CLI production imports
+  are now complete for Parser/Common, Cli/Types, and IssueFanout. This does
+  not approve public facade deprecation/removal, Cabal cleanup, docs cleanup,
+  runtime compatibility cleanup, release approval, milestone completion,
+  terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011g-core-ids-production-closeout-classification`
   Summary: Close the production Core.Ids burndown by scanning and classifying
