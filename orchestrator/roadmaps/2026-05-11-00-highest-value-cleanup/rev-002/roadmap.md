@@ -329,7 +329,7 @@ Candidate directions:
   cleanup, release approval, terminal completion, or public compatibility
   removal.
 
-### 4. [pending] Core.Ids Test And Fixture Import Burndown
+### 4. [in-progress] Core.Ids Test And Fixture Import Burndown
 
 Milestone id: `milestone-004-core-ids-test-and-fixture-import-burndown`
 Depends on: `milestone-003-core-ids-production-import-burndown`
@@ -342,8 +342,25 @@ reasons.
 Parallel lane: test Core.Ids lane
 Coordination notes: test policy surfaces may intentionally import facades, but
 that classification must be explicit and finite.
-Current status: pending. Current remaining test imports include workflow,
-runtime, CLI, support, and facade-policy specs; they are out of milestone 003.
+Current status: in progress. Round 187 migrated
+`test/TestSupport/Workflow.hs` from `CodexWatcher.Core.Ids` to direct
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
+PrNumber, RepoName, ReviewThreadId)` imports. The reviewer approved the
+import-only diff after `cabal build all`, `cabal test watcher-core-test`, git
+diff checks, selected-file no-`Core.Ids` scan, selected-file direct-owner
+scan, broad `Core.Ids` classification, and focused workflow PASS-label
+evidence all passed. Remaining `Core.Ids` test users include workflow specs
+(`test/WorkflowAgentSpec.hs`, `test/WorkflowEventLogSpec.hs`,
+`test/WorkflowExecutionSpec.hs`, `test/WorkflowIndexedSpec.hs`),
+runtime/CLI tests (`test/RuntimeSpec.hs`,
+`test/RuntimeCompatibilityFixtureSpec.hs`, `test/CliSpec.hs`), and
+policy/aggregator candidates (`test/FacadeImportPolicySpec.hs`,
+`test/Main.hs`). Docs, Cabal exposure, and the public facade remain for later
+milestones or public-surface decisions. This status does not approve public
+facade deprecation/removal, Cabal exposure cleanup, docs cleanup, runtime
+compatibility cleanup, milestone 004 completion, release approval, terminal
+completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -359,7 +376,11 @@ Candidate directions:
   Boundary notes: preserve assertions, fixtures, PASS labels, and aggregate
   wiring.
   Extraction notes: direct-owner import split only unless a test helper move is
-  explicitly selected.
+  explicitly selected. `test/TestSupport/Workflow.hs` was completed by round
+  187 as an import-only direct-owner migration. The workflow spec files remain
+  for later slices:
+  `test/WorkflowAgentSpec.hs`, `test/WorkflowEventLogSpec.hs`,
+  `test/WorkflowExecutionSpec.hs`, and `test/WorkflowIndexedSpec.hs`.
 
 - Direction id: `direction-011i-core-ids-runtime-cli-test-imports`
   Summary: Migrate safe runtime and CLI test imports such as
