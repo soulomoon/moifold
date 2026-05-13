@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-154-automatic-loop-runner-spec-core-ids-split-import-migration",
+  "roadmap_item_id": "round-154-automatic-loop-runner-spec-core-ids-split-import-migration",
+  "decision": "approved",
+  "evidence_summary": "Baseline build/test/diff checks passed; AutomaticLoopRunnerSpec no longer imports CodexWatcher.Core.Ids and now imports RepoName, ThreadId, and unThreadId from their direct owner modules; tracked implementation scope stayed within controller state and the selected test file."
+}

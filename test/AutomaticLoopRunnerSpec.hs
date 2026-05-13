@@ -10,14 +10,15 @@ module AutomaticLoopRunnerSpec
 
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure, runAutomaticLoop)
 import CodexWatcher.Cli.Types (LoopCli (..))
-import CodexWatcher.Core.Ids (RepoName (..), ThreadId (..), unThreadId)
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Daemon (DaemonFailure (..))
 import CodexWatcher.DaemonLoop (DaemonLoopFailure (..))
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
 import CodexWatcher.EventLog.Types (WatcherEvent (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), unThreadId)
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure (..))
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
+import CodexWatcher.Workflow.GitHub.Ids (RepoName (..))
 import Control.Exception (bracket, try)
 import Control.Monad (when)
 import Data.Aeson
