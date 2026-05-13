@@ -14,7 +14,8 @@ import CodexWatcher.Workflow.Agent.Codex.Client
   , formatAppServerClientFailure
   )
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
-import CodexWatcher.Core.Ids (RepoName (..), RequestId (..), ThreadId (..), TurnId (..), unThreadId, unTurnId)
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..), unThreadId, unTurnId)
+import CodexWatcher.Workflow.GitHub.Ids (RepoName (..))
 import CodexWatcher.Core.Kinds (Domain (IssuePlanning))
 import CodexWatcher.Core.Limits (StaleSeconds, unStaleSeconds)
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))

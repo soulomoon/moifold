@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-157-runner-guard-spec-core-ids-split-import-migration",
+  "roadmap_item_id": "round-157-runner-guard-spec-core-ids-split-import-migration",
+  "decision": "APPROVED",
+  "evidence_summary": "test/RunnerGuardSpec.hs only changed its Core.Ids import to direct GitHub and agent owner imports; test bodies stayed unchanged; watcher-core-test, cabal build all, diff checks, focused import scans, scope checks, and JSON validation passed."
+}
