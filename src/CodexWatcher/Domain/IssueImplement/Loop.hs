@@ -35,13 +35,14 @@ import CodexWatcher.Runtime.Json (decodeJsonText)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath, runtimeWorkdirPath)
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, nextIssueAttemptBranch, validatePhaseActionPlan)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
-import CodexWatcher.Core.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RequestId, ThreadId (..))
 import CodexWatcher.Core.Reason (BlockedReason (..))
 import CodexWatcher.Core.Thread (ActiveTurn)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
+import CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId (..))
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..))
 import Data.Aeson (Result (..), Value (..), fromJSON)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap

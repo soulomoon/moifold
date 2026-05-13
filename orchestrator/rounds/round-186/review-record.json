@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-003-core-ids-production-import-burndown",
+  "direction_id": "direction-011e-core-ids-domain-loop-production-imports",
+  "extracted_item_id": "round-186-issue-implement-loop-core-ids-import-migration-or-classification",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only IssueImplement/Loop.hs Core.Ids migration to direct Agent/GitHub id owner modules; build, watcher-core-test, diff checks, selected/broad scans, and focused issue-implementation behavior evidence passed with no tests/docs/Cabal/roadmap/runtime/public facade changes."
+}
