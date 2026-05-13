@@ -19,14 +19,13 @@ module CodexWatcher.Cli.Types
   ) where
 
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)
+import CodexWatcher.Workflow.GitHub.Ids
   ( CommitSha
   , IssueNumber
   , PrNumber
   , ReviewThreadId
   , RepoName
-  , ThreadId
-  , TurnId
   )
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Limits (MaxParallel, PollSeconds, StaleSeconds)
