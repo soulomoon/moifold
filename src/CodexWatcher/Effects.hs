@@ -19,12 +19,13 @@ module CodexWatcher.Effects
   , someEffectAction
   ) where
 
-import CodexWatcher.Core.Ids (BranchName, CommitSha, PrNumber, RepoName, ReviewThreadId, ThreadId)
 import CodexWatcher.Core.Kinds (ActionKind (..), KnownAction, KnownMutability, Mutability (..), SActionKind (..), SMutability (..))
 import CodexWatcher.Core.Reason (BlockedReason)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest, PlanningGraph)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence, PrConfig, ReviewEvidence)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, PrNumber, RepoName, ReviewThreadId)
 import Data.Singletons (SingI (..))
 import Data.Singletons.Decide (decideEquality)
 import Data.Text (Text)

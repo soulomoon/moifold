@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-001",
+  "milestone_id": "milestone-003-import-convergence-package-boundaries",
+  "direction_id": "direction-011-core-ids-import-convergence",
+  "extracted_item_id": "round-173-effects-core-ids-split-import-migration",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "APPROVED: state lineage matches round-173 review metadata; src/CodexWatcher/Effects.hs changed only the planned CodexWatcher.Core.Ids import to direct owner imports from Workflow.Agent.Ids and Workflow.GitHub.Ids; no behavior, API, Cabal, docs, tests, fixtures, runtime compatibility, roadmap, public facade module, or facade exposure changes were made; cabal build all, cabal test watcher-core-test, git diff --check, focused Core.Ids scan, and remaining-user scan passed; git diff --cached --check was skipped because nothing was staged."
+}
