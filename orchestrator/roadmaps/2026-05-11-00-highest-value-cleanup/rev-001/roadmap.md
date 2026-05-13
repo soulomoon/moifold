@@ -982,6 +982,25 @@ direct-owner import convergence and does not approve public facade
 deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
 cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
 approval, milestone completion, terminal completion, or public compatibility
+removal. `round-175` completed a narrow one-file production split-import
+`direction-011-core-ids-import-convergence` slice at merged commit
+`0cc69511f74636dbd684208ac9eb546fbf5ef2bf` by moving only
+`src/CodexWatcher/EffectInterpreter.hs` from
+`CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..),
+PrNumber (..), RepoName, RequestId, ThreadId, nextRequestId)` to direct
+`CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha,
+IssueNumber (..), PrNumber (..), RepoName)` and
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, nextRequestId)`,
+preserving effect-plan APIs, request-id threading, runtime command planning,
+rendered prompt and input selection, exports, constructors, package exposure,
+and public compatibility facade availability unchanged, and passing
+`cabal build all`, `cabal test watcher-core-test`, `git diff --check`,
+focused scans, and remaining Core.Ids user scan; cached diff was skipped
+because there were no staged changes. This status records concrete production
+direct-owner import convergence and does not approve public facade
+deprecation/removal, Cabal exposure cleanup, docs cleanup, package descriptor
+cleanup, broader Core.Ids migration, runtime compatibility cleanup, release
+approval, milestone completion, terminal completion, or public compatibility
 removal.
 
 `round-104` completed the artifact-only
@@ -3115,6 +3134,29 @@ Candidate directions:
   `git diff --cached --check` was skipped because there were no staged
   changes. This records one production direct-owner import convergence and
   does not approve broader Core.Ids migration, public facade
+  deprecation/removal, Cabal exposure cleanup, docs cleanup, package
+  descriptor cleanup, runtime compatibility cleanup, release approval,
+  milestone completion, terminal completion, or public compatibility removal.
+
+- `round-175` completed the
+  `round-175-effect-interpreter-core-ids-split-import-migration` slice at
+  `0cc69511f74636dbd684208ac9eb546fbf5ef2bf` by moving only
+  `src/CodexWatcher/EffectInterpreter.hs` from
+  `CodexWatcher.Core.Ids (BranchName (..), CommitSha, IssueNumber (..),
+  PrNumber (..), RepoName, RequestId, ThreadId, nextRequestId)` to direct
+  `CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha,
+  IssueNumber (..), PrNumber (..), RepoName)` and
+  `CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, nextRequestId)`.
+  `CompiledEffectPlan`, `EffectRuntimeConfig`, `PlannedAction`,
+  `TurnRuntimeConfig`, `agentTurnPlanForEffect`, `compileEffect`,
+  `compileEffectPlan`, `issuePlanFileText`, request-id threading, runtime
+  command planning, rendered prompt/input selection, exports, constructors,
+  package exposure, and public compatibility facade availability were
+  unchanged, and validation passed with `cabal build all`,
+  `cabal test watcher-core-test`, `git diff --check`, focused scans, and
+  remaining Core.Ids user scan; cached diff was skipped because there were no
+  staged changes. This records one production direct-owner import convergence
+  and does not approve broader Core.Ids migration, public facade
   deprecation/removal, Cabal exposure cleanup, docs cleanup, package
   descriptor cleanup, runtime compatibility cleanup, release approval,
   milestone completion, terminal completion, or public compatibility removal.
