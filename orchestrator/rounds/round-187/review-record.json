@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-004-core-ids-test-and-fixture-import-burndown",
+  "direction_id": "direction-011h-core-ids-workflow-test-imports",
+  "extracted_item_id": "direction-011h-testsupport-workflow-core-ids-import",
+  "roadmap_item_id": null,
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration in test/TestSupport/Workflow.hs from CodexWatcher.Core.Ids to direct agent/GitHub id owner imports; cabal build all, cabal test watcher-core-test, git diff checks, selected-file scans, broad remaining-user classification, and focused workflow PASS-label evidence all passed."
+}
