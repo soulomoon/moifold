@@ -373,9 +373,17 @@ aggregate-wiring scan, and broad remaining-user classification all passed.
 Direction 011h workflow test imports are complete: no workflow spec remains on
 `CodexWatcher.Core.Ids`. The
 `direction-011i-cli-spec-core-ids-import` extracted item is complete.
-Remaining `Core.Ids` test users are runtime tests
-(`test/RuntimeSpec.hs`, `test/RuntimeCompatibilityFixtureSpec.hs`) and
-policy/aggregator candidates
+Round 193 migrated `test/RuntimeSpec.hs` from `CodexWatcher.Core.Ids` to
+direct `CodexWatcher.Workflow.Agent.Ids (ThreadId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
+PrNumber, RepoName, ReviewThreadId)` imports. The reviewer approved the
+round-193 import-only diff after `cabal build all`,
+`cabal test watcher-core-test`, git diff checks, selected-file no-`Core.Ids`
+scan, selected-file direct-owner imports, selected-file diff inspection,
+aggregate-wiring scan, and broad remaining-user classification all passed. The
+`direction-011i-runtime-spec-core-ids-import` extracted item is complete.
+Remaining `Core.Ids` test users are the runtime compatibility fixture test
+(`test/RuntimeCompatibilityFixtureSpec.hs`) and policy/aggregator candidates
 (`test/FacadeImportPolicySpec.hs`, `test/Main.hs`). No app, reusable package,
 or production `src` users remain beyond the public facade module. Docs, Cabal
 exposure, and the public facade remain for later milestones or public-surface
@@ -422,9 +430,11 @@ Candidate directions:
   Extraction notes: keep fixture data unchanged unless selected by a runtime
   compatibility milestone. `test/CliSpec.hs` was completed by round 192 as an
   import-only direct-owner migration; this completed extracted item is
-  `direction-011i-cli-spec-core-ids-import`. Continue direction 011i with
-  runtime and compatibility fixture tests if they still import
-  `CodexWatcher.Core.Ids`.
+  `direction-011i-cli-spec-core-ids-import`. `test/RuntimeSpec.hs` was
+  completed by round 193 as an import-only direct-owner migration; this
+  completed extracted item is `direction-011i-runtime-spec-core-ids-import`.
+  Continue direction 011i with `test/RuntimeCompatibilityFixtureSpec.hs` if it
+  still imports `CodexWatcher.Core.Ids`.
 
 - Direction id: `direction-011j-core-ids-policy-and-aggregator-classification`
   Summary: Classify remaining facade-policy or aggregation imports such as
