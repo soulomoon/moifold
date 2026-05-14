@@ -382,15 +382,25 @@ round-193 import-only diff after `cabal build all`,
 scan, selected-file direct-owner imports, selected-file diff inspection,
 aggregate-wiring scan, and broad remaining-user classification all passed. The
 `direction-011i-runtime-spec-core-ids-import` extracted item is complete.
-Remaining `Core.Ids` test users are the runtime compatibility fixture test
-(`test/RuntimeCompatibilityFixtureSpec.hs`) and policy/aggregator candidates
-(`test/FacadeImportPolicySpec.hs`, `test/Main.hs`). No app, reusable package,
-or production `src` users remain beyond the public facade module. Docs, Cabal
-exposure, and the public facade remain for later milestones or public-surface
-decisions. This status does not approve public facade deprecation/removal,
-Cabal exposure cleanup, docs cleanup, runtime compatibility cleanup, milestone
-004 completion, release approval, terminal completion, or public compatibility
-removal.
+Round 194 migrated `test/RuntimeCompatibilityFixtureSpec.hs` from
+`CodexWatcher.Core.Ids` to direct `CodexWatcher.Workflow.Agent.Ids (ThreadId,
+TurnId)` and `CodexWatcher.Workflow.GitHub.Ids (BranchName, IssueNumber,
+PrNumber, RepoName)` imports. The reviewer approved the round-194 import-only
+diff after `cabal build all`, `cabal test watcher-core-test`, git diff checks,
+selected-file no-`Core.Ids` scan, selected-file direct-owner imports,
+selected-file diff inspection, aggregate/policy/public-surface unchanged
+checks, and broad remaining-user classification all passed. The
+`direction-011i-runtime-compatibility-fixture-core-ids-import` extracted item
+is complete. Direction 011i runtime/CLI test imports are complete: the current
+broad scan finds no remaining safe runtime or CLI test `Core.Ids` imports.
+Remaining `Core.Ids` test users are policy/aggregator candidates
+(`test/FacadeImportPolicySpec.hs`, `test/Main.hs`) for direction 011j. No app,
+reusable package, or production `src` users remain beyond the public facade
+module. Docs, Cabal exposure, and the public facade remain for later
+milestones or public-surface decisions. This status does not approve public
+facade deprecation/removal, Cabal exposure cleanup, docs cleanup, runtime
+compatibility cleanup, milestone 004 completion, release approval, terminal
+completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -414,8 +424,8 @@ Candidate directions:
   round 190 as an import-only direct-owner migration.
   `test/WorkflowIndexedSpec.hs` was completed by round 191 as an import-only
   direct-owner migration. Direction 011h workflow test imports are complete;
-  continue milestone 004 with direction 011i runtime/CLI tests and direction
-  011j policy/aggregator classification.
+  direction 011i runtime/CLI test imports are also complete; continue
+  milestone 004 with direction 011j policy/aggregator classification.
 
 - Direction id: `direction-011i-core-ids-runtime-cli-test-imports`
   Summary: Migrate safe runtime and CLI test imports such as
@@ -433,8 +443,11 @@ Candidate directions:
   `direction-011i-cli-spec-core-ids-import`. `test/RuntimeSpec.hs` was
   completed by round 193 as an import-only direct-owner migration; this
   completed extracted item is `direction-011i-runtime-spec-core-ids-import`.
-  Continue direction 011i with `test/RuntimeCompatibilityFixtureSpec.hs` if it
-  still imports `CodexWatcher.Core.Ids`.
+  `test/RuntimeCompatibilityFixtureSpec.hs` was completed by round 194 as an
+  import-only direct-owner migration; this completed extracted item is
+  `direction-011i-runtime-compatibility-fixture-core-ids-import`. Direction
+  011i runtime/CLI test imports are complete; continue milestone 004 with
+  direction 011j policy/aggregator classification.
 
 - Direction id: `direction-011j-core-ids-policy-and-aggregator-classification`
   Summary: Classify remaining facade-policy or aggregation imports such as
