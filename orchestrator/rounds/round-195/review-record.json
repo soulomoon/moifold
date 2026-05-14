@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-004-core-ids-test-and-fixture-import-burndown",
+  "direction_id": "direction-011j-core-ids-policy-and-aggregator-classification",
+  "extracted_item_id": "direction-011j-core-ids-policy-aggregator-classification",
+  "roadmap_item_id": "direction-011j-core-ids-policy-and-aggregator-classification",
+  "decision": "approved",
+  "evidence_summary": "Approved artifact-only classification: the only remaining test Core.Ids imports are test/FacadeImportPolicySpec.hs:11 and test/Main.hs:67, broader scan found only out-of-scope public facade/Cabal/docs references, and diff checks passed. Cabal build/test were skipped because no production, test, fixture, docs, Cabal, public API, runtime compatibility, or behavior surface changed."
+}
