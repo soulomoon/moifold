@@ -63,7 +63,6 @@ import CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput
-import CodexWatcher.Core.Ids
 import CodexWatcher.Core.Kinds
 import CodexWatcher.Core.Limits
 import CodexWatcher.Core.Reason
@@ -77,6 +76,7 @@ import CodexWatcher.WatcherRuntimeStatus
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as WorkflowAgentCodexProtocol
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.Codec qualified as WorkflowCodec
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
@@ -86,6 +86,14 @@ import CodexWatcher.Workflow.EventLog.Commit.Core qualified as WorkflowEventLogC
 import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFileCore
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
+import CodexWatcher.Workflow.GitHub.Ids
+  ( BranchName (..)
+  , CommitSha (..)
+  , IssueNumber (..)
+  , PrNumber (..)
+  , RepoName (..)
+  , ReviewThreadId (..)
+  )
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
 import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as IssueImplementIndexed
 import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
