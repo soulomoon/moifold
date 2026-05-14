@@ -362,15 +362,20 @@ PrNumber, RepoName, ReviewThreadId)` imports. Round 191 migrated
 `test/WorkflowIndexedSpec.hs` from `CodexWatcher.Core.Ids` to direct
 `CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId)` and
 `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
-PrNumber, RepoName, ReviewThreadId)` imports. The reviewer approved the
-round-191 import-only diff after `cabal build all`,
+PrNumber, RepoName, ReviewThreadId)` imports. Round 192 migrated
+`test/CliSpec.hs` from `CodexWatcher.Core.Ids` to direct
+`CodexWatcher.Workflow.Agent.Ids (ThreadId)` and
+`CodexWatcher.Workflow.GitHub.Ids (IssueNumber, RepoName)` imports. The
+reviewer approved the round-192 import-only diff after `cabal build all`,
 `cabal test watcher-core-test`, git diff checks, selected-file no-`Core.Ids`
-scan, selected-file direct-owner imports, selected-file diff inspection, and
-broad remaining-user classification all passed. Direction 011h workflow test
-imports are complete: no workflow spec remains on `CodexWatcher.Core.Ids`.
-Remaining `Core.Ids` test users are runtime/CLI tests
-(`test/RuntimeSpec.hs`, `test/RuntimeCompatibilityFixtureSpec.hs`,
-`test/CliSpec.hs`) and policy/aggregator candidates
+scan, selected-file direct-owner imports, selected-file diff inspection,
+aggregate-wiring scan, and broad remaining-user classification all passed.
+Direction 011h workflow test imports are complete: no workflow spec remains on
+`CodexWatcher.Core.Ids`. The
+`direction-011i-cli-spec-core-ids-import` extracted item is complete.
+Remaining `Core.Ids` test users are runtime tests
+(`test/RuntimeSpec.hs`, `test/RuntimeCompatibilityFixtureSpec.hs`) and
+policy/aggregator candidates
 (`test/FacadeImportPolicySpec.hs`, `test/Main.hs`). No app, reusable package,
 or production `src` users remain beyond the public facade module. Docs, Cabal
 exposure, and the public facade remain for later milestones or public-surface
@@ -415,7 +420,11 @@ Candidate directions:
   Boundary notes: preserve fixture JSON, parser/rendering expectations, and
   runtime behavior assertions.
   Extraction notes: keep fixture data unchanged unless selected by a runtime
-  compatibility milestone.
+  compatibility milestone. `test/CliSpec.hs` was completed by round 192 as an
+  import-only direct-owner migration; this completed extracted item is
+  `direction-011i-cli-spec-core-ids-import`. Continue direction 011i with
+  runtime and compatibility fixture tests if they still import
+  `CodexWatcher.Core.Ids`.
 
 - Direction id: `direction-011j-core-ids-policy-and-aggregator-classification`
   Summary: Classify remaining facade-policy or aggregation imports such as
