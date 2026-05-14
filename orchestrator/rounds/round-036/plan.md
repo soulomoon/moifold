@@ -128,4 +128,3 @@ changelog/release-note work.
   non-documentation file. For the expected artifact-only implementation, those
   commands are optional but may still be run as baseline confidence checks.
 - Run `git diff --cached --check` if any files are staged during the round.
-
