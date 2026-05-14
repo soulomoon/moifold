@@ -19,17 +19,17 @@ files directly; `runtime-owner.json` remains a separate product lease file.
 
 | Runtime file | `healthcheck` JSON path | Current status |
 | --- | --- | --- |
-| issue planner `daemon-state.json` | `watchers[].states.daemonState` where `kind == "issue-planning"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| issue planner `planner-state.json` | `watchers[].states.plannerState` where `kind == "issue-planning"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| issue planner `block-state.json` | `watchers[].states.blockedState` where `kind == "issue-planning"` | Replacement read path available; normal and repair-failure local file writers removed, with downstream migration still pending. |
-| issue implementer `daemon-state.json` | `watchers[].states.daemonState` where `kind == "issue-implement"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| issue implementer `issue-state.json` | `watchers[].states.issueState` where `kind == "issue-implement"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| issue implementer `block-state.json` | `watchers[].states.blockedState` where `kind == "issue-implement"` | Replacement read path available; normal and repair-failure local file writers removed, with downstream migration still pending. |
-| PR review `watcher-state.json` | `watchers[].states.watcherState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| PR review `checker-state.json` | `watchers[].states.checkerState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| PR review `agent-state.json` | `watchers[].states.agentState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| PR review `reviewer-state.json` | `watchers[].states.reviewerState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed, with downstream migration still pending. |
-| PR review `block-state.json` | `watchers[].states.blockedState` where `kind == "pr-review"` | Replacement read path available; normal and repair-failure local file writers removed, with downstream migration still pending. |
+| issue planner `daemon-state.json` | `watchers[].states.daemonState` where `kind == "issue-planning"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| issue planner `planner-state.json` | `watchers[].states.plannerState` where `kind == "issue-planning"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| issue planner `block-state.json` | `watchers[].states.blockedState` where `kind == "issue-planning"` | Replacement read path available; normal and repair-failure local file writers removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| issue implementer `daemon-state.json` | `watchers[].states.daemonState` where `kind == "issue-implement"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| issue implementer `issue-state.json` | `watchers[].states.issueState` where `kind == "issue-implement"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| issue implementer `block-state.json` | `watchers[].states.blockedState` where `kind == "issue-implement"` | Replacement read path available; normal and repair-failure local file writers removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| PR review `watcher-state.json` | `watchers[].states.watcherState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| PR review `checker-state.json` | `watchers[].states.checkerState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| PR review `agent-state.json` | `watchers[].states.agentState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| PR review `reviewer-state.json` | `watchers[].states.reviewerState` where `kind == "pr-review"` | Replacement read path available; normal local file writer removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
+| PR review `block-state.json` | `watchers[].states.blockedState` where `kind == "pr-review"` | Replacement read path available; normal and repair-failure local file writers removed; downstream migration accepted in `soulomoon/pr-review-watcher-tool#1`. |
 
 ## Downstream Inventory
 
@@ -123,11 +123,9 @@ implementation, and PR review.
 ## Cleanup Rule
 
 Do not remove, rename, or change the meaning of these runtime files merely
-because the local downstream audit patch can replace read-only status checks
-and daemon bodies. Runtime-file removal requires the downstream patch to be
-accepted by the downstream owner or explicitly retained by that owner. The
-patch is open as draft PR `soulomoon/pr-review-watcher-tool#1` but is not yet
-accepted. Local moifold producers, healthcheck, checked-in snapshots, and
-operator restart runbooks have already migrated off direct stale
-compatibility-file dependence. Healthcheck now projects the stable
-`watchers[].states.*` shape from event replay.
+because healthcheck can project the old shapes. Runtime-file removal required
+the downstream direct-reader migration to be accepted; that gate is closed by
+merged PR `soulomoon/pr-review-watcher-tool#1`. Local moifold producers,
+healthcheck, checked-in snapshots, and operator restart runbooks have already
+migrated off direct stale compatibility-file dependence. Healthcheck now
+projects the stable `watchers[].states.*` shape from event replay.

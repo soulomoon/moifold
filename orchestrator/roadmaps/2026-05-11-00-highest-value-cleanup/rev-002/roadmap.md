@@ -698,9 +698,9 @@ and fixture, migrated checked-in compatibility snapshots to bootstrapped
 event-log fixtures, and removed restart/operator dependence on stale
 compatibility files. `repair-state.json`, `runtime-owner.json`, and live
 `issue-snapshot.json` are documented as retained product contracts outside the
-compatibility-file removal goal. Terminal runtime-file removal remains blocked
-only by downstream acceptance, supersession, or explicit retention for
-`soulomoon/pr-review-watcher-tool`.
+compatibility-file removal goal. Downstream direct readers were migrated by
+merged PR `soulomoon/pr-review-watcher-tool#1`; no runtime-compatibility
+cleanup blocker remains.
 
 Candidate directions:
 
@@ -748,7 +748,7 @@ Candidate directions:
   terminal gate for the runtime compatibility files still observed outside
   this repo.
 
-### 9. [blocked] Final Deprecation And Removal Campaign
+### 9. [completed] Final Deprecation And Removal Campaign
 
 Milestone id: `milestone-009-final-deprecation-removal`
 Depends on:
@@ -769,31 +769,26 @@ compatibility-surface sets.
 Parallel lane: serial
 Coordination notes: deprecation is externally visible. Removal requires exact
 approval and cannot be inferred from preferred-import guidance.
-Current status: blocked for terminal closeout. Public wrapper removals landed
+Current status: completed. Public wrapper removals landed
 for `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
 `CodexWatcher.Workflow.EventLog`, and `CodexWatcher.Workflow.Permission`, with
 direct-owner imports, Cabal exposure cleanup, docs/policy updates, and
-`cabal build all` and `cabal test watcher-core-test` evidence. Terminal
-completion remains blocked because runtime compatibility surfaces still have
-non-empty `keep`/`defer` sets and the roadmap explicitly requires empty kept,
-deferred, and blocked compatibility sets before terminal approval. The
-2026-05-14 completion audit found direct downstream readers in
+`cabal build all` and `cabal test watcher-core-test` evidence. The 2026-05-14
+completion audit found direct downstream readers in
 `soulomoon/pr-review-watcher-tool` for `issue-state.json`,
 `daemon-state.json`, `planner-state.json`, PR-review state files, and
 `block-state.json`; local healthcheck now projects the replacement state shape
-from event replay instead of reading those compatibility files directly. Draft
-PR `soulomoon/pr-review-watcher-tool#1` migrates those downstream readers and
-daemon scripts, but it is not accepted. Normal local compatibility-file
-writers have also been removed: launch/fanout,
+from event replay instead of reading those compatibility files directly. PR
+`soulomoon/pr-review-watcher-tool#1` migrated those downstream readers and
+daemon scripts and was accepted by merge on 2026-05-14. Normal local
+compatibility-file writers have also been removed: launch/fanout,
 daemon-transaction, daemon-loop idle/terminal, repair, PR-review handoff, and
-`RecordBlocked` paths no longer write those compatibility files. Terminal
-cleanup remains blocked by downstream acceptance. The invalid-event-log
-repair-failure `block-state.json` writer/fixture, checked-in compatibility
-snapshot bridge, and restart/operator stale-file cleanup were removed after the
-normal writer cleanup. Retained product files are explicitly outside the
-compatibility-file removal goal. Do not mark the family done until the
-downstream migration gate is accepted, superseded, or explicitly retained by
-the downstream owner.
+`RecordBlocked` paths no longer write those compatibility files. The
+invalid-event-log repair-failure `block-state.json` writer/fixture, checked-in
+compatibility snapshot bridge, and restart/operator stale-file cleanup were
+removed after the normal writer cleanup. Retained product files are explicitly
+outside the compatibility-file removal goal. The roadmap-covered kept,
+deferred, and blocked compatibility-removal sets are empty.
 
 Candidate directions:
 
@@ -849,7 +844,7 @@ Candidate directions:
   blocked surface sets plus validation commands. The kept, deferred, and
   blocked compatibility-surface sets must be empty for terminal approval.
 
-### 10. [blocked] Downstream Runtime-File Migration Front
+### 10. [completed] Downstream Runtime-File Migration Front
 
 Milestone id: `milestone-010-downstream-runtime-file-migration`
 Depends on: `milestone-008-runtime-compatibility-cleanup-gates`
@@ -866,8 +861,9 @@ Parallel lane: serial
 Coordination notes: this milestone is not optional terminal paperwork. The
 2026-05-14 audit found live direct readers in `soulomoon/pr-review-watcher-tool`,
 so local moifold deletion would break known downstream code.
-Current status: blocked after the local replacement read contract and local
-runtime-file candidate classification landed.
+Current status: completed after the local replacement read contract, local
+runtime-file candidate classification, and downstream migration acceptance
+landed.
 `docs/agentic-workflow-framework/downstream-runtime-state-migration.md`
 defines the supported read-only migration path through
 `moifold healthcheck --state-root /workspace/artifacts --repo owner/name`, and
@@ -882,14 +878,12 @@ healthcheck` and replaces the legacy Node daemon bodies with launchers for the
 Haskell `moifold run-* --execute --loop` commands. `npm run check`,
 fake-`moifold` health/status smokes, fake-`moifold` daemon launcher smokes, and
 `moifold replay-events` checks for the generated initial event logs passed
-there. Draft PR `soulomoon/pr-review-watcher-tool#1` is open for that patch,
-but it is not yet an accepted downstream migration, and it does not complete
-the local runtime-file migration:
+there. PR `soulomoon/pr-review-watcher-tool#1` accepted that patch by merge on
+2026-05-14. The local runtime-file migration is completed by the separate
+candidate classification:
 `docs/agentic-workflow-framework/local-runtime-file-candidates.md` classifies
 the local no-downstream-hit files and `localRuntimeFileCandidateDecisionTest`
 guards that decision.
-Runtime-file removal remains blocked until the downstream patch is accepted or
-the downstream owner explicitly retains the legacy runtime outside this goal.
 Normal local Haskell compatibility-file producers have now been removed,
 checked-in compatibility snapshot readers/fixtures have been migrated to
 bootstrapped event-log fixtures and removed, and operator restart/runbook paths
@@ -916,10 +910,9 @@ Candidate directions:
   `watchers[].states.*` paths. A local downstream-audit patch implements the
   read-only command migration for status/healthcheck commands and replaces the
   legacy daemon scripts with compatibility launchers for the Haskell
-  `moifold run-*` loops. Draft PR `soulomoon/pr-review-watcher-tool#1` is open
-  for this migration. Compatibility-file removal remains blocked until
-  upstream accepts the downstream migration or the legacy downstream runtime is
-  explicitly retained by an owner decision.
+  `moifold run-*` loops. PR `soulomoon/pr-review-watcher-tool#1` accepted this
+  migration by merge on 2026-05-14. No downstream direct-reader blocker
+  remains.
 
 - Direction id: `direction-026-local-runtime-file-removal-candidates`
   Summary: Separately evaluate locally produced runtime files without known

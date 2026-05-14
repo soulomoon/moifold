@@ -18,8 +18,8 @@ without subagents.
 | Split selected large runtime modules without behavior changes | Extracted `CodexWatcher.Daemon.Types`, `CodexWatcher.TurnOutput.Schema`, `CodexWatcher.Workflow.Moifold.IssueImplement.Indexed.Types`, `CodexWatcher.Workflow.DocsMigration.Types`, and `CodexWatcher.EventLog.Types.Core`; stable public wrapper modules still export the same public surfaces. | complete |
 | Refresh runtime compatibility cleanup gates | `docs/agentic-workflow-framework/compatibility-deprecation-policy.md` records current runtime-file classifications and the 2026-05-14 direct-reader inventory. | complete |
 | Provide a supported read-only downstream replacement path | `docs/agentic-workflow-framework/downstream-runtime-state-migration.md` maps legacy runtime files to `moifold healthcheck` `watchers[].states.*` paths, and `healthcheckRuntimeStateMigrationContractTests` guard the report shape. | complete |
-| Implement read-only downstream command migration | `/tmp/pr-review-watcher-tool-audit` branch `codex/moifold-healthcheck-migration` commit `c2a14af` routes `watcher-healthcheck.mjs`, `issue-planning-control.mjs status`, `issue-implement-control.mjs status`, and `pr-review-control.mjs status/doctor` through `moifold healthcheck`; `npm run check`, `git diff --check`, direct-state-file scans, and fake-`moifold` status smokes passed in that checkout. Draft PR `soulomoon/pr-review-watcher-tool#1` is open for downstream acceptance. The patch bundle is `/tmp/pr-review-watcher-tool-moifold-healthcheck-migration.patch`. | complete locally, PR open, not accepted |
-| Implement downstream daemon migration shims | `/tmp/pr-review-watcher-tool-audit` branch `codex/moifold-healthcheck-migration` commit `c2a14af` replaces `issue-planning-watcher.mjs`, `issue-implement-watcher.mjs`, and `pr-review-watcher.mjs` with launchers for Haskell `moifold run-* --execute --loop`; fake-`moifold` launcher smokes passed, and current Haskell `moifold replay-events` accepted the generated initial event logs. Draft PR `soulomoon/pr-review-watcher-tool#1` is open for downstream acceptance. | complete locally, PR open, not accepted |
+| Implement read-only downstream command migration | `/tmp/pr-review-watcher-tool-audit` branch `codex/moifold-healthcheck-migration` commit `c2a14af` routes `watcher-healthcheck.mjs`, `issue-planning-control.mjs status`, `issue-implement-control.mjs status`, and `pr-review-control.mjs status/doctor` through `moifold healthcheck`; `npm run check`, `git diff --check`, direct-state-file scans, and fake-`moifold` status smokes passed in that checkout. PR `soulomoon/pr-review-watcher-tool#1` merged on 2026-05-14 as merge commit `6f8c77bd5c2d3179708c8bc1b51d255137f31d34`. The patch bundle is `/tmp/pr-review-watcher-tool-moifold-healthcheck-migration.patch`. | complete, downstream accepted |
+| Implement downstream daemon migration shims | `/tmp/pr-review-watcher-tool-audit` branch `codex/moifold-healthcheck-migration` commit `c2a14af` replaces `issue-planning-watcher.mjs`, `issue-implement-watcher.mjs`, and `pr-review-watcher.mjs` with launchers for Haskell `moifold run-* --execute --loop`; fake-`moifold` launcher smokes passed, and current Haskell `moifold replay-events` accepted the generated initial event logs. PR `soulomoon/pr-review-watcher-tool#1` merged on 2026-05-14. | complete, downstream accepted |
 | Migrate local healthcheck off direct compatibility-file reads | `CodexWatcher.Healthcheck` now projects the stable `watchers[].states.*` compatibility-state shape from event replay through `compatibilityStateWrites`; it directly reads only `runtime-owner.json` as the retained product lease file. `healthcheckRuntimeStateMigrationContractTests` and `healthcheckRuntimeStateReadNonReadContractTest` guard the new behavior. | complete |
 | Classify local runtime-file removal candidates | `docs/agentic-workflow-framework/local-runtime-file-candidates.md` records exact decisions for `planning-state.json`, `repair-state.json`, `runtime-owner.json`, and live `issue-snapshot.json`; `localRuntimeFileCandidateDecisionTest` guards the source-backed classification. | complete |
 | Remove the obsolete local `planning-state.json` compatibility projection | `RecordPlanningGraph` now compiles to no runtime write, `PlanningWaitingForReadyIssues` writes only `planner-state.json` plus daemon state, the old fixture is deleted, and source/fixture tests assert the file remains absent. | complete |
@@ -27,7 +27,7 @@ without subagents.
 | Remove repair-failure `block-state.json` writer and fixture | `AutomaticLoop.Runner` no longer writes `block-state.json` when replay fails, `EventLogRepair` no longer exports `repairFailureBlockStateJson`, the dedicated `golden/runtime-compatibility/block-state/repair-failure/block-state.json` fixture was deleted, and source tests assert runner no longer writes the repair-failure file. | complete |
 | Remove checked-in compatibility snapshot readers/fixtures | `CodexWatcher.Snapshot` and `CodexWatcher.GoldenReplay` were removed from source and Cabal exposure; old `golden/pr-review/*` and `golden/issue-implement/*` JSON snapshots were replaced by replayed `golden/event-log/bootstrapped/*` fixtures. Source scans show no snapshot bridge imports. | complete |
 | Remove restart/operator stale compatibility-file cleanup | `scripts/restart-watcher` no longer removes stale `block-state.json` or `daemon-state.json`; the operator checklist now points at `moifold healthcheck` instead of `block-state.json`; source tests assert restart no longer touches those stale files. | complete |
-| Prove terminal cleanup can close with empty kept/deferred/blocked sets | Direct-reader inventory found live upstream downstream readers of runtime compatibility files. Draft PR `soulomoon/pr-review-watcher-tool#1` migrates those readers and daemon scripts, but it is not accepted. The remaining blocker is downstream owner acceptance, supersession, or explicit retention. | blocked |
+| Prove terminal cleanup can close with empty kept/deferred/blocked sets | Direct-reader inventory found live upstream downstream readers of runtime compatibility files. PR `soulomoon/pr-review-watcher-tool#1` migrated those readers and daemon scripts and was accepted by merge on 2026-05-14. Retained `repair-state.json`, `runtime-owner.json`, and live `issue-snapshot.json` are product contracts outside the compatibility-file removal goal. No kept, deferred, or blocked compatibility-removal set remains. | complete |
 
 ## Verification Commands
 
@@ -66,9 +66,10 @@ without subagents.
   `/tmp/pr-review-watcher-tool-audit`; patch bundle
   `/tmp/pr-review-watcher-tool-moifold-healthcheck-migration.patch`
 - Downstream migration PR:
-  draft PR `soulomoon/pr-review-watcher-tool#1`
-  (`https://github.com/soulomoon/pr-review-watcher-tool/pull/1`), open and
-  not accepted as of the 2026-05-14 audit.
+  PR `soulomoon/pr-review-watcher-tool#1`
+  (`https://github.com/soulomoon/pr-review-watcher-tool/pull/1`), merged on
+  2026-05-14 as merge commit
+  `6f8c77bd5c2d3179708c8bc1b51d255137f31d34`.
 - Downstream read-only migration smoke:
   fake-`moifold` temporary config-root checks for `issue-planning-control.mjs
   status`, `issue-implement-control.mjs status`, `pr-review-control.mjs
@@ -123,9 +124,9 @@ Local repo evidence now supports removing `planning-state.json`; it retains
 `repair-state.json` as a repair diagnostic output, `runtime-owner.json` as the
 live daemon lease contract, and `issue-snapshot.json` as live planner input.
 
-Draft PR `soulomoon/pr-review-watcher-tool#1` migrates every listed downstream
-read-only command and daemon script away from direct runtime state-file
-reads/writes. It is open but not accepted.
+Merged PR `soulomoon/pr-review-watcher-tool#1` migrates every listed
+downstream read-only command and daemon script away from direct runtime
+state-file reads/writes.
 
 ## Replacement Read Path
 
@@ -143,15 +144,13 @@ covered by `healthcheckRuntimeStateMigrationContractTests`.
 The downstream audit checkout has a local patch that implements this migration
 for read-only status/healthcheck commands and replaces the legacy daemon
 scripts with launchers for the Haskell `moifold run-* --execute --loop`
-commands. Draft PR `soulomoon/pr-review-watcher-tool#1` has been opened for
-that patch; it is not accepted.
+commands. PR `soulomoon/pr-review-watcher-tool#1` accepted that patch.
 
-This local downstream patch does not close terminal runtime-file cleanup in the
-current repo. Normal local compatibility-file writers have been removed, but
-runtime-file removal remains blocked until the downstream patch is accepted or
-explicitly retained by the downstream owner. Checked-in compatibility snapshot
-readers/fixtures, restart/operator stale-file cleanup, and the repair-failure
-`block-state.json` writer/fixture have also been removed locally. The retained
+The accepted downstream patch closes the downstream direct-reader gate for
+terminal runtime-file cleanup. Normal local compatibility-file writers have
+been removed. Checked-in compatibility snapshot readers/fixtures,
+restart/operator stale-file cleanup, and the repair-failure `block-state.json`
+writer/fixture have also been removed locally. The retained
 `repair-state.json`, `runtime-owner.json`, and live `issue-snapshot.json` files
 are product contracts outside the compatibility-file removal goal.
 
@@ -171,14 +170,12 @@ direction 026 decisions:
 
 ## Conclusion
 
-Rev-002 implementation work is complete through milestones 5, 6, 7, 8, the
-read-only and daemon-shim downstream audit patches in milestone 10 direction
-025, the local healthcheck projection migration, the local runtime-file
-candidate classification in direction 026, and the removal of normal local
-compatibility-file producers. Milestone 9 cannot be honestly marked complete
-because the final success criterion requires empty kept/deferred/blocked
-compatibility-surface sets, and current evidence still has external downstream
-acceptance unresolved. The next implementable cleanup item is downstream
-acceptance of PR `soulomoon/pr-review-watcher-tool#1`, or recording an
-explicit downstream owner retention/supersession decision; it is not local
-terminal closeout from this workspace alone.
+Rev-002 implementation work is complete through milestones 5, 6, 7, 8, 9, and
+10. Public wrappers and stale snapshot bridges were removed, selected large
+modules were split, healthcheck now projects compatibility state from event
+replay, obsolete local compatibility writers and fixtures were removed, and
+downstream direct readers were migrated by merged PR
+`soulomoon/pr-review-watcher-tool#1`. The remaining `repair-state.json`,
+`runtime-owner.json`, and live `issue-snapshot.json` files are product
+contracts outside the compatibility-file removal goal, so the roadmap-covered
+kept, deferred, and blocked compatibility-removal sets are empty.
