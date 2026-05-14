@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-004-core-ids-test-and-fixture-import-burndown",
+  "direction_id": "direction-011h-core-ids-workflow-test-imports",
+  "extracted_item_id": "direction-011h-workflow-execution-spec-core-ids-import",
+  "roadmap_item_id": "direction-011h-core-ids-workflow-test-imports",
+  "decision": "approved",
+  "evidence_summary": "Approved import-only migration of test/WorkflowExecutionSpec.hs from CodexWatcher.Core.Ids to direct Agent/GitHub id-owner imports; no RequestId usage; required build, watcher-core-test, diff checks, selected-file scans, and remaining-user classification passed."
+}
