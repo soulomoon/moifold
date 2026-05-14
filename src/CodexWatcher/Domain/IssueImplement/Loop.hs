@@ -43,6 +43,7 @@ import CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId (..))
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..))
+import CodexWatcher.Workflow.Moifold.AgentRoles qualified as MoifoldAgentRoles
 import Data.Aeson (Result (..), Value (..), fromJSON)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -554,7 +555,7 @@ ensureIssueWorkerThread ops executor config events issueConfig =
       started <-
         startThreadViaCodexAdapter
           executor
-          WorkflowAgent.issueImplementationWorkerAgentRoleId
+          MoifoldAgentRoles.issueImplementationWorkerAgentRoleId
           requestId
           (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
           instructions
@@ -598,7 +599,7 @@ ensureIssueReviewerThread ops executor config events _replay issueConfig prNumbe
       started <-
         startThreadViaCodexAdapter
           executor
-          WorkflowAgent.finalReviewerAgentRoleId
+          MoifoldAgentRoles.finalReviewerAgentRoleId
           requestId
           (runtimeWorkdirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeWorkdir)
           instructions

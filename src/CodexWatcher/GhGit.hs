@@ -53,6 +53,13 @@ import CodexWatcher.Workflow.GitHub.Remote
 import Data.Text (Text)
 import Data.Text qualified as Text
 
+remotePullRequestMergeStateFixMessage :: Text -> Text -> Text
+remotePullRequestMergeStateFixMessage context status =
+  context
+    <> " is "
+    <> status
+    <> ": the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
+
 runGhIssueListOpen :: Monad m => RuntimeInterpreter m -> RepoName -> m (Either Text [GhIssue])
 runGhIssueListOpen interpreter repo =
   parseCommandJson parseGhIssueList <$> interpreter.runtimeRunCommand (GhIssueListOpen repo)

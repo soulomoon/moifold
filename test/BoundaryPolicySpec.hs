@@ -554,6 +554,14 @@ workflowCodexStandalonePackageKeepsPackageBoundary = do
         , "block-state"
         , "repair-state"
         , "runtime-owner"
+        , "IssuePlanWorkerAgent"
+        , "IssueImplementationWorkerAgent"
+        , "PrReviewWorkerAgent"
+        , "FinalReviewerAgent"
+        , "issue-plan-worker"
+        , "issue-implementation-worker"
+        , "pr-review-worker"
+        , "final-reviewer"
         ]
       forbiddenConcreteTypes =
         [ "WatcherEvent"
@@ -833,6 +841,8 @@ githubForbiddenOwnershipTokens =
   , "watcher-state.json"
   , "block-state.json"
   , "app-server"
+  , "Merge or rebase"
+  , "rerun validation"
   ]
 
 workflowMoifoldCabalLibraryDoesNotReexportAdapters :: IO Bool

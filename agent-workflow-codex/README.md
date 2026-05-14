@@ -24,9 +24,9 @@ The public modules are grouped by ownership:
   start, turn interrupt, and collaboration mode data.
 - `CodexWatcher.Workflow.Agent.Ids`: typed request, thread, and turn
   identifiers plus request-id progression.
-- `CodexWatcher.Workflow.Agent.Types`: typed role identifiers, role marker
-  types, thread and turn plans, turn starts, turn references, retry metadata,
-  and side-effect-scope metadata.
+- `CodexWatcher.Workflow.Agent.Types`: typed role identifiers, thread and turn
+  plans, turn starts, turn references, retry metadata, and side-effect-scope
+  metadata. Concrete product role marker types remain product-owned.
 - `CodexWatcher.Workflow.Agent`: deterministic role classification over
   app-server turns and retry-reason classification for reusable agent adapters.
 - `CodexWatcher.Workflow.Agent.Codex.Protocol`: mapping typed agent thread and

@@ -1,9 +1,9 @@
 # Implemented API Freeze
 
-Status: implemented internal API contract.
+Status: implemented local package API contract.
 
 This page freezes the reusable workflow-framework surface implemented by the
-current internal packages:
+current local package candidates:
 
 - `agent-workflow-core`
 - `agent-workflow-codex`
@@ -59,12 +59,13 @@ events, observations, and effects.
 `workflowPlanObservation` is the helper that turns a state and observation into
 a planned transition by using the spec's pure observation hook.
 
-`CodexWatcher.Workflow.Indexed.Spec` is the current indexed compatibility
-surface. It exposes indexed associated types, indexed planned transitions,
-existential wrappers for mixed state/event/observation/effect/replay values, and
+`CodexWatcher.Workflow.Indexed.Spec` is the public indexed workflow contract.
+It exposes indexed associated types, indexed planned transitions, existential
+wrappers for mixed state/event/observation/effect/replay values, and
 `WorkflowSpecIndexedBridge` for adapting the unindexed contract into indexed
-adapters. Richer domain and phase modeling remains design direction unless it
-is present in these exported associated types and bridge helpers.
+adapters that keep source and target states visible at the type level. Richer
+domain and phase modeling remains design direction unless it is present in
+these exported associated types and bridge helpers.
 
 `CodexWatcher.Workflow.DSL` is the pure authoring layer. `WorkflowM` accumulates
 a `WorkflowEffectPlan` or fails with `Text`; `Transition` wraps a
@@ -135,11 +136,11 @@ classification for external failure text.
 - `CodexWatcher.Workflow.Observation.Agent`
 
 The stable adapter data includes typed request, thread, and turn ids;
-`AgentRoleId`; typed role marker types for current moifold roles; retry
-policies and decisions; side-effect-scope metadata; `AgentThreadPlan`;
-`AgentThreadStart`; `AgentTurnPlan`; `AgentTurnStart`; `AgentTurnInterrupt`;
-`AgentTurnReadResult`; `AgentTurnReadFailure`; `TurnRef`; and
-`agentTurnStartRef`.
+`AgentRoleId`; retry policies and decisions; side-effect-scope metadata;
+`AgentThreadPlan`; `AgentThreadStart`; `AgentTurnPlan`; `AgentTurnStart`;
+`AgentTurnInterrupt`; `AgentTurnReadResult`; `AgentTurnReadFailure`; `TurnRef`;
+and `agentTurnStartRef`. Concrete product role marker types and stable moifold
+role ids remain moifold-owned.
 
 `CodexWatcher.Workflow.Agent` freezes deterministic role classification around
 `AgentRole`, `ClassifiedAgentOutput`, and `AgentOutputClass`. The output class
@@ -218,10 +219,10 @@ must not absorb moifold lifecycle authority by renaming it as framework logic.
 
 ## Evidence
 
-The source of truth for this freeze is the exposed-module list in
-`moifold.cabal`, the modules named above, and the boundary assertions in
-`test/Main.hs`, `test/AppServerSpec.hs`, and `test/GhGitSpec.hs`. The tests
-check the core, Codex, and GitHub package dependency boundaries; current module
-exports; source-level absence of moifold lifecycle ownership in reusable
-packages; Codex request and parser behavior; GitHub parser behavior; and pure
-command rendering parity with moifold runtime command rendering.
+The source of truth for this freeze is the package descriptors, the modules
+named above, and the boundary assertions in `test/BoundaryPolicySpec.hs`,
+`test/AppServerSpec.hs`, and `test/GhGitSpec.hs`. The tests check the core,
+Codex, and GitHub package dependency boundaries; current module exports;
+source-level absence of moifold lifecycle ownership in reusable packages; Codex
+request and parser behavior; GitHub parser behavior; and pure command rendering
+parity with moifold runtime command rendering.

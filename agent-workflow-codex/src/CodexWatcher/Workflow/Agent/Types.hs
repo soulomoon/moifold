@@ -19,23 +19,9 @@ module CodexWatcher.Workflow.Agent.Types
   , AgentTurnReadFailure (..)
   , AgentTurnReadResult (..)
   , AgentTurnStart (..)
-  , FinalReviewerAgent
-  , IssueImplementationWorkerAgent
-  , IssuePlanWorkerAgent
-  , PlannerAgent
-  , PrReviewVerificationReviewerAgent
-  , PrReviewWorkerAgent
-  , ReviewerAgent
   , TurnRef (..)
-  , finalReviewerAgentRoleId
   , agentRetryDecision
   , defaultAgentRetryPolicy
-  , issueImplementationWorkerAgentRoleId
-  , issuePlanWorkerAgentRoleId
-  , plannerAgentRoleId
-  , prReviewVerificationReviewerAgentRoleId
-  , prReviewWorkerAgentRoleId
-  , reviewerAgentRoleId
   , agentTurnStartRef
   ) where
 
@@ -140,48 +126,6 @@ data AgentSideEffectScope
   | AgentMutatesRemote
   | AgentUnknownSideEffects
   deriving stock (Eq, Show)
-
-data PlannerAgent
-
-data PrReviewWorkerAgent
-
-data IssuePlanWorkerAgent
-
-data IssueImplementationWorkerAgent
-
-data ReviewerAgent
-
-data PrReviewVerificationReviewerAgent
-
-data FinalReviewerAgent
-
-plannerAgentRoleId :: AgentRoleId
-plannerAgentRoleId =
-  AgentRoleId "planner"
-
-prReviewWorkerAgentRoleId :: AgentRoleId
-prReviewWorkerAgentRoleId =
-  AgentRoleId "pr-review-worker"
-
-issuePlanWorkerAgentRoleId :: AgentRoleId
-issuePlanWorkerAgentRoleId =
-  AgentRoleId "issue-plan-worker"
-
-issueImplementationWorkerAgentRoleId :: AgentRoleId
-issueImplementationWorkerAgentRoleId =
-  AgentRoleId "issue-implementation-worker"
-
-reviewerAgentRoleId :: AgentRoleId
-reviewerAgentRoleId =
-  AgentRoleId "reviewer"
-
-prReviewVerificationReviewerAgentRoleId :: AgentRoleId
-prReviewVerificationReviewerAgentRoleId =
-  AgentRoleId "pr-review-verification-reviewer"
-
-finalReviewerAgentRoleId :: AgentRoleId
-finalReviewerAgentRoleId =
-  AgentRoleId "final-reviewer"
 
 defaultAgentRetryPolicy :: AgentRetryPolicy
 defaultAgentRetryPolicy =

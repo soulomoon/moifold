@@ -39,6 +39,7 @@ import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..), nextRequestId)
 import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName (..))
+import CodexWatcher.Workflow.Moifold.AgentRoles qualified as MoifoldAgentRoles
 import Control.Monad (filterM)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
@@ -164,7 +165,7 @@ startPlannerThread executor config = do
           runtimeConfig.effectRuntimePlannerThreadInstructions
       threadPlan =
         WorkflowAgentCodex.agentThreadPlanFromThreadStartOptions
-          WorkflowAgent.plannerAgentRoleId
+          MoifoldAgentRoles.plannerAgentRoleId
           threadOptions
       request = WorkflowAgentCodex.agentThreadStartRequest requestId threadPlan
       nextConfig = withRuntimeNextRequestId (nextRequestId requestId) config

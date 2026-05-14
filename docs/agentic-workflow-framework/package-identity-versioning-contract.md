@@ -11,25 +11,28 @@ workflow framework candidates:
 - `agent-workflow-codex`
 - `agent-workflow-github`
 
-The current source tree still has one Cabal package, `moifold`, at version
-`0.1.0.0`, with these names implemented as internal named sublibraries. This
-contract does not create standalone package descriptors, move sources, rename
-modules, remove compatibility facades, publish packages, or approve a public
-release.
+The current source tree has a root `moifold` package plus standalone local
+package descriptors for these three package candidates. This contract fixes
+their package identity; it does not publish packages, remove compatibility
+facades, rename modules, tag a release, or approve a public release.
 
 ## Evidence Base
 
 Source-backed inputs for this contract:
 
-- `moifold.cabal` names the package `moifold`, version `0.1.0.0`, and defines
-  `library agent-workflow-core`, `library agent-workflow-codex`, and
-  `library agent-workflow-github`.
-- `moifold.cabal` exposes current framework modules under
-  `CodexWatcher.Workflow.*` and `CodexWatcher.AppServerProtocol`.
+- `cabal.project` lists the root package and the standalone local package
+  candidates `agent-workflow-core`, `agent-workflow-codex`, and
+  `agent-workflow-github`.
+- `agent-workflow-core/agent-workflow-core.cabal`,
+  `agent-workflow-codex/agent-workflow-codex.cabal`, and
+  `agent-workflow-github/agent-workflow-github.cabal` define the current
+  package descriptors.
+- `moifold.cabal` depends on the standalone package names and does not define
+  `library agent-workflow-*` internal components.
 - `docs/agentic-workflow-framework/package-extraction-readiness.md` records
   the current dependency ownership and extraction blockers.
 - `docs/agentic-workflow-framework/implemented-api-freeze.md` records the
-  implemented internal API surface and moifold-owned policy boundary.
+  implemented local package API surface and moifold-owned policy boundary.
 - `orchestrator/project-contract.md` keeps package ownership, compatibility
   facades, event schemas, golden logs, runtime ownership, and release approval
   as repo-wide contracts.
@@ -46,19 +49,19 @@ Source-backed inputs for this contract:
 | `agent-workflow-github` | Final package identity for the external candidate. | Typed GitHub ids, pure remote parsers/classifiers, and pure GitHub/git command specifications. | Start standalone external packaging at a conservative pre-1.0 version, preferably `0.1.0.0`, independent of the current top-level `moifold` version and subject to release-metadata confirmation. | Keep exposed modules under `CodexWatcher.Workflow.GitHub.*`. No source move or module rename is authorized here. | Currently independent of core and Codex. Add bounds only for actual dependencies introduced by later approved descriptor work. |
 
 The three package names should remain the external descriptor names. They are
-already present as named Cabal sublibraries, match the implemented ownership
-split, and are used consistently by the readiness report and API freeze. Later
-rounds must not invent alternate names without a new package-identity review.
+already present as standalone local package descriptors, match the implemented
+ownership split, and are used consistently by the readiness report and API
+freeze. Later rounds must not invent alternate names without a new
+package-identity review.
 
 ## Versioning Policy
 
-The current `moifold` version is evidence for the repository package only. It
-does not mean the sublibraries already have independent package versions, and
-it does not by itself create public compatibility guarantees for standalone
-packages.
+The current `moifold` version is evidence for the product package only. The
+workflow package candidates now have their own `0.1.0.0` descriptors, but those
+local descriptor versions still do not create public compatibility guarantees or
+publication approval.
 
-When standalone descriptors are introduced, each workflow package should use
-independent pre-1.0 semantic versioning:
+Each workflow package should use independent pre-1.0 semantic versioning:
 
 - Patch releases may fix documentation, metadata, tests, or implementation
   defects without changing the exposed API or documented behavior.
@@ -87,7 +90,7 @@ For these packages, a breaking change includes:
 - broadening dependencies across the package ownership boundaries without an
   approved layout or metadata round.
 
-Once standalone descriptors exist, adapter package bounds should be explicit:
+Adapter package bounds should be explicit:
 
 - `agent-workflow-codex` should depend on the `agent-workflow-core` version
   range used during validation.
@@ -143,18 +146,20 @@ does not move moifold lifecycle policy into the reusable packages.
 The current Cabal shape is:
 
 ```text
+cabal.project
+  .
+  agent-workflow-core
+  agent-workflow-codex
+  agent-workflow-github
+
 moifold
-  library agent-workflow-core
-  library agent-workflow-codex
-  library agent-workflow-github
-  library
+  library depends on agent-workflow-core, agent-workflow-codex, agent-workflow-github
 ```
 
-That means today there are three named internal sublibraries, not three
-standalone package descriptors. The package names are nevertheless already
-source-backed identity decisions. External descriptors must use these names
-after this contract is approved so downstream documentation, dependency bounds,
-and package layout work do not drift from the implemented split.
+That means today there are three standalone local package descriptors, not
+internal package components. The package names are source-backed identity
+decisions, so downstream documentation, dependency bounds, and package layout
+work should not drift from the implemented split.
 
 For current users importing modules through `moifold`, the module names do not
 change as a result of this contract. Future standalone packages may let users
@@ -174,6 +179,5 @@ Later rounds may rely on these assumptions:
 - exposed module namespaces stay as currently implemented;
 - moifold compatibility facades, event schemas, runtime ownership, and
   lifecycle policy remain outside the reusable package compatibility promise;
-- no package descriptor migration, source movement, CI readiness, changelog,
-  release note, source distribution, or publication approval is implied by
-  this identity contract.
+- no source movement, CI readiness, release note, source distribution, package
+  upload, or publication approval is implied by this identity contract.

@@ -85,6 +85,7 @@ import CodexWatcher.Workflow.EventLog.File.Core qualified as WorkflowEventLogFil
 import CodexWatcher.Workflow.Execution qualified as WorkflowExecution
 import CodexWatcher.Workflow.Execution.Core qualified as WorkflowExecutionCore
 import CodexWatcher.Workflow.Indexed.Spec qualified as IndexedWorkflow
+import CodexWatcher.Workflow.Moifold.AgentRoles qualified as MoifoldAgentRoles
 import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as IssueImplementIndexed
 import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
   ( IssuePlanningIndexedActiveTurn
@@ -209,6 +210,8 @@ import System.Exit (ExitCode (..), exitFailure)
 import System.Posix.Process (getProcessID)
 import Test.QuickCheck
 import TestSupport.Workflow
+
+data TestPrReviewWorkerAgent
 
 workflowAgentTests :: IO Bool
 workflowAgentTests =
@@ -349,31 +352,31 @@ workflowAgentCodexStartRequestsMatchCompiledEffects = do
       cases =
         [ ( "planner"
           , SomeEffect (StartPlannerTurn thread)
-          , WorkflowAgent.plannerAgentRoleId
+          , MoifoldAgentRoles.plannerAgentRoleId
           )
         , ( "pr-review worker"
           , SomeEffect (StartWorkerTurn evidence thread)
-          , WorkflowAgent.prReviewWorkerAgentRoleId
+          , MoifoldAgentRoles.prReviewWorkerAgentRoleId
           )
         , ( "issue plan worker"
           , SomeEffect (StartIssuePlanWorkerTurn issueConfig (PrNumber 6) thread)
-          , WorkflowAgent.issuePlanWorkerAgentRoleId
+          , MoifoldAgentRoles.issuePlanWorkerAgentRoleId
           )
         , ( "issue implementation worker"
           , SomeEffect (StartIssueImplementationWorkerTurn thread)
-          , WorkflowAgent.issueImplementationWorkerAgentRoleId
+          , MoifoldAgentRoles.issueImplementationWorkerAgentRoleId
           )
         , ( "reviewer"
           , SomeEffect (StartReviewerTurn prConfig commit thread)
-          , WorkflowAgent.reviewerAgentRoleId
+          , MoifoldAgentRoles.reviewerAgentRoleId
           )
         , ( "verification reviewer"
           , SomeEffect (StartReviewerVerificationTurn prConfig evidence commit thread)
-          , WorkflowAgent.prReviewVerificationReviewerAgentRoleId
+          , MoifoldAgentRoles.prReviewVerificationReviewerAgentRoleId
           )
         , ( "final reviewer"
           , SomeEffect (StartIssueFinalReviewTurn issueConfig (PrNumber 6) commit thread)
-          , WorkflowAgent.finalReviewerAgentRoleId
+          , MoifoldAgentRoles.finalReviewerAgentRoleId
           )
         ]
   results <-
@@ -394,7 +397,7 @@ workflowAgentCodexStartsThreadsThroughTypedAdapter :: IO Bool
 workflowAgentCodexStartsThreadsThroughTypedAdapter = do
   let plan =
         WorkflowAgent.AgentThreadPlan
-          { WorkflowAgent.agentThreadPlanRoleId = WorkflowAgent.plannerAgentRoleId
+          { WorkflowAgent.agentThreadPlanRoleId = MoifoldAgentRoles.plannerAgentRoleId
           , WorkflowAgent.agentThreadPlanCwd = "/tmp/work"
           , WorkflowAgent.agentThreadPlanApprovalPolicy = "never"
           , WorkflowAgent.agentThreadPlanSandbox = "danger-full-access"
@@ -429,9 +432,9 @@ workflowAgentCodexStartsThreadsThroughTypedAdapter = do
           request == expectedRequest
       , assert "workflow Codex adapter parses thread start" $
           WorkflowAgentCodex.parseAgentThreadStart plan response
-            == Right (WorkflowAgent.AgentThreadStart WorkflowAgent.plannerAgentRoleId (ThreadId "thread-1"))
+            == Right (WorkflowAgent.AgentThreadStart MoifoldAgentRoles.plannerAgentRoleId (ThreadId "thread-1"))
       , assert "workflow Codex adapter starts thread with interpreter" $
-          started == Right (WorkflowAgent.AgentThreadStart WorkflowAgent.plannerAgentRoleId (ThreadId "thread-1"))
+          started == Right (WorkflowAgent.AgentThreadStart MoifoldAgentRoles.plannerAgentRoleId (ThreadId "thread-1"))
       ]
   pure (and results)
 
@@ -439,7 +442,7 @@ workflowAgentCodexParsesTurnLifecycle :: IO Bool
 workflowAgentCodexParsesTurnLifecycle = do
   let plan =
         WorkflowAgent.AgentTurnPlan
-          { WorkflowAgent.agentTurnPlanRoleId = WorkflowAgent.prReviewWorkerAgentRoleId
+          { WorkflowAgent.agentTurnPlanRoleId = MoifoldAgentRoles.prReviewWorkerAgentRoleId
           , WorkflowAgent.agentTurnPlanThreadId = ThreadId "thread-1"
           , WorkflowAgent.agentTurnPlanCwd = "/tmp/work"
           , WorkflowAgent.agentTurnPlanEffort = defaultEffort
@@ -494,16 +497,16 @@ workflowAgentCodexParsesTurnLifecycle = do
     sequence
       [ assert "workflow Codex adapter parses turn start" $
           WorkflowAgentCodex.parseAgentTurnStart plan startValue
-            == Right (WorkflowAgent.AgentTurnStart WorkflowAgent.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
+            == Right (WorkflowAgent.AgentTurnStart MoifoldAgentRoles.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
       , assert "workflow Codex adapter exposes typed turn refs from starts" $
           case WorkflowAgentCodex.parseAgentTurnStart plan startValue of
             Right started ->
-              (WorkflowAgent.agentTurnStartRef started :: WorkflowAgent.TurnRef WorkflowAgent.PrReviewWorkerAgent ())
+              (WorkflowAgent.agentTurnStartRef started :: WorkflowAgent.TurnRef TestPrReviewWorkerAgent ())
                 == WorkflowAgent.TurnRef (ThreadId "thread-1") (TurnId "turn-1")
             Left _ -> False
       , assert "workflow Codex adapter cached start response is used" $
           startedViaInterpreter
-            == Right (WorkflowAgent.AgentTurnStart WorkflowAgent.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
+            == Right (WorkflowAgent.AgentTurnStart MoifoldAgentRoles.prReviewWorkerAgentRoleId (ThreadId "thread-1") (TurnId "turn-1"))
       , assert "workflow Codex adapter renders typed thread read request" $
           WorkflowAgentCodexProtocol.agentThreadReadRequest (RequestId 441) turnRef
             == threadReadRequest (RequestId 441) (ThreadId "thread-1") True

@@ -1,9 +1,10 @@
 # Agentic Workflow Framework
 
-Status: implemented internal contract, with migration background.
+Status: implemented local package-candidate contract, with migration background.
 
-This directory captures the implemented internal workflow-framework contract
-inside moifold and the remaining migration background for extracting it safely.
+This directory captures the implemented local workflow-framework package
+candidates consumed by moifold and the remaining migration background for
+publishing them safely.
 
 The framework thesis is:
 
@@ -11,8 +12,8 @@ The framework thesis is:
 Agent work should be written as a typed protocol, not as prompts plus shell scripts.
 ```
 
-The current moifold implementation now exposes the reusable framework shape as
-internal sublibraries:
+The current moifold implementation now consumes the reusable framework shape as
+standalone local package candidates:
 
 - `agent-workflow-core`: typed workflow kernel, replay, effect plans,
   permissions, transactions, audit, and daemon projections.
@@ -44,11 +45,11 @@ Agents may produce incomplete, blocked, or incorrect output. The workflow bounda
 
 Implemented contract:
 
-- [implemented-api-freeze.md](implemented-api-freeze.md): frozen internal API
-  surface for `agent-workflow-core`, `agent-workflow-codex`, and
+- [implemented-api-freeze.md](implemented-api-freeze.md): frozen local package
+  API surface for `agent-workflow-core`, `agent-workflow-codex`, and
   `agent-workflow-github`, plus the moifold-owned policy boundary.
 - [package-extraction-readiness.md](package-extraction-readiness.md):
-  source-backed readiness report for the internal package split, dependency
+  source-backed readiness report for the local package split, dependency
   ownership, compatibility facades, validation commands, and remaining
   blockers before any external package publication decision.
 - [package-identity-versioning-contract.md](package-identity-versioning-contract.md):
@@ -107,7 +108,7 @@ Migration background:
 
 ## Non-goals
 
-- Do not treat the internal sublibrary split as package publication.
+- Do not treat the standalone local package split as package publication.
 - Do not build a generic prompt runner.
 - Do not expose `liftIO` in the workflow DSL.
 - Do not replace typed states with configurable YAML.
@@ -117,7 +118,7 @@ Migration background:
 
 ## Implemented Layering
 
-The implemented internal layering is:
+The implemented local package-candidate layering is:
 
 ```text
 agent-workflow-core
@@ -133,6 +134,5 @@ moifold
   issue planning, issue implementation, PR review, merge readiness, compatibility files, daemon/runtime ownership, healthcheck, repair, runbooks
 ```
 
-The current freeze is about that implemented internal API. External package
-publication, Cabal cleanup for publication, and compatibility facade removal are
-separate decisions.
+The current freeze is about that implemented local package Interface. External
+package publication and compatibility facade removal are separate decisions.

@@ -27,17 +27,17 @@ exhausted, and what lifecycle state follows.
 `CodexWatcher.Workflow.Agent.Types` freezes:
 
 - `AgentRoleId`;
-- role marker types for the current moifold roles;
-- stable role ids such as `planner`, `pr-review-worker`,
-  `issue-plan-worker`, `issue-implementation-worker`, `reviewer`,
-  `pr-review-verification-reviewer`, and `final-reviewer`;
 - `AgentRetryReason`, `AgentRetryDecision`, `AgentRetryPolicy`,
   `defaultAgentRetryPolicy`, and `agentRetryDecision`;
 - `AgentSideEffectScope`: read-only, writes worktree, mutates remote, or
   unknown side effects.
 
-These values are reusable metadata. Moifold still owns which roles are used in
-which issue/PR phase and what each role is allowed to prove.
+These values are reusable metadata. Concrete product role marker types and
+stable moifold role ids such as `planner`, `pr-review-worker`,
+`issue-plan-worker`, `issue-implementation-worker`, `reviewer`,
+`pr-review-verification-reviewer`, and `final-reviewer` are moifold-owned.
+Moifold still owns which roles are used in which issue/PR phase and what each
+role is allowed to prove.
 
 ## Thread and Turn Plans
 

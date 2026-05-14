@@ -18,7 +18,7 @@ Descriptor and wiring scans:
 ```sh
 git status --short
 rg -n "packages:|agent-workflow-(core|codex|github)|moifold:agent-workflow|library agent-workflow" cabal.project moifold.cabal agent-workflow-core/agent-workflow-core.cabal agent-workflow-codex/agent-workflow-codex.cabal agent-workflow-github/agent-workflow-github.cabal examples/workflow-package-consumer/cabal.project examples/workflow-package-consumer/workflow-package-consumer.cabal
-rg -n "workflowMoifoldCabalConsumesStandaloneWorkflowPackages|workflowCabalProjectListsStandaloneWorkflowPackages|workflowCoreStandalonePackageKeepsPackageBoundary|workflowCodexStandalonePackageKeepsPackageBoundary|workflowGithubStandalonePackageKeepsPackageBoundary" test/Main.hs
+rg -n "workflowMoifoldCabalConsumesStandaloneWorkflowPackages|workflowCabalProjectListsStandaloneWorkflowPackages|workflowCoreStandalonePackageKeepsPackageBoundary|workflowCodexStandalonePackageKeepsPackageBoundary|workflowGithubStandalonePackageKeepsPackageBoundary" test/BoundaryPolicySpec.hs
 ```
 
 Package-boundary import scans:
@@ -33,7 +33,7 @@ Compatibility-surface scans:
 
 ```sh
 rg -n "CodexWatcher\.(AppServerClient|Core\.Ids|Workflow\.EventLog|Workflow\.Permission)" moifold.cabal src app test
-rg -n "workflowMoifoldCabalLibraryDoesNotReexportAdapters|workflowDirectOwnerReplayMatchesEventLog|workflowPermissionSpecMatchesStateMachine|workflowExecutionFacadeDryRunMatchesExecutor|workflowPrReviewCheckingFacadeMatchesWatcher|workflowPrReviewMergeabilityFacadeMatchesWatcher" test/Main.hs test/FacadeImportPolicySpec.hs
+rg -n "workflowMoifoldCabalLibraryDoesNotReexportAdapters|workflowDirectOwnerReplayMatchesEventLog|workflowPermissionSpecMatchesStateMachine|workflowExecutionFacadeDryRunMatchesExecutor|workflowPrReviewCheckingFacadeMatchesWatcher|workflowPrReviewMergeabilityFacadeMatchesWatcher" test/BoundaryPolicySpec.hs test/FacadeImportPolicySpec.hs
 rg -n "compatibilityStateWrites|writeCompatibility|issue-state\.json|daemon-state\.json|planning-state\.json|block-state|repair-state|runtime-owner" src/CodexWatcher/Runtime/Compatibility.hs src/CodexWatcher/Cli/Command/Replay.hs src/CodexWatcher/Cli/Command/Observe.hs src/CodexWatcher/AutomaticLoop/Runner.hs src/CodexWatcher/AutomaticLoop/IssuePlanningFanout.hs src/CodexWatcher/AutomaticLoop/StartupThreads.hs src/CodexWatcher/AutomaticLoop/PrReviewHandoff.hs docs/agentic-workflow-framework/compatibility-deprecation-policy.md
 ```
 
@@ -113,7 +113,7 @@ source trees:
   lifecycle, event-log, healthcheck, runtime, agent, daemon, workflow facade, or
   compatibility modules.
 
-`test/Main.hs` contains the recursive source-tree assertions used by
+`test/BoundaryPolicySpec.hs` contains the recursive source-tree assertions used by
 `watcher-core-test`, including:
 
 - `workflowCabalProjectListsStandaloneWorkflowPackages`
@@ -141,7 +141,7 @@ src/CodexWatcher/Workflow/Execution.hs still imports CodexWatcher.Workflow.Execu
 src/CodexWatcher/Workflow/Types.hs still imports CodexWatcher.Workflow.Spec
 ```
 
-`test/Main.hs` and `test/BoundaryPolicySpec.hs` assert the direct owner and
+`test/BoundaryPolicySpec.hs` and `test/FacadeImportPolicySpec.hs` assert the direct owner and
 adapter boundary contracts:
 
 - `workflowMoifoldCabalLibraryDoesNotReexportAdapters`
@@ -249,7 +249,7 @@ dist-newstyle/build/aarch64-osx/ghc-9.12.2/moifold-0.1.0.0/t/watcher-core-test/t
 
 Relevant covered surfaces in `watcher-core-test` include:
 
-- `test/Main.hs`: package descriptor scans, recursive package-boundary scans,
+- `test/BoundaryPolicySpec.hs`: package descriptor scans, recursive package-boundary scans,
   facade parity checks, adapter reexport checks, event-log/replay contracts,
   and workflow law checks.
 - `test/CliSpec.hs`: CLI parser coverage for healthcheck, run-loop,

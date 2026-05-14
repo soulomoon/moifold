@@ -113,6 +113,7 @@ library
     CodexWatcher.WatcherRuntimeStatus
     CodexWatcher.Workflow.DocsMigration
     CodexWatcher.Workflow.Execution
+    CodexWatcher.Workflow.Moifold.AgentRoles
     CodexWatcher.Workflow.Moifold.IssueImplement.Indexed
     CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
     CodexWatcher.Workflow.Moifold.ObservationProjection

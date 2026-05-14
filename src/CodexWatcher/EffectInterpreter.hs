@@ -50,7 +50,9 @@ import CodexWatcher.Workflow.Agent.Codex.Protocol qualified as AgentCodexProtoco
 import CodexWatcher.Workflow.Agent.Types
   ( AgentRoleId
   , AgentTurnPlan (..)
-  , finalReviewerAgentRoleId
+  )
+import CodexWatcher.Workflow.Moifold.AgentRoles
+  ( finalReviewerAgentRoleId
   , issueImplementationWorkerAgentRoleId
   , issuePlanWorkerAgentRoleId
   , plannerAgentRoleId

@@ -27,7 +27,6 @@ import CodexWatcher.Workflow.Agent.Types
   , AgentTurnStart (..)
   , TurnRef (..)
   , agentTurnStartRef
-  , plannerAgentRoleId
   )
 import CodexWatcher.Workflow.DSL
   ( advance
@@ -213,9 +212,10 @@ runCoreExample = do
 
 runCodexExample :: IO ()
 runCodexExample = do
-  let threadPlan =
+  let examplePlannerRoleId = AgentRoleId "consumer-example-planner"
+      threadPlan =
         AgentThreadPlan
-          { agentThreadPlanRoleId = plannerAgentRoleId
+          { agentThreadPlanRoleId = examplePlannerRoleId
           , agentThreadPlanCwd = "/workspace/example"
           , agentThreadPlanApprovalPolicy = "never"
           , agentThreadPlanSandbox = "read-only"

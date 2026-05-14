@@ -25,8 +25,9 @@ The public modules are grouped by ownership:
 - `CodexWatcher.Workflow.Spec`: the unindexed workflow contract, planned
   transitions, observation planning, replay hooks, permission hooks, terminal
   checks, and labels.
-- `CodexWatcher.Workflow.Indexed.Spec`: the current indexed compatibility
-  surface and bridge to the unindexed spec; it is not a richer indexed redesign.
+- `CodexWatcher.Workflow.Indexed.Spec`: the public indexed workflow contract
+  and bridge to the unindexed spec for adapters that keep source and target
+  states visible at the type level.
 - `CodexWatcher.Workflow.DSL`: the pure `WorkflowM` and `Transition` authoring
   layer for building inspectable effect plans without `liftIO`.
 - `CodexWatcher.Workflow.Codec`: generic codec contracts, event type labels,

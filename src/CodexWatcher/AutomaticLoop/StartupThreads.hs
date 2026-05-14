@@ -28,6 +28,7 @@ import CodexWatcher.Domain.IssueImplement.Types (IssueConfig)
 import CodexWatcher.Domain.PrReview.Types (PrConfig)
 import CodexWatcher.Workflow.Agent qualified as WorkflowAgent
 import CodexWatcher.Workflow.Agent.Codex qualified as WorkflowAgentCodex
+import CodexWatcher.Workflow.Moifold.AgentRoles qualified as MoifoldAgentRoles
 import Data.Text qualified as Text
 import System.Exit (die)
 
@@ -68,7 +69,7 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
       Just issueConfig -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
             instructions = issueImplementerThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir issueConfig
-        threadId <- startFreshThread executor WorkflowAgent.issueImplementationWorkerAgentRoleId requestId cli.loopCliWorkdir instructions
+        threadId <- startFreshThread executor MoifoldAgentRoles.issueImplementationWorkerAgentRoleId requestId cli.loopCliWorkdir instructions
         appendStartupThreadRefresh (IssueWorkerThreadRefreshed threadId)
         pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
@@ -78,13 +79,13 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
         pure loopConfig
       Just (RefreshPrReviewIdleThreads prConfig) -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
-        workerThread <- startFreshThread executor WorkflowAgent.prReviewWorkerAgentRoleId requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
-        reviewerThread <- startFreshThread executor WorkflowAgent.reviewerAgentRoleId (nextRequestId requestId) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        workerThread <- startFreshThread executor MoifoldAgentRoles.prReviewWorkerAgentRoleId requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "worker")
+        reviewerThread <- startFreshThread executor MoifoldAgentRoles.reviewerAgentRoleId (nextRequestId requestId) cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
         appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
         pure (withNextRequestId (nextRequestId (nextRequestId requestId)) loopConfig)
       Just (RefreshPrReviewReviewerForActiveWorker prConfig workerThread) -> do
         let requestId = runtimeConfig.effectRuntimeNextRequestId
-        reviewerThread <- startFreshThread executor WorkflowAgent.reviewerAgentRoleId requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
+        reviewerThread <- startFreshThread executor MoifoldAgentRoles.reviewerAgentRoleId requestId cli.loopCliWorkdir (prReviewThreadDeveloperInstructions cli.loopCliWorkdir cli.loopCliStateDir prConfig "reviewer")
         appendStartupThreadRefresh (PrReviewThreadsRefreshed workerThread reviewerThread)
         pure (withNextRequestId (nextRequestId requestId) loopConfig)
 

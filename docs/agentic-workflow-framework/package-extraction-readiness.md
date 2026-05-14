@@ -2,10 +2,10 @@
 
 Status: source-backed readiness report, not a publication decision.
 
-This report records the current extraction readiness of the internal
+This report records the current extraction readiness of the standalone local
 `agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`
-sublibraries. It is evidence for a future external package split decision; it
-does not publish packages, remove compatibility facades, or move moifold
+package candidates. It is evidence for a future external publication decision;
+it does not publish packages, remove compatibility facades, or move moifold
 lifecycle policy into framework packages.
 
 ## Verdict
@@ -25,11 +25,17 @@ packages.
 
 Primary source files:
 
-- `moifold.cabal`: internal sublibrary exposed modules and dependency
-  ownership.
-- `test/Main.hs`: recursive source-scan and Cabal-boundary assertions.
+- `cabal.project`: root package plus standalone local workflow package
+  candidates.
+- `agent-workflow-core/agent-workflow-core.cabal`,
+  `agent-workflow-codex/agent-workflow-codex.cabal`, and
+  `agent-workflow-github/agent-workflow-github.cabal`: package descriptors,
+  exposed modules, and dependency ownership.
+- `moifold.cabal`: concrete product dependency ownership.
+- `test/BoundaryPolicySpec.hs`: recursive source-scan and Cabal-boundary
+  assertions.
 - `docs/agentic-workflow-framework/implemented-api-freeze.md`: implemented
-  internal API freeze and moifold-owned policy boundary.
+  local package API freeze and moifold-owned policy boundary.
 - `orchestrator/project-contract.md`: repo-wide package and compatibility
   invariants.
 - `orchestrator/roadmaps/2026-05-08-00-framework-kernel-migration/rev-001/verification.md`:
@@ -40,7 +46,7 @@ Inspection commands used for the import and Cabal evidence:
 ```sh
 find agent-workflow-core/src agent-workflow-codex/src agent-workflow-github/src -name '*.hs' -print0 | xargs -0 rg -n '^import '
 rg -n "import CodexWatcher\\.Workflow\\.(Agent|GitHub)|import CodexWatcher\\.AppServerProtocol|import CodexWatcher\\.Workflow\\.Agent\\.Codex|import CodexWatcher\\.Workflow\\.GitHub" src test agent-workflow-core agent-workflow-codex agent-workflow-github
-rg -n "library agent-workflow-core|library agent-workflow-codex|library agent-workflow-github|exposed-modules:|build-depends:" moifold.cabal
+rg -n "packages:|agent-workflow-(core|codex|github)|moifold:agent-workflow|library agent-workflow" cabal.project moifold.cabal agent-workflow-core/agent-workflow-core.cabal agent-workflow-codex/agent-workflow-codex.cabal agent-workflow-github/agent-workflow-github.cabal
 ```
 
 Additional negative checks used to verify absent forbidden edges:
@@ -128,7 +134,7 @@ Forbidden edges are absent:
 
 ### Main moifold library imports
 
-The main library is allowed to import the reusable sublibraries as a concrete
+The main library is allowed to import the reusable packages as a concrete
 product:
 
 - `src/CodexWatcher/EffectInterpreter.hs`, daemon loop modules, domain loops,
@@ -138,13 +144,14 @@ product:
   have been removed; main-library code imports shared agent, GitHub, and Codex
   adapter owners directly.
 
-This direction is acceptable because moifold depends on the framework
-sublibraries. The reverse direction would be an extraction blocker; the source
-scans above show that reverse lifecycle ownership is not present.
+This direction is acceptable because moifold depends on the framework packages.
+The reverse direction would be an extraction blocker; the source scans above
+show that reverse lifecycle ownership is not present.
 
 ## Dependency Ownership
 
-`moifold.cabal` currently records the intended ownership split:
+The package descriptors and `moifold.cabal` currently record the intended
+ownership split:
 
 - `agent-workflow-core` exposes the generic workflow kernel modules and depends
   only on `base`, `bytestring`, and `text`. This keeps the kernel independent
@@ -156,8 +163,8 @@ scans above show that reverse lifecycle ownership is not present.
   agent observation bridge. It owns `aeson` because request/response payloads
   are JSON values, `websockets` because transport now lives in this adapter,
   `bytestring` and `text` because the client/transport parse and render
-  protocol data, and `moifold:agent-workflow-core` because observation helpers
-  target the generic workflow spec.
+  protocol data, and `agent-workflow-core` because observation helpers target
+  the generic workflow spec.
 - `agent-workflow-github` exposes GitHub ids, remote parsers/classifiers, and
   pure command specs. It owns `aeson` for JSON payload parsing and `text` for
   typed ids/rendering. It intentionally has no dependency on `moifold`,
@@ -165,7 +172,7 @@ scans above show that reverse lifecycle ownership is not present.
 - The main `moifold` library owns the concrete product dependencies:
   filesystem, process, CLI, singletons, time, Unix, runtime execution,
   compatibility files, daemon ownership, lifecycle modules, and the three
-  workflow sublibraries.
+  workflow packages.
 
 The current dependency graph is one-way:
 
@@ -193,7 +200,7 @@ from `agent-workflow-github` to moifold, Codex, or core.
 | Main `library` Cabal section | Does not use `reexported-modules:` and does not expose adapter modules directly. | Moifold depends on the reusable package candidates without turning adapter modules into part of the main public library surface. | Current direct-owner imports are the preferred path. |
 | `agent-workflow-codex` public modules | Exposes protocol, typed agent data, Codex client/protocol/interpreter/transport, and observation bridge directly. | New code can target the extracted adapter APIs instead of the compatibility wrapper. | Ready for preferred-import guidance, not external stability guarantees. |
 | `agent-workflow-github` public modules | Exposes ids, remote parsing/classification, and pure command specs directly. | New code can use pure GitHub specs without pulling moifold runtime policy. | Ready for preferred-import guidance, not command execution policy migration. |
-| `agent-workflow-core` public modules | Exposes workflow spec, indexed spec, DSL, codec contracts, event-log cores, execution, permission, transaction, audit, daemon projections, and failure classification. | Reusable kernel APIs are available internally without importing concrete moifold lifecycle state. | Ready for API-freeze review; external versioning and semantic compatibility remain unstarted. |
+| `agent-workflow-core` public modules | Exposes workflow spec, indexed spec, DSL, codec contracts, event-log cores, execution, permission, transaction, audit, daemon projections, and failure classification. | Reusable kernel APIs are available through the local package without importing concrete moifold lifecycle state. | Ready for API-freeze review; external versioning and semantic compatibility remain unstarted. |
 
 The facade map now separates removed public wrappers from runtime compatibility
 files. Runtime compatibility availability remains a repo-wide contract, so
@@ -202,24 +209,24 @@ extraction readiness.
 
 ## Boundary Tests
 
-`test/Main.hs` contains the reviewer-facing assertions that protect this
-report:
+`test/BoundaryPolicySpec.hs` contains the reviewer-facing assertions that
+protect this report:
 
-- `workflowCoreCabalSublibraryKeepsPackageBoundary` verifies core exposed
+- `workflowCoreStandalonePackageKeepsPackageBoundary` verifies core exposed
   modules, the approved `base`/`bytestring`/`text` dependency set, the main
   library's dependency on core, and the absence of concrete lifecycle imports,
   Aeson, runtime ownership, filesystem, IO, Codex, and GitHub tokens.
-- `workflowCodexCabalSublibraryKeepsPackageBoundary` verifies Codex exposed
+- `workflowCodexStandalonePackageKeepsPackageBoundary` verifies Codex exposed
   modules, the approved `aeson`/`base`/`bytestring`/`text`/`websockets`/core
   dependency set, the main library's dependency on Codex, and the absence of
   moifold lifecycle imports and compatibility-file ownership tokens.
-- `workflowGithubCabalSublibraryKeepsPackageBoundary` verifies GitHub exposed
+- `workflowGithubStandalonePackageKeepsPackageBoundary` verifies GitHub exposed
   modules, the approved `aeson`/`base`/`text` dependency set, the main
   library's dependency on GitHub, and the absence of moifold lifecycle, daemon,
   runtime, compatibility, Codex, and workflow-policy imports.
 - `workflowMoifoldCabalLibraryDoesNotReexportAdapters` verifies the main
   library has no Cabal adapter reexports, keeps dependencies on the Codex and
-  GitHub sublibraries, and does not expose the removed
+  GitHub packages, and does not expose the removed
   `CodexWatcher.AppServerClient` wrapper.
 
 These assertions are recursive source scans and Cabal-section checks, so they

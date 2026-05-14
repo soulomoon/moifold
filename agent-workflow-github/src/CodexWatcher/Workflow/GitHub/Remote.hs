@@ -37,7 +37,6 @@ module CodexWatcher.Workflow.GitHub.Remote
   , remoteIssueIsClosed
   , remotePullRequestIsMerged
   , remotePullRequestIsOpen
-  , remotePullRequestMergeStateFixMessage
   , renderRemoteIssueState
   , renderRemotePullRequestState
   ) where
@@ -230,13 +229,6 @@ classifyRemotePullRequestMergeState (Just status)
   | otherwise = RemotePullRequestMergeStateBlocked status
  where
   normalized = Text.toUpper (Text.strip status)
-
-remotePullRequestMergeStateFixMessage :: Text -> Text -> Text
-remotePullRequestMergeStateFixMessage context status =
-  context
-    <> " is "
-    <> status
-    <> ": the PR branch is not mergeable with the latest base branch. Merge or rebase the latest base branch into the PR branch, resolve conflicts, rerun validation, and push the fix."
 
 parseRemotePullRequestState :: Text -> RemotePullRequestState
 parseRemotePullRequestState state =

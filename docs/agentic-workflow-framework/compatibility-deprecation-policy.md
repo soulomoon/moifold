@@ -1,18 +1,18 @@
 # Compatibility And Deprecation Policy
 
-Status: compatibility and deprecation policy for future external package
-candidates, not a code migration, package descriptor migration, release note,
-upload approval, package publication decision, deprecation pragma, import
-migration, wrapper removal, or compatibility-file migration.
+Status: compatibility and deprecation policy for local external package
+candidates, not a code migration, release note, upload approval, package
+publication decision, deprecation pragma, import migration, wrapper removal, or
+compatibility-file migration.
 
-This policy covers the future external package candidates:
+This policy covers the local external package candidates:
 
 - `agent-workflow-core`
 - `agent-workflow-codex`
 - `agent-workflow-github`
 
-The current source tree still exposes those candidates as internal named
-sublibraries of `moifold`. Preferred imports may be documented now, but
+The current source tree exposes those candidates as standalone local package
+descriptors consumed by `moifold`. Preferred imports may be documented now, but
 moifold-owned compatibility facades stay available until a later selected round
 proves that deprecation or removal is safe.
 
@@ -51,12 +51,13 @@ Source-backed inputs for this policy:
   metadata, changelog, release-note, and metadata-truth constraints for future
   standalone descriptors and releases.
 - `docs/agentic-workflow-framework/implemented-api-freeze.md` freezes the
-  implemented internal API surface and the moifold-owned policy boundary.
+  implemented local package API surface and the moifold-owned policy boundary.
 - `orchestrator/project-contract.md` preserves package ownership,
   compatibility facades, compatibility files, event schemas, golden logs,
   runtime ownership, healthcheck, repair, and release approval as repo-wide
   contracts.
-- `moifold.cabal` defines the three internal named sublibraries and exposes
+- `cabal.project` lists the three standalone local package candidates, and
+  `moifold.cabal` depends on their package names. `moifold.cabal` exposes
   `CodexWatcher.Workflow.Types` and `CodexWatcher.Workflow.Execution` as
   product-facing moifold workflow surfaces. It no longer exposes
   `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
@@ -65,9 +66,9 @@ Source-backed inputs for this policy:
   `src/CodexWatcher/Workflow/Execution.hs` expose moifold-facing wrappers
   around concrete `MoifoldSpec`, `SomeWatcherState`, concrete effect plans,
   runtime action types, and execution policy.
-- `test/Main.hs`, `test/FacadeImportPolicySpec.hs`, and
-  `test/BoundaryPolicySpec.hs` contain package-boundary and direct-owner
-  assertions for the core, Codex, GitHub, and main moifold library surfaces.
+- `test/BoundaryPolicySpec.hs` and `test/FacadeImportPolicySpec.hs` contain
+  package-boundary and direct-owner assertions for the core, Codex, GitHub, and
+  main moifold library surfaces.
 
 ## Preferred Imports
 

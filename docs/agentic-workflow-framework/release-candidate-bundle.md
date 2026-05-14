@@ -23,7 +23,7 @@ Current source and configuration:
 - `agent-workflow-github/agent-workflow-github.cabal`
 - `.github/workflows/ci.yml`
 - `scripts/validate-workflow-packages.sh`
-- `test/Main.hs`
+- `test/BoundaryPolicySpec.hs`
 - `agent-workflow-core/README.md`
 - `agent-workflow-codex/README.md`
 - `agent-workflow-github/README.md`
@@ -65,7 +65,7 @@ still passes. Current validation results are recorded below.
 | --- | --- | --- |
 | Descriptor/project wiring scan | Passed | `cabal.project` lists `.`, `agent-workflow-core`, `agent-workflow-codex`, and `agent-workflow-github`; `moifold.cabal` consumes the standalone package names; the scan found no `moifold:agent-workflow-*` dependency and no `library agent-workflow-*` internal component definition. |
 | Descriptor metadata/exposed-modules/build-depends scan | Passed | All three descriptors record `version: 0.1.0.0`, `license: MIT`, `author: soulomoon`, `maintainer: soulomoon`, `category: Development`, and `source-repository head` at `https://github.com/soulomoon/moifold.git`; exposed modules and dependency sets are package-specific. |
-| Package boundary tests present | Passed | `test/Main.hs` contains `workflowCabalProjectListsStandaloneWorkflowPackages`, `workflowMoifoldCabalConsumesStandaloneWorkflowPackages`, `workflowCoreStandalonePackageKeepsPackageBoundary`, `workflowCodexStandalonePackageKeepsPackageBoundary`, `workflowGithubStandalonePackageKeepsPackageBoundary`, and `workflowMoifoldCabalLibraryDoesNotReexportAdapters`. |
+| Package boundary tests present | Passed | `test/BoundaryPolicySpec.hs` contains `workflowCabalProjectListsStandaloneWorkflowPackages`, `workflowMoifoldCabalConsumesStandaloneWorkflowPackages`, `workflowCoreStandalonePackageKeepsPackageBoundary`, `workflowCodexStandalonePackageKeepsPackageBoundary`, `workflowGithubStandalonePackageKeepsPackageBoundary`, and `workflowMoifoldCabalLibraryDoesNotReexportAdapters`. |
 | Reusable package forbidden-import scans | Passed | The required `rg` scans returned no matches for forbidden moifold lifecycle/runtime imports in `agent-workflow-core/src`, `agent-workflow-codex/src`, and `agent-workflow-github/src`. |
 | Compatibility facade scan | Passed | The main `moifold` library no longer exposes `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, or `CodexWatcher.Workflow.Permission`; `CodexWatcher.Workflow.Types` and `CodexWatcher.Workflow.Execution` remain available as moifold-facing product surfaces. |
 | `scripts/validate-workflow-packages.sh` | Passed | Ran `cabal check` for all three packages, generated local sdists, verified package roots and Cabal descriptors, and ended with `No upload or package publication command was run.` |

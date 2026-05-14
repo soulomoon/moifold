@@ -80,9 +80,9 @@ GitHub, git, the filesystem, or the app-server directly.
 
 ## Current Indexed Contract
 
-`CodexWatcher.Workflow.Indexed.Spec` exposes the indexed compatibility surface.
-It does not replace the unindexed contract; it provides stronger phase/source
-and target markers for adapters that can carry them.
+`CodexWatcher.Workflow.Indexed.Spec` exposes the public indexed workflow
+contract. It does not replace the unindexed contract; it provides stronger
+phase/source and target markers for adapters that can carry them.
 
 The current indexed class provides associated types for:
 
@@ -285,5 +285,5 @@ protocol explicitly permits a transition.
 The earlier docs described domain and phase associated data families directly
 on `WorkflowSpec`. That remains a useful direction for stronger public APIs,
 but it is not the current frozen contract. The implemented contract is the
-associated-type surface in `CodexWatcher.Workflow.Spec`, plus the indexed
-compatibility bridge in `CodexWatcher.Workflow.Indexed.Spec`.
+associated-type surface in `CodexWatcher.Workflow.Spec`, plus the public
+indexed workflow contract and bridge in `CodexWatcher.Workflow.Indexed.Spec`.

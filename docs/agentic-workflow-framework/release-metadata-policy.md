@@ -1,8 +1,8 @@
 # Release Metadata Policy
 
-Status: metadata policy for future external package candidates, not a package
-descriptor migration, source-distribution readiness claim, release
-announcement, upload approval, or publication decision.
+Status: metadata policy for local external package candidates, not a
+source-distribution readiness claim, release announcement, upload approval, or
+publication decision.
 
 This policy defines release metadata requirements for the future standalone
 package candidates:
@@ -11,11 +11,10 @@ package candidates:
 - `agent-workflow-codex`
 - `agent-workflow-github`
 
-The current source tree still has one Cabal package, `moifold`, at version
-`0.1.0.0`, with those candidates implemented as internal named sublibraries.
-Later descriptor, documentation, changelog, source-distribution, and
-release-gate rounds may use this policy as their metadata source of truth, but
-this policy does not create standalone descriptors or authorize publication.
+The current source tree has a root `moifold` package plus standalone local
+package descriptors for those candidates. Later descriptor, documentation,
+changelog, source-distribution, and release-gate rounds may use this policy as
+their metadata source of truth, but this policy does not authorize publication.
 
 ## Evidence Base
 
@@ -25,8 +24,12 @@ Source-backed inputs for this policy:
   `license: MIT`, `author: soulomoon`, `maintainer: soulomoon`,
   `category: Development`, and `source-repository head` at
   `https://github.com/soulomoon/moifold.git`.
-- `moifold.cabal` defines the internal sublibraries `agent-workflow-core`,
-  `agent-workflow-codex`, and `agent-workflow-github`.
+- `cabal.project` lists the root `moifold` package plus the standalone local
+  package candidates.
+- `agent-workflow-core/agent-workflow-core.cabal`,
+  `agent-workflow-codex/agent-workflow-codex.cabal`, and
+  `agent-workflow-github/agent-workflow-github.cabal` define the current
+  package metadata.
 - `docs/agentic-workflow-framework/package-identity-versioning-contract.md`
   fixes the external package names, pre-1.0 version expectations, module
   namespace policy, version-bound expectations, ownership limits, and
@@ -35,7 +38,7 @@ Source-backed inputs for this policy:
   package ownership, dependency ownership, remaining blockers, and surfaces not
   included in extraction readiness.
 - `docs/agentic-workflow-framework/implemented-api-freeze.md` records the
-  implemented public surface of the internal sublibraries and the
+  implemented public surface of the local package candidates and the
   moifold-owned policy boundary.
 - `orchestrator/project-contract.md` requires metadata, release notes, package
   descriptors, source distributions, and public documentation to preserve the
@@ -46,9 +49,9 @@ Source-backed inputs for this policy:
 
 ## Package Metadata Defaults
 
-The following table gives descriptor-time defaults and wording constraints.
-Every value marked "reconfirm" must be checked again when standalone
-descriptors are actually written; current `moifold` metadata is evidence, not
+The following table gives descriptor defaults and wording constraints. Every
+value marked "reconfirm" must be checked again when descriptors change or a
+release gate is evaluated; current `moifold` metadata is evidence, not
 automatic final metadata for every external package.
 
 | Package candidate | License | Maintainer | Category | Synopsis | Description constraints | Source repository |
@@ -71,7 +74,7 @@ the package it describes. Descriptor rounds must not rely on the top-level
   package.
 - `maintainer`: each package needs an explicit maintainer field. Current
   evidence is `soulomoon`, but descriptor rounds must reconfirm the contact and
-  ownership before writing standalone descriptors.
+  ownership before changing standalone descriptors or publishing.
 - `category`: default to `Development`. Category and adjacent descriptive text
   must describe reusable workflow, adapter, parser, or command-spec surfaces,
   not moifold watcher operations.
@@ -115,7 +118,7 @@ Metadata must not claim any of the following unless a later approved round
 proves that specific claim:
 
 - package upload or public release approval;
-- standalone descriptor readiness before descriptors exist and pass review;
+- standalone descriptor readiness before descriptors pass review;
 - source-distribution validity before `cabal check` and source-distribution
   validation run for the relevant package candidate;
 - CI coverage beyond the checks that actually ran;
@@ -134,9 +137,10 @@ Reusable workflow packages may expose typed data, pure helpers, protocol
 adapters, and effect interpretation contracts. Moifold remains the concrete
 product and runtime owner.
 
-## Descriptor-Time Checklist
+## Descriptor Checklist
 
-Before any later round writes standalone package descriptors, it must confirm:
+Before any later round changes standalone package descriptors or treats them as
+release-ready, it must confirm:
 
 - the package name matches the package identity contract;
 - the version remains an independently chosen pre-1.0 package version unless a
