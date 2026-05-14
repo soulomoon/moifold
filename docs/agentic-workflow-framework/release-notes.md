@@ -84,24 +84,18 @@ The package split follows this ownership model:
   app-server startup policy, healthcheck, repair, prompts, operator runbooks,
   and release decisions.
 
-## Compatibility Facades
+## Compatibility Surface
 
-Compatibility facades remain available. Preferred imports are documented for
-new reusable-package consumers, but this release-note material does not add a
-deprecation pragma, require an import migration, remove a facade, or migrate
-compatibility files.
+The main `moifold` library no longer exposes the old public wrappers
+`CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
+`CodexWatcher.Workflow.EventLog`, or `CodexWatcher.Workflow.Permission`.
+Consumers should use the direct owner modules from `agent-workflow-codex`,
+`agent-workflow-github`, and `agent-workflow-core`.
 
-Notable status:
-
-- `CodexWatcher.AppServerClient` remains a moifold-owned facade over Codex
-  client and transport modules.
-- `CodexWatcher.Core.Ids` remains a moifold convenience facade over agent and
-  GitHub ids.
-- `CodexWatcher.Workflow.Types`, `CodexWatcher.Workflow.EventLog`,
-  `CodexWatcher.Workflow.Execution`, and `CodexWatcher.Workflow.Permission`
-  remain moifold product-facing surfaces where they expose concrete state,
-  concrete events, concrete effect plans, replay policy, runtime action types,
-  or phase validation.
+`CodexWatcher.Workflow.Types` and `CodexWatcher.Workflow.Execution` remain
+moifold product-facing surfaces where they expose concrete state, concrete
+effect plans, runtime action types, or execution policy. Runtime compatibility
+files are unchanged by this cleanup.
 
 ## Validation Evidence
 

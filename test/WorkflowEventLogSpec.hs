@@ -34,7 +34,6 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
-import CodexWatcher.GoldenReplay
 import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildArgs, issueImplementerChildLaunchMode, issueImplementerLaunchManifest, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
@@ -54,7 +53,6 @@ import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease, clearRuntimeLeaseIfOwn
 import CodexWatcher.Runtime.Owner.Store
 import CodexWatcher.Runtime.Owner.Types
 import CodexWatcher.RunnerGuard
-import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Supervisor
 import CodexWatcher.Domain.IssueImplement.TurnClassifier

@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
@@ -31,6 +29,7 @@ module CodexWatcher.Daemon
   ) where
 
 import CodexWatcher.Runtime.Compatibility
+import CodexWatcher.Daemon.Types
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
@@ -38,8 +37,6 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.Failure
 import CodexWatcher.GhGit
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Runtime.Command.Render (commandText)
-import CodexWatcher.Runtime.Command.Types (CommandReport (..))
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..))
@@ -61,7 +58,6 @@ import CodexWatcher.Workflow.Transaction.Core
   ( WorkflowObservedTransactionHooks (..)
   , WorkflowObservedTransactionFailure (..)
   , WorkflowObservedTransactionResult (..)
-  , WorkflowTransactionFailureStage (..)
   , runWorkflowPreparedDryRunTransaction
   , runWorkflowPreparedExecuteTransactionDetailed
   )
@@ -73,54 +69,6 @@ import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
-import GHC.Generics (Generic)
-
-data DaemonOptions = DaemonOptions
-  { daemonEventLogPath :: FilePath
-  , daemonRuntimeConfig :: EffectRuntimeConfig
-  , daemonExecutionMode :: ActionExecutionMode
-  }
-  deriving stock (Eq, Show, Generic)
-
-data DaemonFailure
-  = DaemonEventLogDecodeFailed Text
-  | DaemonReplayFailed ReplayFailure
-  | DaemonObservationRejected Text
-  | DaemonActionFailed PlannedAction CommandReport
-  | DaemonActionResultInvalid PlannedAction Text
-  | DaemonObservedTransactionFailed DaemonObservedTransactionFailure
-  deriving stock (Eq, Show, Generic)
-
-data DaemonObservedTransactionFailure = DaemonObservedTransactionFailure
-  { daemonObservedTransactionFailureStage :: WorkflowTransactionFailureStage
-  , daemonObservedTransactionFailureReason :: DaemonFailure
-  , daemonObservedTransactionFailurePlannedEvent :: Maybe WatcherEvent
-  , daemonObservedTransactionFailureCommittedEvents :: [WatcherEvent]
-  , daemonObservedTransactionFailureCompiledEffects :: Maybe WorkflowCompiledEffectPlan
-  , daemonObservedTransactionFailurePreCommitReports :: [ActionExecutionReport]
-  , daemonObservedTransactionFailurePostCommitReports :: [ActionExecutionReport]
-  , daemonObservedTransactionFailureAudit :: Maybe (WorkflowAudit.WorkflowTickAudit MoifoldSpec DaemonFailure ActionExecutionReport)
-  }
-  deriving stock (Eq, Show, Generic)
-
-data DaemonTickResult = DaemonTickResult
-  { daemonReplayResult :: EventReplayResult
-  , daemonCompiledEffects :: CompiledEffectPlan
-  , daemonActionReports :: [ActionExecutionReport]
-  }
-  deriving stock (Show, Generic)
-
-data DaemonObservedTickResult = DaemonObservedTickResult
-  { daemonObservedReplayResult :: EventReplayResult
-  , daemonObservedEvent :: WatcherEvent
-  , daemonObservedCommittedEvents :: [WatcherEvent]
-  , daemonObservedState :: SomeWatcherState
-  , daemonObservedCompatibilityWrites :: [CompatibilityWrite]
-  , daemonObservedCompiledEffects :: CompiledEffectPlan
-  , daemonObservedActionReports :: [ActionExecutionReport]
-  , daemonObservedAudit :: WorkflowAudit.WorkflowTickAudit MoifoldSpec FailureClassification ActionExecutionReport
-  }
-  deriving stock (Show, Generic)
 
 data PreparedDaemonObservation = PreparedDaemonObservation
   { preparedDaemonObservationPlanned :: PlannedTransition MoifoldSpec
@@ -254,46 +202,6 @@ replayDaemonEventLog path = do
 appendWatcherEvent :: RuntimeInterpreter m -> FilePath -> WatcherEvent -> m ()
 appendWatcherEvent interpreter path event =
   appendEncodedWorkflowEvent toJSON (interpreter.runtimeAppendJsonLine path) event
-
-formatDaemonFailure :: DaemonFailure -> Text
-formatDaemonFailure = \case
-  DaemonEventLogDecodeFailed message ->
-    "event log decode failed: " <> message
-  DaemonReplayFailed failure ->
-    "event replay failed at event "
-      <> Text.pack (show failure.eventIndex)
-      <> " ("
-      <> Text.pack (show failure.event)
-      <> "): "
-      <> failure.reason
-  DaemonObservationRejected message ->
-    "observation rejected: " <> message
-  DaemonActionFailed action report ->
-    "action failed before event commit: " <> Text.pack (show action) <> ": " <> commandText report
-  DaemonActionResultInvalid action message ->
-    "action returned invalid result before event commit: " <> Text.pack (show action) <> ": " <> message
-  DaemonObservedTransactionFailed failure ->
-    formatDaemonObservedTransactionFailure failure
-
-formatDaemonObservedTransactionFailure :: DaemonObservedTransactionFailure -> Text
-formatDaemonObservedTransactionFailure failure =
-  "observed transaction failed during "
-    <> Text.pack (show failure.daemonObservedTransactionFailureStage)
-    <> ": "
-    <> formatDaemonFailure failure.daemonObservedTransactionFailureReason
-    <> "; committed events: "
-    <> Text.pack (show (length failure.daemonObservedTransactionFailureCommittedEvents))
-    <> maybe "" formatAudit failure.daemonObservedTransactionFailureAudit
- where
-  formatAudit audit =
-    "; audit prior="
-      <> WorkflowAudit.workflowAuditPriorStateLabel audit
-      <> ", committed="
-      <> maybe "<none>" id (WorkflowAudit.workflowAuditCommittedEventLabel audit)
-      <> ", final="
-      <> maybe "<none>" id (WorkflowAudit.workflowAuditFinalStateLabel audit)
-      <> ", recommendation="
-      <> Text.pack (show (WorkflowAudit.workflowAuditNextDaemonRecommendation audit))
 
 replayEventLogFromEvents :: [WatcherEvent] -> Either DaemonFailure EventReplayResult
 replayEventLogFromEvents events =
@@ -666,7 +574,7 @@ moifoldObservedTransactionHooks executor options =
     , workflowTransactionDryRunActions = fmap dryRunWorkflowAction
     , workflowTransactionExecuteActions = executeMoifoldWorkflowActions executor
     , workflowTransactionCommitEvent = commitMoifoldObservedEvent executor options
-    , workflowTransactionAfterCommit = writeMoifoldCompatibilityState executor options
+    , workflowTransactionAfterCommit = skipMoifoldCompatibilityState executor options
     , workflowTransactionFailureIsRetryable = const False
     }
 
@@ -693,21 +601,19 @@ commitMoifoldObservedEvent executor options =
       )
     pure (Right ())
 
-writeMoifoldCompatibilityState :: Monad m => ActionExecutor m -> DaemonOptions -> SomeWatcherState -> m (Either DaemonFailure ())
-writeMoifoldCompatibilityState executor options finalState = do
-  mapM_
-    ( \write -> do
-        writeCompatibility executor.actionRuntime write
-        Log.logWatcher
-          executor.actionLogger
-          ( Log.watcherLog
-              Log.Debug
-              "compatibility_written"
-              "compatibility state written"
-              ["path" .= compatibilityWritePath write]
-          )
+skipMoifoldCompatibilityState :: Monad m => ActionExecutor m -> DaemonOptions -> SomeWatcherState -> m (Either DaemonFailure ())
+skipMoifoldCompatibilityState executor options finalState = do
+  let projectedWrites = observedCompatibilityWrites options finalState
+  Log.logWatcher
+    executor.actionLogger
+    ( Log.watcherLog
+        Log.Debug
+        "compatibility_write_skipped"
+        "compatibility state projection is available from event replay; no runtime files written"
+        [ "stateDir" .= runtimeStateDirPath options.daemonRuntimeConfig.effectRuntimeStateDir
+        , "projectedWrites" .= length projectedWrites
+        ]
     )
-    (observedCompatibilityWrites options finalState)
   pure (Right ())
 
 observedTransactionResultToDaemon
@@ -820,13 +726,6 @@ daemonFailureFromObservedTransactionFailure failure =
       , daemonObservedTransactionFailurePostCommitReports = coreFailure.workflowObservedDaemonFailurePostCommitReports
       , daemonObservedTransactionFailureAudit = coreFailure.workflowObservedDaemonFailureAudit
       }
-
-data PreMergeGateResult
-  = PreMergeGatePassed
-  | PreMergeGateRetry Text
-  | PreMergeGateRecheck Text
-  | PreMergeGateFixRequired Text
-  | PreMergeGateBlocked Text
 
 runPreMergeGate :: Monad m => ActionExecutor m -> PrConfig -> CleanReviewEvidence -> m PreMergeGateResult
 runPreMergeGate executor prConfig evidence = do

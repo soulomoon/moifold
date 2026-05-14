@@ -28,7 +28,6 @@ import CodexWatcher.Workflow.GitHub.Ids
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig, ReviewEvidence)
 import CodexWatcher.Effects
-import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Paths
   ( RuntimeCwd
   , RuntimeStateDir
@@ -61,7 +60,6 @@ import CodexWatcher.Workflow.Agent.Types
   )
 import Data.Aeson
   ( Value
-  , toJSON
   )
 import Data.List (mapAccumL)
 import Data.Text (Text)
@@ -168,10 +166,10 @@ compileEffect config requestId (SomeEffect effect) =
       unchanged [PlannedCommand (GhPrCommentReviewFindings prConfig evidence)]
     RecordIssuePlan issueConfig prNumber planMarkdown ->
       unchanged [PlannedWriteText (runtimeStateDirFile config.effectRuntimeStateDir "issue-plan.md") (issuePlanFileText issueConfig prNumber planMarkdown)]
-    RecordPlanningGraph graph ->
-      unchanged [PlannedWriteJson (runtimeStateDirFile config.effectRuntimeStateDir "planning-state.json") (toJSON graph)]
-    RecordBlocked reason ->
-      unchanged [PlannedWriteJson (runtimeStateDirFile config.effectRuntimeStateDir "block-state.json") (blockedStateJson reason)]
+    RecordPlanningGraph _graph ->
+      unchanged []
+    RecordBlocked _reason ->
+      unchanged []
     MergePullRequest prNumber evidence ->
       unchanged [PlannedCommand (GhPrCleanReviewAndMerge config.effectRuntimeRepo prNumber evidence config.effectRuntimeMergeMethod)]
     StopDaemon ->

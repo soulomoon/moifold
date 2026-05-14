@@ -6,7 +6,7 @@ usage() {
 Usage:
   scripts/restart-watcher --state-dir PATH --domain DOMAIN [options]
 
-Stop a watcher if it is still running, clear stale compatibility state, and
+Stop a watcher if it is still running, clear stale process ownership state, and
 restart it from the state's restart-command.sh.
 
 Required:
@@ -219,8 +219,6 @@ cleanup_state() {
     "$pid_file" \
     "$default_pid_file" \
     "$state_dir/runtime-owner.json" \
-    "$state_dir/block-state.json" \
-    "$state_dir/daemon-state.json" \
     "$state_dir/stale-active-turn.json"
 }
 

@@ -36,7 +36,6 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
-import CodexWatcher.GoldenReplay
 import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildArgs, issueImplementerChildLaunchMode, issueImplementerLaunchManifest, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
@@ -56,7 +55,6 @@ import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease, clearRuntimeLeaseIfOwn
 import CodexWatcher.Runtime.Owner.Store
 import CodexWatcher.Runtime.Owner.Types
 import CodexWatcher.RunnerGuard
-import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Supervisor
 import CodexWatcher.Domain.IssueImplement.TurnClassifier
@@ -64,7 +62,6 @@ import CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput
-import CodexWatcher.Core.Ids
 import CodexWatcher.Core.Kinds
 import CodexWatcher.Core.Limits
 import CodexWatcher.Core.Reason
@@ -79,6 +76,8 @@ import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerClientFailure (..), AppServerTurn (..))
 import CodexWatcher.Workflow.Agent.Codex.Interpreter (AppServerInterpreter (..))
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Ids
+import CodexWatcher.Workflow.GitHub.Ids
 import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as IssueImplementIndexed
 import CodexWatcher.Workflow.Transaction.Core qualified as WorkflowTransaction
 import CodexWatcher.Workflow.Types (PlannedTransition (..))
@@ -155,6 +154,7 @@ import CliSpec
   )
 import HealthcheckSpec
   ( healthcheckAppServerThreadInspectionTests
+  , healthcheckRuntimeStateMigrationContractTests
   , prop_healthcheckDaemonRequiredStatuses
   , prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
   , prop_healthcheckIssueImplementLifecycleReporting
@@ -1019,7 +1019,7 @@ prop_issuePlanningCompatibilityDistinguishesPlannerAndPlanningState graph =
       waitingPlanningValues = [value | CompatibilityWrite path value <- waitingWrites, path == planningPath]
       otherPlannerStateWrites = readyWrites <> activeWrites <> completeWrites
    in waitingPlannerValues == [expectedPlannerJson]
-        && waitingPlanningValues == [toJSON graph]
+        && null waitingPlanningValues
         && expectedPlannerJson /= toJSON graph
         && all (\(CompatibilityWrite path _) -> path /= planningPath) otherPlannerStateWrites
         && length [() | CompatibilityWrite path _ <- otherPlannerStateWrites, path == plannerPath] == 3
@@ -1303,7 +1303,7 @@ prop_issuePlanningFanoutBuildsLaunchPlans =
                  , RawCommand "git" ["config", "user.name", "codex-watcher"] (Just "/tmp/worktrees/owner_name__issue1")
                  ]
             && launchInitialEvent firstLaunch == IssueImplementInitialized (launchIssueConfig firstLaunch) (launchThreadId firstLaunch)
-            && length (launchCompatibilityWrites firstLaunch) == 2
+            && null (launchCompatibilityWrites firstLaunch)
             && lookupValue "threadId" (launchConfigJson firstLaunch) == Just (String "issue-worker-1")
             && lookupValue "branch" (launchConfigJson firstLaunch) == Just (String "codex/issue-1")
             && launchThreadId createdThreadLaunch == ThreadId "created-thread"
@@ -1383,9 +1383,10 @@ issuePlanningFanoutRoutesTerminalWritesThroughIndexedProjection = do
         "projectIssuePlanningReadyIssuesFixedObservation" `Text.isInfixOf` source
     , assert "issue planning fanout blocked marker uses indexed projection" $
         "projectIssuePlanningBlockedWaitingReadyIssuesObservation" `Text.isInfixOf` source
-    , assert "issue planning fanout writes compatibility from projected final state after append" $
+    , assert "issue planning fanout appends projected final event without writing compatibility files" $
         "appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath projection.issuePlanningIndexedProjectionPlanned.plannedEvent" `Text.isInfixOf` source
-          && "compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState" `Text.isInfixOf` source
+          && not ("compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState" `Text.isInfixOf` source)
+          && not ("writeCompatibility" `Text.isInfixOf` source)
     , assert "issue planning fanout no longer derives terminal writes through compatibility observer" $
         not ("issuePlanningObserve" `Text.isInfixOf` source)
     ]
@@ -1539,12 +1540,9 @@ issueImplementerLaunchLifecycleManifestsAndDryRunCommand = do
     [ assert "pending launch manifest preserves status and launch kind" $
         lookupValue "status" pending == Just (String "pending")
           && lookupValue "launchKind" pending == Just (String "issue-implementer")
-    , assert "launch plan writes initialized event and compatibility facade files" $
+    , assert "launch plan writes initialized event without compatibility facade files" $
         launchInitialEvent launch == IssueImplementInitialized (launchIssueConfig launch) (ThreadId "thread-created")
-          && fmap compatibilityWritePath launch.launchCompatibilityWrites
-            == [ "/tmp/implementers/owner_name__issue42/issue-state.json"
-               , "/tmp/implementers/owner_name__issue42/daemon-state.json"
-               ]
+          && null launch.launchCompatibilityWrites
           && lookupValue "threadId" launch.launchConfigJson == Just (String "thread-created")
     , assert "pending launch manifest preserves issue identity and paths" $
         lookupValue "repo" pending == Just (String "owner/name")
@@ -1593,13 +1591,13 @@ issueImplementerLaunchSourcePreservesWriteOrdering :: IO Bool
 issueImplementerLaunchSourcePreservesWriteOrdering = do
   source <- TextIO.readFile "src/CodexWatcher/Cli/Command/IssueFanout.hs"
   sequenceAnd
-    [ assert "launch write appends event before compatibility writes" $
+    [ assert "launch write appends event after config without compatibility writes" $
         textNeedlesInOrder
           [ "writeJsonValue launch.launchConfigPath launch.launchConfigJson"
           , "appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent"
-          , "mapM_ (writeCompatibility ioRuntimeInterpreter) launch.launchCompatibilityWrites"
           ]
           source
+          && not ("writeCompatibility ioRuntimeInterpreter" `Text.isInfixOf` source)
     , assert "execute launch writes pending manifest before config/events and finalizes before start" $
         textNeedlesInOrder
           [ "writeIssueImplementerLaunchPending childLaunch launch"
@@ -1865,12 +1863,11 @@ issueImplementEventLogRepairCliPreservesDryRunAndExecuteContract = do
           , "putStrLn \"dry-run: pass --execute to archive and rewrite events.jsonl\""
           ]
           replaySource
-    , assert "repair execute archives, rewrites events, writes repair state, rewrites compatibility, then removes block state" $
+    , assert "repair execute archives, rewrites events, writes repair state, then removes block state" $
         textNeedlesInOrder
           [ "archivePath <- archiveEventLog options.repairCliEventsPath"
           , "writeWatcherEventsFile options.repairCliEventsPath plan.repairRepairedEvents"
           , "writeRepairSummary options.repairCliStateDir archivePath plan"
-          , "writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState"
           , "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")"
           ]
           replaySource
@@ -2828,22 +2825,24 @@ prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds workerThread reviewerT
    in fmap appServerRequestId compiled.compiledActions == [Just 20, Just 21]
         && compiled.compiledNextRequestId == RequestId 22
 
-prop_effectInterpreterRecordBlockedWritesBlockState :: BlockedReason -> Bool
-prop_effectInterpreterRecordBlockedWritesBlockState reason =
+prop_effectInterpreterRecordBlockedSkipsCompatibilityWrite :: BlockedReason -> Bool
+prop_effectInterpreterRecordBlockedSkipsCompatibilityWrite reason =
   let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 30
       compiled = compileEffectPlan config [SomeEffect (RecordBlocked reason)]
       expectedPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
       expectedJson = object ["blocked" .= True, "reason" .= unBlockedReason reason]
-   in compiled.compiledActions == [PlannedWriteJson expectedPath expectedJson]
+   in null compiled.compiledActions
+        && not (PlannedWriteJson expectedPath expectedJson `elem` compiled.compiledActions)
         && compiled.compiledNextRequestId == RequestId 30
 
-prop_effectInterpreterRecordPlanningGraphWritesState :: PlanningGraph -> Bool
-prop_effectInterpreterRecordPlanningGraphWritesState graph =
+prop_effectInterpreterRecordPlanningGraphSkipsCompatibilityWrite :: PlanningGraph -> Bool
+prop_effectInterpreterRecordPlanningGraphSkipsCompatibilityWrite graph =
   let config = effectRuntimeConfig (RepoName "soulomoon/mlf2") "/tmp/work" 32
       compiled = compileEffectPlan config [SomeEffect (RecordPlanningGraph graph)]
       expectedPath = runtimeStateDirFile config.effectRuntimeStateDir "planning-state.json"
       plannerPath = runtimeStateDirFile config.effectRuntimeStateDir "planner-state.json"
-   in compiled.compiledActions == [PlannedWriteJson expectedPath (toJSON graph)]
+   in null compiled.compiledActions
+        && not (PlannedWriteJson expectedPath (toJSON graph) `elem` compiled.compiledActions)
         && not (PlannedWriteJson plannerPath (toJSON graph) `elem` compiled.compiledActions)
         && compiled.compiledNextRequestId == RequestId 32
 
@@ -3322,46 +3321,6 @@ assert assertionName condition = do
     else putStrLn ("FAIL " <> assertionName)
   pure condition
 
-goldenReplayPr6Merged :: IO Bool
-goldenReplayPr6Merged =
-  goldenReplayCase "golden/pr-review/mlf2-pr6-merged" PrReview Complete True
-
-goldenReplayCase :: FilePath -> Domain -> Phase -> Bool -> IO Bool
-goldenReplayCase fixture expectedDomain expectedPhase expectWarnings = do
-  loaded <- loadNodeSnapshot fixture
-  case loaded of
-    Left err -> do
-      putStrLn ("FAIL golden decode " <> fixture <> ": " <> err)
-      pure False
-    Right snapshot -> do
-      let replayed = replayNodeSnapshot snapshot
-      case replayed of
-        Left err -> do
-          putStrLn ("FAIL golden replay " <> fixture <> ": " <> Text.unpack err)
-          pure False
-        Right replay -> do
-          results <-
-            sequence
-              [ assert (fixture <> " domain") (someDomain replay.replayState == expectedDomain)
-              , assert (fixture <> " phase") (somePhase replay.replayState == expectedPhase)
-              , assert (fixture <> " warning expectation") (not (null replay.replayWarnings) == expectWarnings)
-              ]
-          pure (and results)
-
-goldenReplayCases :: IO Bool
-goldenReplayCases = do
-  results <-
-    sequence
-      [ goldenReplayPr6Merged
-      , goldenReplayCase "golden/pr-review/mlf2-pr6-unresolved" PrReview CheckingReviews True
-      , goldenReplayCase "golden/pr-review/mlf2-pr6-blocked" PrReview Blocked False
-      , goldenReplayCase "golden/pr-review/mlf2-pr6-clean-ready" PrReview WaitingMergeability False
-      , goldenReplayCase "golden/issue-implement/mlf2-issue42-plan-ready" IssueImplement Implementing False
-      , goldenReplayCase "golden/issue-implement/mlf2-issue42-incomplete" IssueImplement Implementing True
-      , goldenReplayCase "golden/issue-implement/mlf2-issue42-blocked" IssueImplement Blocked False
-      ]
-  pure (and results)
-
 goldenEventLogCase :: FilePath -> Domain -> Phase -> IO Bool
 goldenEventLogCase path expectedDomain expectedPhase = do
   loaded <- loadEventLogFile path
@@ -3402,52 +3361,14 @@ goldenEventLogFixtures =
   , ("golden/event-log/issue-implement/mlf2-issue42-incomplete-then-complete/events.jsonl", IssueImplement, Complete)
   , ("golden/event-log/issue-implement/mlf2-issue42-implementation-blocked/events.jsonl", IssueImplement, Blocked)
   , ("golden/event-log/issue-planning/mlf2-planning-ready/events.jsonl", IssuePlanning, Complete)
+  , ("golden/event-log/bootstrapped/pr-review/mlf2-pr6-merged/events.jsonl", PrReview, Complete)
+  , ("golden/event-log/bootstrapped/pr-review/mlf2-pr6-unresolved/events.jsonl", PrReview, CheckingReviews)
+  , ("golden/event-log/bootstrapped/pr-review/mlf2-pr6-blocked/events.jsonl", PrReview, Blocked)
+  , ("golden/event-log/bootstrapped/pr-review/mlf2-pr6-clean-ready/events.jsonl", PrReview, WaitingMergeability)
+  , ("golden/event-log/bootstrapped/issue-implement/mlf2-issue42-plan-ready/events.jsonl", IssueImplement, Implementing)
+  , ("golden/event-log/bootstrapped/issue-implement/mlf2-issue42-incomplete/events.jsonl", IssueImplement, Implementing)
+  , ("golden/event-log/bootstrapped/issue-implement/mlf2-issue42-blocked/events.jsonl", IssueImplement, Blocked)
   ]
-
-goldenBootstrapCase :: FilePath -> IO Bool
-goldenBootstrapCase fixture = do
-  loaded <- loadNodeSnapshot fixture
-  case loaded of
-    Left err -> do
-      putStrLn ("FAIL golden bootstrap decode " <> fixture <> ": " <> err)
-      pure False
-    Right snapshot ->
-      case (replayNodeSnapshot snapshot, replayEventLog (bootstrapNodeSnapshotEvents snapshot)) of
-        (Left err, _) -> do
-          putStrLn ("FAIL golden bootstrap normalized replay " <> fixture <> ": " <> Text.unpack err)
-          pure False
-        (_, Left err) -> do
-          putStrLn ("FAIL golden bootstrap event replay " <> fixture <> ": " <> show err)
-          pure False
-        (Right normalized, Right bootstrapped) -> do
-          let events = bootstrapNodeSnapshotEvents snapshot
-              roundTripped =
-                traverse
-                  (eitherDecodeStrict' . LazyByteString.toStrict . encode)
-                  events ::
-                  Either String [WatcherEvent]
-          results <-
-            sequence
-              [ assert (fixture <> " bootstrap nonempty") (not (null events))
-              , assert (fixture <> " bootstrap json roundtrip") (roundTripped == Right events)
-              , assert (fixture <> " bootstrap domain") (someDomain bootstrapped.replayState == someDomain normalized.replayState)
-              , assert (fixture <> " bootstrap phase") (somePhase bootstrapped.replayState == somePhase normalized.replayState)
-              ]
-          pure (and results)
-
-goldenBootstrapCases :: IO Bool
-goldenBootstrapCases = do
-  results <-
-    sequence
-      [ goldenBootstrapCase "golden/pr-review/mlf2-pr6-merged"
-      , goldenBootstrapCase "golden/pr-review/mlf2-pr6-unresolved"
-      , goldenBootstrapCase "golden/pr-review/mlf2-pr6-blocked"
-      , goldenBootstrapCase "golden/pr-review/mlf2-pr6-clean-ready"
-      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-plan-ready"
-      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-incomplete"
-      , goldenBootstrapCase "golden/issue-implement/mlf2-issue42-blocked"
-      ]
-  pure (and results)
 
 data FakeActionCall
   = FakeCommand RuntimeCommand
@@ -3606,13 +3527,10 @@ actionExecutorExecuteCallsInjectedInterpreters = do
           ]
   reports <- executeCompiledEffectPlan executor ExecuteActions compiled
   calls <- getCalls
-  let expectedBlockPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
-      expectedBlockJson = object ["blocked" .= True, "reason" .= unBlockedReason blockedReason]
-      expectedWorkerInput = prReviewWorkerTurnInputWithEvidence "worker prompt" reviewEvidence
+  let expectedWorkerInput = prReviewWorkerTurnInputWithEvidence "worker prompt" reviewEvidence
       expectedCalls =
         [ FakeCommand (GitPush "/tmp/work" (BranchName "codex/example"))
         , FakeAppServer (turnStartRequest (RequestId 70) (defaultTurnStartOptions (ThreadId "worker-thread") "/tmp/work" expectedWorkerInput))
-        , FakeWriteJson expectedBlockPath expectedBlockJson
         , FakeSleep
         , FakeStop
         ]
@@ -3814,10 +3732,11 @@ observedDaemonTickExecuteAppendsWritesAndRunsEffects = do
       results <-
         sequence
           [ assert "observed execute runs external action before appending event" (case calls of FakeAppServer {} : FakeAppendJsonLine "/tmp/events.jsonl" appended : _ -> appended == toJSON expectedEvent; _ -> False)
-          , assert "observed execute writes compatibility state" (length [() | FakeWriteJson {} <- calls] == length tick.daemonObservedCompatibilityWrites)
-          , assert "observed execute appends before compatibility writes" $
-              let appendCall = FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)
-               in all (\write -> callBefore appendCall (FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write)) calls) tick.daemonObservedCompatibilityWrites
+          , assert "observed execute computes compatibility projections without writing state files" $
+              length tick.daemonObservedCompatibilityWrites == 2
+                && null [() | FakeWriteJson {} <- calls]
+          , assert "observed execute appends event without post-commit compatibility writes" $
+              FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent) `elem` calls
           , assert "observed execute runs effect actions" (any isFakeAppServer calls)
           , assert "observed execute reaches plan mode" (somePhase tick.daemonObservedState == PlanMode)
           , assert "observed execute audit records committed event" (WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started")
@@ -4981,7 +4900,7 @@ automaticDaemonLoopPlanningGraphWaitsAndRecords = do
         sequence
           [ assert "planning graph emits graph update event" (observedEvent == Just (IssuePlanningGraphUpdated graph))
           , assert "planning graph waits for ready issues" (maybe False ((== Initialized) . somePhase . daemonObservedState) tick.loopObservedTick)
-          , assert "planning graph writes graph state" (FakeWriteJson expectedPath (toJSON graph) `elem` calls)
+          , assert "planning graph no longer writes planning-state compatibility file" (FakeWriteJson expectedPath (toJSON graph) `notElem` calls)
           , assert "planning graph sleeps instead of stopping" (FakeSleep `elem` calls && not (FakeStop `elem` calls))
           ]
       pure (and results)
@@ -5115,7 +5034,7 @@ automaticDaemonLoopPlanningGraphCanonicalizesOpenScopeCoverage = do
       results <-
         sequence
           [ assert "canonical planning graph restores open root as ready" (observedEvent == Just (IssuePlanningGraphUpdated expectedGraph))
-          , assert "canonical planning graph records normalized state" (FakeWriteJson (runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "planning-state.json") (toJSON expectedGraph) `elem` calls)
+          , assert "canonical planning graph no longer writes planning-state compatibility file" (FakeWriteJson (runtimeStateDirFile runtimeConfig.effectRuntimeStateDir "planning-state.json") (toJSON expectedGraph) `notElem` calls)
           , assert "canonical planning graph fetches scoped issue snapshot" (fetchedIssue (IssueNumber 12) calls && fetchedSubIssues (IssueNumber 12) calls)
           ]
       pure (and results)
@@ -6990,8 +6909,8 @@ main = do
       , quickCheckResult prop_promptPipelineAlignmentContracts
       , quickCheckResult prop_effectInterpreterIssuePlanTurnUsesIssuePlanModeDeveloperInstructions
       , quickCheckResult prop_effectInterpreterTwoTurnStartsUseMonotonicRequestIds
-      , quickCheckResult prop_effectInterpreterRecordBlockedWritesBlockState
-      , quickCheckResult prop_effectInterpreterRecordPlanningGraphWritesState
+      , quickCheckResult prop_effectInterpreterRecordBlockedSkipsCompatibilityWrite
+      , quickCheckResult prop_effectInterpreterRecordPlanningGraphSkipsCompatibilityWrite
       , quickCheckResult prop_effectInterpreterCreateIssueUsesConfiguredEffect
       , quickCheckResult prop_effectInterpreterMergeUsesConfiguredRepoAndMethod
       , quickCheckResult prop_actionExecutorDryRunPreservesActionOrder
@@ -7008,9 +6927,7 @@ main = do
       , quickCheckResult prop_cliParsesGenericRunnerGuardDomains
       , quickCheckResult prop_supervisorRendersRestartAndLogrotate
       ]
-  goldenOk <- goldenReplayCases
   eventLogOk <- goldenEventLogCases
-  bootstrapOk <- goldenBootstrapCases
   runtimeProcessOk <- runtimeProcessSpecCapturesStreamsAndExit
   actionExecutorDryRunOk <- actionExecutorDryRunDoesNotCallInterpreters
   actionExecutorExecuteOk <- actionExecutorExecuteCallsInjectedInterpreters
@@ -7078,6 +6995,7 @@ main = do
   runnerGuardRepairOk <- runnerGuardRepairsInvalidPlanningEventLog
   runnerGuardActiveTurnInspectionOk <- runnerGuardActiveTurnInspectionTests
   healthcheckAppServerThreadInspectionOk <- healthcheckAppServerThreadInspectionTests
+  healthcheckRuntimeStateMigrationContractOk <- healthcheckRuntimeStateMigrationContractTests
   appServerProbeCommandOk <- appServerProbeCommandTests
   runtimeStatusOk <- runtimeStatusHelperCoversCommonCases
   runtimeStatusIssueImplementOk <- runtimeStatusIssueImplementTerminalRequiresIssueCloseVerifier
@@ -7092,9 +7010,7 @@ main = do
   automaticLoopRunnerOk <- automaticLoopRunnerTests
   if
     all isSuccess results
-      && goldenOk
       && eventLogOk
-      && bootstrapOk
       && runtimeProcessOk
       && actionExecutorDryRunOk
       && actionExecutorExecuteOk
@@ -7162,6 +7078,7 @@ main = do
       && runnerGuardRepairOk
       && runnerGuardActiveTurnInspectionOk
       && healthcheckAppServerThreadInspectionOk
+      && healthcheckRuntimeStateMigrationContractOk
       && appServerProbeCommandOk
       && runtimeStatusOk
       && runtimeStatusIssueImplementOk

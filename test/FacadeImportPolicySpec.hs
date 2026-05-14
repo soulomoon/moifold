@@ -8,7 +8,6 @@ module FacadeImportPolicySpec
   ) where
 
 import BoundaryPolicySpec (coreBoundaryForbiddenImportModules)
-import CodexWatcher.Core.Ids
 import CodexWatcher.Core.Kinds
 import CodexWatcher.Core.Limits (MaxParallel, mkMaxParallel)
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
@@ -17,9 +16,11 @@ import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (.
 import CodexWatcher.Effects (Effect (..), SomeEffect (..))
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), ReplayFailure, WatcherEvent (..))
-import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
-import CodexWatcher.Workflow.EventLog qualified as WorkflowEventLog
-import CodexWatcher.Workflow.Permission qualified as WorkflowPermission
+import CodexWatcher.StateMachine (PhaseActionValidationError (..), formatPhaseActionValidationError, validatePhaseActionPlan)
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.EventLog.Core qualified as WorkflowEventLogCore
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RepoName (..))
+import CodexWatcher.Workflow.Permission.Core qualified as WorkflowPermissionCore
 import CodexWatcher.Workflow.Types (MoifoldSpec, workflowEffectLabel, workflowStateLabel)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -30,13 +31,13 @@ workflowFacadeImportPolicyTests :: IO Bool
 workflowFacadeImportPolicyTests = do
   results <-
     sequence
-      [ workflowFacadeReplayMatchesEventLog
+      [ workflowDirectOwnerReplayMatchesEventLog
       , workflowSpecModuleKeepsCoreBoundary
       , workflowIndexedSpecModuleKeepsCoreBoundary
       , workflowSpecIndexedBridgeSourceScans
       , workflowSpecInventoryCoversCurrentSpecSurfaces
-      , workflowFacadeInitialApplyMatchesReplay
-      , workflowPermissionFacadeMatchesStateMachine
+      , workflowDirectOwnerInitialApplyMatchesReplay
+      , workflowPermissionSpecMatchesStateMachine
       , workflowPermissionCoreChecksMatchMoifoldPermission
       , workflowPermissionPolicyMatchesMoifoldPermission
       ]
@@ -216,26 +217,30 @@ workflowSpecInventoryCoversCurrentSpecSurfaces = do
       <$> readFile ("src" </> "CodexWatcher" </> "Workflow" </> "DocsMigration.hs")
   indexedAdapterSources <-
     traverse
-      ( \(path, needles) -> do
-          source <- Text.pack <$> readFile path
+      ( \(paths, needles) -> do
+          source <-
+            Text.intercalate "\n"
+              <$> traverse (fmap Text.pack . readFile) paths
           pure (source, needles)
       )
-      [ ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssuePlanning" </> "Indexed.hs"
+      [ ( ["src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssuePlanning" </> "Indexed.hs"]
         , ["data IssuePlanningIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec IssuePlanningIndexedSpec"]
         )
-      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssueImplement" </> "Indexed.hs"
+      , ( [ "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssueImplement" </> "Indexed.hs"
+          , "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "IssueImplement" </> "Indexed" </> "Types.hs"
+          ]
         , ["data IssueImplementIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec IssueImplementIndexedSpec"]
         )
-      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Checking" </> "Indexed.hs"
+      , ( ["src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Checking" </> "Indexed.hs"]
         , ["data PrReviewCheckingIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewCheckingIndexedSpec"]
         )
-      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Worker" </> "Indexed.hs"
+      , ( ["src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Worker" </> "Indexed.hs"]
         , ["data PrReviewWorkerIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewWorkerIndexedSpec"]
         )
-      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Reviewer" </> "Indexed.hs"
+      , ( ["src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Reviewer" </> "Indexed.hs"]
         , ["data PrReviewReviewerIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewReviewerIndexedSpec"]
         )
-      , ( "src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Mergeability" </> "Indexed.hs"
+      , ( ["src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Mergeability" </> "Indexed.hs"]
         , ["data PrReviewMergeabilityIndexedSpec", "instance IndexedWorkflow.IndexedWorkflowSpec PrReviewMergeabilityIndexedSpec"]
         )
       ]
@@ -333,8 +338,8 @@ workflowSpecInventoryCoversCurrentSpecSurfaces = do
     , "indexedWorkflowObservationTargetLabel"
     ]
 
-workflowFacadeReplayMatchesEventLog :: IO Bool
-workflowFacadeReplayMatchesEventLog = do
+workflowDirectOwnerReplayMatchesEventLog :: IO Bool
+workflowDirectOwnerReplayMatchesEventLog = do
   let repo = RepoName "soulomoon/mlf2"
       prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
       workerThread = ThreadId "worker"
@@ -347,17 +352,17 @@ workflowFacadeReplayMatchesEventLog = do
         , PrReviewCleanFound cleanEvidence []
         ]
       direct = replayEventLog events
-      specialized = WorkflowEventLog.replayMoifoldWorkflowEvents events
-      generic = WorkflowEventLog.replayWorkflowEventLog @MoifoldSpec events
+      specialized = replayEventLog events
+      generic = WorkflowEventLogCore.replayWorkflowEventLog @MoifoldSpec events
   results <-
     sequence
-      [ assert "workflow replay facade preserves direct replay result" (sameReplay direct specialized)
-      , assert "workflow spec replay facade preserves direct replay result" (sameReplayText direct generic)
+      [ assert "workflow replay direct owner preserves direct replay result" (sameReplay direct specialized)
+      , assert "workflow spec replay direct owner preserves direct replay result" (sameReplayText direct generic)
       ]
   pure (and results)
 
-workflowFacadeInitialApplyMatchesReplay :: IO Bool
-workflowFacadeInitialApplyMatchesReplay = do
+workflowDirectOwnerInitialApplyMatchesReplay :: IO Bool
+workflowDirectOwnerInitialApplyMatchesReplay = do
   let repo = RepoName "soulomoon/mlf2"
       prConfig = PrConfig repo (PrNumber 6) (BranchName "codex/pr-6")
       workerThread = ThreadId "worker"
@@ -367,18 +372,18 @@ workflowFacadeInitialApplyMatchesReplay = do
       secondEvent = PrReviewNoUnresolvedFound commit (TurnId "reviewer-turn")
       direct = replayEventLog [firstEvent, secondEvent]
       stepped = do
-        (state0, _effects0) <- WorkflowEventLog.initializeMoifoldWorkflow firstEvent
-        (state1, effects1) <- WorkflowEventLog.applyMoifoldWorkflowEvent state0 secondEvent
+        (state0, _effects0) <- WorkflowEventLogCore.initializeWorkflowEvent @MoifoldSpec id firstEvent
+        (state1, effects1) <- WorkflowEventLogCore.applyWorkflowEvent @MoifoldSpec id state0 secondEvent
         pure (state1, effects1)
   results <-
     sequence
-      [ assert "workflow event-log facade initializes and applies to replay state" $
+      [ assert "workflow event-log direct owner initializes and applies to replay state" $
           case (direct, stepped) of
             (Right replay, Right (state1, _effects1)) ->
               someDomain replay.replayState == someDomain state1
                 && somePhase replay.replayState == somePhase state1
             _ -> False
-      , assert "workflow event-log facade exposes transition effects" $
+      , assert "workflow event-log direct owner exposes transition effects" $
           case stepped of
             Right (_state1, effects1) ->
               any ((== "StartReviewerTurn") . workflowEffectLabel @MoifoldSpec) effects1
@@ -386,15 +391,24 @@ workflowFacadeInitialApplyMatchesReplay = do
       ]
   pure (and results)
 
-workflowPermissionFacadeMatchesStateMachine :: IO Bool
-workflowPermissionFacadeMatchesStateMachine = do
+workflowPermissionSpecMatchesStateMachine :: IO Bool
+workflowPermissionSpecMatchesStateMachine = do
   let plannerConfig = PlannerConfig (RepoName "soulomoon/mlf2") (maxParallelForTest 2) [IssueNumber 12]
       planningGraph = PlanningGraph [IssueNumber 12] [] []
       state = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
       effects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
       direct = validatePhaseActionPlan state effects
-      facade = WorkflowPermission.validateMoifoldEffectPlan state effects
-  assert "workflow permission facade matches state-machine validation" (direct == facade)
+      core = WorkflowPermissionCore.validateWorkflowEffectPlanCore @MoifoldSpec state effects
+  assert "workflow permission spec matches state-machine validation" $
+    case (direct, core) of
+      (Left directError, Left coreError) ->
+        coreError.workflowPermissionStateLabel == directError.phaseActionState
+          && coreError.workflowPermissionEffectLabel == directError.phaseActionEffect
+          && coreError.workflowPermissionReason == formatPhaseActionValidationError directError
+      (Right (), Right ()) ->
+        True
+      _ ->
+        False
 
 workflowPermissionCoreChecksMatchMoifoldPermission :: IO Bool
 workflowPermissionCoreChecksMatchMoifoldPermission = do
@@ -403,8 +417,8 @@ workflowPermissionCoreChecksMatchMoifoldPermission = do
       state = SomeWatcherState (PlanningWaitingForReadyIssues plannerConfig planningGraph)
       effects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
       direct = validatePhaseActionPlan state effects
-      core = WorkflowPermission.validateWorkflowEffectPlanCore @MoifoldSpec state effects
-      checks = WorkflowPermission.workflowEffectPermissionChecks @MoifoldSpec state effects
+      core = WorkflowPermissionCore.validateWorkflowEffectPlanCore @MoifoldSpec state effects
+      checks = WorkflowPermissionCore.workflowEffectPermissionChecks @MoifoldSpec state effects
   assert "workflow permission core checks match moifold validation" $
     case (direct, core, checks) of
       (Left directError, Left coreError, [check]) ->
@@ -425,23 +439,23 @@ workflowPermissionPolicyMatchesMoifoldPermission = do
       allowedEffects = [SomeEffect (StartPlannerTurn (ThreadId "planner"))]
       deniedDirect = validatePhaseActionPlan deniedState deniedEffects
       deniedPolicy =
-        WorkflowPermission.validateWorkflowEffectPlanWithPolicy
-          WorkflowPermission.moifoldPermissionPolicy
+        WorkflowPermissionCore.validateWorkflowEffectPlanWithPolicy
+          (WorkflowPermissionCore.workflowSpecPermissionPolicy @MoifoldSpec)
           deniedState
           deniedEffects
       allowedPolicy =
-        WorkflowPermission.validateWorkflowEffectPlanWithPolicy
-          WorkflowPermission.moifoldPermissionPolicy
+        WorkflowPermissionCore.validateWorkflowEffectPlanWithPolicy
+          (WorkflowPermissionCore.workflowSpecPermissionPolicy @MoifoldSpec)
           allowedState
           allowedEffects
       allowedChecks =
-        WorkflowPermission.workflowEffectPermissionChecksWithPolicy
-          WorkflowPermission.moifoldPermissionPolicy
+        WorkflowPermissionCore.workflowEffectPermissionChecksWithPolicy
+          (WorkflowPermissionCore.workflowSpecPermissionPolicy @MoifoldSpec)
           allowedState
           allowedEffects
       deniedChecks =
-        WorkflowPermission.workflowEffectPermissionChecksWithPolicy
-          WorkflowPermission.moifoldPermissionPolicy
+        WorkflowPermissionCore.workflowEffectPermissionChecksWithPolicy
+          (WorkflowPermissionCore.workflowSpecPermissionPolicy @MoifoldSpec)
           deniedState
           deniedEffects
   results <-

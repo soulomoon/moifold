@@ -204,9 +204,8 @@ The following surfaces are explicitly outside the reusable framework API:
   workflow fanout, and close/merge/review-publication decisions;
 - role-specific prompts, output schemas, evidence requirements, retry
   escalation, and structured-output compatibility policy;
-- compatibility snapshots and file names such as `issue-state.json`,
-  `daemon-state.json`, `planning-state.json`, PR URL files, block state, repair
-  state, and runtime owner files;
+- compatibility file names such as `issue-state.json`, `daemon-state.json`,
+  PR URL files, block state, repair state, and runtime owner files;
 - filesystem writes, process execution, PID files, leases, runtime ownership,
   concrete daemon loops, app-server startup, and watcher supervision;
 - healthcheck, repair tools, operator runbooks, and destructive recovery

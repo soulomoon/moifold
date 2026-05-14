@@ -8,13 +8,12 @@ module CodexWatcher.Cli.Command.Replay
   ) where
 
 import CodexWatcher.Cli.Types (RepairInvalidStateCli (..))
-import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.Runtime.File (writeJsonValue)
-import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
+import CodexWatcher.Core.State (someDomain, somePhase)
 import Control.Monad (when)
 import Data.Aeson (encode, object, (.=))
 import Data.ByteString.Lazy qualified as LazyByteString
@@ -56,7 +55,6 @@ repairInvalidState options = do
           archivePath <- archiveEventLog options.repairCliEventsPath
           writeWatcherEventsFile options.repairCliEventsPath plan.repairRepairedEvents
           writeRepairSummary options.repairCliStateDir archivePath plan
-          writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState
           removeFileIfExists (options.repairCliStateDir </> "block-state.json")
           putStrLn ("archived invalid event log: " <> archivePath)
           putStrLn ("wrote repaired event log: " <> options.repairCliEventsPath)
@@ -92,14 +90,6 @@ writeRepairSummary stateDir archivePath plan =
         , "finalPhase" .= show (somePhase plan.repairReplayResult.replayState)
         ]
     )
-
-writeCompatibilityFiles :: FilePath -> SomeWatcherState -> IO ()
-writeCompatibilityFiles stateDir state =
-  mapM_ writeOne (compatibilityStateWrites stateDir state)
- where
-  writeOne compatibilityWrite = do
-    createDirectoryIfMissing True (takeDirectory compatibilityWrite.compatibilityWritePath)
-    writeJsonValue compatibilityWrite.compatibilityWritePath compatibilityWrite.compatibilityWriteValue
 
 removeFileIfExists :: FilePath -> IO ()
 removeFileIfExists path = do

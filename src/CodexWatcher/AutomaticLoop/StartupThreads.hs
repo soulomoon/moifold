@@ -11,14 +11,12 @@ module CodexWatcher.AutomaticLoop.StartupThreads
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..), ActionExecutor (..))
 import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
 import CodexWatcher.Cli.Types (LoopCli (..))
-import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonOptions (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopConfig (..))
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..))
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
-import CodexWatcher.Cli.Command.Replay (formatReplayFailure)
 import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Defaults (defaultThreadStartOptions)
 import CodexWatcher.TurnOutput (issueImplementerThreadDeveloperInstructions, prReviewThreadDeveloperInstructions)
@@ -91,10 +89,7 @@ refreshStartupThreads executor cli ExecuteActions loopConfig = do
         pure (withNextRequestId (nextRequestId requestId) loopConfig)
 
   appendStartupThreadRefresh event = do
-    events <- either die pure =<< loadEventLogFile cli.loopCliEventsPath
     appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath event
-    replay <- either (die . formatReplayFailure) pure (replayEventLog (events <> [event]))
-    mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir replay.replayState)
 
 startFreshThread :: ActionExecutor IO -> WorkflowAgent.AgentRoleId -> RequestId -> FilePath -> Text.Text -> IO ThreadId
 startFreshThread executor roleId requestId cwd developerInstructions = do

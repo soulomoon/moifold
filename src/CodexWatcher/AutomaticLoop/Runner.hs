@@ -18,19 +18,13 @@ import CodexWatcher.AutomaticLoop.PrReviewHandoff (issueImplementReviewHandoffAf
 import CodexWatcher.AutomaticLoop.StartupThreads (refreshStartupThreads)
 import CodexWatcher.ChildDaemon (restoreOwnedPidFile, runWithOptionalPidFile)
 import CodexWatcher.Cli.Types (LoopCli (..), cliDomainName)
-import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop
 import CodexWatcher.EffectInterpreter (EffectRuntimeConfig (..), PlannedAction (..))
 import CodexWatcher.Cli.RuntimeConfig (defaultEffectRuntimeConfigWithPlannerScope)
-import CodexWatcher.EventLog.File (loadEventLogFile)
-import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..))
-import CodexWatcher.EventLogRepair (repairFailureBlockStateJson)
 import CodexWatcher.Failure (FailureClassification (..), failureClassText, failureIsRetryable)
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Runtime.File (writeJsonValue)
-import CodexWatcher.Runtime.Interpreter (ioRuntimeInterpreter)
 import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLeaseIfOwnedByCurrentProcess, renewRuntimeOwnerForExecution, validateRuntimeOwnerForExecution)
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Runtime.WatcherPaths qualified as WatcherPaths
@@ -50,7 +44,6 @@ import Data.Aeson ((.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing)
 import System.Exit (die)
 import System.FilePath ((</>))
 import System.Posix.Process (getProcessID)
@@ -132,7 +125,6 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
         "runtime owner lease renewed"
         ["stateDir" .= runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir]
     )
-  reconcileLoopCompatibility executor loopConfig
   result <- runAutomaticDaemonLoopOnceFromFile executor loopConfig
   case result of
     Left failure
@@ -156,8 +148,7 @@ runLoopIterations stopRequested executor loopConfig cliDomain postTick shouldLoo
               loopConfig.loopDaemonOptions.daemonExecutionMode
               PlannedSleepUntilNextPoll
           pure ()
-    Left failure -> do
-      recordInvalidReplayBlockState loopConfig failure
+    Left failure ->
       die (Text.unpack (formatDaemonLoopFailure failure))
     Right tick -> do
       validateLoopResultDomain cliDomain tick
@@ -178,42 +169,6 @@ repairCurrentPidFile domain stateDir ExecuteActions = do
 retryableAutomaticLoopFailure :: DaemonLoopFailure -> Bool
 retryableAutomaticLoopFailure =
   failureIsRetryable . classifyDaemonLoopFailure
-
-recordInvalidReplayBlockState :: DaemonLoopConfig -> DaemonLoopFailure -> IO ()
-recordInvalidReplayBlockState loopConfig = \case
-  DaemonLoopDaemonFailure (DaemonReplayFailed replayFailure) -> do
-    let stateDir = runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
-    createDirectoryIfMissing True stateDir
-    writeJsonValue (stateDir </> "block-state.json") (repairFailureBlockStateJson replayFailure)
-  _ -> pure ()
-
-reconcileLoopCompatibility :: ActionExecutor IO -> DaemonLoopConfig -> IO ()
-reconcileLoopCompatibility executor loopConfig =
-  case loopConfig.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions -> pure ()
-    ExecuteActions -> do
-      loaded <- loadEventLogFile loopConfig.loopDaemonOptions.daemonEventLogPath
-      case loaded of
-        Left _ -> pure ()
-        Right events ->
-          case replayEventLog events of
-            Left _ -> pure ()
-            Right replay ->
-              let writes = compatibilityStateWrites (runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) replay.replayState
-               in do
-                    mapM_
-                      (writeCompatibility ioRuntimeInterpreter)
-                      writes
-                    Log.logWatcher
-                      executor.actionLogger
-                      ( Log.watcherLog
-                          Log.Debug
-                          "compatibility_reconciled"
-                          "compatibility state reconciled from event log"
-                          [ "stateDir" .= runtimeStateDirPath loopConfig.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir
-                          , "writes" .= length writes
-                          ]
-                      )
 
 validateLoopDomain :: Domain -> Maybe ThreadId -> IO ()
 validateLoopDomain _domain _plannerThread =

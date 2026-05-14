@@ -26,5 +26,5 @@ printLoopTick domain iteration tick = do
     Just observed -> do
       putStrLn ("event: " <> show observed.daemonObservedEvent)
       putStrLn ("next phase: " <> show (somePhase observed.daemonObservedState))
-      putStrLn ("compatibility writes: " <> show (length observed.daemonObservedCompatibilityWrites))
+      putStrLn ("compatibility projections: " <> show (length observed.daemonObservedCompatibilityWrites))
   putStrLn ("actions: " <> show (length tick.loopActionReports))

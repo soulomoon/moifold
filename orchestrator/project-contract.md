@@ -26,12 +26,18 @@ stable contracts instead of restating them in every role or roadmap file.
   source-distribution artifacts, public documentation, and release notes must
   preserve the same ownership split. Moifold may consume external package
   candidates, but reusable workflow packages must not depend on moifold.
-- Public compatibility facades: keep existing moifold compatibility modules
-  available until a round proves safe removal with import, build, and behavior
-  coverage. Compatibility files such as `issue-state.json`, `daemon-state.json`,
-  `planning-state.json`, PR URL files, block state, repair state, and runtime
-  owner files keep their current names and field meanings unless explicitly
-  migrated.
+- Public compatibility facades: the highest-value cleanup removed the
+  unsupported public wrappers `CodexWatcher.AppServerClient`,
+  `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, and
+  `CodexWatcher.Workflow.Permission` after import scans, direct-owner
+  migrations, package descriptor updates, and build/test evidence. Remaining
+  moifold product-facing modules stay available until a later round proves
+  safe removal with import, build, and behavior coverage. Remaining
+  compatibility files such as `issue-state.json`, `daemon-state.json`, PR URL
+  files, block state, repair state, and runtime owner files keep their current
+  names and field meanings unless explicitly migrated. The obsolete
+  `planning-state.json` runtime file was removed after local/downstream
+  non-reader evidence and graph-persistence tests were updated.
 - Terminal compatibility holds: the `2026-05-09-01-compatibility-surface-cleanup`
   family closed with an empty removed-surface set. Later facade-removal work
   must be selected under a fresh active family and must not cite that hold as
@@ -51,17 +57,23 @@ stable contracts instead of restating them in every role or roadmap file.
   deprecation or removal; decompose large runtime modules behind focused tests;
   perform deprecated or removed-surface cleanup only after exact gates are met;
   keep refining the roadmap until compatibility surfaces are removed cleanly.
-- Planner state compatibility: `planner-state.json` and
-  `planning-state.json` are distinct compatibility surfaces. Current runtime
-  code writes both in different planning states, while healthcheck reads
-  `planner-state.json`; no rename, deletion, or reader change is allowed until
-  a selected round records an explicit compatibility contract with tests.
+- Planner state compatibility: `planner-state.json` remains the supported
+  issue-planning summary/status compatibility surface for current runtime
+  writers, while healthcheck now projects `plannerState` from replayed event
+  truth instead of reading that file directly. The obsolete
+  `planning-state.json` graph projection is no longer written; planning graph
+  truth is carried by event-log events and replayed watcher state. Do not
+  restore that runtime file without a selected compatibility round and
+  old-log/fixture evidence.
 - Large-module extraction: splits of `test/Main.hs`, `CodexWatcher.Daemon`,
   `CodexWatcher.Workflow.DocsMigration`,
   `CodexWatcher.Workflow.Moifold.IssueImplement.Indexed`,
   `CodexWatcher.EventLog.Types`, and `CodexWatcher.TurnOutput` must preserve
   behavior behind focused tests unless a selected round explicitly approves a
-  behavior change.
+  behavior change. Current extraction owners are
+  `CodexWatcher.Daemon.Types`, `CodexWatcher.Workflow.DocsMigration.Types`,
+  `CodexWatcher.Workflow.Moifold.IssueImplement.Indexed.Types`,
+  `CodexWatcher.EventLog.Types.Core`, and `CodexWatcher.TurnOutput.Schema`.
 
 ## Alignment Invariants
 

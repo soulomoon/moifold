@@ -102,8 +102,8 @@ Forbidden edges are absent:
   `CodexWatcher.StateMachine`, `CodexWatcher.Workflow.GitHub`,
   `CodexWatcher.Workflow.Moifold.*`, or `CodexWatcher.Workflow.Types`.
 - The recursive test also rejects compatibility-file names and ownership
-  tokens such as `issue-state.json`, `daemon-state.json`,
-  `planning-state.json`, `block-state`, `repair-state`, and `runtime-owner`.
+  tokens such as `issue-state.json`, `daemon-state.json`, `block-state`,
+  `repair-state`, and `runtime-owner`.
 
 ### `agent-workflow-github`
 
@@ -134,11 +134,9 @@ product:
 - `src/CodexWatcher/EffectInterpreter.hs`, daemon loop modules, domain loops,
   healthcheck, runtime command rendering, and tests import Codex or GitHub
   adapter APIs where moifold interprets effects or classifies external state.
-- `src/CodexWatcher/Core/Ids.hs` imports shared agent and GitHub ids.
-- `src/CodexWatcher/AppServerClient.hs` imports only
-  `CodexWatcher.Workflow.Agent.Codex.Client` and
-  `CodexWatcher.Workflow.Agent.Codex.Transport`, preserving the old module
-  name as a compatibility facade.
+- The old `CodexWatcher.Core.Ids` and `CodexWatcher.AppServerClient` wrappers
+  have been removed; main-library code imports shared agent, GitHub, and Codex
+  adapter owners directly.
 
 This direction is acceptable because moifold depends on the framework
 sublibraries. The reverse direction would be an extraction blocker; the source
@@ -191,15 +189,16 @@ from `agent-workflow-github` to moifold, Codex, or core.
 
 | Surface | Current state | Extraction meaning | Deprecation readiness |
 | --- | --- | --- | --- |
-| `src/CodexWatcher/AppServerClient.hs` | Reexport-only compatibility wrapper for `Workflow.Agent.Codex.Client` and `Workflow.Agent.Codex.Transport`. | The implementation and `websockets` dependency are already owned by `agent-workflow-codex`; existing moifold imports can continue through the old module name. | Ready to document as compatibility-only, but not ready to remove until import coverage and downstream compatibility policy are approved. |
-| Main `library` Cabal section | Exposes `CodexWatcher.AppServerClient` but does not use `reexported-modules:` and does not expose adapter modules directly. | Moifold keeps a narrow facade without turning adapter modules into part of the main public library surface. | Ready for gradual import migration inside moifold; removal remains blocked on explicit deprecation policy. |
+| Removed public wrappers | `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, and `CodexWatcher.Workflow.Permission` are no longer exposed by the main library. | The reusable package owner modules are the supported import paths for Codex client/transport, agent ids, GitHub ids, event-log core helpers, and permission core helpers. | Removal has landed for these wrappers; runtime compatibility files and product-facing workflow modules are unchanged. |
+| Main `library` Cabal section | Does not use `reexported-modules:` and does not expose adapter modules directly. | Moifold depends on the reusable package candidates without turning adapter modules into part of the main public library surface. | Current direct-owner imports are the preferred path. |
 | `agent-workflow-codex` public modules | Exposes protocol, typed agent data, Codex client/protocol/interpreter/transport, and observation bridge directly. | New code can target the extracted adapter APIs instead of the compatibility wrapper. | Ready for preferred-import guidance, not external stability guarantees. |
 | `agent-workflow-github` public modules | Exposes ids, remote parsing/classification, and pure command specs directly. | New code can use pure GitHub specs without pulling moifold runtime policy. | Ready for preferred-import guidance, not command execution policy migration. |
 | `agent-workflow-core` public modules | Exposes workflow spec, indexed spec, DSL, codec contracts, event-log cores, execution, permission, transaction, audit, daemon projections, and failure classification. | Reusable kernel APIs are available internally without importing concrete moifold lifecycle state. | Ready for API-freeze review; external versioning and semantic compatibility remain unstarted. |
 
-The facade map is intentionally conservative. Compatibility availability is a
-repo-wide contract, so this report does not recommend removing wrapper modules
-or compatibility files as part of package extraction readiness.
+The facade map now separates removed public wrappers from runtime compatibility
+files. Runtime compatibility availability remains a repo-wide contract, so
+this report does not recommend removing compatibility files as part of package
+extraction readiness.
 
 ## Boundary Tests
 
@@ -220,8 +219,8 @@ report:
   runtime, compatibility, Codex, and workflow-policy imports.
 - `workflowMoifoldCabalLibraryDoesNotReexportAdapters` verifies the main
   library has no Cabal adapter reexports, keeps dependencies on the Codex and
-  GitHub sublibraries, and keeps `CodexWatcher.AppServerClient` as a thin
-  wrapper that no longer owns websocket transport.
+  GitHub sublibraries, and does not expose the removed
+  `CodexWatcher.AppServerClient` wrapper.
 
 These assertions are recursive source scans and Cabal-section checks, so they
 are more robust than a hand-maintained list of a few representative files.
@@ -239,9 +238,8 @@ explicitly changes the contract:
 - Role prompts, output schemas, evidence requirements, retry escalation,
   classifier compatibility, and structured-output policy.
 - Compatibility files and their current names and meanings, including
-  `issue-state.json`, `daemon-state.json`, `planning-state.json`, PR URL
-  files, block state, repair state, runtime owner files, and compatibility
-  snapshots.
+  `issue-state.json`, `daemon-state.json`, PR URL files, block state, repair
+  state, and runtime owner files.
 - Filesystem writes, process execution, PID files, locks, leases, runtime
   owner stores, watcher supervision, app-server startup, and concrete daemon
   loops.

@@ -57,51 +57,63 @@ Source-backed inputs for this policy:
   runtime ownership, healthcheck, repair, and release approval as repo-wide
   contracts.
 - `moifold.cabal` defines the three internal named sublibraries and exposes
+  `CodexWatcher.Workflow.Types` and `CodexWatcher.Workflow.Execution` as
+  product-facing moifold workflow surfaces. It no longer exposes
   `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
-  `CodexWatcher.Workflow.Types`, `CodexWatcher.Workflow.EventLog`,
-  `CodexWatcher.Workflow.Execution`, and `CodexWatcher.Workflow.Permission`
-  from the main moifold library.
-- `src/CodexWatcher/AppServerClient.hs` reexports
-  `CodexWatcher.Workflow.Agent.Codex.Client` and
-  `CodexWatcher.Workflow.Agent.Codex.Transport`.
-- `src/CodexWatcher/Core/Ids.hs` reexports
-  `CodexWatcher.Workflow.Agent.Ids` and
-  `CodexWatcher.Workflow.GitHub.Ids`.
-- `src/CodexWatcher/Workflow/Types.hs`,
-  `src/CodexWatcher/Workflow/EventLog.hs`,
-  `src/CodexWatcher/Workflow/Execution.hs`, and
-  `src/CodexWatcher/Workflow/Permission.hs` expose moifold-facing wrappers
-  around concrete `MoifoldSpec`, `WatcherEvent`, `SomeWatcherState`,
-  concrete effect plans, runtime action types, replay behavior, and phase
-  permission validation.
-- `test/Main.hs` contains recursive package-boundary and facade assertions for
-  the core, Codex, GitHub, and main moifold library surfaces.
+  `CodexWatcher.Workflow.EventLog`, or `CodexWatcher.Workflow.Permission`.
+- `src/CodexWatcher/Workflow/Types.hs` and
+  `src/CodexWatcher/Workflow/Execution.hs` expose moifold-facing wrappers
+  around concrete `MoifoldSpec`, `SomeWatcherState`, concrete effect plans,
+  runtime action types, and execution policy.
+- `test/Main.hs`, `test/FacadeImportPolicySpec.hs`, and
+  `test/BoundaryPolicySpec.hs` contain package-boundary and direct-owner
+  assertions for the core, Codex, GitHub, and main moifold library surfaces.
 
 ## Preferred Imports
 
 | Package candidate | Preferred reusable-package imports | Compatibility or product-facing imports | Policy |
 | --- | --- | --- | --- |
-| `agent-workflow-core` | Prefer implemented generic `CodexWatcher.Workflow.*` core modules from the package candidate, including `Spec`, `Indexed.Spec`, `DSL`, `Codec`, `EventLog.Core`, `EventLog.File.Core`, `EventLog.Commit.Core`, `Execution.Core`, `Permission.Core`, `Transaction.Core`, `Audit`, `Daemon.Core`, and `Failure`. | `CodexWatcher.Workflow.Types`, `CodexWatcher.Workflow.EventLog`, `CodexWatcher.Workflow.Execution`, and `CodexWatcher.Workflow.Permission` are moifold product or adapter facades when they expose `MoifoldSpec`, `WatcherEvent`, `SomeWatcherState`, concrete effects, runtime action types, phase validation, or compatibility behavior. | New reusable core code should import the generic core modules directly. Existing moifold code may continue using the product-facing modules. This policy does not add deprecation pragmas or authorize removal. |
-| `agent-workflow-codex` | Prefer `CodexWatcher.AppServerProtocol`, `CodexWatcher.Workflow.Agent`, `CodexWatcher.Workflow.Agent.Ids`, `CodexWatcher.Workflow.Agent.Types`, `CodexWatcher.Workflow.Agent.Codex`, `CodexWatcher.Workflow.Agent.Codex.Client`, `CodexWatcher.Workflow.Agent.Codex.Interpreter`, `CodexWatcher.Workflow.Agent.Codex.Protocol`, `CodexWatcher.Workflow.Agent.Codex.Transport`, and `CodexWatcher.Workflow.Observation.Agent`. | `CodexWatcher.AppServerClient` is a moifold-owned compatibility facade over `CodexWatcher.Workflow.Agent.Codex.Client` and `CodexWatcher.Workflow.Agent.Codex.Transport`. | New reusable Codex-adapter guidance should point at the adapter modules directly. Existing imports through `CodexWatcher.AppServerClient` remain allowed until a later deprecation or removal round proves safety. |
-| `agent-workflow-github` | Prefer `CodexWatcher.Workflow.GitHub.Ids`, `CodexWatcher.Workflow.GitHub.Remote`, and `CodexWatcher.Workflow.GitHub.Command`. | `CodexWatcher.Core.Ids` is a moifold convenience facade over agent ids and GitHub ids, not the preferred public import for standalone reusable package consumers. | New reusable GitHub-adapter code should import GitHub modules directly. Existing moifold code may keep using `CodexWatcher.Core.Ids` where the combined id facade is useful. |
+| `agent-workflow-core` | Prefer implemented generic `CodexWatcher.Workflow.*` core modules from the package candidate, including `Spec`, `Indexed.Spec`, `DSL`, `Codec`, `EventLog.Core`, `EventLog.File.Core`, `EventLog.Commit.Core`, `Execution.Core`, `Permission.Core`, `Transaction.Core`, `Audit`, `Daemon.Core`, and `Failure`. | `CodexWatcher.Workflow.Types` and `CodexWatcher.Workflow.Execution` remain moifold product-facing surfaces when they expose `MoifoldSpec`, `SomeWatcherState`, concrete effects, or runtime action types. The old `Workflow.EventLog` and `Workflow.Permission` wrappers are removed. | New reusable core code should import the generic core modules directly. Existing moifold code may continue using the remaining product-facing modules. |
+| `agent-workflow-codex` | Prefer `CodexWatcher.AppServerProtocol`, `CodexWatcher.Workflow.Agent`, `CodexWatcher.Workflow.Agent.Ids`, `CodexWatcher.Workflow.Agent.Types`, `CodexWatcher.Workflow.Agent.Codex`, `CodexWatcher.Workflow.Agent.Codex.Client`, `CodexWatcher.Workflow.Agent.Codex.Interpreter`, `CodexWatcher.Workflow.Agent.Codex.Protocol`, `CodexWatcher.Workflow.Agent.Codex.Transport`, and `CodexWatcher.Workflow.Observation.Agent`. | The old `CodexWatcher.AppServerClient` wrapper is removed from the main library. | New reusable Codex-adapter guidance should point at the adapter modules directly. |
+| `agent-workflow-github` | Prefer `CodexWatcher.Workflow.GitHub.Ids`, `CodexWatcher.Workflow.GitHub.Remote`, and `CodexWatcher.Workflow.GitHub.Command`. | The old `CodexWatcher.Core.Ids` combined convenience wrapper is removed from the main library. | New reusable GitHub-adapter code should import GitHub modules directly. |
 
-Preferred-import guidance is documentation only. It is not an import migration,
-not a Cabal descriptor migration, not a deprecation warning, and not a
-compatibility promise that old paths can be removed. It is guidance for
-reusable package consumers; existing moifold imports may continue using the
-compatibility or product-facing modules while the relevant `keep` or `defer`
-classification remains in force.
+Preferred-import guidance is now code-backed for the removed wrappers: current
+moifold source and tests use direct owner modules. Runtime compatibility-file
+policy is unchanged.
+
+## Runtime Direct-Reader Inventory Refresh
+
+The 2026-05-14 direct cleanup audit refreshed local and downstream
+runtime-file readers before terminal closeout. The local scan used:
+
+`rg -n "issue-state\\.json|daemon-state\\.json|planner-state\\.json|planning-state\\.json|watcher-state\\.json|checker-state\\.json|agent-state\\.json|reviewer-state\\.json|block-state\\.json|repair-state\\.json|runtime-owner\\.json|issue-snapshot\\.json" . --glob '!dist-newstyle/**' --glob '!orchestrator/worktrees/**' --glob '!orchestrator/rounds/**' --glob '!orchestrator/roadmap-updates/**'`
+
+The downstream scan used `gh search code "\"<file-name>\"" --owner soulomoon
+--limit 20`. It found direct readers in `soulomoon/pr-review-watcher-tool` for
+`issue-state.json`, `daemon-state.json`, `planner-state.json`,
+`watcher-state.json`, `checker-state.json`, `agent-state.json`,
+`reviewer-state.json`, and `block-state.json`. It did not find owner-scoped
+downstream hits for `planning-state.json`, `repair-state.json`,
+`runtime-owner.json`, or `issue-snapshot.json`, but local repo evidence still
+shows active producers/readers or operator paths for `runtime-owner.json` and
+`issue-snapshot.json`.
+
+This inventory converts the previous external-reader unknown into a concrete
+cleanup blocker for the directly read runtime files. Removing or renaming those
+files now requires a selected downstream migration, replacement API, or
+owner retention decision before the moifold compatibility contract can be
+removed cleanly.
 
 ## Compatibility Facade Status
 
 | Surface | Current source evidence | Preferred import direction | Allowed current use | Evidence classification | Deprecation and removal status |
 | --- | --- | --- | --- | --- | --- |
-| `CodexWatcher.AppServerClient` | Main-library module reexports `CodexWatcher.Workflow.Agent.Codex.Client` and `CodexWatcher.Workflow.Agent.Codex.Transport`; round 056 still finds 28 selected-facade imports and no selected-facade imports under standalone package candidates or examples. | Reusable Codex adapter users should import `CodexWatcher.Workflow.Agent.Codex.Client` and `CodexWatcher.Workflow.Agent.Codex.Transport` directly. | Existing moifold and downstream imports may continue through the old facade. | `defer` | No deprecation pragma, import migration requirement, Cabal exposure change, or removal approval. A later selected round must satisfy the gates. |
-| `CodexWatcher.Core.Ids` | Main-library module reexports `CodexWatcher.Workflow.Agent.Ids` and `CodexWatcher.Workflow.GitHub.Ids`; round 056 still finds 65 selected-facade imports. | Reusable agent code should import `CodexWatcher.Workflow.Agent.Ids`; reusable GitHub code should import `CodexWatcher.Workflow.GitHub.Ids`. | Existing moifold code may continue using the combined convenience facade. | `defer` | No deprecation or removal until combined-facade users have split-import evidence, behavior checks, and reviewer approval. |
+| `CodexWatcher.AppServerClient` | Removed from `moifold.cabal` and source after scans found no concrete source/app/test users. | Reusable Codex adapter users import `CodexWatcher.Workflow.Agent.Codex.Client` and `CodexWatcher.Workflow.Agent.Codex.Transport` directly. | None in the current tree. | `removed` | Removed public wrapper; runtime compatibility files unaffected. |
+| `CodexWatcher.Core.Ids` | Removed from `moifold.cabal` and source after production and test import burndown migrated safe users to direct agent and GitHub id owners. | Reusable agent code imports `CodexWatcher.Workflow.Agent.Ids`; reusable GitHub code imports `CodexWatcher.Workflow.GitHub.Ids`. | None in the current tree. | `removed` | Removed public wrapper; id newtypes remain available from direct owner modules. |
 | `CodexWatcher.Workflow.Types` | Main-library module defines `MoifoldSpec` over `SomeWatcherState`, `WatcherEvent`, `DaemonObservation`, concrete effects, replay, and phase validation; round 056 still finds 10 selected-facade imports. | Generic reusable workflow code should import `CodexWatcher.Workflow.Spec` and other core modules directly. | Moifold lifecycle code may continue using this product spec as the concrete bridge from generic workflow contracts to moifold state and events. | `keep` | Not a removal candidate. No deprecation or removal unless a later round proves an approved replacement for the concrete `MoifoldSpec` owner role and behavior parity. |
-| `CodexWatcher.Workflow.EventLog` | Main-library module exposes generic event-log helpers plus moifold-specific helpers such as `initializeMoifoldWorkflow`, `applyMoifoldWorkflowEvent`, and `replayMoifoldWorkflowEvents`; round 056 still finds 3 selected-facade imports. | Reusable code should import `CodexWatcher.Workflow.EventLog.Core`, `CodexWatcher.Workflow.EventLog.File.Core`, `CodexWatcher.Workflow.EventLog.Commit.Core`, and `CodexWatcher.Workflow.Audit` as needed. | Existing moifold code may continue using the facade for concrete event-log and audit behavior. | `defer` | No deprecation or removal while concrete `WatcherEvent`, replay policy, old-log, golden-fixture, and compatibility behavior evidence remains missing. |
+| `CodexWatcher.Workflow.EventLog` | Removed from `moifold.cabal` and source after remaining policy/parity tests moved to direct event-log core helpers. | Reusable code imports `CodexWatcher.Workflow.EventLog.Core`, `CodexWatcher.Workflow.EventLog.File.Core`, `CodexWatcher.Workflow.EventLog.Commit.Core`, and `CodexWatcher.Workflow.Audit` as needed. | None in the current tree. | `removed` | Removed public wrapper; event JSON `type` fields, replay behavior, and compatibility files are unchanged. |
 | `CodexWatcher.Workflow.Execution` | Main-library module bridges generic execution-core metadata to concrete effects, action executors, runtime configs, command reports, and request ids; round 056 still finds 4 selected-facade imports. | Reusable execution code should import `CodexWatcher.Workflow.Execution.Core`. | Existing moifold runtime and effect-interpreter code may keep using the concrete execution facade. | `keep` | Not a removal candidate. Concrete runtime action types and command/report behavior remain product-owned. |
-| `CodexWatcher.Workflow.Permission` | Main-library module bridges `CodexWatcher.Workflow.Permission.Core` to concrete moifold phase validation, `SomeWatcherState`, `EffectPlan`, and `MoifoldSpec`; round 056 still finds 1 selected-facade import in tests and public exposure remains. | Reusable permission code should import `CodexWatcher.Workflow.Permission.Core`. | Existing moifold code may continue using `validateMoifoldEffectPlan`, `moifoldPermissionPolicy`, and concrete validation helpers. | `defer` | No deprecation or removal until public API, downstream-user, and behavior evidence is reviewed. |
+| `CodexWatcher.Workflow.Permission` | Removed from `moifold.cabal` and source after remaining policy/parity tests moved to `CodexWatcher.Workflow.Permission.Core` and `WorkflowSpec` policy helpers. | Reusable permission code imports `CodexWatcher.Workflow.Permission.Core`. | None in the current tree. | `removed` | Removed public wrapper; phase validation behavior is unchanged. |
 
 ## Runtime Compatibility-File Cleanup Policy
 
@@ -120,16 +132,55 @@ changes, roadmap expansion, import-facade changes, or removal approval.
 
 | Surface | Classification | Evidence basis | Missing gates before later deprecation, migration, or removal |
 | --- | --- | --- | --- |
-| `issue-state.json` | `keep` | Round 053 records current producers in compatibility projection, repair rewrite, fanout, startup/reconciliation, and PR-review handoff paths; healthcheck reads `issueState`; golden issue fixtures cover blocked, plan-ready, and incomplete snapshots; tests protect PR URL projection, golden replay/bootstrap, daemon write order, and compatibility parity. Round 055 keeps this as a current operator/runtime contract. | Exhaustive old live state-directory fixtures for field combinations and external operator/downstream direct-reader inventory are still missing. |
-| `daemon-state.json` | `keep` | Round 053 records compatibility projection producers for idle, active, stopped, and concrete daemon summaries; healthcheck reads shared `daemonState`; repair rewrites daemon state through repaired replay compatibility writes; the incomplete issue fixture covers an older tolerated `lastCompletedTurn` shape. Round 055 keeps the file because it remains an operator contract. | Active and stopped daemon fixtures and external operator/downstream direct-reader inventory are still missing. |
-| `planner-state.json` | `keep` | Round 087 records this as a distinct issue-planning summary/status surface, not an alias for `planning-state.json`. Compatibility projection writes it for ready, active, waiting-ready-issues, and complete planning states, and healthcheck reads it as `plannerState` for issue planning. | Old/current fixture coverage, external operator/downstream direct-reader inventory, write-timing evidence, and a reviewed behavior-change selection are required before any reader change, rename, deletion, deprecation, migration, or removal. |
-| `planning-state.json` | `defer` | Round 053 records two producer shapes: direct `RecordPlanningGraph` planned writes and compatibility projection from waiting-ready-issues planning state. Tests protect direct graph recording, canonical graph recording, indexed planning parity, and daemon compatibility writes. Round 055 records no healthcheck reader and no checked-in `planning-state.json` fixture. Round 064 confirms the producer readback and records explicit current non-healthcheck policy for this write-only compatibility projection. | Old snapshot/file fixture coverage, external operator/downstream direct-reader inventory, and a reviewed behavior-change selection for any future healthcheck surfacing are missing. |
-| PR review state files and PR URL fields | `keep` for current PR review state files; `defer` for absent dedicated PR URL file wording | Round 053 maps the selected surface to current `watcher-state.json`, `checker-state.json`, optional `agent-state.json`, `reviewer-state.json`, `issue-state.json` `pr_url`, and PR review config `prUrl`; no dedicated `pr-url` or `pr-state` file producer was found. Golden PR-review snapshots cover merged, unresolved, blocked, and clean-ready shapes; healthcheck reads PR-review state files; tests protect PR-review compatibility and PR URL projection. | External operator/downstream inventory is still required before concluding no user expects a dedicated PR URL/state path. |
-| `block-state.json` | `keep` | Round 053 records direct `RecordBlocked` planned writes, compatibility projection for blocked state, and runner repair-failure block-state writes. Healthcheck reads blocked state across issue planning, issue implementation, and PR review; successful repair removes stale block state after compatibility rewrite; golden PR-review blocked fixture and blocked event-log fixtures exist. Round 055 keeps the file as a current operator contract. | A checked-in fixture for runner repair-failure block-state JSON and external operator/downstream direct-reader inventory are still missing. |
-| `repair-state.json` | `defer` | Round 053 records the single producer in `repair-invalid-state --execute`: archive invalid log, write repaired `events.jsonl`, write `repair-state.json`, rewrite compatibility files, then remove stale `block-state.json`. Round 055 records no production reader, no healthcheck reader, and no checked-in fixture; tests protect dry-run/execute source-order behavior. Round 065 records the explicit current non-healthcheck policy: healthcheck does not read this repair summary output. | Fixture round-trip coverage, production-reader expectations, and external operator/downstream direct-reader inventory are missing. |
-| `runtime-owner.json` | `keep` | Round 053 records runtime owner store and CLI producers/readers, automatic-loop validation and renewal, healthcheck surfacing, and `scripts/restart-watcher` shell parsing/removal. Tests protect current lease JSON parsing, rejection of old owner-only shapes, running-lease rejection, and current-process cleanup. Round 055 keeps this as live daemon ownership state. Round 089 records the current healthcheck contract without changing behavior: healthcheck reads this file as `runtimeOwner` for issue planning, issue implementation, and PR review; runtime-owner production writes lease-shaped JSON under top-level `lease`; and summary owner lookup remains `["runtimeOwner","owner"]`, not `["runtimeOwner","lease","runtime"]`. | Checked-in fixture coverage, external operator/downstream script inventory, and a reviewed behavior-change selection for any future healthcheck field-path change are still missing. |
-| Checked-in compatibility snapshots | `defer` | Round 053 records golden PR-review and issue-implementation snapshot directories plus golden event-log replay/bootstrap coverage. Round 055 separates checked-in compatibility snapshots from live `issue-snapshot.json` and records replay/bootstrap tests as the current evidence. | Any removal or migration needs fixture-by-fixture old-log/golden proof and reviewer approval that the snapshot is no longer required. |
-| Live `issue-snapshot.json` | `defer` | Round 053 records live issue-planning snapshot production before planner turn start, and tests protect snapshot write timing plus closed-scope completion without starting a planner turn. Round 055 records no checked-in live `issue-snapshot.json` fixture and no healthcheck reader. | Old live snapshot fixture coverage, external operator/downstream direct-reader inventory, and explicit write-timing migration evidence are missing. |
+| `issue-state.json` | `migrated-locally; blocked-downstream` | Normal local file writers were removed: launch/fanout/reconciliation/PR-handoff/daemon transaction paths append event logs and keep only pure healthcheck projections. Healthcheck projects `issueState` from event replay instead of reading this file directly. The old checked-in issue-implementation compatibility snapshots and `CodexWatcher.Snapshot`/`CodexWatcher.GoldenReplay` bridge were removed after fixture-by-fixture event-log bootstrap coverage was added under `golden/event-log/bootstrapped`. The 2026-05-14 inventory found direct downstream readers in `soulomoon/pr-review-watcher-tool` (`watcher-healthcheck.mjs`, `issue-planning-watcher.mjs`, and `issue-implement-control.mjs`). | Upstream acceptance of the downstream migration is still required before terminal removal can close. |
+| `daemon-state.json` | `migrated-locally; blocked-downstream` | Normal local file writers were removed from daemon transactions, daemon-loop idle/terminal paths, launch/reconciliation paths, and repair execution. Healthcheck projects `daemonState` from event replay instead of reading this file directly. Active/stopped runtime-compatibility fixtures remain as current projection fixtures, while old snapshot readers were deleted. `scripts/restart-watcher` no longer removes the stale legacy file. The 2026-05-14 inventory found direct downstream readers in `soulomoon/pr-review-watcher-tool` (`watcher-healthcheck.mjs`, `issue-planning-control.mjs`, and `issue-implement-control.mjs`). | Upstream acceptance of the downstream migration is still required before terminal removal can close. |
+| `planner-state.json` | `migrated-locally; blocked-downstream` | Round 087 records this as the issue-planning summary/status surface. Normal local file writers were removed; the remaining production path is a pure event-replay projection surfaced under healthcheck `plannerState`. The 2026-05-14 inventory found direct downstream readers in `soulomoon/pr-review-watcher-tool` (`issue-planning-control.mjs` and `watcher-healthcheck.mjs`). | Upstream acceptance of the downstream migration is still required before terminal removal can close. |
+| `planning-state.json` | `removed` | No owner-scoped downstream hits were found; healthcheck never read it; `RecordPlanningGraph` now compiles to no runtime write; issue-planning compatibility projection writes only `planner-state.json`; the checked-in `planning-state.json` fixture was deleted; tests guard the absence of direct and projection writes. Planning graph truth remains in the event log through `IssuePlanningGraphUpdated` and replayed watcher state. | No remaining removal gate for this file. Restoring it would require a selected compatibility round with a supported reader contract, old-log evidence, and fixture coverage. |
+| PR review state files and PR URL fields | `migrated-locally; blocked-downstream`; `defer` for absent dedicated PR URL file wording | Round 053 maps the selected surface to current `watcher-state.json`, `checker-state.json`, optional `agent-state.json`, `reviewer-state.json`, `issue-state.json` `pr_url`, and PR review config `prUrl`; no dedicated `pr-url` or `pr-state` file producer was found. Normal local file writers for these PR-review state files were removed; healthcheck now projects PR-review `states` keys from event replay. Old golden PR-review compatibility snapshots were migrated to explicit bootstrapped event-log fixtures covering merged, unresolved, blocked, and clean-ready states. The 2026-05-14 inventory found direct downstream readers in `soulomoon/pr-review-watcher-tool` (`watcher-healthcheck.mjs`, `pr-review-control.mjs`, and `pr-review-watcher.mjs`). | Upstream acceptance of the downstream migration is still required before terminal removal can close. No dedicated PR URL/state path exists in current producers. |
+| `block-state.json` | `migrated-locally; blocked-downstream` | Direct `RecordBlocked` planned writes, normal compatibility-file writes, and the automatic-loop invalid-event-log repair-failure writer were removed. Healthcheck projects normal blocked state from event replay instead of reading this file directly. Successful repair still removes stale block state left by older runs, but `scripts/restart-watcher` no longer removes or relies on the stale legacy file. Old checked-in blocked snapshots were migrated to event-log fixtures; the dedicated repair-failure fixture was deleted with the writer. The 2026-05-14 inventory found direct downstream readers in `soulomoon/pr-review-watcher-tool` (`watcher-healthcheck.mjs`, `pr-review-control.mjs`, `pr-review-watcher.mjs`, `issue-planning-control.mjs`, and `issue-implement-control.mjs`). | Upstream acceptance of the downstream migration is still required before terminal removal can close. |
+| `repair-state.json` | `keep-as-product` | The single producer in `repair-invalid-state --execute` archives the invalid log, writes repaired `events.jsonl`, writes `repair-state.json`, then removes stale `block-state.json`; it no longer rewrites compatibility files. Round 055 records no production reader, no healthcheck reader, and no checked-in fixture; tests protect dry-run/execute source-order behavior. Round 065 records the explicit current non-healthcheck policy: healthcheck does not read this repair summary output. The 2026-05-14 local candidate decision classifies it as a moifold repair diagnostic, not a compatibility alias. | No removal is required for public facade cleanup. Any future replacement must preserve repair execute-order diagnostics or explicitly replace that product contract. |
+| `runtime-owner.json` | `keep-as-product` | Round 053 records runtime owner store and CLI producers/readers, automatic-loop validation and renewal, healthcheck surfacing, and `scripts/restart-watcher` shell parsing/removal. Tests protect current lease JSON parsing, rejection of old owner-only shapes, running-lease rejection, and current-process cleanup. Round 055 keeps this as live daemon ownership state. Round 089 records the current healthcheck contract without changing behavior: healthcheck reads this file as `runtimeOwner` for issue planning, issue implementation, and PR review; runtime-owner production writes lease-shaped JSON under top-level `lease`; and summary owner lookup remains `["runtimeOwner","owner"]`, not `["runtimeOwner","lease","runtime"]`. The 2026-05-14 local candidate decision classifies it as the live daemon lease contract. | Retain until a selected replacement lease mechanism lands with healthcheck, restart, runtime owner, and automatic-loop evidence. |
+| Checked-in compatibility snapshots | `removed` | The old `golden/pr-review/*` and `golden/issue-implement/*` compatibility snapshot JSON fixtures were migrated to explicit bootstrapped event-log fixtures under `golden/event-log/bootstrapped`, and `CodexWatcher.Snapshot` plus `CodexWatcher.GoldenReplay` were removed from source, Cabal exposure, and tests. `goldenEventLogCases` now replays those bootstrapped fixtures directly. | No remaining removal gate for checked-in compatibility snapshots. Restoring snapshot-reader support would require a selected compatibility round with new owner approval. |
+| Live `issue-snapshot.json` | `keep-as-product` | Round 053 records live issue-planning snapshot production before planner turn start, and tests protect snapshot write timing plus closed-scope completion without starting a planner turn. Round 055 records no checked-in live `issue-snapshot.json` fixture and no healthcheck reader. The 2026-05-14 local candidate decision classifies it as live planner input because prompt rendering tells planners to read this file and tests protect the deterministic shape. | Retain until a selected replacement planner-input path lands with write-timing, prompt, fixture, and closed-scope behavior evidence. |
+
+## Downstream Runtime-State Migration Contract
+
+The supported read-only migration path for downstream status or health tooling
+is `moifold healthcheck --state-root /workspace/artifacts --repo owner/name`.
+The report preserves the legacy runtime-state projection shape under stable
+`watchers[].states.*` keys, now deriving compatibility state from event replay
+instead of direct compatibility-file reads. The exact file-to-JSON mapping and
+downstream reader classification are recorded in
+`docs/agentic-workflow-framework/downstream-runtime-state-migration.md` and
+guarded by `healthcheckRuntimeStateMigrationContractTests`.
+
+This replacement path covers read-only health/status consumers. The local
+downstream audit checkout now contains a patch that routes both read-only
+health/status commands and legacy daemon launchers through the Haskell moifold
+healthcheck and `run-*` commands. That patch is not an upstream accepted
+downstream migration from this workspace. Local moifold healthcheck no longer
+directly reads compatibility files, and normal plus repair-failure local
+compatibility-file writers have been removed; checked-in compatibility
+snapshot readers/fixtures have also been removed after migration to
+bootstrapped event-log fixtures. `scripts/restart-watcher` and the operator
+runbook no longer depend on stale compatibility files. The remaining product
+files, `repair-state.json`, `runtime-owner.json`, and live
+`issue-snapshot.json`, are explicitly retained product contracts outside the
+compatibility-file removal goal. Runtime-file removal remains blocked until
+the downstream migration is accepted or explicitly superseded.
+
+## Local Runtime-File Candidate Decisions
+
+The local runtime-file candidates without owner-scoped downstream search hits
+are classified in
+`docs/agentic-workflow-framework/local-runtime-file-candidates.md` and guarded
+by `localRuntimeFileCandidateDecisionTest`.
+
+- `planning-state.json` is `removed`; planning graph persistence is event-log
+  and replay state, not a runtime compatibility file.
+- `repair-state.json` is `keep-as-product` as a repair diagnostic output.
+- `runtime-owner.json` is `keep-as-product` as the live daemon lease contract.
+- `issue-snapshot.json` is `keep-as-product` as live planner input.
 
 Future rounds must preserve the round 055 classifications unless refreshed
 source, fixture, old-log, repair, healthcheck, write-timing, and external
@@ -143,7 +194,7 @@ selected, the future round must name the exact file, field, or snapshot
 surface and prove every applicable gate:
 
 - old-log and golden replay/bootstrap behavior for historical event logs and
-  checked-in compatibility snapshots;
+  any retained bootstrapped event-log fixtures;
 - repair behavior, including `repair-invalid-state --execute` ordering,
   compatibility rewrite behavior, and stale `block-state.json` handling;
 - healthcheck behavior, including read-only reporting or an explicit reviewed
@@ -165,10 +216,11 @@ surface and prove every applicable gate:
 - A preferred-import policy is not a deprecation pragma, not a warning policy,
   not an import migration, not wrapper removal approval, and not standalone
   package publication approval.
-- Compatibility files keep their current names and meanings, including
-  `issue-state.json`, `daemon-state.json`, `planning-state.json`, PR URL
-  files, block state, repair state, runtime owner files, and compatibility
-  snapshots.
+- Remaining compatibility files keep their current names and meanings,
+  including `issue-state.json`, `daemon-state.json`, PR URL files, block state,
+  repair state, and runtime owner files. The removed `planning-state.json`
+  runtime file and checked-in compatibility snapshots are no longer supported
+  compatibility surfaces.
 - Event schemas, event JSON `type` fields, schema versions, golden logs,
   replay policy, dry-run rendering, action ordering, request-id progression,
   prompt schemas, structured-output compatibility, runtime ownership,
@@ -200,8 +252,10 @@ a future round must prove:
   command rendering;
 - reviewer approval explicitly names the surface as ready for deprecation.
 
-This round satisfies none of those gates for any specific deprecation pragma
-because it intentionally changes documentation only.
+The removed public wrappers skipped deprecation pragmas because the selected
+cleanup removed the exposed modules outright after current import scans and
+direct-owner migrations. Remaining runtime compatibility files still require
+the gates below.
 
 ## Removal Gates
 
@@ -223,7 +277,7 @@ round must be selected specifically for removal and must provide:
   gate is satisfied.
 
 Removal is blocked unless every applicable gate is satisfied. Missing evidence
-means the compatibility surface remains available.
+means a remaining compatibility surface stays available.
 
 ## Release-Note Constraints
 

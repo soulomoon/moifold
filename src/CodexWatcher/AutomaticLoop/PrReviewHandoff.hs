@@ -9,7 +9,6 @@ module CodexWatcher.AutomaticLoop.PrReviewHandoff
 import CodexWatcher.ActionExecutor (ActionExecutionMode)
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import CodexWatcher.Cli.Types (LoopCli (..))
-import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
 import CodexWatcher.EventLog.Types (EventReplayResult (..), WatcherEvent (..))
@@ -69,7 +68,6 @@ blockIssueImplementerHandoff cli state reason =
           die ("failed to block issue implementer after PR review handoff: " <> Text.unpack failure)
         Right blockedTick -> do
           appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath blockedTick.issueImplementTickEvent
-          mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir blockedTick.issueImplementTickState)
           putStrLn ("blocked issue implementer: " <> Text.unpack reason.unBlockedReason)
 
 issueWaitingForPrMerge :: SomeWatcherState -> Maybe (IssueConfig, PrNumber)

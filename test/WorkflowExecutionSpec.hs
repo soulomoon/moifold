@@ -34,7 +34,6 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
-import CodexWatcher.GoldenReplay
 import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildArgs, issueImplementerChildLaunchMode, issueImplementerLaunchManifest, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
@@ -54,7 +53,6 @@ import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease, clearRuntimeLeaseIfOwn
 import CodexWatcher.Runtime.Owner.Store
 import CodexWatcher.Runtime.Owner.Types
 import CodexWatcher.RunnerGuard
-import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Supervisor
 import CodexWatcher.Domain.IssueImplement.TurnClassifier
@@ -1311,8 +1309,8 @@ workflowExecutionMetadataPartitionPreservesLegacyOrdering = do
       preCommitActions = fmap WorkflowExecution.workflowPlannedAction preCommit
       postCommitActions = fmap WorkflowExecution.workflowPlannedAction postCommit
       legacyPartition =
-        ( [legacy.compiledActions !! 0, legacy.compiledActions !! 1, legacy.compiledActions !! 2, legacy.compiledActions !! 4]
-        , [legacy.compiledActions !! 3, legacy.compiledActions !! 5, legacy.compiledActions !! 6]
+        ( [legacy.compiledActions !! 0, legacy.compiledActions !! 1, legacy.compiledActions !! 2, legacy.compiledActions !! 3]
+        , [legacy.compiledActions !! 4, legacy.compiledActions !! 5]
         )
   results <-
     sequence

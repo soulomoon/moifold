@@ -26,12 +26,11 @@ module CodexWatcher.Domain.IssuePlanning.Fanout
   , completeClosedReadyIssueStatuses
   ) where
 
-import CodexWatcher.Runtime.Compatibility
+import CodexWatcher.Runtime.Compatibility (CompatibilityWrite)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Domain.IssuePlanning.Watcher
 import CodexWatcher.Runtime.Command.Types (RuntimeCommand (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..))
-import CodexWatcher.Core.Thread (WorkerThread (..))
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Scope (planningGraphScopeContains)
 import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..), PlanningGraph)
@@ -162,7 +161,7 @@ issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber' =
     , launchWorkdir = workdir
     , launchConfigJson = issueImplementerConfigJson issueConfig threadId stateDir workdir
     , launchInitialEvent = initialEvent
-    , launchCompatibilityWrites = compatibilityStateWrites stateDir initialState
+    , launchCompatibilityWrites = []
     }
  where
   repo = plannerRepo plannerConfig
@@ -172,7 +171,6 @@ issueImplementerLaunchPlan fanoutConfig plannerConfig issueNumber' =
   stateDir = issueImplementerStateDir fanoutConfig.fanoutImplementersRoot repo issueNumber'
   workdir = (</> issueImplementerSlug repo issueNumber') <$> fanoutConfig.fanoutWorkdirRoot
   initialEvent = IssueImplementInitialized issueConfig threadId
-  initialState = SomeWatcherState (IssueImplementationReady issueConfig Nothing (WorkerIdle threadId))
 
 withLaunchThreadId :: ThreadId -> IssueImplementerLaunchPlan -> IssueImplementerLaunchPlan
 withLaunchThreadId threadId launch =
@@ -180,10 +178,8 @@ withLaunchThreadId threadId launch =
     { launchThreadId = threadId
     , launchConfigJson = issueImplementerConfigJson launch.launchIssueConfig threadId launch.launchStateDir launch.launchWorkdir
     , launchInitialEvent = IssueImplementInitialized launch.launchIssueConfig threadId
-    , launchCompatibilityWrites = compatibilityStateWrites launch.launchStateDir initialState
+    , launchCompatibilityWrites = []
     }
- where
-  initialState = SomeWatcherState (IssueImplementationReady launch.launchIssueConfig Nothing (WorkerIdle threadId))
 
 issueImplementerConfigJson :: IssueConfig -> ThreadId -> FilePath -> Maybe FilePath -> Value
 issueImplementerConfigJson issueConfig threadId stateDir maybeWorkdir =

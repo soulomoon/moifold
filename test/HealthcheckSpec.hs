@@ -8,6 +8,7 @@
 
 module HealthcheckSpec
   ( healthcheckAppServerThreadInspectionTests
+  , healthcheckRuntimeStateMigrationContractTests
   , prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork
   , prop_healthcheckDaemonRequiredStatuses
   , prop_healthcheckIssueImplementLifecycleReporting
@@ -19,15 +20,22 @@ module HealthcheckSpec
 import CodexWatcher.Healthcheck
 import CodexWatcher.Healthcheck.Analysis (analyzeCrossItemRules, analyzeItem, logicReview, summaryObject)
 import CodexWatcher.Healthcheck.Types
+import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
+import CodexWatcher.Domain.IssuePlanning.Types (PlannerConfig (..))
+import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
+import CodexWatcher.EventLog.Types (WatcherEvent (..))
 import CodexWatcher.Runtime.Process (skippedCommand)
 import CodexWatcher.Core.Kinds (Domain (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..))
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), IssueNumber (..), PrNumber (..), RepoName (..))
 import Control.Exception (bracket, catch, evaluate, finally, mask)
 import Data.Aeson (Value (..), eitherDecode', encode, object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy.Char8 qualified as LazyByteString.Char8
 import Data.Foldable (traverse_)
+import Data.Foldable qualified as Foldable
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.Directory (createDirectory, createDirectoryIfMissing, getPermissions, getTemporaryDirectory, removeFile, removePathForcibly, setPermissions, writable, executable)
@@ -37,7 +45,7 @@ import System.Exit (ExitCode (..))
 import System.IO (hClose, hFlush, hGetContents, openTempFile, stderr, stdout)
 import System.Posix.IO qualified as Posix
 import TestSupport.AppServer (jsonRpcError, jsonRpcResult, withEndpointBackedAppServer)
-import TestSupport.Workflow (assert, lookupValue, sequenceAnd)
+import TestSupport.Workflow (assert, lookupValue, maxParallelForTest, sequenceAnd)
 
 healthcheckAppServerThreadInspectionTests :: IO Bool
 healthcheckAppServerThreadInspectionTests =
@@ -49,6 +57,40 @@ healthcheckAppServerThreadInspectionTests =
       , healthcheckReportsAppServerJsonRpcError
       , healthcheckReportsAppServerDecodeFailure
       ]
+
+healthcheckRuntimeStateMigrationContractTests :: IO Bool
+healthcheckRuntimeStateMigrationContractTests =
+  withHealthcheckCommandStubs $
+    withRuntimeStateContractRoot \stateRoot' -> do
+      (_exitCode, stdoutText, _stderrText) <-
+        captureStdoutStderr
+          ( runHealthcheck
+              HealthcheckOptions
+                { stateRoot = stateRoot'
+                , repoFilter = Just "owner/repo"
+                , appServerEndpoint = Nothing
+                }
+          )
+      case eitherDecode' (LazyByteString.Char8.pack stdoutText) of
+        Left error' -> assert ("healthcheck runtime-state migration report decodes as JSON: " <> error') False
+        Right report ->
+          let watchers = watcherObjects report
+           in sequenceAnd
+                [ assert "healthcheck replacement report includes planner, implementer, and PR review watchers" $
+                    length watchers == 3
+                , assert "healthcheck projects issue-planning compatibility state from event replay under stable state keys" $
+                    watcherStateText "issue-planning" ["plannerState", "status"] watchers == Just "ready"
+                      && watcherStateIsNull "issue-planning" ["blockedState"] watchers
+                , assert "healthcheck projects issue-implementation compatibility state from event replay under stable state keys" $
+                    watcherStateText "issue-implement" ["issueState", "issue_status"] watchers == Just "preparing_pr"
+                      && watcherStateIsNull "issue-implement" ["blockedState"] watchers
+                , assert "healthcheck projects PR-review compatibility state from event replay under stable state keys" $
+                    watcherStateText "pr-review" ["watcherState", "lastTurnStatus"] watchers == Just "checking"
+                      && watcherStateBool "pr-review" ["checkerState", "has_unresolved"] watchers == Just False
+                      && watcherStateIsNull "pr-review" ["agentState"] watchers
+                      && watcherStateIsNull "pr-review" ["reviewerState"] watchers
+                      && watcherStateIsNull "pr-review" ["blockedState"] watchers
+                ]
 
 healthcheckReadsWorkerThread :: IO Bool
 healthcheckReadsWorkerThread =
@@ -166,6 +208,65 @@ withHealthcheckState threadId' action =
       , "eventsPath" .= (watcherDir </> "events.jsonl")
       , "threadId" .= threadId'
       ]
+
+withRuntimeStateContractRoot :: (FilePath -> IO a) -> IO a
+withRuntimeStateContractRoot action =
+  bracket makeRoot removePathForcibly \stateRoot' -> do
+    let plannerDir = stateRoot' </> "issue-planners" </> "owner-repo"
+        implementDir = stateRoot' </> "issue-implementers" </> "owner-repo-issue-7"
+        reviewDir = stateRoot' </> "pr-review-watchers" </> "owner-repo-pr-11"
+    createDirectoryIfMissing True plannerDir
+    createDirectoryIfMissing True implementDir
+    createDirectoryIfMissing True reviewDir
+    LazyByteString.Char8.writeFile (plannerDir </> "config.json") (encode (plannerConfigJson plannerDir))
+    LazyByteString.Char8.writeFile (implementDir </> "config.json") (encode (implementConfigJson implementDir))
+    LazyByteString.Char8.writeFile (reviewDir </> "config.json") (encode (reviewConfigJson reviewDir))
+    writeEventsFile
+      (plannerDir </> "events.jsonl")
+      [IssuePlanningInitialized (PlannerConfig (RepoName "owner/repo") (maxParallelForTest 2) [])]
+    writeEventsFile
+      (implementDir </> "events.jsonl")
+      [IssueImplementInitialized (IssueConfig (RepoName "owner/repo") (IssueNumber 7) (BranchName "issue-7")) (ThreadId "worker-thread")]
+    writeEventsFile
+      (reviewDir </> "events.jsonl")
+      [PrReviewInitialized (PrConfig (RepoName "owner/repo") (PrNumber 11) (BranchName "pr-11")) (ThreadId "pr-worker-thread") (ThreadId "reviewer-thread")]
+    action stateRoot'
+ where
+  makeRoot = do
+    tempRoot <- getTemporaryDirectory
+    createTempDirectoryLocal tempRoot "healthcheck-runtime-state-"
+  plannerConfigJson plannerDir =
+    object
+      [ "repoFullName" .= ("owner/repo" :: Text)
+      , "stateDir" .= plannerDir
+      , "pidPath" .= (plannerDir </> "watcher.pid")
+      , "eventsPath" .= (plannerDir </> "events.jsonl")
+      , "threadId" .= ("planner-thread" :: Text)
+      , "maxParallel" .= (2 :: Int)
+      ]
+  implementConfigJson implementDir =
+    object
+      [ "repoFullName" .= ("owner/repo" :: Text)
+      , "issueNumber" .= (7 :: Int)
+      , "stateDir" .= implementDir
+      , "pidPath" .= (implementDir </> "watcher.pid")
+      , "eventsPath" .= (implementDir </> "events.jsonl")
+      , "threadId" .= ("worker-thread" :: Text)
+      ]
+  reviewConfigJson reviewDir =
+    object
+      [ "repoFullName" .= ("owner/repo" :: Text)
+      , "prNumber" .= (11 :: Int)
+      , "stateDir" .= reviewDir
+      , "pidPath" .= (reviewDir </> "watcher.pid")
+      , "eventsPath" .= (reviewDir </> "events.jsonl")
+      , "threadId" .= ("pr-worker-thread" :: Text)
+      , "reviewerThreadId" .= ("reviewer-thread" :: Text)
+      ]
+
+writeEventsFile :: FilePath -> [WatcherEvent] -> IO ()
+writeEventsFile path events =
+  LazyByteString.Char8.writeFile path (LazyByteString.Char8.unlines (fmap encode events))
 
 withHealthcheckCommandStubs :: IO a -> IO a
 withHealthcheckCommandStubs action =
@@ -302,6 +403,50 @@ textField key value =
   case lookupValue key value of
     Just (String text) -> Just text
     _ -> Nothing
+
+watcherObjects :: Value -> [Value]
+watcherObjects report =
+  case lookupValue "watchers" report of
+    Just (Array watchers) -> Foldable.toList watchers
+    _ -> []
+
+watcherStateText :: Text -> [Text] -> [Value] -> Maybe Text
+watcherStateText kind path watchers =
+  case watcherStateValue kind path watchers of
+    Just (String text) -> Just text
+    _ -> Nothing
+
+watcherStateBool :: Text -> [Text] -> [Value] -> Maybe Bool
+watcherStateBool kind path watchers =
+  case watcherStateValue kind path watchers of
+    Just (Bool bool) -> Just bool
+    _ -> Nothing
+
+watcherStateIsNull :: Text -> [Text] -> [Value] -> Bool
+watcherStateIsNull kind path watchers =
+  watcherStateValue kind path watchers == Just Null
+
+watcherStateValue :: Text -> [Text] -> [Value] -> Maybe Value
+watcherStateValue kind path watchers = do
+  watcher <- firstMatchingWatcher kind watchers
+  states <- lookupValue "states" watcher
+  valueAtTextPath path states
+
+firstMatchingWatcher :: Text -> [Value] -> Maybe Value
+firstMatchingWatcher kind =
+  foldr
+    ( \watcher found ->
+        if lookupValue "kind" watcher == Just (String kind)
+          then Just watcher
+          else found
+    )
+    Nothing
+
+valueAtTextPath :: [Text] -> Value -> Maybe Value
+valueAtTextPath [] value = Just value
+valueAtTextPath (key : rest) value = do
+  child <- lookupValue key value
+  valueAtTextPath rest child
 
 prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork :: Bool
 prop_healthcheckDirtyWarningsOnlyForStoppedLiveWork =

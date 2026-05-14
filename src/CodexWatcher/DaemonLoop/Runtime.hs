@@ -11,7 +11,6 @@ module CodexWatcher.DaemonLoop.Runtime
   ) where
 
 import CodexWatcher.ActionExecutor
-import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon
 import CodexWatcher.DaemonLoop.ActiveTurn qualified as ActiveTurn
 import CodexWatcher.DaemonLoop.TurnStart qualified as TurnStart
@@ -20,8 +19,6 @@ import CodexWatcher.EffectInterpreter
 import CodexWatcher.Effects
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Logging qualified as Log
-import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
-import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.StateMachine (formatPhaseActionValidationError, validatePhaseActionPlan)
 import Data.Aeson ((.=))
@@ -91,12 +88,6 @@ idle executor config replay reason = do
         , "phase" .= Text.pack (show (somePhase replay.replayState))
         ]
     )
-  case config.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions -> pure ()
-    ExecuteActions ->
-      mapM_
-        writeIdleCompatibility
-        (compatibilityStateWrites (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) replay.replayState)
   case validatePhaseActionPlan replay.replayState [SomeEffect SleepUntilNextPoll] of
     Left errorValue ->
       pure (Left (DaemonLoopDaemonFailure (DaemonObservationRejected (formatPhaseActionValidationError errorValue))))
@@ -104,9 +95,6 @@ idle executor config replay reason = do
       let sleepPlan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig [SomeEffect SleepUntilNextPoll]
       reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode sleepPlan
       pure (Right (idleTickResult replay reason reports))
- where
-  writeIdleCompatibility write =
-    runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)
 
 terminalStop
   :: Monad m
@@ -127,12 +115,6 @@ terminalStop executor config replay reason = do
         , "phase" .= Text.pack (show (somePhase replay.replayState))
         ]
     )
-  case config.loopDaemonOptions.daemonExecutionMode of
-    DryRunActions -> pure ()
-    ExecuteActions ->
-      mapM_
-        writeTerminalCompatibility
-        (compatibilityStateWrites (runtimeStateDirPath config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir) replay.replayState)
   case validatePhaseActionPlan replay.replayState [SomeEffect StopDaemon] of
     Left errorValue ->
       pure (Left (DaemonLoopDaemonFailure (DaemonObservationRejected (formatPhaseActionValidationError errorValue))))
@@ -140,6 +122,3 @@ terminalStop executor config replay reason = do
       let stopPlan = compileEffectPlan config.loopDaemonOptions.daemonRuntimeConfig [SomeEffect StopDaemon]
       reports <- executeCompiledEffectPlan executor config.loopDaemonOptions.daemonExecutionMode stopPlan
       pure (Right (idleTickResult replay reason reports))
- where
-  writeTerminalCompatibility write =
-    runtimeWriteJsonValue (actionRuntime executor) (compatibilityWritePath write) (compatibilityWriteValue write)

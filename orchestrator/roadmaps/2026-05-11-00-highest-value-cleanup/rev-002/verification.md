@@ -22,22 +22,24 @@ public API, fixture, docs, or behavior surface changed.
   this revision is activated.
 - Confirm no round treats preferred-import guidance, import reduction, a
   terminal hold, or local absence of users as deprecation or removal approval.
-- Confirm `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
+- Confirm removed public wrappers
+  `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
   `CodexWatcher.Workflow.EventLog`, and
-  `CodexWatcher.Workflow.Permission` remain available and exposed until an
-  exact reviewed gate names the surface.
+  `CodexWatcher.Workflow.Permission` have no remaining source/app/test imports,
+  no main-library exposed-module entries, and docs/policy that point at direct
+  owner modules.
 - Confirm milestone 003 reviews production `Core.Ids` users only, separating
   tests, docs, `moifold.cabal`, and `src/CodexWatcher/Core/Ids.hs` from the
   production burndown scan.
 - Confirm milestone 004 reviews test/fixture `Core.Ids` users only, and
   classifies intentional policy evidence imports instead of forcing fake
   migrations.
-- Confirm milestone 005 moves or classifies concrete `Workflow.EventLog` and
-  `Workflow.Permission` bridge/facade uses without changing public facade
-  exposure, Cabal exposure, docs, or event/permission behavior unless selected.
-- Confirm milestone 006 handles `CodexWatcher.AppServerClient` public facade,
-  Cabal, docs, and policy cleanup only after current scans and exact public
-  surface decisions are reviewed.
+- Confirm milestone 005 moved concrete `Workflow.EventLog` and
+  `Workflow.Permission` bridge/facade uses to direct owner modules without
+  changing event/permission behavior.
+- Confirm milestone 006 removed `CodexWatcher.AppServerClient` public facade,
+  Cabal exposure, docs, and policy references only after current scans proved
+  no source/app/test users.
 - Confirm compatibility files keep current names and meanings until fixture,
   old-log, repair, healthcheck, write-timing, operator/downstream, and behavior
   evidence approves an exact migration or removal.
@@ -49,6 +51,27 @@ public API, fixture, docs, or behavior surface changed.
   are removed cleanly or migrated away from supported compatibility paths. Any
   kept, deferred, blocked, or hold-only compatibility surface requires roadmap
   milestone expansion, not terminal `done`.
+- Confirm `completion-audit.md` maps the user objective to concrete artifact,
+  scan, build, test, and runtime-file evidence before any terminal closeout
+  claim.
+- Confirm downstream runtime-file direct-reader inventory is current before
+  removing or renaming `issue-state.json`, `daemon-state.json`,
+  `planner-state.json`, PR-review state files, or `block-state.json`.
+- Confirm the read-only downstream replacement path remains guarded by
+  `healthcheckRuntimeStateMigrationContractTests` before claiming health/status
+  consumers can move from direct file reads to `moifold healthcheck`.
+- Confirm any downstream daemon migration claim names the exact downstream
+  scripts, proves they delegate to Haskell `moifold run-*` commands, and
+  validates generated initial event logs with current Haskell replay.
+- Confirm local runtime-file candidate decisions remain guarded by
+  `localRuntimeFileCandidateDecisionTest` before claiming
+  `planning-state.json`, `repair-state.json`, `runtime-owner.json`, or
+  live `issue-snapshot.json` have exact removed/keep status.
+- Confirm any local compatibility-file writer migration proves normal execute
+  paths append event logs without writing `issue-state.json`,
+  `daemon-state.json`, `planner-state.json`, PR-review state files, or normal
+  `block-state.json`; pure healthcheck/reporting projections do not count as
+  file writers.
 
 ## Task-Specific Checks
 
@@ -59,10 +82,10 @@ Reviewers should require focused checks matching the selected surface:
   broad remaining-user scan over `src`, `app`, `test`, docs, package
   descriptors, and standalone package candidates; record remaining production
   users separately from tests, docs, Cabal, and the public facade module.
-- For `EventLog.Types`, `GoldenReplay`, or replay-adjacent import changes:
-  verify golden replay, event JSON `type` stability, schema compatibility,
-  old-log parsing, transition/replay parity, and selected-file direct-owner
-  imports.
+- For `EventLog.Types` or replay-adjacent import/fixture changes: verify event
+  JSON `type` stability, schema compatibility, old-log parsing,
+  transition/replay parity, selected-file direct-owner imports, and any
+  bootstrapped event-log fixture coverage that replaces removed snapshots.
 - For `Runtime.Compatibility` or `Healthcheck` import changes: verify current
   runtime compatibility file names, fixture shapes, healthcheck reader/non-reader
   contracts, summary paths, write timing, repair boundaries, and selected-file
@@ -114,6 +137,24 @@ Reviewers should require focused checks matching the selected surface:
 - For roadmap expansion, verify the update names new milestones,
   dependencies, verification gates, and why the work could not be represented
   by existing pending milestones.
+- For downstream runtime-file migration, verify the exact downstream repository
+  and file readers, the replacement read path or product-contract retention
+  decision, and focused validation for both moifold and downstream behavior.
+- For the `moifold healthcheck` replacement path, verify the report preserves
+  the documented `watchers[].states.*` mapping for planner, issue implementer,
+  and PR review state files.
+- For downstream daemon migration shims, verify the scripts no longer directly
+  read or write the legacy runtime files, fake-launcher smoke checks cover each
+  daemon script, and Haskell `moifold replay-events` accepts the initialized
+  event logs produced by the shims.
+- For local runtime-file candidates, verify the decision artifact names each
+  selected file, records `defer` or `keep-as-product`, and is backed by
+  source/fixture tests for writer paths, non-reader contracts, and replacement
+  gates.
+- For local compatibility-file writer removal, run a production source scan for
+  stale writer functions and stale `PlannedWriteJson` compatibility outputs,
+  and keep separate any retained product files or diagnostics such as
+  `repair-state.json`, `runtime-owner.json`, and live `issue-snapshot.json`.
 
 ## Roadmap Overrides
 

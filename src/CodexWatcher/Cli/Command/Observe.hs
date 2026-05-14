@@ -50,7 +50,7 @@ observeOnce cli = do
     Right tick -> do
       putStrLn ("event: " <> show tick.daemonObservedEvent)
       putStrLn ("phase: " <> show (somePhase tick.daemonObservedState))
-      putStrLn ("compatibility writes: " <> show (length tick.daemonObservedCompatibilityWrites))
+      putStrLn ("compatibility projections: " <> show (length tick.daemonObservedCompatibilityWrites))
       putStrLn ("actions: " <> show (length tick.daemonObservedActionReports))
       putStrLn ("mode: " <> show options.daemonExecutionMode)
 

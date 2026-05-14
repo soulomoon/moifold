@@ -67,7 +67,7 @@ still passes. Current validation results are recorded below.
 | Descriptor metadata/exposed-modules/build-depends scan | Passed | All three descriptors record `version: 0.1.0.0`, `license: MIT`, `author: soulomoon`, `maintainer: soulomoon`, `category: Development`, and `source-repository head` at `https://github.com/soulomoon/moifold.git`; exposed modules and dependency sets are package-specific. |
 | Package boundary tests present | Passed | `test/Main.hs` contains `workflowCabalProjectListsStandaloneWorkflowPackages`, `workflowMoifoldCabalConsumesStandaloneWorkflowPackages`, `workflowCoreStandalonePackageKeepsPackageBoundary`, `workflowCodexStandalonePackageKeepsPackageBoundary`, `workflowGithubStandalonePackageKeepsPackageBoundary`, and `workflowMoifoldCabalLibraryDoesNotReexportAdapters`. |
 | Reusable package forbidden-import scans | Passed | The required `rg` scans returned no matches for forbidden moifold lifecycle/runtime imports in `agent-workflow-core/src`, `agent-workflow-codex/src`, and `agent-workflow-github/src`. |
-| Compatibility facade scan | Passed | `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.Types`, `Workflow.EventLog`, `Workflow.Execution`, and `Workflow.Permission` remain available as moifold-facing compatibility surfaces. |
+| Compatibility facade scan | Passed | The main `moifold` library no longer exposes `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, or `CodexWatcher.Workflow.Permission`; `CodexWatcher.Workflow.Types` and `CodexWatcher.Workflow.Execution` remain available as moifold-facing product surfaces. |
 | `scripts/validate-workflow-packages.sh` | Passed | Ran `cabal check` for all three packages, generated local sdists, verified package roots and Cabal descriptors, and ended with `No upload or package publication command was run.` |
 | `cabal build all` | Passed | Built `agent-workflow-core`, `agent-workflow-github`, `agent-workflow-codex`, the `moifold` library, and `exe:moifold` with GHC 9.12.2. |
 | `cabal test watcher-core-test` | Passed | Built and ran the suite; Cabal reported `Test suite watcher-core-test: PASS` and `1 of 1 test suites (1 of 1 test cases) passed.` |
@@ -96,7 +96,7 @@ These artifacts are local evidence only.
 | Docs and Haddock | `agent-workflow-core/README.md` documents the workflow-kernel thesis, architecture, guarantees, non-goals, and evidence links. Haddock generated HTML for the package, with missing per-export documentation still reported. |
 | Changelog and release-note evidence | `docs/agentic-workflow-framework/changelog.md` and `release-notes.md` describe the local `0.1.0.0` core candidate, pre-1.0 status, metadata, validation path, and moifold-owned exclusions. |
 | Consumer validation | The consumer example uses `WorkflowSpec`, `workflowPlanObservation`, `WorkflowM`, `advance`, `emit`, and transition helpers; the run printed `observation -> event=review-accepted, effects=record-decision` and matching DSL output. |
-| Compatibility and deprecation notes | Core package APIs are preferred for reusable consumers. Moifold-facing facades such as `CodexWatcher.Workflow.Types`, `Workflow.EventLog`, `Workflow.Execution`, and `Workflow.Permission` remain compatibility surfaces and are not removed by this bundle. |
+| Compatibility and deprecation notes | Core package APIs are preferred for reusable consumers. `CodexWatcher.Workflow.EventLog` and `CodexWatcher.Workflow.Permission` have been removed from the main public surface; `CodexWatcher.Workflow.Types` and `Workflow.Execution` remain moifold product-facing surfaces. |
 | Remaining follow-ups | Terminal gate should decide whether the current per-export Haddock gaps are acceptable for the intended release, and should rerun the current validation path immediately before any publication action. |
 
 ## `agent-workflow-codex`
@@ -110,7 +110,7 @@ These artifacts are local evidence only.
 | Docs and Haddock | `agent-workflow-codex/README.md` documents the Codex adapter boundary, request construction, typed ids/plans, transport helpers, and non-goals. Haddock generated HTML, with missing per-export documentation and link warnings still reported. |
 | Changelog and release-note evidence | `changelog.md` and `release-notes.md` describe the local `0.1.0.0` Codex candidate, pre-1.0 status, dependency on core, adapter scope, compatibility status, and moifold-owned exclusions. |
 | Consumer validation | The consumer example constructs `thread/start`, `turn/start`, and `thread/read` JSON-RPC requests through package-facing APIs. The run printed request ids 1, 2, and 3 plus JSON payloads. |
-| Compatibility and deprecation notes | `CodexWatcher.AppServerClient` remains a moifold-owned compatibility facade over `CodexWatcher.Workflow.Agent.Codex.Client` and `CodexWatcher.Workflow.Agent.Codex.Transport`; no deprecation pragma, import migration requirement, or facade removal is part of this bundle. |
+| Compatibility and deprecation notes | `CodexWatcher.AppServerClient` has been removed from the main public surface. Consumers should import `CodexWatcher.Workflow.Agent.Codex.Client` and `CodexWatcher.Workflow.Agent.Codex.Transport` directly. |
 | Remaining follow-ups | Terminal gate should classify the Haddock gaps, verify hosted CI, and confirm that app-server startup policy, prompts, structured-output acceptance, and lifecycle routing remain moifold-owned in final wording. |
 
 ## `agent-workflow-github`
@@ -134,9 +134,8 @@ The following remain moifold-owned and outside reusable package promises:
 - concrete `WatcherEvent` values, event JSON `type` fields, schema version
   policy, event codecs, and golden replay logs;
 - compatibility files and compatibility facade lifecycle policy, including
-  `issue-state.json`, `daemon-state.json`, `planning-state.json`, PR URL/state
-  files, block state, repair state, runtime owner files, and compatibility
-  snapshots;
+  `issue-state.json`, `daemon-state.json`, PR URL/state files, block state,
+  repair state, and runtime owner files;
 - issue planning, issue implementation, PR review, merge readiness, review
   publication, child fanout, terminal-state lifecycle choices, and operator
   runbooks;
@@ -150,7 +149,8 @@ The following remain moifold-owned and outside reusable package promises:
 
 The current boundary scans and `watcher-core-test` coverage support this split:
 reusable package source trees do not import forbidden moifold lifecycle/runtime
-modules, and compatibility facades remain available in the main moifold library.
+modules, and removed compatibility wrappers are no longer exposed by the main
+moifold library.
 
 ## Remaining Blockers For The Publication Gate
 

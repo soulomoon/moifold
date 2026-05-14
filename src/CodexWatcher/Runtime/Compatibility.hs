@@ -8,7 +8,6 @@
 module CodexWatcher.Runtime.Compatibility
   ( CompatibilityWrite (..)
   , compatibilityStateWrites
-  , writeCompatibility
   ) where
 
 import CodexWatcher.Core.Limits (MaxParallel (..))
@@ -26,7 +25,6 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceThreadIds
   )
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
-import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.TurnOutput (reviewerPromptVersion)
 import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.GitHub.Ids
@@ -37,7 +35,7 @@ import CodexWatcher.Workflow.GitHub.Ids
   , RepoName (..)
   , ReviewThreadId (..)
   )
-import Data.Aeson (Value (..), object, toJSON, (.=))
+import Data.Aeson (Value (..), object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
@@ -47,10 +45,6 @@ data CompatibilityWrite = CompatibilityWrite
   , compatibilityWriteValue :: Value
   }
   deriving stock (Eq, Show)
-
-writeCompatibility :: RuntimeInterpreter m -> CompatibilityWrite -> m ()
-writeCompatibility interpreter write =
-  interpreter.runtimeWriteJsonValue write.compatibilityWritePath write.compatibilityWriteValue
 
 compatibilityStateWrites :: FilePath -> SomeWatcherState -> [CompatibilityWrite]
 compatibilityStateWrites stateDir state =
@@ -63,9 +57,8 @@ compatibilityStateWrites stateDir state =
       [ write "planner-state.json" (plannerStateJson config "active")
       , write "daemon-state.json" (activeDaemonJson "plan" activeTurn)
       ]
-    SomeWatcherState (PlanningWaitingForReadyIssues config graph) ->
+    SomeWatcherState (PlanningWaitingForReadyIssues config _graph) ->
       [ write "planner-state.json" (plannerStateJson config "waiting_ready_issues")
-      , write "planning-state.json" (toJSON graph)
       , write "daemon-state.json" idleDaemonJson
       ]
     SomeWatcherState (IssueReadyToPlan config prNumber (WorkerIdle _threadId)) ->

@@ -8,7 +8,6 @@
 
 module CodexWatcher.EventLogRepair
   ( EventLogRepairPlan (..)
-  , repairFailureBlockStateJson
   , repairIssueImplementEventLog
   ) where
 
@@ -18,7 +17,6 @@ import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDo
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Workflow.Agent.Ids (TurnId (..))
 import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), PrNumber (..))
-import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Generics (Generic)
@@ -223,15 +221,4 @@ recoveryReason failure action =
     , "failedEventIndex=" <> Text.pack (show failure.eventIndex)
     , "failedEvent=" <> eventName failure.event
     , "reason=" <> failure.reason
-    ]
-
-repairFailureBlockStateJson :: ReplayFailure -> Value
-repairFailureBlockStateJson failure =
-  object
-    [ "blocked" .= True
-    , "blockedKind" .= ("invalid_event_log" :: Text)
-    , "reason" .= failure.reason
-    , "eventIndex" .= failure.eventIndex
-    , "eventType" .= eventName failure.event
-    , "event" .= failure.event
     ]

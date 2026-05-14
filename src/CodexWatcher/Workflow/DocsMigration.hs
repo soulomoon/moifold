@@ -71,6 +71,7 @@ import CodexWatcher.Workflow.Codec
   )
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.DSL qualified as WorkflowDSL
+import CodexWatcher.Workflow.DocsMigration.Types
 import CodexWatcher.Workflow.EventLog.Core
   ( EventLogFixtureContract (..)
   , WorkflowReplaySummary (..)
@@ -100,7 +101,7 @@ import CodexWatcher.Workflow.Transaction.Core
   , runWorkflowObservedDryRunTransaction
   , runWorkflowObservedExecuteTransaction
   )
-import Data.Aeson (FromJSON (..), Value (..), eitherDecodeStrict', object, (.:), (.:?), (.=), (.!=), withObject)
+import Data.Aeson (Value (..), eitherDecodeStrict', object, (.:), (.:?), (.=), (.!=), withObject)
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types (Pair, Parser, parseEither)
 import Data.List qualified as List
@@ -110,139 +111,7 @@ import Data.Text.Encoding qualified as Text.Encoding
 
 data DocsMigrationSpec
 
-data DocsMigrationIndexedWorkflow
-
-data DocsMigrationIndexedUninitialized
-
-data DocsMigrationIndexedReady
-
-data DocsMigrationIndexedTurnActive
-
-data DocsMigrationIndexedDraftReady
-
-data DocsMigrationIndexedValidated
-
-data DocsMigrationIndexedComplete
-
-data DocsMigrationIndexedBlocked
-
-newtype DocsMigrationIndexedState state =
-  DocsMigrationIndexedState
-    { docsMigrationIndexedStateValue :: DocsMigrationState
-    }
-  deriving stock (Eq, Show)
-
-data DocsMigrationIndexedEvent source target = DocsMigrationIndexedEvent
-  { docsMigrationIndexedEventSourceLabel :: Text
-  , docsMigrationIndexedEventTargetLabel :: Text
-  , docsMigrationIndexedEventValue :: DocsMigrationEvent
-  }
-  deriving stock (Eq, Show)
-
-data DocsMigrationIndexedObservation source target = DocsMigrationIndexedObservation
-  { docsMigrationIndexedObservationSourceLabel :: Text
-  , docsMigrationIndexedObservationTargetLabel :: Text
-  , docsMigrationIndexedObservationValue :: DocsMigrationObservation
-  }
-  deriving stock (Eq, Show)
-
-data DocsMigrationIndexedObservedTick source target = DocsMigrationIndexedObservedTick
-  { docsMigrationIndexedObservedTickSourceLabel :: Text
-  , docsMigrationIndexedObservedTickTargetLabel :: Text
-  , docsMigrationIndexedObservedTickValue :: DocsMigrationTick
-  }
-  deriving stock (Eq, Show)
-
-newtype DocsMigrationIndexedEffect source target =
-  DocsMigrationIndexedEffect
-    { docsMigrationIndexedEffectValue :: DocsMigrationEffect
-    }
-  deriving stock (Eq, Show)
-
-newtype DocsMigrationIndexedEffectPlan source target =
-  DocsMigrationIndexedEffectPlan
-    { docsMigrationIndexedEffectPlanValues :: [DocsMigrationEffect]
-    }
-  deriving stock (Eq, Show)
-
-newtype DocsMigrationIndexedReplayResult state =
-  DocsMigrationIndexedReplayResult
-    { docsMigrationIndexedReplayValue :: DocsMigrationReplayResult
-    }
-  deriving stock (Eq, Show)
-
 type instance IndexedWorkflow.WorkflowIndex DocsMigrationSpec = DocsMigrationIndexedWorkflow
-
-data DocsMigrationConfig = DocsMigrationConfig
-  { docsMigrationSource :: FilePath
-  , docsMigrationTarget :: FilePath
-  , docsMigrationGoal :: Text
-  }
-  deriving stock (Eq, Show)
-
-data DocsMigrationOutput = DocsMigrationOutput
-  { docsMigrationOutputDraft :: Text
-  , docsMigrationOutputSummary :: Text
-  }
-  deriving stock (Eq, Show)
-
-instance FromJSON DocsMigrationOutput where
-  parseJSON =
-    withObject "DocsMigrationOutput" $ \objectValue ->
-      DocsMigrationOutput
-        <$> objectValue .: "draft_markdown"
-        <*> objectValue .:? "summary" .!= "docs migration draft produced"
-
-data DocsMigrationState
-  = DocsMigrationReady DocsMigrationConfig
-  | DocsMigrationTurnActive DocsMigrationConfig (TurnRef () DocsMigrationOutput)
-  | DocsMigrationDraftReady DocsMigrationConfig Text
-  | DocsMigrationValidated DocsMigrationConfig Text
-  | DocsMigrationComplete Text
-  | DocsMigrationBlocked Text
-  deriving stock (Eq, Show)
-
-data DocsMigrationEvent
-  = DocsMigrationInitialized DocsMigrationConfig
-  | DocsMigrationTurnStarted ThreadId TurnId
-  | DocsMigrationDraftProduced Text Text
-  | DocsMigrationValidationPassed Text
-  | DocsMigrationWorkflowBlocked Text
-  | DocsMigrationWorkflowCompleted Text
-  deriving stock (Eq, Show)
-
-data DocsMigrationObservation
-  = DocsMigrationAgentReturned (ClassifiedAgentOutput DocsMigrationOutput)
-  | DocsMigrationValidationReturned Bool Text
-  deriving stock (Eq, Show)
-
-data DocsMigrationEffect
-  = StartDocsMigrationTurn DocsMigrationConfig
-  | WriteDocsMigrationDraft FilePath Text
-  | RunDocsMigrationValidation FilePath
-  | StopDocsMigrationDaemon
-  deriving stock (Eq, Show)
-
-data DocsMigrationAction
-  = StartDocsMigrationTurnAction DocsMigrationConfig
-  | WriteDocsMigrationDraftAction FilePath Text
-  | RunDocsMigrationValidationAction FilePath
-  | StopDocsMigrationDaemonAction
-  deriving stock (Eq, Show)
-
-data DocsMigrationActionReport = DocsMigrationActionReport
-  { docsMigrationActionReportMode :: ActionExecutionMode
-  , docsMigrationActionReportAction :: DocsMigrationAction
-  , docsMigrationActionReportExecuted :: Bool
-  }
-  deriving stock (Eq, Show)
-
-data DocsMigrationInterpreter m = DocsMigrationInterpreter
-  { docsMigrationStartTurn :: DocsMigrationConfig -> m ()
-  , docsMigrationWriteDraft :: FilePath -> Text -> m ()
-  , docsMigrationRunValidation :: FilePath -> m ()
-  , docsMigrationStopDaemon :: m ()
-  }
 
 data DocsMigrationDaemonTickResult = DocsMigrationDaemonTickResult
   { docsMigrationDaemonPriorReplay :: DocsMigrationReplayResult
@@ -252,19 +121,6 @@ data DocsMigrationDaemonTickResult = DocsMigrationDaemonTickResult
   , docsMigrationDaemonCompiledEffects :: WorkflowCompiledEffectPlanOf DocsMigrationEffect DocsMigrationAction
   , docsMigrationDaemonActionReports :: [DocsMigrationActionReport]
   , docsMigrationDaemonAudit :: WorkflowTickAudit DocsMigrationSpec FailureClassification DocsMigrationActionReport
-  }
-  deriving stock (Eq, Show)
-
-data DocsMigrationTick = DocsMigrationTick
-  { docsMigrationTickEvent :: DocsMigrationEvent
-  , docsMigrationTickState :: DocsMigrationState
-  , docsMigrationTickEffects :: [DocsMigrationEffect]
-  }
-  deriving stock (Eq, Show)
-
-data DocsMigrationReplayResult = DocsMigrationReplayResult
-  { docsMigrationReplayState :: DocsMigrationState
-  , docsMigrationReplayEffects :: [[DocsMigrationEffect]]
   }
   deriving stock (Eq, Show)
 

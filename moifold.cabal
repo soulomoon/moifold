@@ -30,7 +30,6 @@ library
   hs-source-dirs:   src
   exposed-modules:
     CodexWatcher.ActionExecutor
-    CodexWatcher.AppServerClient
     CodexWatcher.AutomaticLoop.Runner
     CodexWatcher.ChildDaemon
     CodexWatcher.Cli.Command.AppServerProbe
@@ -43,7 +42,6 @@ library
     CodexWatcher.Cli.Parser
     CodexWatcher.Cli.RuntimeConfig
     CodexWatcher.Cli.Types
-    CodexWatcher.Core.Ids
     CodexWatcher.Core.Kinds
     CodexWatcher.Core.Limits
     CodexWatcher.Core.Reason
@@ -80,7 +78,6 @@ library
     CodexWatcher.EventLogRepair
     CodexWatcher.Failure
     CodexWatcher.GhGit
-    CodexWatcher.GoldenReplay
     CodexWatcher.Healthcheck
     CodexWatcher.Healthcheck.Analysis
     CodexWatcher.Healthcheck.Types
@@ -105,7 +102,6 @@ library
     CodexWatcher.Runtime.Process
     CodexWatcher.Runtime.WatcherPaths
     CodexWatcher.RunnerGuard
-    CodexWatcher.Snapshot
     CodexWatcher.StateMachine
     CodexWatcher.Supervisor
     CodexWatcher.Turn.Classifier.Common
@@ -113,7 +109,6 @@ library
     CodexWatcher.WatcherLiveness
     CodexWatcher.WatcherRuntimeStatus
     CodexWatcher.Workflow.DocsMigration
-    CodexWatcher.Workflow.EventLog
     CodexWatcher.Workflow.Execution
     CodexWatcher.Workflow.Moifold.IssueImplement.Indexed
     CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed
@@ -125,7 +120,6 @@ library
     CodexWatcher.Workflow.Moifold.PrReview.Reviewer.Indexed
     CodexWatcher.Workflow.Moifold.PrReview.Worker.Indexed
     CodexWatcher.Workflow.Observation
-    CodexWatcher.Workflow.Permission
     CodexWatcher.Workflow.Types
   other-modules:
     CodexWatcher.AutomaticLoop.IssuePlanningFanout
@@ -141,6 +135,11 @@ library
     CodexWatcher.Cli.Parser.Observe
     CodexWatcher.Cli.Parser.Repair
     CodexWatcher.Cli.Parser.Service
+    CodexWatcher.Daemon.Types
+    CodexWatcher.EventLog.Types.Core
+    CodexWatcher.TurnOutput.Schema
+    CodexWatcher.Workflow.DocsMigration.Types
+    CodexWatcher.Workflow.Moifold.IssueImplement.Indexed.Types
   build-depends:
     aeson >=2.2 && <3,
     base >=4.18 && <5,

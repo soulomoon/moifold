@@ -28,7 +28,6 @@ import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
-import CodexWatcher.Runtime.Compatibility
 import CodexWatcher.Daemon (appendWatcherEvent)
 import CodexWatcher.EventLog.Types
 import CodexWatcher.Failure (transientFailureText)
@@ -336,7 +335,6 @@ writeIssueImplementerLaunch launch = do
   createDirectoryIfMissing True launch.launchStateDir
   writeJsonValue launch.launchConfigPath launch.launchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.launchEventsPath launch.launchInitialEvent
-  mapM_ (writeCompatibility ioRuntimeInterpreter) launch.launchCompatibilityWrites
   putStrLn ("wrote issue implementer " <> show (unIssueNumber (launchIssueNumber launch)) <> " to " <> launch.launchStateDir)
 
 writeIssueImplementerLaunchPending :: IssueImplementerChildLaunch -> IssueImplementerLaunchPlan -> IO ()

@@ -29,11 +29,11 @@ rg -n "^import CodexWatcher\.(AppServerClient|ActionExecutor|ChildDaemon|Daemon|
 rg -n "^import CodexWatcher\.(AppServer|AppServerClient|AppServerProtocol|ChildDaemon|Cli|Core|Daemon|DaemonLoop|Domain|EffectInterpreter|Effects|EventLog|EventLogRepair|GhGit|Healthcheck|Json|Logging|Observation|Runtime|StateMachine|Supervisor|Turn|TurnOutput|Watcher|Workflow\.Agent|Workflow\.Daemon|Workflow\.EventLog|Workflow\.Execution|Workflow\.Moifold|Workflow\.Observation|Workflow\.Permission|Workflow\.Transaction|Workflow\.Types)" agent-workflow-github/src
 ```
 
-Compatibility-facade scans:
+Compatibility-surface scans:
 
 ```sh
-rg -n "^module CodexWatcher\.(AppServerClient|Workflow\.(EventLog|Execution|Permission|Types))|import CodexWatcher\.Workflow\.(Agent\.Codex\.(Client|Transport)|EventLog\.Core|Execution\.Core|Permission\.Core|Spec)" src/CodexWatcher/AppServerClient.hs src/CodexWatcher/Workflow/EventLog.hs src/CodexWatcher/Workflow/Execution.hs src/CodexWatcher/Workflow/Permission.hs src/CodexWatcher/Workflow/Types.hs
-rg -n "workflowMoifoldCabalLibraryDoesNotReexportAdapters|workflowFacadeReplayMatchesEventLog|workflowPermissionFacadeMatchesStateMachine|workflowExecutionFacadeDryRunMatchesExecutor|workflowPrReviewCheckingFacadeMatchesWatcher|workflowPrReviewMergeabilityFacadeMatchesWatcher" test/Main.hs
+rg -n "CodexWatcher\.(AppServerClient|Core\.Ids|Workflow\.EventLog|Workflow\.Permission)" moifold.cabal src app test
+rg -n "workflowMoifoldCabalLibraryDoesNotReexportAdapters|workflowDirectOwnerReplayMatchesEventLog|workflowPermissionSpecMatchesStateMachine|workflowExecutionFacadeDryRunMatchesExecutor|workflowPrReviewCheckingFacadeMatchesWatcher|workflowPrReviewMergeabilityFacadeMatchesWatcher" test/Main.hs test/FacadeImportPolicySpec.hs
 rg -n "compatibilityStateWrites|writeCompatibility|issue-state\.json|daemon-state\.json|planning-state\.json|block-state|repair-state|runtime-owner" src/CodexWatcher/Runtime/Compatibility.hs src/CodexWatcher/Cli/Command/Replay.hs src/CodexWatcher/Cli/Command/Observe.hs src/CodexWatcher/AutomaticLoop/Runner.hs src/CodexWatcher/AutomaticLoop/IssuePlanningFanout.hs src/CodexWatcher/AutomaticLoop/StartupThreads.hs src/CodexWatcher/AutomaticLoop/PrReviewHandoff.hs docs/agentic-workflow-framework/compatibility-deprecation-policy.md
 ```
 
@@ -127,36 +127,38 @@ The helpers `sourceFilesUnder`, `sourceModulesUnder`,
 package source trees recursively rather than relying on a hand-listed source
 subset.
 
-## Compatibility Facade Evidence
+## Compatibility Surface Evidence
 
-The compatibility facade scan confirms that the existing moifold import paths
-remain available:
+The compatibility scan confirms that the removed public wrappers no longer
+carry reusable-package access:
 
 ```text
-src/CodexWatcher/AppServerClient.hs imports CodexWatcher.Workflow.Agent.Codex.Client
-src/CodexWatcher/AppServerClient.hs imports CodexWatcher.Workflow.Agent.Codex.Transport
-src/CodexWatcher/Workflow/EventLog.hs imports CodexWatcher.Workflow.EventLog.Core
-src/CodexWatcher/Workflow/Execution.hs imports CodexWatcher.Workflow.Execution.Core
-src/CodexWatcher/Workflow/Permission.hs imports CodexWatcher.Workflow.Permission.Core
-src/CodexWatcher/Workflow/Types.hs imports CodexWatcher.Workflow.Spec
+CodexWatcher.AppServerClient is not exposed by moifold.cabal
+CodexWatcher.Core.Ids is not exposed by moifold.cabal
+CodexWatcher.Workflow.EventLog is not exposed by moifold.cabal
+CodexWatcher.Workflow.Permission is not exposed by moifold.cabal
+src/CodexWatcher/Workflow/Execution.hs still imports CodexWatcher.Workflow.Execution.Core
+src/CodexWatcher/Workflow/Types.hs still imports CodexWatcher.Workflow.Spec
 ```
 
-`test/Main.hs` still asserts the facade and adapter boundary contracts:
+`test/Main.hs` and `test/BoundaryPolicySpec.hs` assert the direct owner and
+adapter boundary contracts:
 
 - `workflowMoifoldCabalLibraryDoesNotReexportAdapters`
-- `workflowFacadeReplayMatchesEventLog`
-- `workflowPermissionFacadeMatchesStateMachine`
+- `workflowDirectOwnerReplayMatchesEventLog`
+- `workflowPermissionSpecMatchesStateMachine`
 - `workflowExecutionFacadeDryRunMatchesExecutor`
 - `workflowPrReviewCheckingFacadeMatchesWatcher`
 - `workflowPrReviewMergeabilityFacadeMatchesWatcher`
 
-Compatibility file ownership remains in moifold. The scan found
-`compatibilityStateWrites` and `writeCompatibility` in
-`src/CodexWatcher/Runtime/Compatibility.hs`, plus call sites in replay,
-automatic-loop startup, issue planning fanout, and PR review handoff paths.
-The policy doc still names compatibility files such as `issue-state.json`,
-`daemon-state.json`, `planning-state.json`, and PR URL/state files as moifold
-compatibility promises.
+Compatibility file ownership remains in moifold. As of the 2026-05-14 cleanup,
+`src/CodexWatcher/Runtime/Compatibility.hs` exposes pure
+`compatibilityStateWrites` projections for healthcheck/reporting, and the old
+`writeCompatibility` runtime writer plus replay/startup/fanout/PR-handoff
+writer call sites have been removed. The policy doc names the remaining
+runtime-state surfaces as moifold-owned migration or product-retention issues,
+not reusable package promises; the obsolete `planning-state.json` graph
+projection has been removed.
 
 ## Package Validation Output
 

@@ -788,10 +788,10 @@ githubForbiddenOwnershipTokens =
 workflowMoifoldCabalLibraryDoesNotReexportAdapters :: IO Bool
 workflowMoifoldCabalLibraryDoesNotReexportAdapters = do
   cabalSource <- Text.pack <$> readFile "moifold.cabal"
-  appServerCompatibilitySource <- Text.pack <$> readFile ("src" </> "CodexWatcher" </> "AppServerClient.hs")
   let mainLibrarySection = cabalComponentSection "library" cabalSource
       adapterModuleNeedles =
-        [ "CodexWatcher.AppServerProtocol"
+        [ "CodexWatcher.AppServerClient"
+        , "CodexWatcher.AppServerProtocol"
         , "CodexWatcher.Workflow.Agent"
         , "CodexWatcher.Workflow.Agent.Codex"
         , "CodexWatcher.Workflow.Agent.Codex.Protocol"
@@ -811,11 +811,7 @@ workflowMoifoldCabalLibraryDoesNotReexportAdapters = do
           ]
       mainLibraryDoesNotOwnAppServerTransport =
         not ("websockets" `Text.isInfixOf` mainLibrarySection)
-          && "import CodexWatcher.Workflow.Agent.Codex.Transport" `Text.isInfixOf` appServerCompatibilitySource
-          && "import CodexWatcher.Workflow.Agent.Codex.Client" `Text.isInfixOf` appServerCompatibilitySource
-          && not ("Network.WebSockets" `Text.isInfixOf` appServerCompatibilitySource)
-          && not ("data AppServerEndpoint" `Text.isInfixOf` appServerCompatibilitySource)
-          && not ("newtype AppServerConnection" `Text.isInfixOf` appServerCompatibilitySource)
+          && not ("CodexWatcher.AppServerClient" `Text.isInfixOf` mainLibrarySection)
   assert
     "main moifold library does not reexport workflow adapter modules or own app-server transport"
     (noAdapterReexports && keepsAdapterDependencies && mainLibraryDoesNotOwnAppServerTransport)

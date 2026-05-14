@@ -35,9 +35,10 @@ Cabal exposure removal, or facade removal.
 - If fixture coverage is incomplete for a runtime compatibility cleanup, keep
   the round on fixture/test work or record the missing gate. Do not proceed to
   runtime-state cleanup.
-- If `planner-state.json` and `planning-state.json` semantics become
-  ambiguous, require an explicit contract artifact and focused tests before
-  allowing a rename, deletion, or healthcheck behavior change.
+- If `planner-state.json` summary/status semantics or the removed
+  `planning-state.json` graph-projection decision become ambiguous, require an
+  explicit contract artifact and focused tests before allowing a rename,
+  restoration, deletion, or healthcheck behavior change.
 - If a large-module split creates import cycles, mixed ownership, or behavior
   drift, narrow the split or return to tests before retrying.
 - If deprecation or removal approval is missing, the lawful result is keep,

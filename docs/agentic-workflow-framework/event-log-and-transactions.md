@@ -78,7 +78,7 @@ repairing bad logs are concrete workflow or moifold responsibilities.
 - `EventLogFixtureContract` validates expected final state label and optional
   event count.
 
-Replay is pure. It does not read files, write compatibility snapshots, execute
+Replay is pure. It does not read files, write compatibility files, execute
 actions, call GitHub, or inspect app-server state.
 
 ## Commit Boundary
@@ -239,9 +239,9 @@ decisions:
 - Aeson object shapes and golden replay fixture contents;
 - schema migration policy and old-log repair commands;
 - `events.jsonl` path selection, file append locking, and backups;
-- compatibility writes such as `issue-state.json`, `daemon-state.json`,
-  `planning-state.json`, PR URL files, block state, repair state, and runtime
-  owner files;
+- compatibility projections and retained moifold runtime files such as
+  `issue-state.json`, `daemon-state.json`, PR URL fields, block-state
+  diagnostics, repair state, runtime owner files, and live issue snapshots;
 - concrete command execution, process failure interpretation, healthcheck, and
   repair;
 - issue/PR lifecycle choices such as when to merge, close, publish a review, or

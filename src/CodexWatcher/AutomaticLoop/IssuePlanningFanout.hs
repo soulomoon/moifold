@@ -12,7 +12,6 @@ module CodexWatcher.AutomaticLoop.IssuePlanningFanout
 import CodexWatcher.ActionExecutor (ActionExecutionMode (..), ActionExecutor (..))
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint)
 import CodexWatcher.Cli.Types (LoopCli (..))
-import CodexWatcher.Runtime.Compatibility (compatibilityStateWrites, writeCompatibility)
 import CodexWatcher.Daemon (DaemonObservedTickResult (..), appendWatcherEvent)
 import CodexWatcher.DaemonLoop (DaemonLoopTickResult (..))
 import CodexWatcher.EventLog.File (loadEventLogFile)
@@ -301,7 +300,6 @@ blockPlanningFanout executionMode cli planningState reason =
     ExecuteActions -> do
       projection <- applyBlocked planningState
       appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath projection.issuePlanningIndexedProjectionPlanned.plannedEvent
-      mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState)
       putStrLn ("blocked planner fanout: " <> Text.unpack reason.unBlockedReason)
  where
   applyBlocked state =
@@ -326,7 +324,6 @@ markPlanningReadyIssuesFixed executionMode cli planningState =
         SomeWatcherState PlanningWaitingForReadyIssues {} ->
           applyReadyIssuesFixed currentState \projection -> do
             appendWatcherEvent ioRuntimeInterpreter cli.loopCliEventsPath projection.issuePlanningIndexedProjectionPlanned.plannedEvent
-            mapM_ (writeCompatibility ioRuntimeInterpreter) (compatibilityStateWrites cli.loopCliStateDir projection.issuePlanningIndexedProjectionFinalState)
             putStrLn "planner ready issues fixed; re-entering planning"
         other ->
           die

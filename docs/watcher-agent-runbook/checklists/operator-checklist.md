@@ -32,7 +32,8 @@ Before resume:
 - Do not overwrite old `events.jsonl`.
 - Back up state before repair or blocked-tail drop.
 - Prefer `scripts/restart-watcher` over invoking a raw loop command by hand.
-- Check `daemon.log`, `daemon.err.log`, `watcher.log.jsonl`, and `block-state.json` after restart.
+- Check `daemon.log`, `daemon.err.log`, `watcher.log.jsonl`, and
+  `moifold healthcheck` after restart.
 
 Before handing off:
 

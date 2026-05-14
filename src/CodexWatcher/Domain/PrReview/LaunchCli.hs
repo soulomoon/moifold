@@ -17,7 +17,7 @@ import CodexWatcher.ActionExecutor
 import CodexWatcher.AppServerProtocol
 import CodexWatcher.ChildDaemon
 import CodexWatcher.Cli.Types
-import CodexWatcher.Runtime.Compatibility
+import CodexWatcher.Runtime.Compatibility (CompatibilityWrite)
 import CodexWatcher.Workflow.Agent.Codex.Client (formatAppServerClientFailure)
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..), defaultAppServerClientOptions, startThreadWithEndpoint)
 import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..))
@@ -32,8 +32,7 @@ import CodexWatcher.TurnOutput (prReviewThreadDeveloperInstructions)
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Limits (PollSeconds)
 import CodexWatcher.Core.Reason (BlockedReason (..))
-import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), somePhaseIs)
-import CodexWatcher.Core.Thread (ReviewerThread (..), WorkerThread (..))
+import CodexWatcher.Core.State (somePhaseIs)
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.PrReview.Types (PrConfig (..))
 import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), PrNumber (..), RepoName (..))
@@ -99,14 +98,13 @@ prReviewWatcherLaunchPlan root workdir issueConfig prNumber =
     , reviewLaunchWorkdir = workdir
     , reviewLaunchConfigJson = prReviewWatcherConfigJson prConfig workerThread reviewerThread stateDir workdir
     , reviewLaunchInitialEvent = PrReviewInitialized prConfig workerThread reviewerThread
-    , reviewLaunchCompatibilityWrites = compatibilityStateWrites stateDir initialState
+    , reviewLaunchCompatibilityWrites = []
     }
  where
   prConfig = PrConfig issueConfig.issueRepo prNumber issueConfig.issueBranch
   workerThread = ThreadId ("pr-worker-" <> Text.pack (show (unPrNumber prNumber)))
   reviewerThread = ThreadId ("pr-reviewer-" <> Text.pack (show (unPrNumber prNumber)))
   stateDir = root </> prReviewWatcherSlug issueConfig.issueRepo prNumber
-  initialState = SomeWatcherState (PrCheckingReviews prConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
 
 prReviewWatcherSlug :: RepoName -> PrNumber -> FilePath
 prReviewWatcherSlug repo prNumber =
@@ -133,10 +131,8 @@ withPrReviewThreadIds workerThread reviewerThread launch =
     , reviewLaunchReviewerThreadId = reviewerThread
     , reviewLaunchConfigJson = prReviewWatcherConfigJson launch.reviewLaunchPrConfig workerThread reviewerThread launch.reviewLaunchStateDir launch.reviewLaunchWorkdir
     , reviewLaunchInitialEvent = PrReviewInitialized launch.reviewLaunchPrConfig workerThread reviewerThread
-    , reviewLaunchCompatibilityWrites = compatibilityStateWrites launch.reviewLaunchStateDir initialState
+    , reviewLaunchCompatibilityWrites = []
     }
- where
-  initialState = SomeWatcherState (PrCheckingReviews launch.reviewLaunchPrConfig (WorkerIdle workerThread) (ReviewerIdle reviewerThread))
 
 launchPrReviewWatcher :: ActionExecutionMode -> Maybe AppServerEndpoint -> PollSeconds -> PrReviewWatcherLaunchPlan -> IO ()
 launchPrReviewWatcher DryRunActions maybeEndpoint pollSeconds launch = do
@@ -182,7 +178,6 @@ writePrReviewWatcherLaunch launch = do
   createDirectoryIfMissing True launch.reviewLaunchStateDir
   writeJsonValue launch.reviewLaunchConfigPath launch.reviewLaunchConfigJson
   appendWatcherEvent ioRuntimeInterpreter launch.reviewLaunchEventsPath launch.reviewLaunchInitialEvent
-  mapM_ (writeCompatibility ioRuntimeInterpreter) launch.reviewLaunchCompatibilityWrites
   putStrLn ("wrote PR review watcher " <> show (unPrNumber launch.reviewLaunchPrConfig.prNumber) <> " to " <> launch.reviewLaunchStateDir)
 
 ensurePrReviewWatcherLaunchWritable :: PrReviewWatcherLaunchPlan -> IO ()

@@ -35,7 +35,6 @@ import CodexWatcher.EventLog.Types
 import CodexWatcher.EventLogRepair
 import CodexWatcher.Failure
 import CodexWatcher.GhGit (ReviewComment (..), ReviewThread (..), ReviewThreadsReport (..))
-import CodexWatcher.GoldenReplay
 import CodexWatcher.Cli.Command.IssueFanout (IssueImplementerChildLaunch (..), issueImplementerChildArgs, issueImplementerChildLaunchMode, issueImplementerLaunchManifest, readyIssueStatusFromRuntime, resolveFanoutActiveIssues, retryableLaunchCommandFailure)
 import CodexWatcher.AutomaticLoop.Runner (retryableAutomaticLoopFailure)
 import CodexWatcher.Domain.IssueImplement.Watcher
@@ -55,7 +54,6 @@ import CodexWatcher.Runtime.Owner.Cli (clearRuntimeLease, clearRuntimeLeaseIfOwn
 import CodexWatcher.Runtime.Owner.Store
 import CodexWatcher.Runtime.Owner.Types
 import CodexWatcher.RunnerGuard
-import CodexWatcher.Snapshot
 import CodexWatcher.StateMachine
 import CodexWatcher.Supervisor
 import CodexWatcher.Domain.IssueImplement.TurnClassifier
@@ -667,7 +665,7 @@ workflowIssuePlanningIndexedSpecMatchesPolicyTransitions = do
                 && planned.plannedPostCommitEffects == [SomeEffect (RecordPlanningGraph validGraph), SomeEffect SleepUntilNextPoll]
           )
           requestIdStable
-          (compatibilityWritesContainPlanningGraph validGraph)
+          (compatibilityWritesOmitPlanningGraph validGraph)
       , issuePlanningIndexedSpecMatchesCompatibility
           "indexed workflow issue planning ready issues fixed matches compatibility"
           waitingState
@@ -873,7 +871,7 @@ workflowIssuePlanningIndexedSpecPreservesGraphValidation = do
       "IssuePlanning/Initialized"
       (effectTagPlan [RecordPlanningGraphTag, SleepUntilNextPollTag])
       (\compiled -> compiled.workflowCompiledNextRequestId == RequestId 900)
-      (compatibilityWritesContainPlanningGraph scopedClosureGraph)
+      (compatibilityWritesOmitPlanningGraph scopedClosureGraph)
   pure (and invalidResults && successResult)
  where
   blockedIssue issue =
@@ -1028,7 +1026,7 @@ workflowIssuePlanningIndexedProjectionHandlesActiveTurnOutcomes = do
                 && projection.issuePlanningIndexedProjectionTargetLabel == "IssuePlanning/Initialized"
                 && workflowStateLabel @MoifoldSpec projection.issuePlanningIndexedProjectionFinalState == "IssuePlanning/Initialized"
                 && sameWatcherStateShape projection.issuePlanningIndexedProjectionFinalState observed.observedState
-                && compatibilityWritesContainPlanningGraph graph writes
+                && compatibilityWritesOmitPlanningGraph graph writes
                 && case projection.issuePlanningIndexedProjectionFinalState of
                   SomeWatcherState (PlanningWaitingForReadyIssues _ projectedGraph) -> projectedGraph == graph
                   _ -> False
@@ -1303,11 +1301,10 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility = do
                       && request.requestId == RequestId 940
                       && appended == toJSON expectedEvent
                   _ -> False
-          , assert "indexed issue-planning daemon execute writes compatibility after event append" $
+          , assert "indexed issue-planning daemon execute computes compatibility projections without writing files" $
               tick.daemonObservedCompatibilityWrites == expectedWrites
-                && length [() | FakeWriteJson {} <- calls] == length expectedWrites
-                && all (`elem` calls) expectedWriteCalls
-                && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                && not (any (`elem` calls) expectedWriteCalls)
+                && expectedAppend `elem` calls
           , assert "indexed issue-planning daemon execute keeps audit surfaces stable" $
               WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "issue_planning_turn_started"
                 && WorkflowAudit.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
@@ -1323,7 +1320,7 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesCompatibility = do
 workflowIssuePlanningIndexedDaemonDryRunMatchesActiveTurnCompatibility :: IO Bool
 workflowIssuePlanningIndexedDaemonDryRunMatchesActiveTurnCompatibility = do
   requestResult <- dryRunCase "issue requests" requestObservation expectedRequestEvent expectedRequestEffects "IssuePlanning/Initialized" (const True)
-  graphResult <- dryRunCase "graph update" graphObservation expectedGraphEvent expectedGraphEffects "IssuePlanning/Initialized" (runtimeWritesContainPlanningGraph graph)
+  graphResult <- dryRunCase "graph update" graphObservation expectedGraphEvent expectedGraphEffects "IssuePlanning/Initialized" (runtimeWritesOmitPlanningGraph graph)
   pure (requestResult && graphResult)
  where
   config = issuePlanningIndexedConfig
@@ -1418,10 +1415,9 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesActiveTurnCompatibility = do
             , assert "indexed issue-planning daemon execute active issue requests creates issues before append" $
                 tick.daemonObservedCompiledEffects == expectedCompiled
                   && callBefore (FakeCommand expectedCommand) expectedAppend calls
-            , assert "indexed issue-planning daemon execute active issue requests writes compatibility before post sleep" $
+            , assert "indexed issue-planning daemon execute active issue requests computes compatibility projections before post sleep" $
                 tick.daemonObservedCompatibilityWrites == expectedWrites
-                  && all (`elem` calls) expectedWriteCalls
-                  && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                  && not (any (`elem` calls) expectedWriteCalls)
                   && callBefore expectedAppend FakeSleep calls
             , assert "indexed issue-planning daemon execute active issue requests keeps audit labels" $
                 WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
@@ -1454,16 +1450,14 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesActiveTurnCompatibility = do
                 tick.daemonObservedEvent == expectedEvent
                   && tick.daemonObservedCommittedEvents == [expectedEvent]
                   && workflowStateLabel @MoifoldSpec tick.daemonObservedState == "IssuePlanning/Initialized"
-                  && runtimeWritesContainPlanningGraph graph tick.daemonObservedCompatibilityWrites
-            , assert "indexed issue-planning daemon execute active graph update records graph after append" $
+                  && runtimeWritesOmitPlanningGraph graph tick.daemonObservedCompatibilityWrites
+            , assert "indexed issue-planning daemon execute active graph update omits planning-state compatibility write" $
                 tick.daemonObservedCompiledEffects == expectedCompiled
-                  && graphWrite `elem` calls
-                  && length [() | FakeWriteJson path value <- calls, path == graphPath, value == toJSON graph] == 2
-                  && callBefore expectedAppend graphWrite calls
-            , assert "indexed issue-planning daemon execute active graph update writes compatibility after append" $
+                  && graphWrite `notElem` calls
+                  && null [() | FakeWriteJson path value <- calls, path == graphPath, value == toJSON graph]
+            , assert "indexed issue-planning daemon execute active graph update computes compatibility projections without writing files" $
                 tick.daemonObservedCompatibilityWrites == expectedWrites
-                  && all (`elem` calls) expectedWriteCalls
-                  && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                  && not (any (`elem` calls) expectedWriteCalls)
                   && callBefore expectedAppend FakeSleep calls
             , assert "indexed issue-planning daemon execute active graph update keeps audit labels" $
                 WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
@@ -1572,10 +1566,9 @@ workflowIssuePlanningIndexedDaemonRejectsInvalidActiveTurnRoutingLikeCompatibili
                   && tick.daemonObservedCommittedEvents == [expectedEvent]
                   && workflowStateLabel @MoifoldSpec tick.daemonObservedState == "IssuePlanning/Blocked"
                   && projection.issuePlanningIndexedProjectionTargetLabel == "IssuePlanning/Blocked"
-            , assert "indexed issue-planning daemon invalid graph preserves blocked effect ordering and writes" $
+            , assert "indexed issue-planning daemon invalid graph preserves blocked effect ordering without compatibility writes" $
                 blockedPostCommitPlan compatibilityPlan
-                  && all (`elem` calls) expectedWriteCalls
-                  && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                  && not (any (`elem` calls) expectedWriteCalls)
                   && callBefore expectedAppend FakeStop calls
             , assert "indexed issue-planning daemon invalid graph keeps audit labels" $
                 WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == "IssuePlanning/PlanMode"
@@ -1888,11 +1881,10 @@ workflowIssuePlanningIndexedDaemonExecuteMatchesTerminalAndRetryCompatibility = 
                   && expectedAppend `elem` calls
             , assert ("indexed issue-planning daemon execute " <> caseName <> " reaches target state") $
                 workflowStateLabel @MoifoldSpec tick.daemonObservedState == expectedTargetLabel
-            , assert ("indexed issue-planning daemon execute " <> caseName <> " writes compatibility after append") $
+            , assert ("indexed issue-planning daemon execute " <> caseName <> " computes compatibility projections without writing files") $
                 tick.daemonObservedCompiledEffects == expectedCompiled
                   && tick.daemonObservedCompatibilityWrites == expectedWrites
-                  && all (`elem` calls) expectedWriteCalls
-                  && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                  && not (any (`elem` calls) expectedWriteCalls)
                   && postCallOk
             , assert ("indexed issue-planning daemon execute " <> caseName <> " keeps audit labels") $
                 WorkflowAudit.workflowAuditPriorStateLabel tick.daemonObservedAudit == workflowStateLabel @MoifoldSpec state
@@ -2034,13 +2026,13 @@ issuePlanningIndexedGraphUpdatedEvent graph =
         :: IssuePlanningIndexedEvent IssuePlanningIndexedActiveTurn IssuePlanningIndexedWaitingReadyIssues
     )
 
-compatibilityWritesContainPlanningGraph :: PlanningGraph -> [CompatibilityWrite] -> Bool
-compatibilityWritesContainPlanningGraph graph writes =
-  CompatibilityWrite "/tmp/state/planning-state.json" (toJSON graph) `elem` writes
+compatibilityWritesOmitPlanningGraph :: PlanningGraph -> [CompatibilityWrite] -> Bool
+compatibilityWritesOmitPlanningGraph graph writes =
+  CompatibilityWrite "/tmp/state/planning-state.json" (toJSON graph) `notElem` writes
 
-runtimeWritesContainPlanningGraph :: PlanningGraph -> [CompatibilityWrite] -> Bool
-runtimeWritesContainPlanningGraph graph writes =
-  any ((== toJSON graph) . compatibilityWriteValue) writes
+runtimeWritesOmitPlanningGraph :: PlanningGraph -> [CompatibilityWrite] -> Bool
+runtimeWritesOmitPlanningGraph graph writes =
+  all ((/= toJSON graph) . compatibilityWriteValue) writes
 
 data PrReviewMergeabilityGoldenSlice = PrReviewMergeabilityGoldenSlice
   { prReviewMergeabilityGoldenPrefix :: [WatcherEvent]
@@ -2683,10 +2675,9 @@ workflowPrReviewMergeabilityIndexedDaemonExecuteMatchesCompatibility = do
                   tick.daemonObservedCompiledEffects == expectedCompiled
                     && tick.daemonObservedCompiledEffects.compiledNextRequestId == runtimeConfig.effectRuntimeNextRequestId
                     && callBefore (FakeCommand expectedCommand) (FakeAppendJsonLine "/tmp/events.jsonl" (toJSON expectedEvent)) calls
-              , assert "indexed daemon execute writes compatibility after event append" $
+              , assert "indexed daemon execute computes compatibility projections without writing files" $
                   tick.daemonObservedCompatibilityWrites == expectedWrites
-                    && length [() | FakeWriteJson {} <- calls] == length expectedWrites
-                    && all (\write -> FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write) `elem` calls) expectedWrites
+                    && not (any (\write -> FakeWriteJson (compatibilityWritePath write) (compatibilityWriteValue write) `elem` calls) expectedWrites)
               , assert "indexed daemon execute keeps audit and post-commit surfaces stable" $
                   WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit == Just "pr_review_mergeability_clean"
                     && WorkflowAudit.workflowAuditPreCommitReports tick.daemonObservedAudit == tick.daemonObservedActionReports
@@ -3267,11 +3258,10 @@ runIssueImplementDaemonProjectionCase executionMode testCase = do
               ]
           ExecuteActions ->
             sequence
-              [ assert (title "commits event and compatibility writes") $
+              [ assert (title "commits event without compatibility writes") $
                   tick.daemonObservedCommittedEvents == [tick.daemonObservedEvent]
                     && expectedAppend `elem` calls
-                    && all (`elem` calls) expectedWriteCalls
-                    && all (\writeCall -> callBefore expectedAppend writeCall calls) expectedWriteCalls
+                    && not (any (`elem` calls) expectedWriteCalls)
                     && WorkflowAudit.workflowAuditCommittedEventLabel tick.daemonObservedAudit /= Nothing
               ]
       commonResults <-

@@ -29,14 +29,13 @@ import CodexWatcher.Domain.IssuePlanning.Types
 import CodexWatcher.EffectInterpreter (CompiledEffectPlan (..), EffectRuntimeConfig (..), PlannedAction (..), compileEffectPlan)
 import CodexWatcher.Effects (Effect (..), SomeEffect (..))
 import CodexWatcher.EventLog.Types (EventReplayResult (replayState), ReplayFailure (..), WatcherEvent (..), eventName)
-import CodexWatcher.EventLogRepair (EventLogRepairPlan (..), repairFailureBlockStateJson, repairIssueImplementEventLog)
+import CodexWatcher.EventLogRepair (EventLogRepairPlan (..), repairIssueImplementEventLog)
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
 import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
 import CodexWatcher.Runtime.Owner.Store (readRuntimeOwner, readRuntimeOwnerMarker, runtimeLeaseJson)
 import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
-import CodexWatcher.Snapshot (NodeBlockedState (..), NodeIssueDaemonState (..))
 import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), IssueNumber (..), PrNumber (..), RepoName (..))
 import Control.Monad (when)
@@ -52,7 +51,7 @@ import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.IO qualified as TextIO
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removePathForcibly)
 import System.FilePath (takeDirectory, (</>))
 import TestSupport.Workflow (FakeActionCall (..), assert, defaultFakeAppServer, defaultFakeCommand, effectRuntimeConfig, fakeActionExecutorWith, maxParallelForTest, sequenceAnd)
 
@@ -63,7 +62,6 @@ runtimeCompatibilityFixtureTests =
     , daemonFixtureShapeTests
     , compatibilityProjectionFixtureTests
     , daemonCompatibilityProjectionFixtureTests
-    , blockStateRepairFailureFixtureTests
     , blockStateCompatibilityShapeTests
     , repairStateFixtureTests
     , repairStateExecuteShapeTest
@@ -77,6 +75,7 @@ runtimeCompatibilityFixtureTests =
     , repairStateSourceBoundaryTest
     , runtimeOwnerSourceBoundaryTest
     , issueSnapshotSourceBoundaryTest
+    , localRuntimeFileCandidateDecisionTest
     ]
 
 fixtureShapeTests :: IO Bool
@@ -84,21 +83,20 @@ fixtureShapeTests = do
   readyResult <- loadFixtureValue ("planner-ready" </> "planner-state.json")
   activeResult <- loadFixtureValue ("planner-active" </> "planner-state.json")
   waitingPlannerResult <- loadFixtureValue ("planner-waiting-ready-issues" </> "planner-state.json")
-  planningResult <- loadFixtureValue ("planner-waiting-ready-issues" </> "planning-state.json")
   completeResult <- loadFixtureValue ("planner-complete" </> "planner-state.json")
-  planningGraphResult <- loadPlanningGraphFixture ("planner-waiting-ready-issues" </> "planning-state.json")
+  planningStateFixtureExists <- doesFileExist (fixtureRoot </> "planner-waiting-ready-issues" </> "planning-state.json")
   decodedOk <-
     assert
-      "runtime compatibility planner/planning fixtures decode as JSON values"
-      (all isRight [readyResult, activeResult, waitingPlannerResult, planningResult, completeResult])
+      "runtime compatibility planner-state fixtures decode as JSON values"
+      (all isRight [readyResult, activeResult, waitingPlannerResult, completeResult])
   planningGraphOk <-
     assert
-      "planning-state fixture decodes as the deterministic PlanningGraph"
-      (planningGraphResult == Right fixturePlanningGraph)
+      "removed planning-state fixture is absent"
+      (not planningStateFixtureExists)
   shapeOk <-
-    case sequence [readyResult, activeResult, waitingPlannerResult, planningResult, completeResult] of
+    case sequence [readyResult, activeResult, waitingPlannerResult, completeResult] of
       Left _ -> pure False
-      Right [readyValue, activeValue, waitingPlannerValue, planningValue, completeValue] ->
+      Right [readyValue, activeValue, waitingPlannerValue, completeValue] ->
         sequenceAnd
           [ assert
               "planner-state fixtures match current summary/status JSON shapes"
@@ -108,15 +106,9 @@ fixtureShapeTests = do
                   && completeValue == completePlannerStateValue
               )
           , assert
-              "planning-state fixture matches current PlanningGraph JSON shape"
-              (planningValue == toJSON fixturePlanningGraph)
-          , assert
-              "planner-state and planning-state fixture shapes are not interchangeable"
+              "planner-state fixtures do not contain planning graph keys"
               ( all hasPlannerStatusKey [readyValue, activeValue, waitingPlannerValue, completeValue]
                   && all (not . hasPlanningGraphKey) [readyValue, activeValue, waitingPlannerValue, completeValue]
-                  && hasPlanningGraphKey planningValue
-                  && not (hasPlannerStatusKey planningValue)
-                  && planningValue `notElem` [readyValue, activeValue, waitingPlannerValue, completeValue]
               )
           ]
       Right _ -> pure False
@@ -135,12 +127,8 @@ compatibilityProjectionFixtureTests =
             (plannerStateValue "active")
         )
     , assert
-        "PlanningWaitingForReadyIssues writes distinct planner-state and planning-state fixtures"
-        ( let writes = compatibilityStateWrites fixtureStateDir (SomeWatcherState (PlanningWaitingForReadyIssues fixturePlannerConfig fixturePlanningGraph))
-           in singleWriteValue fixturePlannerPath writes == Just (plannerStateValue "waiting_ready_issues")
-                && singleWriteValue fixturePlanningPath writes == Just (toJSON fixturePlanningGraph)
-                && singleWriteValue fixturePlannerPath writes /= singleWriteValue fixturePlanningPath writes
-        )
+        "PlanningWaitingForReadyIssues writes planner-state and no planning-state"
+        (writesOnlyPlannerState (SomeWatcherState (PlanningWaitingForReadyIssues fixturePlannerConfig fixturePlanningGraph)) (plannerStateValue "waiting_ready_issues"))
     , assert
         "PlanningComplete writes the complete planner-state fixture and no planning-state"
         (writesOnlyPlannerState (SomeWatcherState (CompleteState PlanningComplete)) completePlannerStateValue)
@@ -150,18 +138,10 @@ daemonFixtureShapeTests :: IO Bool
 daemonFixtureShapeTests = do
   activeResult <- loadDaemonFixtureValue ("planning-active" </> "daemon-state.json")
   stoppedResult <- loadDaemonFixtureValue ("stopped" </> "daemon-state.json")
-  activeDecodeResult <- loadDaemonFixtureState ("planning-active" </> "daemon-state.json")
-  stoppedDecodeResult <- loadDaemonFixtureState ("stopped" </> "daemon-state.json")
   decodedOk <-
     assert
       "runtime compatibility daemon fixtures decode as JSON values"
       (all isRight [activeResult, stoppedResult])
-  snapshotReaderOk <-
-    assert
-      "issue-implementation snapshot daemon reader accepts active and stopped daemon fixtures"
-      ( activeDecodeResult == Right (NodeIssueDaemonState (Just "daemon-turn") (Just "plan") Nothing)
-          && stoppedDecodeResult == Right (NodeIssueDaemonState Nothing Nothing Nothing)
-      )
   shapeOk <-
     case (activeResult, stoppedResult) of
       (Right activeValue, Right stoppedValue) ->
@@ -181,7 +161,7 @@ daemonFixtureShapeTests = do
               )
           ]
       _ -> pure False
-  pure (decodedOk && snapshotReaderOk && shapeOk)
+  pure (decodedOk && shapeOk)
 
 daemonCompatibilityProjectionFixtureTests :: IO Bool
 daemonCompatibilityProjectionFixtureTests =
@@ -222,74 +202,27 @@ daemonCompatibilityProjectionFixtureTests =
         )
     ]
 
-blockStateRepairFailureFixtureTests :: IO Bool
-blockStateRepairFailureFixtureTests = do
-  fixtureResult <- loadBlockStateFixtureValue ("repair-failure" </> "block-state.json")
-  blockedStateResult <- loadBlockStateFixtureState ("repair-failure" </> "block-state.json")
-  decodedOk <-
-    assert
-      "runtime compatibility repair-failure block-state fixture decodes as JSON"
-      (isRight fixtureResult)
-  snapshotReaderOk <-
-    assert
-      "snapshot blocked-state reader accepts repair-failure block-state fixture"
-      (blockedStateResult == Right (NodeBlockedState True (Just fixtureReplayFailure.reason)))
-  shapeOk <-
-    case fixtureResult of
-      Right fixtureValue ->
-        sequenceAnd
-          [ assert
-              "repair-failure block-state fixture matches current generator output"
-              (fixtureValue == repairFailureBlockStateJson fixtureReplayFailure)
-          , assert
-              "repair-failure block-state fixture keeps invalid-event-log fields"
-              ( lookupObjectKey "blockedKind" fixtureValue == Just (String "invalid_event_log")
-                  && lookupObjectKey "eventIndex" fixtureValue == Just (Number 3)
-                  && lookupObjectKey "eventType" fixtureValue == Just (String (eventName fixtureReplayFailure.event))
-                  && lookupObjectKey "event" fixtureValue == Just (toJSON fixtureReplayFailure.event)
-              )
-          , assert
-              "repair-failure block-state embedded event keeps current event type"
-              (case lookupObjectKey "event" fixtureValue of
-                Just eventValue ->
-                  lookupObjectKey "type" eventValue == Just (String (eventName fixtureReplayFailure.event))
-                _ -> False
-              )
-          ]
-      Left _ -> pure False
-  pure (decodedOk && snapshotReaderOk && shapeOk)
-
 blockStateCompatibilityShapeTests :: IO Bool
-blockStateCompatibilityShapeTests = do
-  fixtureResult <- loadBlockStateFixtureValue ("repair-failure" </> "block-state.json")
-  case fixtureResult of
-    Left _ -> pure False
-    Right fixtureValue -> do
-      let blockedReason = BlockedReason fixtureReplayFailure.reason
-          normalBlockStateValue = blockedStateJson blockedReason
-          config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
-          directBlockPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
-          compiled = compileEffectPlan config [SomeEffect (RecordBlocked blockedReason)]
-          compatibilityWrites =
-            compatibilityStateWrites
-              fixtureStateDir
-              (SomeWatcherState (BlockedState blockedReason :: WatcherState 'IssuePlanning 'Blocked))
-      sequenceAnd
+blockStateCompatibilityShapeTests =
+  let blockedReason = BlockedReason "event replay failed"
+      normalBlockStateValue = blockedStateJson blockedReason
+      config = effectRuntimeConfig fixtureRepo "/tmp/runtime-compatibility-fixture-workdir" 1
+      directBlockPath = runtimeStateDirFile config.effectRuntimeStateDir "block-state.json"
+      compiled = compileEffectPlan config [SomeEffect (RecordBlocked blockedReason)]
+      compatibilityWrites =
+        compatibilityStateWrites
+          fixtureStateDir
+          (SomeWatcherState (BlockedState blockedReason :: WatcherState 'IssuePlanning 'Blocked))
+   in sequenceAnd
         [ assert
-            "normal blocked-state JSON is not interchangeable with repair-failure fixture"
-            ( normalBlockStateValue /= fixtureValue
-                && objectLacksKeys ["blockedKind", "eventIndex", "eventType", "event"] normalBlockStateValue
-            )
-        , assert
             "BlockedState compatibility projection keeps the normal block-state shape"
             ( singleWriteValue fixtureBlockStatePath compatibilityWrites == Just normalBlockStateValue
-                && singleWriteValue fixtureBlockStatePath compatibilityWrites /= Just fixtureValue
                 && maybe False (objectLacksKeys ["blockedKind", "eventIndex", "eventType", "event"]) (singleWriteValue fixtureBlockStatePath compatibilityWrites)
             )
         , assert
-            "RecordBlocked compiled effect keeps the normal block-state shape"
-            ( compiled.compiledActions == [PlannedWriteJson directBlockPath normalBlockStateValue]
-                && compiled.compiledActions /= [PlannedWriteJson directBlockPath fixtureValue]
+            "RecordBlocked compiled effect no longer writes the normal block-state file"
+            ( null compiled.compiledActions
+                && not (PlannedWriteJson directBlockPath normalBlockStateValue `elem` compiled.compiledActions)
                 && objectLacksKeys ["blockedKind", "eventIndex", "eventType", "event"] normalBlockStateValue
             )
         ]
@@ -323,7 +256,7 @@ repairStateFixtureTests = do
                   && lookupObjectKey "finalPhase" fixtureValue == Just (String (showText (somePhase plan.repairReplayResult.replayState)))
               )
           , assert
-              "repair-state fixture is not interchangeable with repair-failure block-state JSON"
+              "repair-state fixture is not interchangeable with normal block-state JSON"
               (objectLacksKeys ["blocked", "blockedKind", "eventIndex", "eventType", "event"] fixtureValue)
           ]
       _ -> pure False
@@ -556,8 +489,9 @@ recordPlanningGraphFixtureTest = do
       planningPath = runtimeStateDirFile config.effectRuntimeStateDir "planning-state.json"
       plannerPath = runtimeStateDirFile config.effectRuntimeStateDir "planner-state.json"
   assert
-    "RecordPlanningGraph writes only the planning-state graph fixture shape"
-    ( compiled.compiledActions == [PlannedWriteJson planningPath (toJSON fixturePlanningGraph)]
+    "RecordPlanningGraph no longer writes planning-state compatibility files"
+    ( null compiled.compiledActions
+        && not (PlannedWriteJson planningPath (toJSON fixturePlanningGraph) `elem` compiled.compiledActions)
         && all (/= PlannedWriteJson plannerPath (toJSON fixturePlanningGraph)) compiled.compiledActions
     )
 
@@ -574,12 +508,15 @@ healthcheckRuntimeStateReadNonReadContractTest :: IO Bool
 healthcheckRuntimeStateReadNonReadContractTest = do
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
   assert
-    "healthcheck keeps consolidated runtime-state read/non-read contract"
+    "healthcheck keeps consolidated runtime-state projection/non-read contract"
     ( textNeedlesInOrder
-        [ "readStateFiles :: SDomain kind -> FilePath -> IO Value"
-        , "object <$> traverse readStateFile (stateFileSpecs kind)"
-        , "readStateFile (key, fileName) = do"
-        , "value <- readOptionalValueFile (stateDir' </> fileName)"
+        [ "projectStateFiles :: SDomain kind -> FilePath -> Maybe SomeWatcherState -> IO Value"
+        , "object <$> traverse projectStateFile (stateFileSpecs kind)"
+        , "writes = maybe [] (compatibilityStateWrites stateDir') replayState"
+        , "projectStateFile (key, fileName) = do"
+        , "if fileName == \"runtime-owner.json\""
+        , "then readOptionalValueFile (stateDir' </> fileName)"
+        , "else pure (lookupProjectedState fileName writes)"
         , "pure (Key.fromText key .= fromMaybe Null value)"
         , "stateFileSpecs :: SDomain kind -> [(Text, FilePath)]"
         , "SIssuePlanning ->"
@@ -599,9 +536,13 @@ healthcheckRuntimeStateReadNonReadContractTest = do
         , ", (\"runtimeOwner\", \"runtime-owner.json\")"
         , "readOptionalValueFile :: FilePath -> IO (Maybe Value)"
         , "else either (const Nothing) Just <$> readJsonValue path"
+        , "lookupProjectedState :: FilePath -> [CompatibilityWrite] -> Maybe Value"
+        , "takeFileName path == fileName"
         ]
         healthcheckSource
         && "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states" `Text.isInfixOf` healthcheckSource
+        && "states <- projectStateFiles kind stateDir' replayState" `Text.isInfixOf` healthcheckSource
+        && not ("states <- readStateFiles kind stateDir'" `Text.isInfixOf` healthcheckSource)
         && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
         && not ("repair-state.json" `Text.isInfixOf` healthcheckSource)
         && not ("issue-snapshot.json" `Text.isInfixOf` healthcheckSource)
@@ -612,43 +553,43 @@ healthcheckRuntimeStateReadNonReadContractTest = do
 daemonStateSourceBoundaryTest :: IO Bool
 daemonStateSourceBoundaryTest = do
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
-  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
   restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
   assert
-    "daemon-state compatibility interactions keep current healthcheck, snapshot, repair, and restart paths"
+    "daemon-state compatibility interactions keep projection paths without snapshot readers, restart cleanup, or repair rewrites"
     ( "(\"daemonState\", \"daemon-state.json\")" `Text.isInfixOf` healthcheckSource
         && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
         && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
-        && "daemonResult <- decodeOptionalJsonFile (dir </> \"daemon-state.json\")" `Text.isInfixOf` snapshotSource
-        && "writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState" `Text.isInfixOf` replaySource
-        && "\"$state_dir/daemon-state.json\"" `Text.isInfixOf` restartSource
+        && not snapshotSourceExists
+        && not ("writeCompatibilityFiles" `Text.isInfixOf` replaySource)
+        && not ("\"$state_dir/daemon-state.json\"" `Text.isInfixOf` restartSource)
     )
 
 blockStateSourceBoundaryTest :: IO Bool
 blockStateSourceBoundaryTest = do
   runnerSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "AutomaticLoop" </> "Runner.hs")
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
-  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
   restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
   assert
-    "block-state compatibility interactions keep current repair-failure, healthcheck, snapshot, repair, and restart paths"
-    ( "DaemonLoopDaemonFailure (DaemonReplayFailed replayFailure) -> do" `Text.isInfixOf` runnerSource
-        && "writeJsonValue (stateDir </> \"block-state.json\") (repairFailureBlockStateJson replayFailure)" `Text.isInfixOf` runnerSource
+    "block-state compatibility interactions keep projection/repair cleanup paths without snapshot readers, restart cleanup, or repair-failure writes"
+    ( not ("repairFailureBlockStateJson" `Text.isInfixOf` runnerSource)
+        && not ("writeJsonValue (stateDir </> \"block-state.json\")" `Text.isInfixOf` runnerSource)
         && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
         && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
         && "(\"blockedState\", \"block-state.json\")" `Text.isInfixOf` healthcheckSource
-        && "blockedResult <- decodeOptionalJsonFile (dir </> \"block-state.json\")" `Text.isInfixOf` snapshotSource
+        && not snapshotSourceExists
         && "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")" `Text.isInfixOf` replaySource
-        && "\"$state_dir/block-state.json\"" `Text.isInfixOf` restartSource
+        && not ("\"$state_dir/block-state.json\"" `Text.isInfixOf` restartSource)
     )
 
 repairStateSourceBoundaryTest :: IO Bool
 repairStateSourceBoundaryTest = do
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
-  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
+  snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
   runtimeSources <- traverse TextIO.readFile runtimeSourceFiles
   automaticLoopSources <- traverse TextIO.readFile automaticLoopSourceFiles
   sequenceAnd
@@ -667,12 +608,11 @@ repairStateSourceBoundaryTest = do
             replaySource
         )
     , assert
-        "repair execute order archives, rewrites events, writes repair state, rewrites compatibility, then removes stale block state"
+        "repair execute order archives, rewrites events, writes repair state, then removes stale block state"
         ( textNeedlesInOrder
             [ "archivePath <- archiveEventLog options.repairCliEventsPath"
             , "writeWatcherEventsFile options.repairCliEventsPath plan.repairRepairedEvents"
             , "writeRepairSummary options.repairCliStateDir archivePath plan"
-            , "writeCompatibilityFiles options.repairCliStateDir plan.repairReplayResult.replayState"
             , "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")"
             ]
             replaySource
@@ -696,24 +636,22 @@ repairStateSourceBoundaryTest = do
             ]
         )
     , assert
-        "writeCompatibilityFiles remains a separate compatibility rewrite from writeRepairSummary"
-        ( textNeedlesInOrder
-            [ "writeRepairSummary :: FilePath -> FilePath -> EventLogRepairPlan -> IO ()"
-            , "(stateDir </> \"repair-state.json\")"
-            , "writeCompatibilityFiles :: FilePath -> SomeWatcherState -> IO ()"
-            , "compatibilityStateWrites stateDir state"
-            ]
-            replaySource
+        "repair CLI no longer rewrites compatibility files from writeRepairSummary"
+        ( "writeRepairSummary :: FilePath -> FilePath -> EventLogRepairPlan -> IO ()" `Text.isInfixOf` replaySource
+            && "(stateDir </> \"repair-state.json\")" `Text.isInfixOf` replaySource
+            && not ("writeCompatibilityFiles" `Text.isInfixOf` replaySource)
+            && not ("compatibilityStateWrites stateDir state" `Text.isInfixOf` replaySource)
         )
     , assert
         "healthcheck remains a repair-state non-reader"
-        ( "stateFileSpecs" `Text.isInfixOf` healthcheckSource
+        ( "projectStateFiles" `Text.isInfixOf` healthcheckSource
             && "sharedStateFiles" `Text.isInfixOf` healthcheckSource
             && not ("repair-state.json" `Text.isInfixOf` healthcheckSource)
         )
     , assert
-        "snapshot, runtime, and automatic-loop sources remain repair-state non-readers"
-        ( all (not . ("repair-state.json" `Text.isInfixOf`)) (snapshotSource : runtimeSources <> automaticLoopSources)
+        "removed snapshot bridge, runtime, and automatic-loop sources remain repair-state non-readers"
+        ( not snapshotSourceExists
+            && all (not . ("repair-state.json" `Text.isInfixOf`)) (runtimeSources <> automaticLoopSources)
         )
     ]
 
@@ -755,8 +693,8 @@ issueSnapshotSourceBoundaryTest = do
   promptTemplatesSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "PromptTemplates.hs")
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
-  snapshotSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Snapshot.hs")
   restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
+  snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
   sequenceAnd
     [ assert
         "execute planning writes issue-snapshot before starting the planner turn"
@@ -802,10 +740,64 @@ issueSnapshotSourceBoundaryTest = do
         ( "Read the issue snapshot from {{issueSnapshotPath}}." `Text.isInfixOf` promptTemplatesSource
         )
     , assert
-        "healthcheck, repair, replay snapshot loading, and restart remain live issue-snapshot non-readers"
+        "healthcheck, repair, removed snapshot bridge, and restart remain live issue-snapshot non-readers"
+        ( not snapshotSourceExists
+            && all
+              (not . ("issue-snapshot.json" `Text.isInfixOf`))
+              [healthcheckSource, replaySource, restartSource]
+        )
+    ]
+
+localRuntimeFileCandidateDecisionTest :: IO Bool
+localRuntimeFileCandidateDecisionTest = do
+  decisionDoc <- TextIO.readFile ("docs" </> "agentic-workflow-framework" </> "local-runtime-file-candidates.md")
+  effectInterpreterSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "EffectInterpreter.hs")
+  compatibilitySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Compatibility.hs")
+  repairSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
+  runtimeOwnerStoreSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Owner" </> "Store.hs")
+  runtimeOwnerCliSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Owner" </> "Cli.hs")
+  issuePlanningLoopSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Domain" </> "IssuePlanning" </> "Loop.hs")
+  turnOutputSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "TurnOutput.hs")
+  sequenceAnd
+    [ assert
+        "local runtime-file candidate decisions name all selected files and outcomes"
         ( all
-            (not . ("issue-snapshot.json" `Text.isInfixOf`))
-            [healthcheckSource, replaySource, snapshotSource, restartSource]
+            (`Text.isInfixOf` decisionDoc)
+            [ "| `planning-state.json` | `removed` |"
+            , "| `repair-state.json` | `keep-as-product` |"
+            , "| `runtime-owner.json` | `keep-as-product` |"
+            , "| `issue-snapshot.json` | `keep-as-product` |"
+            ]
+        )
+    , assert
+        "planning-state decision remains backed by removed graph writers and healthcheck non-reader tests"
+        ( "RecordPlanningGraph _graph ->" `Text.isInfixOf` effectInterpreterSource
+            && "unchanged []" `Text.isInfixOf` effectInterpreterSource
+            && not ("\"planning-state.json\"" `Text.isInfixOf` effectInterpreterSource)
+            && not ("write \"planning-state.json\"" `Text.isInfixOf` compatibilitySource)
+            && "`removed`" `Text.isInfixOf` decisionDoc
+        )
+    , assert
+        "repair-state decision remains backed by repair execute diagnostic writer"
+        ( all
+            (`Text.isInfixOf` repairSource)
+            [ "writeRepairSummary options.repairCliStateDir archivePath plan"
+            , "(stateDir </> \"repair-state.json\")"
+            , "\"repaired\" .= True"
+            ]
+            && "`keep-as-product`" `Text.isInfixOf` decisionDoc
+        )
+    , assert
+        "runtime-owner decision remains backed by store and CLI lease paths"
+        ( "(stateDir </> \"runtime-owner.json\")" `Text.isInfixOf` runtimeOwnerStoreSource
+            && "let path = stateDir </> \"runtime-owner.json\"" `Text.isInfixOf` runtimeOwnerCliSource
+            && "live daemon lease contract" `Text.isInfixOf` decisionDoc
+        )
+    , assert
+        "issue-snapshot decision remains backed by planner input write and prompt rendering"
+        ( "runtimeStateDirFile config.loopDaemonOptions.daemonRuntimeConfig.effectRuntimeStateDir \"issue-snapshot.json\"" `Text.isInfixOf` issuePlanningLoopSource
+            && "(\"issueSnapshotPath\", Text.pack (stateDir </> \"issue-snapshot.json\"))" `Text.isInfixOf` turnOutputSource
+            && "live planner input" `Text.isInfixOf` decisionDoc
         )
     ]
 
@@ -825,25 +817,9 @@ loadFixtureValue :: FilePath -> IO (Either String Value)
 loadFixtureValue relativePath =
   eitherDecodeStrict' <$> ByteString.readFile (fixtureRoot </> relativePath)
 
-loadPlanningGraphFixture :: FilePath -> IO (Either String PlanningGraph)
-loadPlanningGraphFixture relativePath =
-  eitherDecodeStrict' <$> ByteString.readFile (fixtureRoot </> relativePath)
-
 loadDaemonFixtureValue :: FilePath -> IO (Either String Value)
 loadDaemonFixtureValue relativePath =
   eitherDecodeStrict' <$> ByteString.readFile (daemonFixtureRoot </> relativePath)
-
-loadDaemonFixtureState :: FilePath -> IO (Either String NodeIssueDaemonState)
-loadDaemonFixtureState relativePath =
-  eitherDecodeStrict' <$> ByteString.readFile (daemonFixtureRoot </> relativePath)
-
-loadBlockStateFixtureValue :: FilePath -> IO (Either String Value)
-loadBlockStateFixtureValue relativePath =
-  eitherDecodeStrict' <$> ByteString.readFile (blockStateFixtureRoot </> relativePath)
-
-loadBlockStateFixtureState :: FilePath -> IO (Either String NodeBlockedState)
-loadBlockStateFixtureState relativePath =
-  eitherDecodeStrict' <$> ByteString.readFile (blockStateFixtureRoot </> relativePath)
 
 loadRepairStateFixtureValue :: FilePath -> IO (Either String Value)
 loadRepairStateFixtureValue relativePath =
@@ -1018,13 +994,6 @@ stoppedDaemonStateValue =
     , "stopReason" .= ("stopped for fixture" :: Text)
     ]
 
-fixtureReplayFailure :: ReplayFailure
-fixtureReplayFailure =
-  ReplayFailure
-    3
-    (IssueImplementationCompletedEvent (PrNumber 42) Nothing)
-    "event issue_implementation_completed is invalid in IssueImplement/PlanReady"
-
 repairStateInvalidEvents :: [WatcherEvent]
 repairStateInvalidEvents =
   [ IssueImplementInitialized repairStateIssueConfig (ThreadId "worker-thread")
@@ -1076,10 +1045,6 @@ fixtureRoot =
 daemonFixtureRoot :: FilePath
 daemonFixtureRoot =
   "golden" </> "runtime-compatibility" </> "daemon-state"
-
-blockStateFixtureRoot :: FilePath
-blockStateFixtureRoot =
-  "golden" </> "runtime-compatibility" </> "block-state"
 
 repairStateFixtureRoot :: FilePath
 repairStateFixtureRoot =

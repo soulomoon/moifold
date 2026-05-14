@@ -103,9 +103,8 @@ unless a later release-gate contract explicitly says so:
 
 - concrete `WatcherEvent` schemas, event JSON `type` fields, schema migration
   policy, and golden replay fixtures;
-- compatibility files such as `issue-state.json`, `daemon-state.json`,
-  `planning-state.json`, PR URL files, block state, repair state, runtime
-  owner files, and compatibility snapshots;
+- compatibility files such as `issue-state.json`, `daemon-state.json`, PR URL
+  files, block state, repair state, and runtime owner files;
 - concrete daemon loops, app-server startup policy, runtime ownership,
   filesystem writes, PID files, locks, leases, process execution, healthcheck,
   repair, and operator runbooks;
@@ -133,9 +132,11 @@ namespace change, if any, requires a separate migration plan with import
 coverage, build evidence, documentation updates, compatibility notes, and
 review approval.
 
-Compatibility modules such as `CodexWatcher.AppServerClient` remain
-moifold-owned facades. This contract does not remove, repurpose, or move those
-facades into the reusable packages.
+The removed compatibility wrappers `CodexWatcher.AppServerClient`,
+`CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, and
+`CodexWatcher.Workflow.Permission` are not reusable package namespaces.
+Consumers should import the direct owner modules instead. This contract still
+does not move moifold lifecycle policy into the reusable packages.
 
 ## Compatibility Analysis
 

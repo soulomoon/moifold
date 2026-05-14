@@ -23,11 +23,11 @@ surface and runtime compatibility cleanup.
   supported compatibility path or reaches an exact reviewed removal/migration
   decision. No kept, deferred, blocked, or hold-only set can be treated as
   final success for this family.
-- Non-goals: no casual removal of `CodexWatcher.AppServerClient`,
-  `CodexWatcher.Core.Ids`, `CodexWatcher.Workflow.EventLog`, or
-  `CodexWatcher.Workflow.Permission`; no compatibility-file rename or deletion
-  before fixture and behavior evidence; no event JSON `type` migration; no
-  release or publication approval.
+- Non-goals: no casual removal of public wrappers or compatibility files; no
+  compatibility-file rename or deletion before fixture and behavior evidence;
+  no event JSON `type` migration; no release or publication approval. The
+  current direct cleanup removed only surfaces whose gates are recorded in
+  `completion-audit.md`.
 - Revision reason: rev-002 replaces the overloaded rev-001 milestone 003 with
   smaller milestones that have finite completion signals. This is a future
   coordination change, not a status-only update.
@@ -70,7 +70,9 @@ Out of scope:
 - Preferred imports, empty local source scans, or successful local validation
   are not public deprecation or removal approval.
 - Public compatibility facades and Cabal exposed-module entries remain exposed
-  until exact public-surface cleanup directions approve a change.
+  until exact public-surface cleanup directions approve a change. The removed
+  wrappers are listed in `completion-audit.md`; this rule still applies to any
+  remaining product-facing surfaces.
 - Runtime compatibility files keep current names and meanings until fixture,
   healthcheck, repair, write-timing, operator/downstream, and behavior evidence
   approves an exact migration or removal.
@@ -136,10 +138,10 @@ Milestone id: `milestone-002-compatibility-fixtures-contracts`
 Depends on: `milestone-001-test-topology-inventory`
 Intent: Add the selected fixture and healthcheck evidence needed before later
 runtime compatibility cleanup and keep state-file semantics explicit.
-Completion signal: selected runtime-state fixture slices and the
+Completion signal: selected runtime-state fixture slices and the former
 `planner-state.json` versus `planning-state.json` contract have reviewed
-evidence; runtime compatibility migration/removal decisions are deferred to the
-dedicated runtime cleanup milestone.
+evidence; later runtime cleanup removed the obsolete `planning-state.json`
+projection while preserving `planner-state.json`.
 Parallel lane: complete
 Coordination notes: Remaining runtime compatibility decisions now belong to
 `milestone-008-runtime-compatibility-cleanup-gates`, not to import burndown.
@@ -213,19 +215,18 @@ Candidate directions:
   milestone completion, terminal completion, or public compatibility removal.
 
 - Direction id: `direction-011b-core-ids-golden-replay-production-import`
-  Summary: Move `src/CodexWatcher/GoldenReplay.hs` from `Core.Ids` to direct id
-  owners.
-  Why it matters now: golden replay is compatibility evidence for later event
-  and runtime cleanup, so its imports should be explicit before removal gates.
-  Preconditions: focused golden replay and snapshot normalization validation.
+  Summary: Remove the old `CodexWatcher.GoldenReplay`/`CodexWatcher.Snapshot`
+  bridge after migrating its compatibility evidence to event-log fixtures.
+  Why it matters now: checked-in compatibility snapshots were a cleanup blocker;
+  event-log fixtures now carry the retained behavior coverage directly.
+  Preconditions: fixture-by-fixture bootstrapped event-log validation.
   Parallel hints: serial with EventLog.Types and runtime compatibility work.
-  Boundary notes: no snapshot normalization, replay warning, bootstrap event,
-  or old fixture behavior change.
-  Extraction notes: completed by round 178 as an import-only direct-owner
-  migration. Keep this as status evidence only; it does not approve replay
-  behavior edits, fixture edits, public facade deprecation/removal, Cabal
-  cleanup, docs cleanup, runtime compatibility cleanup, release approval,
-  milestone completion, terminal completion, or public compatibility removal.
+  Boundary notes: no event JSON `type` change; bootstrapped fixtures must replay
+  to the same domain and phase as the removed snapshots.
+  Extraction notes: completed by direct cleanup after the import-only round.
+  The old snapshot modules and `golden/pr-review/*` plus
+  `golden/issue-implement/*` compatibility snapshot JSON fixtures were removed;
+  `golden/event-log/bootstrapped/*` now preserves the retained replay evidence.
 
 - Direction id: `direction-011c-core-ids-runtime-compatibility-production-classification`
   Summary: Migrate or classify `src/CodexWatcher/Runtime/Compatibility.hs`
@@ -393,22 +394,15 @@ checks, and broad remaining-user classification all passed. The
 `direction-011i-runtime-compatibility-fixture-core-ids-import` extracted item
 is complete. Direction 011i runtime/CLI test imports are complete: the current
 broad scan finds no remaining safe runtime or CLI test `Core.Ids` imports.
-Round 195 classified the only remaining test `Core.Ids` imports as intentional
-evidence surfaces: `test/FacadeImportPolicySpec.hs` intentionally imports
-`CodexWatcher.Core.Ids` as facade-policy evidence, and `test/Main.hs`
-intentionally imports `CodexWatcher.Core.Ids` as watcher-core-test
-aggregate/property wiring evidence. The reviewer approved the artifact-only
-classification after focused import scans found only those two test imports and
-the broader scan found only out-of-scope public facade, Cabal exposure, and
-docs/policy references. Direction 011j is complete, and milestone 004 is
-complete: every safe test/fixture `Core.Ids` import has migrated, and the
-remaining test imports are explicitly classified with reviewer-approved
-reasons. No app, reusable package, or production `src` users remain beyond the
-public facade module. Docs, Cabal exposure, and the public facade remain for
-later milestones or public-surface decisions. This status does not approve
-public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
-runtime compatibility cleanup, release approval, terminal completion, or public
-compatibility removal.
+Round 195 originally classified the only remaining test `Core.Ids` imports as
+intentional evidence surfaces. The direct cleanup pass after round 195 removed
+those final test imports too: `test/FacadeImportPolicySpec.hs` now imports
+direct agent/GitHub id owners and `test/Main.hs` imports direct agent/GitHub id
+owners. Direction 011j and milestone 004 are complete: every safe test/fixture
+`Core.Ids` import has migrated and no app, reusable package, production `src`,
+or test users remain. Later public-surface cleanup removed the public facade,
+Cabal exposure, and stale docs/policy claims. This status does not approve
+runtime compatibility cleanup, release approval, or package publication.
 
 Candidate directions:
 
@@ -466,17 +460,14 @@ Candidate directions:
   Parallel hints: artifact-only or narrow test-only round.
   Boundary notes: no public facade removal or policy weakening.
   Extraction notes: completed by round 195 as artifact-only classification
-  evidence. `test/FacadeImportPolicySpec.hs:11` intentionally imports
-  `CodexWatcher.Core.Ids` as facade-policy evidence. `test/Main.hs:67`
-  intentionally imports `CodexWatcher.Core.Ids` as watcher-core-test
-  aggregate/property wiring evidence. Focused scans found no other test or
-  fixture `Core.Ids` imports, and broader scans found only out-of-scope public
-  facade, Cabal exposure, and docs/policy references. This completes direction
-  011j and milestone 004 without approving public facade deprecation/removal,
-  Cabal exposure cleanup, docs cleanup, runtime compatibility cleanup, release
-  approval, terminal completion, or public compatibility removal.
+  evidence, then superseded by the direct cleanup pass after round 195.
+  `test/FacadeImportPolicySpec.hs` and `test/Main.hs` now import direct
+  agent/GitHub id owners instead of `CodexWatcher.Core.Ids`. Focused scans find
+  no remaining test or fixture `Core.Ids` imports. This completes direction
+  011j and milestone 004 without approving runtime compatibility cleanup,
+  release approval, or package publication.
 
-### 5. [pending] EventLog And Permission Bridge Burndown
+### 5. [completed] EventLog And Permission Bridge Burndown
 
 Milestone id: `milestone-005-eventlog-permission-bridge-burndown`
 Depends on: `milestone-001-test-topology-inventory`
@@ -491,10 +482,16 @@ public-compat, policy-parity, or bridge behavior with reasons.
 Parallel lane: bridge/facade lane
 Coordination notes: this is migration/classification work, not just readiness.
 Public facade/Cabal/docs cleanup remains separate.
-Current status: pending. Prior rounds moved most concrete EventLog and
-Permission usages; current exact facade imports appear concentrated in
-facade-policy/parity surfaces and public facade modules, but the milestone must
-verify that before closeout.
+Current status: completed by the direct cleanup pass after round 195. Focused
+source/app/test scans found no concrete `CodexWatcher.Workflow.EventLog` or
+`CodexWatcher.Workflow.Permission` imports beyond the policy/parity test and
+public wrapper modules. `test/FacadeImportPolicySpec.hs` now uses
+`CodexWatcher.Workflow.EventLog.Core` and
+`CodexWatcher.Workflow.Permission.Core` directly, preserving replay and
+permission parity assertions. The public wrapper modules were then removed in
+milestone 006/final public-surface cleanup. Event JSON `type` fields, replay
+behavior, permission validation behavior, fixtures, and runtime compatibility
+files are unchanged.
 
 Candidate directions:
 
@@ -532,10 +529,11 @@ Candidate directions:
   Preconditions: safe EventLog and Permission migration candidates resolved.
   Parallel hints: artifact-only or narrow test-policy round.
   Boundary notes: no facade exposure, Cabal, docs, or public API change.
-  Extraction notes: include exact scans and the reason each retained facade
-  import remains lawful.
+  Extraction notes: completed by direct-owner migration rather than retained
+  facade classification. No retained EventLog or Permission facade import
+  remains in source/app/test code.
 
-### 6. [pending] AppServerClient Public Surface Cleanup
+### 6. [completed] AppServerClient Public Surface Cleanup
 
 Milestone id: `milestone-006-appserverclient-public-surface-cleanup`
 Depends on: `milestone-001-test-topology-inventory`
@@ -548,15 +546,20 @@ keep, deprecate, migrate, or remove with exact evidence.
 Parallel lane: bridge/facade lane
 Coordination notes: direct import migration is not enough to remove the public
 facade. Public compatibility cleanup needs docs, Cabal, and downstream scope.
-Current status: pending. Current scans show no concrete source/app/test imports
-through `CodexWatcher.AppServerClient` beyond the facade module itself and
-policy/docs/Cabal references, but public-surface cleanup has not been approved.
+Current status: completed by the direct cleanup pass after round 195. Current
+source/app/test scans found no concrete imports through
+`CodexWatcher.AppServerClient`; the main Cabal exposed-module entry and thin
+wrapper module were removed, and docs/policy now point consumers at
+`CodexWatcher.Workflow.Agent.Codex.Client` and
+`CodexWatcher.Workflow.Agent.Codex.Transport` directly. App-server endpoint
+parsing, session handling, command rendering, failure formatting, runtime
+compatibility files, and package publication status are unchanged.
 
 Candidate directions:
 
 - Direction id: `direction-010z-appserverclient-public-surface-decision`
-  Summary: Decide whether `CodexWatcher.AppServerClient` remains, receives
-  deprecation wording, or can move toward removal.
+  Summary: Remove `CodexWatcher.AppServerClient` from the main public surface
+  after proving no concrete source/app/test users remain.
   Why it matters now: source imports are gone, so the remaining question is the
   public compatibility contract.
   Preconditions: current import scan, docs/policy scan, Cabal exposed-module
@@ -564,7 +567,9 @@ Candidate directions:
   Parallel hints: serial.
   Boundary notes: no deprecation pragma, docs warning, or Cabal exposure change
   unless the exact decision is approved.
-  Extraction notes: record kept/deprecated/removed candidate state and blockers.
+  Extraction notes: completed as removal. The wrapper module and Cabal exposure
+  are gone; docs/policy point consumers at direct Codex client and transport
+  owner modules.
 
 - Direction id: `direction-010y-appserverclient-cabal-doc-policy-alignment`
   Summary: Align Cabal exposure, docs, and compatibility policy for the
@@ -577,7 +582,7 @@ Candidate directions:
   Extraction notes: update only the named public-surface artifacts and preserve
   behavior validation.
 
-### 7. [pending] Large Runtime Module Decomposition
+### 7. [completed] Large Runtime Module Decomposition
 
 Milestone id: `milestone-007-large-module-decomposition`
 Depends on: `milestone-001-test-topology-inventory`
@@ -590,6 +595,16 @@ pass after each split.
 Parallel lane: large-module split lane
 Coordination notes: pure extraction is preferred. Behavior changes require a
 separate selected direction with focused tests.
+Current status: completed by the direct cleanup pass after round 195. The pass
+extracted `CodexWatcher.Daemon.Types`, `CodexWatcher.TurnOutput.Schema`,
+`CodexWatcher.Workflow.Moifold.IssueImplement.Indexed.Types`,
+`CodexWatcher.Workflow.DocsMigration.Types`, and
+`CodexWatcher.EventLog.Types.Core` while preserving existing public exports
+from `CodexWatcher.Daemon`, `CodexWatcher.TurnOutput`,
+`CodexWatcher.Workflow.Moifold.IssueImplement.Indexed`,
+`CodexWatcher.Workflow.DocsMigration`, and `CodexWatcher.EventLog.Types`.
+`cabal build all` and `cabal test watcher-core-test` passed after these
+splits.
 
 Candidate directions:
 
@@ -603,7 +618,9 @@ Candidate directions:
   Parallel hints: serial with other daemon/runtime changes.
   Boundary notes: preserve daemon result shapes, event append order,
   compatibility writes, and runtime ownership.
-  Extraction notes: record moved exports and unchanged public API evidence.
+  Extraction notes: completed for daemon type/result ownership by extracting
+  `CodexWatcher.Daemon.Types` while preserving the `CodexWatcher.Daemon`
+  public export surface.
 
 - Direction id: `direction-014-docs-migration-module-split`
   Summary: Split `Workflow.DocsMigration` into smaller parsing, planning, and
@@ -613,8 +630,10 @@ Candidate directions:
   Preconditions: current docs migration tests and golden replay evidence.
   Parallel hints: serial unless only test support moves.
   Boundary notes: preserve docs migration event schemas and golden behavior.
-  Extraction notes: keep old fixture replay coverage in the same reviewed
-  slice.
+  Extraction notes: completed for docs migration type/model ownership by
+  extracting `CodexWatcher.Workflow.DocsMigration.Types` while keeping
+  `DocsMigrationSpec` instances and public exports in
+  `CodexWatcher.Workflow.DocsMigration`.
 
 - Direction id: `direction-015-issue-implement-indexed-module-split`
   Summary: Split `Workflow.Moifold.IssueImplement.Indexed` into smaller indexed
@@ -626,7 +645,10 @@ Candidate directions:
   changes.
   Boundary notes: preserve event schemas, daemon routing, dry-run text,
   request-id progression, and state transition parity.
-  Extraction notes: do not move concrete moifold policy into reusable packages.
+  Extraction notes: completed for indexed type/projection ownership by
+  extracting
+  `CodexWatcher.Workflow.Moifold.IssueImplement.Indexed.Types` while leaving
+  concrete moifold transition policy in the existing module.
 
 - Direction id: `direction-016-eventlog-types-module-split`
   Summary: Split `CodexWatcher.EventLog.Types` into smaller event groups or
@@ -638,7 +660,9 @@ Candidate directions:
   Parallel hints: serial.
   Boundary notes: no event JSON `type` change, schema-version change, or old
   log rejection unless separately approved.
-  Extraction notes: preserve parse/render behavior and fixture compatibility.
+  Extraction notes: completed for event/codec ownership by moving the existing
+  implementation into `CodexWatcher.EventLog.Types.Core` and preserving
+  `CodexWatcher.EventLog.Types` as the stable public wrapper.
 
 - Direction id: `direction-017-turn-output-module-split`
   Summary: Split `CodexWatcher.TurnOutput` into structured-output, prompt
@@ -649,10 +673,11 @@ Candidate directions:
   Parallel hints: serial with prompt or app-server output changes.
   Boundary notes: preserve structured-output requirements and prompt schema
   compatibility.
-  Extraction notes: do not change app-server protocol or output parsing as an
-  incidental extraction.
+  Extraction notes: completed for structured output schema ownership by
+  extracting `CodexWatcher.TurnOutput.Schema` while preserving prompt text,
+  app-server protocol, and output parsing behavior.
 
-### 8. [pending] Runtime Compatibility Cleanup Gates
+### 8. [completed] Runtime Compatibility Cleanup Gates
 
 Milestone id: `milestone-008-runtime-compatibility-cleanup-gates`
 Depends on: `milestone-002-compatibility-fixtures-contracts`
@@ -665,6 +690,17 @@ removals are exact and scoped.
 Parallel lane: serial by default
 Coordination notes: do not delete runtime compatibility files from local
 absence alone. Missing downstream/operator evidence means defer or keep.
+Current status: completed for the selected local cleanup surfaces. The direct
+cleanup moved healthcheck to event-replay projections, removed normal local
+compatibility-file writers, removed the obsolete `planning-state.json`
+projection and fixture, removed the repair-failure `block-state.json` writer
+and fixture, migrated checked-in compatibility snapshots to bootstrapped
+event-log fixtures, and removed restart/operator dependence on stale
+compatibility files. `repair-state.json`, `runtime-owner.json`, and live
+`issue-snapshot.json` are documented as retained product contracts outside the
+compatibility-file removal goal. Terminal runtime-file removal remains blocked
+only by downstream acceptance, supersession, or explicit retention for
+`soulomoon/pr-review-watcher-tool`.
 
 Candidate directions:
 
@@ -677,8 +713,10 @@ Candidate directions:
   classifications from milestone 003.
   Parallel hints: serial evidence round.
   Boundary notes: no deletion, rename, or schema change.
-  Extraction notes: classify each selected file as keep, defer, migrate,
-  deprecate, or remove with blockers.
+  Extraction notes: completed by the direct cleanup audit and policy refresh.
+  Current classifications are recorded in
+  `docs/agentic-workflow-framework/compatibility-deprecation-policy.md` and
+  `docs/agentic-workflow-framework/local-runtime-file-candidates.md`.
 
 - Direction id: `direction-019-selected-compatibility-file-migration`
   Summary: Land exact approved migrations for compatibility files whose gates
@@ -690,8 +728,11 @@ Candidate directions:
   fixtures.
   Boundary notes: preserve event truth, repair ordering, healthcheck behavior,
   and write timing.
-  Extraction notes: update fixtures, docs, tests, and policy in one reviewed
-  slice.
+  Extraction notes: completed locally for selected surfaces: healthcheck now
+  projects compatibility state from event replay, checked-in snapshots were
+  migrated to bootstrapped event-log fixtures, and the downstream audit branch
+  `codex/moifold-healthcheck-migration` commit `c2a14af` carries the external
+  consumer migration pending owner acceptance.
 
 - Direction id: `direction-020-selected-compatibility-file-removal`
   Summary: Remove only compatibility files whose removal gates are all
@@ -700,10 +741,14 @@ Candidate directions:
   Preconditions: reviewer approval naming exact file paths and satisfied gates.
   Parallel hints: serial.
   Boundary notes: no broad runtime compatibility cleanup by implication.
-  Extraction notes: include old-log, fixture, healthcheck, repair,
-  write-timing, operator/downstream, and baseline evidence.
+  Extraction notes: completed locally for approved removal slices:
+  `planning-state.json`, normal local compatibility-file writers,
+  repair-failure `block-state.json`, stale snapshot readers/fixtures, and
+  restart/operator stale-file cleanup. Downstream acceptance remains the only
+  terminal gate for the runtime compatibility files still observed outside
+  this repo.
 
-### 9. [pending] Final Deprecation And Removal Campaign
+### 9. [blocked] Final Deprecation And Removal Campaign
 
 Milestone id: `milestone-009-final-deprecation-removal`
 Depends on:
@@ -724,6 +769,30 @@ compatibility-surface sets.
 Parallel lane: serial
 Coordination notes: deprecation is externally visible. Removal requires exact
 approval and cannot be inferred from preferred-import guidance.
+Current status: blocked for terminal closeout. Public wrapper removals landed
+for `CodexWatcher.AppServerClient`, `CodexWatcher.Core.Ids`,
+`CodexWatcher.Workflow.EventLog`, and `CodexWatcher.Workflow.Permission`, with
+direct-owner imports, Cabal exposure cleanup, docs/policy updates, and
+`cabal build all` and `cabal test watcher-core-test` evidence. Terminal
+completion remains blocked because runtime compatibility surfaces still have
+non-empty `keep`/`defer` sets and the roadmap explicitly requires empty kept,
+deferred, and blocked compatibility sets before terminal approval. The
+2026-05-14 completion audit found direct downstream readers in
+`soulomoon/pr-review-watcher-tool` for `issue-state.json`,
+`daemon-state.json`, `planner-state.json`, PR-review state files, and
+`block-state.json`; local healthcheck now projects the replacement state shape
+from event replay instead of reading those compatibility files directly, but
+the downstream migration is not upstream accepted from this workspace. Normal
+local compatibility-file writers have also been removed: launch/fanout,
+daemon-transaction, daemon-loop idle/terminal, repair, PR-review handoff, and
+`RecordBlocked` paths no longer write those compatibility files. Terminal
+cleanup remains blocked by downstream acceptance. The invalid-event-log
+repair-failure `block-state.json` writer/fixture, checked-in compatibility
+snapshot bridge, and restart/operator stale-file cleanup were removed after the
+normal writer cleanup. Retained product files are explicitly outside the
+compatibility-file removal goal. Do not mark the family done until the
+downstream migration gate is accepted, superseded, or explicitly retained by
+the downstream owner.
 
 Candidate directions:
 
@@ -778,3 +847,116 @@ Candidate directions:
   Extraction notes: include kept, deferred, deprecated, removed, migrated, and
   blocked surface sets plus validation commands. The kept, deferred, and
   blocked compatibility-surface sets must be empty for terminal approval.
+
+### 10. [blocked] Downstream Runtime-File Migration Front
+
+Milestone id: `milestone-010-downstream-runtime-file-migration`
+Depends on: `milestone-008-runtime-compatibility-cleanup-gates`
+Blocks: `milestone-009-final-deprecation-removal`
+Intent: Turn the newly confirmed downstream direct-reader inventory into
+concrete migration work before any terminal cleanup claim.
+Completion signal: every downstream direct reader of `issue-state.json`,
+`daemon-state.json`, `planner-state.json`, PR-review state files, and
+`block-state.json` has either migrated to a supported replacement API/path or
+is explicitly retained as a product contract outside the compatibility-removal
+goal with updated docs, tests, and owner approval. The runtime compatibility
+policy must list no unknown downstream direct-reader gate for these surfaces.
+Parallel lane: serial
+Coordination notes: this milestone is not optional terminal paperwork. The
+2026-05-14 audit found live direct readers in `soulomoon/pr-review-watcher-tool`,
+so local moifold deletion would break known downstream code.
+Current status: blocked after the local replacement read contract and local
+runtime-file candidate classification landed.
+`docs/agentic-workflow-framework/downstream-runtime-state-migration.md`
+defines the supported read-only migration path through
+`moifold healthcheck --state-root /workspace/artifacts --repo owner/name`, and
+`healthcheckRuntimeStateMigrationContractTests` guard the legacy state
+projection keys under `watchers[].states.*`. Healthcheck now derives those
+compatibility-state entries from event replay rather than direct
+compatibility-file reads. That completes the read-only replacement mapping for
+health/status consumers. The direct cleanup pass also implemented a local
+downstream-audit patch in `/tmp/pr-review-watcher-tool-audit`
+that routes read-only status/healthcheck commands through `moifold
+healthcheck` and replaces the legacy Node daemon bodies with launchers for the
+Haskell `moifold run-* --execute --loop` commands. `npm run check`,
+fake-`moifold` health/status smokes, fake-`moifold` daemon launcher smokes, and
+`moifold replay-events` checks for the generated initial event logs passed
+there. That patch is not yet an upstream accepted downstream migration, and it
+does not complete the local runtime-file migration:
+`docs/agentic-workflow-framework/local-runtime-file-candidates.md` classifies
+the local no-downstream-hit files and `localRuntimeFileCandidateDecisionTest`
+guards that decision.
+Runtime-file removal remains blocked until the downstream patch is accepted or
+the downstream owner explicitly retains the legacy runtime outside this goal.
+Normal local Haskell compatibility-file producers have now been removed,
+checked-in compatibility snapshot readers/fixtures have been migrated to
+bootstrapped event-log fixtures and removed, and operator restart/runbook paths
+no longer depend on stale compatibility files. The retained product files are
+documented as product contracts outside the compatibility-removal goal. The
+repair-failure `block-state.json` writer and fixture have been removed locally.
+
+Candidate directions:
+
+- Direction id: `direction-025-downstream-state-file-migration-plan`
+  Summary: Define replacement reads or product-contract retention for the
+  `soulomoon/pr-review-watcher-tool` direct state-file readers.
+  Why it matters now: terminal cleanup is blocked by known downstream readers,
+  not by speculative risk.
+  Preconditions: current `gh search code` direct-reader inventory and local
+  runtime-file reader/writer inventory.
+  Parallel hints: serial.
+  Boundary notes: no local file removal until the replacement reader path is
+  implemented and validated.
+  Extraction notes: completed for the local read-only replacement contract.
+  `docs/agentic-workflow-framework/downstream-runtime-state-migration.md`
+  maps `issue-state.json`, `daemon-state.json`, `planner-state.json`,
+  PR-review state files, and `block-state.json` to `moifold healthcheck`
+  `watchers[].states.*` paths. A local downstream-audit patch implements the
+  read-only command migration for status/healthcheck commands and replaces the
+  legacy daemon scripts with compatibility launchers for the Haskell
+  `moifold run-*` loops. Compatibility-file removal remains blocked until
+  upstream accepts the downstream migration or the legacy downstream runtime is
+  explicitly retained by an owner decision.
+
+- Direction id: `direction-026-local-runtime-file-removal-candidates`
+  Summary: Separately evaluate locally produced runtime files without known
+  downstream code-search hits: `planning-state.json`, `repair-state.json`,
+  `runtime-owner.json`, and live `issue-snapshot.json`.
+  Why it matters now: these files have different ownership. Some may be
+  removable compatibility projections; others are live product/operator
+  contracts.
+  Preconditions: focused local reader/writer scan, fixture evidence, healthcheck
+  evidence, repair evidence, and operator runbook/script inventory.
+  Parallel hints: serial by file.
+  Boundary notes: `runtime-owner.json` and live `issue-snapshot.json` are
+  operator/runtime behavior until a selected replacement is implemented.
+  Extraction notes: completed for local classification. The decision artifact
+  `docs/agentic-workflow-framework/local-runtime-file-candidates.md` classifies
+  `planning-state.json` as `removed`, `repair-state.json` as
+  `keep-as-product`, `runtime-owner.json` as `keep-as-product`, and live
+  `issue-snapshot.json` as `keep-as-product`. The aggregate
+  `localRuntimeFileCandidateDecisionTest` plus existing fixture/source tests
+  guard the decision. This direction removed only the obsolete
+  `planning-state.json` compatibility projection; the kept product files still
+  require selected replacement work before any removal. A follow-up direct
+  cleanup also removed normal compatibility-file producers for
+  `issue-state.json`, `daemon-state.json`, `planner-state.json`, PR-review
+  state files, and normal `block-state.json`; a follow-up direct cleanup
+  migrated checked-in compatibility snapshots to event-log fixtures and removed
+  the snapshot bridge; another follow-up removed restart/operator dependence on
+  stale compatibility files. The retained product files are documented outside
+  the compatibility-removal goal. The repair-failure `block-state.json` writer
+  and fixture were removed as a follow-up local cleanup slice.
+
+- Direction id: `direction-027-runtime-compatibility-terminal-report`
+  Summary: Re-run terminal closeout after downstream and local runtime-file
+  migration work lands.
+  Why it matters now: milestone 009 cannot close until known direct readers are
+  migrated or the goal changes.
+  Preconditions: directions 025 and 026 completed or explicitly superseded by
+  a new roadmap revision.
+  Parallel hints: serial.
+  Boundary notes: no terminal `done` while kept, deferred, or blocked
+  compatibility-surface sets remain.
+  Extraction notes: update `completion-audit.md`, compatibility policy, docs,
+  and verification evidence together.
