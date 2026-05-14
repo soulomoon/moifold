@@ -350,21 +350,25 @@ PrNumber, RepoName, ReviewThreadId)` imports. Round 188 migrated
 `test/WorkflowEventLogSpec.hs` from `CodexWatcher.Core.Ids` to direct
 `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)` and
 `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
+PrNumber, RepoName, ReviewThreadId)` imports. Round 189 migrated
+`test/WorkflowAgentSpec.hs` from `CodexWatcher.Core.Ids` to direct
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId, nextRequestId)`
+and `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
 PrNumber, RepoName, ReviewThreadId)` imports. The reviewer approved the
-round-188 import-only diff after `cabal build all`,
+round-189 import-only diff after `cabal build all`,
 `cabal test watcher-core-test`, git diff checks, selected-file no-`Core.Ids`
-scan, selected-file direct-owner scan, and broad remaining-user
+scan, selected-file direct-owner imports, and broad remaining-user
 classification all passed. Remaining `Core.Ids` test users include workflow
-specs (`test/WorkflowAgentSpec.hs`, `test/WorkflowExecutionSpec.hs`,
-`test/WorkflowIndexedSpec.hs`), runtime/CLI tests (`test/RuntimeSpec.hs`,
+specs (`test/WorkflowExecutionSpec.hs`, `test/WorkflowIndexedSpec.hs`),
+runtime/CLI tests (`test/RuntimeSpec.hs`,
 `test/RuntimeCompatibilityFixtureSpec.hs`, `test/CliSpec.hs`), and
 policy/aggregator candidates (`test/FacadeImportPolicySpec.hs`,
-`test/Main.hs`). No app users and no production `src` users remain beyond the
-public facade module. Docs, Cabal exposure, and the public facade remain for
-later milestones or public-surface decisions. This status does not approve
-public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
-runtime compatibility cleanup, milestone 004 completion, release approval,
-terminal completion, or public compatibility removal.
+`test/Main.hs`). No app, reusable package, or production `src` users remain
+beyond the public facade module. Docs, Cabal exposure, and the public facade
+remain for later milestones or public-surface decisions. This status does not
+approve public facade deprecation/removal, Cabal exposure cleanup, docs
+cleanup, runtime compatibility cleanup, milestone 004 completion, release
+approval, terminal completion, or public compatibility removal.
 
 Candidate directions:
 
@@ -382,10 +386,10 @@ Candidate directions:
   Extraction notes: direct-owner import split only unless a test helper move is
   explicitly selected. `test/TestSupport/Workflow.hs` was completed by round
   187 as an import-only direct-owner migration. `test/WorkflowEventLogSpec.hs`
-  was completed by round 188 as an import-only direct-owner migration. The
-  workflow spec files that remain for later slices are
-  `test/WorkflowAgentSpec.hs`, `test/WorkflowExecutionSpec.hs`, and
-  `test/WorkflowIndexedSpec.hs`.
+  was completed by round 188 as an import-only direct-owner migration.
+  `test/WorkflowAgentSpec.hs` was completed by round 189 as an import-only
+  direct-owner migration. The workflow spec files that remain for later slices
+  are `test/WorkflowExecutionSpec.hs` and `test/WorkflowIndexedSpec.hs`.
 
 - Direction id: `direction-011i-core-ids-runtime-cli-test-imports`
   Summary: Migrate safe runtime and CLI test imports such as
