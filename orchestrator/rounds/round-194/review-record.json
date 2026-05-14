@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-004-core-ids-test-and-fixture-import-burndown",
+  "direction_id": "direction-011i-core-ids-runtime-cli-test-imports",
+  "extracted_item_id": "direction-011i-runtime-compatibility-fixture-core-ids-import",
+  "roadmap_item_id": "direction-011i-core-ids-runtime-cli-test-imports",
+  "decision": "approved",
+  "evidence_summary": "Selected file no longer imports CodexWatcher.Core.Ids, now imports ThreadId and TurnId from Workflow.Agent.Ids and BranchName, IssueNumber, PrNumber, and RepoName from Workflow.GitHub.Ids. Diff is import-only for RuntimeCompatibilityFixtureSpec; aggregate wiring, policy spec, public facade module, Cabal exposure, fixtures, and compatibility behavior are unchanged. cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed."
+}

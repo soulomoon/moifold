@@ -8,7 +8,6 @@ module RuntimeCompatibilityFixtureSpec
   ( runtimeCompatibilityFixtureTests
   ) where
 
-import CodexWatcher.Core.Ids (BranchName (..), IssueNumber (..), PrNumber (..), RepoName (..), ThreadId (..), TurnId (..))
 import CodexWatcher.Core.Kinds (Domain (..), Phase (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (CompletionEvidence (..), SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
@@ -38,6 +37,8 @@ import CodexWatcher.Runtime.Owner.Store (readRuntimeOwner, readRuntimeOwnerMarke
 import CodexWatcher.Runtime.Owner.Types (RuntimeLease (..), RuntimeOwner (..), RuntimeOwnerMarker (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirFile)
 import CodexWatcher.Snapshot (NodeBlockedState (..), NodeIssueDaemonState (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), IssueNumber (..), PrNumber (..), RepoName (..))
 import Control.Monad (when)
 import Data.Aeson (Result (..), Value (..), eitherDecodeStrict', encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson.Key qualified as Key
