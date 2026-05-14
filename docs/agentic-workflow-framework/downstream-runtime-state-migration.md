@@ -125,8 +125,9 @@ implementation, and PR review.
 Do not remove, rename, or change the meaning of these runtime files merely
 because the local downstream audit patch can replace read-only status checks
 and daemon bodies. Runtime-file removal requires the downstream patch to be
-accepted by the downstream owner or explicitly retained by that owner. Local
-moifold producers, healthcheck, checked-in snapshots, and operator restart
-runbooks have already migrated off direct stale compatibility-file dependence.
-Healthcheck now projects the stable `watchers[].states.*` shape from event
-replay.
+accepted by the downstream owner or explicitly retained by that owner. The
+patch is open as draft PR `soulomoon/pr-review-watcher-tool#1` but is not yet
+accepted. Local moifold producers, healthcheck, checked-in snapshots, and
+operator restart runbooks have already migrated off direct stale
+compatibility-file dependence. Healthcheck now projects the stable
+`watchers[].states.*` shape from event replay.

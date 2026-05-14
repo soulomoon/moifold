@@ -781,9 +781,10 @@ deferred, and blocked compatibility sets before terminal approval. The
 `soulomoon/pr-review-watcher-tool` for `issue-state.json`,
 `daemon-state.json`, `planner-state.json`, PR-review state files, and
 `block-state.json`; local healthcheck now projects the replacement state shape
-from event replay instead of reading those compatibility files directly, but
-the downstream migration is not upstream accepted from this workspace. Normal
-local compatibility-file writers have also been removed: launch/fanout,
+from event replay instead of reading those compatibility files directly. Draft
+PR `soulomoon/pr-review-watcher-tool#1` migrates those downstream readers and
+daemon scripts, but it is not accepted. Normal local compatibility-file
+writers have also been removed: launch/fanout,
 daemon-transaction, daemon-loop idle/terminal, repair, PR-review handoff, and
 `RecordBlocked` paths no longer write those compatibility files. Terminal
 cleanup remains blocked by downstream acceptance. The invalid-event-log
@@ -881,8 +882,9 @@ healthcheck` and replaces the legacy Node daemon bodies with launchers for the
 Haskell `moifold run-* --execute --loop` commands. `npm run check`,
 fake-`moifold` health/status smokes, fake-`moifold` daemon launcher smokes, and
 `moifold replay-events` checks for the generated initial event logs passed
-there. That patch is not yet an upstream accepted downstream migration, and it
-does not complete the local runtime-file migration:
+there. Draft PR `soulomoon/pr-review-watcher-tool#1` is open for that patch,
+but it is not yet an accepted downstream migration, and it does not complete
+the local runtime-file migration:
 `docs/agentic-workflow-framework/local-runtime-file-candidates.md` classifies
 the local no-downstream-hit files and `localRuntimeFileCandidateDecisionTest`
 guards that decision.
@@ -914,7 +916,8 @@ Candidate directions:
   `watchers[].states.*` paths. A local downstream-audit patch implements the
   read-only command migration for status/healthcheck commands and replaces the
   legacy daemon scripts with compatibility launchers for the Haskell
-  `moifold run-*` loops. Compatibility-file removal remains blocked until
+  `moifold run-*` loops. Draft PR `soulomoon/pr-review-watcher-tool#1` is open
+  for this migration. Compatibility-file removal remains blocked until
   upstream accepts the downstream migration or the legacy downstream runtime is
   explicitly retained by an owner decision.
 

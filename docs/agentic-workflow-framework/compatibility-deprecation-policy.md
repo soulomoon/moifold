@@ -154,12 +154,12 @@ downstream reader classification are recorded in
 `docs/agentic-workflow-framework/downstream-runtime-state-migration.md` and
 guarded by `healthcheckRuntimeStateMigrationContractTests`.
 
-This replacement path covers read-only health/status consumers. The local
-downstream audit checkout now contains a patch that routes both read-only
-health/status commands and legacy daemon launchers through the Haskell moifold
-healthcheck and `run-*` commands. That patch is not an upstream accepted
-downstream migration from this workspace. Local moifold healthcheck no longer
-directly reads compatibility files, and normal plus repair-failure local
+This replacement path covers read-only health/status consumers. The downstream
+audit patch routes both read-only health/status commands and legacy daemon
+launchers through the Haskell moifold healthcheck and `run-*` commands, and is
+now open as draft PR `soulomoon/pr-review-watcher-tool#1`. That PR is not yet
+an accepted downstream migration. Local moifold healthcheck no longer directly
+reads compatibility files, and normal plus repair-failure local
 compatibility-file writers have been removed; checked-in compatibility
 snapshot readers/fixtures have also been removed after migration to
 bootstrapped event-log fixtures. `scripts/restart-watcher` and the operator
