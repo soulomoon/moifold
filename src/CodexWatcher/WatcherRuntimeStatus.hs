@@ -19,13 +19,12 @@ module CodexWatcher.WatcherRuntimeStatus
   , watcherRuntimeStatus
   ) where
 
-import CodexWatcher.ChildDaemon (readPidFile, isPidRunning)
-import CodexWatcher.EventLog.File (loadEventLogFile)
-import CodexWatcher.EventLog.Replay (replayEventLog)
-import CodexWatcher.EventLog.Types (EventReplayResult (..))
-import CodexWatcher.Core.Kinds (Domain, KnownDomain)
+import CodexWatcher.Core.Kinds (Domain, KnownDomain, domainSing)
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
-import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), isTerminalState, someDomainIs)
+import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), isTerminalState)
+import CodexWatcher.EventLog.Types (EventReplayResult (..))
+import CodexWatcher.Healthcheck.Types (PidReport (..))
+import CodexWatcher.Runtime.Inspection (RuntimeEventReplay (..), checkRuntimeEventReplay, readRuntimePid)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
@@ -64,30 +63,18 @@ watcherRuntimeStatus config = do
       if not eventsExists
         then pure (runningStatus running)
         else do
-          loaded <- loadEventLogFile config.watcherRuntimeEventsPath
-          case loaded of
-            Left _failure ->
-              pure (runningStatus running)
-            Right events ->
-              case replayEventLog events of
-                Left _failure ->
-                  pure (runningStatus running)
-                Right replay
-                  | someDomainIs @domain replay.replayState
-                  , isTerminalState replay.replayState -> do
-                      terminal <- config.watcherRuntimeReplayTerminalIsTerminal replay
-                      pure (if terminal then WatcherTerminal (terminalReason replay.replayState) else runningStatus running)
-                  | running ->
-                      pure WatcherActiveRunning
-                  | otherwise ->
-                      pure WatcherActiveStopped
+          eventReplay <- checkRuntimeEventReplay (domainSing @domain) (Just config.watcherRuntimeEventsPath)
+          case eventReplay.runtimeEventReplayResult of
+            Just replay
+              | isTerminalState replay.replayState -> do
+                  terminal <- config.watcherRuntimeReplayTerminalIsTerminal replay
+                  pure (if terminal then WatcherTerminal (terminalReason replay.replayState) else runningStatus running)
+            _ -> pure (runningStatus running)
 
 pidRunning :: FilePath -> IO Bool
 pidRunning pidPath = do
-  maybePid <- readPidFile pidPath
-  case maybePid of
-    Nothing -> pure False
-    Just pidText -> isPidRunning pidText
+  PidReport {running} <- readRuntimePid pidPath
+  pure running
 
 runningStatus :: Bool -> WatcherRuntimeStatus
 runningStatus running =

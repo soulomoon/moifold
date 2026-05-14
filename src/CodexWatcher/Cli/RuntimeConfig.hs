@@ -12,7 +12,7 @@ import CodexWatcher.Runtime.Defaults
 import CodexWatcher.Runtime.Paths (RuntimeCwd (..), RuntimeStateDir (..), RuntimeWorkdir (..))
 import CodexWatcher.TurnOutput
 import CodexWatcher.Workflow.Agent.Ids (RequestId (..))
-import CodexWatcher.Workflow.GitHub.Ids (IssueNumber, RepoName)
+import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..), IssueNumber, RepoName)
 
 defaultEffectRuntimeConfig :: RepoName -> FilePath -> FilePath -> EffectRuntimeConfig
 defaultEffectRuntimeConfig =
@@ -41,11 +41,11 @@ defaultEffectRuntimeConfigWithPlannerScope scopeIssues repo workdir stateDir =
         , effectRuntimeNextRequestId = RequestId 1
         , effectRuntimePlannerThreadInstructions = issuePlanningThreadDeveloperInstructions stateDir repo scopeIssues
         , effectRuntimePlannerTurn =
-            (turnConfig (plannerTurnInputForScope scopeIssues) (Just plannerTurnOutputSchema))
+            (turnConfig (plannerTurnInputForScope scopeIssues) (Just (turnOutputContractSchema plannerTurnOutputContract)))
               { turnRuntimeCwd = RuntimeStateDirCwd runtimeStateDir
               }
-        , effectRuntimeWorkerTurn = turnConfig prReviewWorkerTurnInput (Just prReviewWorkerTurnOutputSchema)
-        , effectRuntimeIssuePlanTurn = turnConfig issuePlanTurnInput (Just issuePlanTurnOutputSchema)
-        , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput (Just issueImplementationTurnOutputSchema)
-        , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit." (Just reviewerTurnOutputSchema)
+        , effectRuntimeWorkerTurn = turnConfig prReviewWorkerTurnInput (Just (turnOutputContractSchema prReviewWorkerTurnOutputContract))
+        , effectRuntimeIssuePlanTurn = turnConfig issuePlanTurnInput (Just (turnOutputContractSchema issuePlanTurnOutputContract))
+        , effectRuntimeIssueImplementationTurn = turnConfig issueImplementationTurnInput (Just (turnOutputContractSchema (issueImplementationTurnOutputContract Nothing Nothing)))
+        , effectRuntimeReviewerTurn = turnConfig "Reviewer prompt is generated per PR target commit." (Just (turnOutputContractSchema (reviewerTurnOutputContract (CommitSha ""))))
         }

@@ -25,7 +25,7 @@ import CodexWatcher.Domain.PrReview.Types
   , reviewEvidenceThreadIds
   )
 import CodexWatcher.Runtime.BlockedState (blockedStateJson)
-import CodexWatcher.TurnOutput (reviewerPromptVersion)
+import CodexWatcher.TurnOutput.Version (reviewerPromptVersion)
 import CodexWatcher.Workflow.Agent.Ids (ThreadId (..), TurnId (..))
 import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)

@@ -12,7 +12,7 @@ module CodexWatcher.Domain.IssueImplement.TurnClassifier
 
 import CodexWatcher.Domain.IssueImplement.Watcher
 import CodexWatcher.Turn.Classifier.Common
-import CodexWatcher.TurnOutput (reviewerPromptVersion)
+import CodexWatcher.TurnOutput.Version (reviewerPromptVersion)
 import CodexWatcher.Workflow.Agent.Ids (ThreadId)
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..), PrNumber)

@@ -8,15 +8,14 @@ module CodexWatcher.Workflow.Moifold.PrReview.Agent
 
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn)
 import CodexWatcher.Domain.PrReview.Protocol (ReviewerOutcome (..), WorkerOutcome (..))
-import CodexWatcher.Domain.PrReview.TurnClassifier
-  ( classifyPrReviewReviewerTurn
-  , classifyPrReviewWorkerTurn
-  )
 import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Turn.Classifier.Common (TurnCompletion (..), classifyTurnCompletion)
 import CodexWatcher.TurnOutput
-  ( prReviewWorkerTurnOutputSchema
-  , reviewerTurnOutputSchema
+  ( TurnOutputContract
+  , prReviewWorkerTurnOutputContract
+  , reviewerTurnOutputContract
+  , turnOutputContractClassify
+  , turnOutputContractSchema
   )
 import CodexWatcher.Workflow.GitHub.Ids (CommitSha)
 import CodexWatcher.Workflow.Agent
@@ -31,29 +30,33 @@ import Data.Text qualified as Text
 
 prReviewWorkerAgentRole :: AgentRole Text PrReviewObservation
 prReviewWorkerAgentRole =
+  let contract = prReviewWorkerTurnOutputContract
+   in
   AgentRole
     { agentRoleName = "pr-review-worker"
     , renderAgentInput = \input -> input
-    , agentOutputSchema = Just prReviewWorkerTurnOutputSchema
+    , agentOutputSchema = Just (turnOutputContractSchema contract)
     , agentRetryPolicy = defaultAgentRetryPolicy
     , agentSideEffectScope = AgentWritesWorktree
-    , agentClassifyTurn = classifyPrReviewWorkerAgentTurn
+    , agentClassifyTurn = classifyPrReviewWorkerAgentTurn contract
     }
 
 prReviewReviewerAgentRole :: CommitSha -> AgentRole Text PrReviewObservation
 prReviewReviewerAgentRole commit =
+  let contract = reviewerTurnOutputContract commit
+   in
   AgentRole
     { agentRoleName = "pr-reviewer"
     , renderAgentInput = \input -> input
-    , agentOutputSchema = Just reviewerTurnOutputSchema
+    , agentOutputSchema = Just (turnOutputContractSchema contract)
     , agentRetryPolicy = defaultAgentRetryPolicy
     , agentSideEffectScope = AgentReadOnly
-    , agentClassifyTurn = classifyPrReviewReviewerAgentTurn commit
+    , agentClassifyTurn = classifyPrReviewReviewerAgentTurn contract
     }
 
-classifyPrReviewWorkerAgentTurn :: AppServerTurn -> Either Text (ClassifiedAgentOutput PrReviewObservation)
-classifyPrReviewWorkerAgentTurn turn =
-  case classifyPrReviewWorkerTurn turn of
+classifyPrReviewWorkerAgentTurn :: TurnOutputContract PrReviewObservation -> AppServerTurn -> Either Text (ClassifiedAgentOutput PrReviewObservation)
+classifyPrReviewWorkerAgentTurn contract turn =
+  case turnOutputContractClassify contract turn of
     Nothing ->
       Left "turn still running"
     Just observation@(ObservedWorkerOutcome outcome) ->
@@ -61,9 +64,9 @@ classifyPrReviewWorkerAgentTurn turn =
     Just observation ->
       Right (ClassifiedAgentOutput AgentComplete observation)
 
-classifyPrReviewReviewerAgentTurn :: CommitSha -> AppServerTurn -> Either Text (ClassifiedAgentOutput PrReviewObservation)
-classifyPrReviewReviewerAgentTurn commit turn =
-  case classifyPrReviewReviewerTurn commit turn of
+classifyPrReviewReviewerAgentTurn :: TurnOutputContract PrReviewObservation -> AppServerTurn -> Either Text (ClassifiedAgentOutput PrReviewObservation)
+classifyPrReviewReviewerAgentTurn contract turn =
+  case turnOutputContractClassify contract turn of
     Nothing ->
       Left "turn still running"
     Just observation@(ObservedReviewerOutcome outcome) ->

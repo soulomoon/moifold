@@ -3122,7 +3122,7 @@ workflowIssueImplementIndexedDaemonRoutingIsLimitedToDaemonProjectionOnly = do
 
 workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors :: IO Bool
 workflowIssueImplementIndexedDaemonDoesNotRouteLaterProjectors = do
-  source <- Text.pack <$> readFile ("src" </> "CodexWatcher" </> "Daemon.hs")
+  source <- Text.pack <$> readFile ("src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "ObservationProjection.hs")
   let requiredNeedles =
         [ "projectIssueImplementWorkerThreadRefreshedImplementationReadyObservation"
         , "projectIssueImplementationTurnStartedObservation"

@@ -43,10 +43,11 @@ import CodexWatcher.Workflow.Agent.Codex.Transport
 import CodexWatcher.EventLog.File (loadEventLogFile)
 import CodexWatcher.EventLog.Replay (replayEventLog)
 import CodexWatcher.EventLog.Types (EventReplayResult (..), ReplayFailure (..), WatcherEvent (..), eventName)
-import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
+import CodexWatcher.Runtime.Inspection (RuntimeEventReplay (..), checkRuntimeEventReplay, readRuntimePid)
 import CodexWatcher.Runtime.Defaults (defaultEffort, defaultModel, defaultThreadStartOptions, defaultTurnStartOptions)
+import CodexWatcher.Healthcheck.Types (PidReport (..))
 import CodexWatcher.Turn.Classifier.Common (TurnCompletion (..), classifyTurnCompletion)
-import CodexWatcher.Core.Kinds (Domain, KnownDomain, Phase (..))
+import CodexWatcher.Core.Kinds (Domain, KnownDomain, Phase (..), domainSing)
 import CodexWatcher.Core.Limits (StaleSeconds (..))
 import CodexWatcher.Core.Reason (BlockedReason (..), StopReason (..))
 import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), knownDomain, someDomain, someDomainIs, somePhaseIs)
@@ -210,12 +211,12 @@ runnerGuardRepairPrompt config problem' =
 
 checkWatcherPid :: FilePath -> IO (Maybe RunnerGuardProblem)
 checkWatcherPid pidPath = do
-  maybePid <- readPidFile pidPath
+  pidReport <- readRuntimePid pidPath
+  let PidReport {pid = maybePid, running} = pidReport
   case maybePid of
     Nothing ->
       pure (Just (restartProblem "watcher pid file is missing or empty" ["pid file: " <> Text.pack pidPath]))
     Just pidText -> do
-      running <- isPidRunning pidText
       pure
         if running
           then Nothing
@@ -256,14 +257,10 @@ watcherEventLogTerminal config = do
   if not exists
     then pure False
     else do
-      loaded <- loadEventLogFile eventsPath
-      case loaded of
-        Left _ -> pure False
-        Right events ->
-          case replayEventLog events of
-            Left _ -> pure False
-            Right replay ->
-              pure (someDomainIs @domain replay.replayState && somePhaseIs @'Complete replay.replayState)
+      eventReplay <- checkRuntimeEventReplay (domainSing @domain) (Just eventsPath)
+      pure case eventReplay.runtimeEventReplayState of
+        Just state -> somePhaseIs @'Complete state
+        Nothing -> False
 
 checkReplayState :: RunnerGuardConfig domain -> [WatcherEvent] -> SomeWatcherState -> IO (Maybe RunnerGuardProblem)
 checkReplayState config events = \case

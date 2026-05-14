@@ -30,6 +30,7 @@ workflowBoundaryPolicyTests = do
       , workflowMoifoldCabalLibraryDoesNotReexportAdapters
       , workflowGithubCommandFacadeMatchesRuntimeRender
       , workflowIssueImplementLifecycleBoundarySourceScans
+      , workflowTurnOutputContractSourceScan
       ]
   pure (and results)
 
@@ -57,6 +58,8 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
   daemonSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Daemon.hs")
   issueFanoutSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "IssueFanout.hs")
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
+  observationProjectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "ObservationProjection.hs")
   cabalSource <- TextIO.readFile "moifold.cabal"
   let coreForbiddenImportModules =
         [ "CodexWatcher.ChildDaemon"
@@ -110,8 +113,10 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
       lifecycleRouterViolations
   daemonRouterOk <-
     assert
-      "live IssueImplement indexed projection routing remains isolated to Daemon"
-      ("CodexWatcher.Workflow.Moifold.IssueImplement.Indexed" `Text.isInfixOf` daemonSource)
+      "live IssueImplement indexed projection routing remains isolated to Moifold observation projection"
+      ( "CodexWatcher.Workflow.Moifold.IssueImplement.Indexed" `Text.isInfixOf` observationProjectionSource
+          && not ("CodexWatcher.Workflow.Moifold.IssueImplement.Indexed" `Text.isInfixOf` daemonSource)
+      )
   compatibilityFacadeOk <-
     assertNoTextMatches
       "main moifold library keeps compatibility facades without adapter reexports"
@@ -127,30 +132,33 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
       )
   healthcheckReadOnlyOk <-
     assert
-      "healthcheck surfaces issue implement lifecycle files without mutation"
+      "runtime inspection surfaces issue implement lifecycle files without mutation"
       ( all
-          (`Text.isInfixOf` healthcheckSource)
+          (`Text.isInfixOf` runtimeInspectionSource)
           [ "(\"issueState\", \"issue-state.json\")"
           , "(\"plannerState\", \"planner-state.json\")"
           , "(\"daemonState\", \"daemon-state.json\")"
           , "(\"blockedState\", \"block-state.json\")"
           , "(\"runtimeOwner\", \"runtime-owner.json\")"
-          , "fallbackPidPath kind stateDir' config.pidPath"
           ]
+          && "fallbackPidPath kind stateDir' config.pidPath" `Text.isInfixOf` healthcheckSource
           && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
+          && not ("planning-state.json" `Text.isInfixOf` runtimeInspectionSource)
           && not ("writeJsonValue" `Text.isInfixOf` healthcheckSource)
+          && not ("writeJsonValue" `Text.isInfixOf` runtimeInspectionSource)
       )
   healthcheckRuntimeOwnerContractOk <-
     assert
       "healthcheck preserves runtime-owner.json field-path contract"
       ( all
-          (`Text.isInfixOf` healthcheckSource)
+          (`Text.isInfixOf` runtimeInspectionSource)
           [ "SIssuePlanning ->\n    sharedStateFiles"
           , "SIssueImplement ->\n    sharedStateFiles"
           , "(\"runtimeOwner\", \"runtime-owner.json\")"
-          , "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states"
           ]
+          && "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states" `Text.isInfixOf` healthcheckSource
           && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` healthcheckSource)
+          && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` runtimeInspectionSource)
       )
   pure
     ( importsOk
@@ -162,6 +170,48 @@ workflowIssueImplementLifecycleBoundarySourceScans = do
         && healthcheckReadOnlyOk
         && healthcheckRuntimeOwnerContractOk
     )
+
+workflowTurnOutputContractSourceScan :: IO Bool
+workflowTurnOutputContractSourceScan = do
+  contractSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "TurnOutput" </> "Contract.hs")
+  prAgentSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Workflow" </> "Moifold" </> "PrReview" </> "Agent.hs")
+  runtimeConfigSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "RuntimeConfig.hs")
+  results <-
+    sequence
+      [ assert
+          "turn output contract owns instructions, schema, and classifier slots"
+          ( all
+              (`Text.isInfixOf` contractSource)
+              [ "data TurnOutputContract observation = TurnOutputContract"
+              , "turnOutputContractInstructions :: Text"
+              , "turnOutputContractSchema :: Value"
+              , "turnOutputContractClassify :: AppServerTurn -> Maybe observation"
+              , "prReviewWorkerTurnOutputContract"
+              , "reviewerTurnOutputContract"
+              ]
+          )
+      , assert
+          "PR review agent role consumes output contracts instead of direct schema/classifier imports"
+          ( all
+              (`Text.isInfixOf` prAgentSource)
+              [ "turnOutputContractSchema contract"
+              , "turnOutputContractClassify contract turn"
+              ]
+              && not ("classifyPrReviewReviewerTurn" `Text.isInfixOf` prAgentSource)
+              && not ("classifyPrReviewWorkerTurn" `Text.isInfixOf` prAgentSource)
+          )
+      , assert
+          "runtime config derives turn schemas through output contracts"
+          ( all
+              (`Text.isInfixOf` runtimeConfigSource)
+              [ "turnOutputContractSchema plannerTurnOutputContract"
+              , "turnOutputContractSchema prReviewWorkerTurnOutputContract"
+              , "turnOutputContractSchema issuePlanTurnOutputContract"
+              , "turnOutputContractSchema (issueImplementationTurnOutputContract Nothing Nothing)"
+              ]
+          )
+      ]
+  pure (and results)
 
 workflowMoifoldCabalConsumesStandaloneWorkflowPackages :: IO Bool
 workflowMoifoldCabalConsumesStandaloneWorkflowPackages = do

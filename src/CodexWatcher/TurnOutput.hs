@@ -23,6 +23,13 @@ module CodexWatcher.TurnOutput
   , reviewerVerificationTurnInput
   , structuredTurnOutcomeInstructions
   , structuredTurnOutputSchema
+  , TurnOutputContract (..)
+  , issueFinalReviewTurnOutputContract
+  , issueImplementationTurnOutputContract
+  , issuePlanTurnOutputContract
+  , plannerTurnOutputContract
+  , prReviewWorkerTurnOutputContract
+  , reviewerTurnOutputContract
   ) where
 
 import CodexWatcher.PromptTemplates
@@ -37,11 +44,12 @@ import CodexWatcher.PromptTemplates
   , prReviewWorkerTemplate
   , publishProtocolTemplate
   , renderTemplate
-  , reviewerPromptVersion
   , reviewerTemplate
   , validationProtocolTemplate
   )
 import CodexWatcher.IssueText (issueNumbersText)
+import CodexWatcher.TurnOutput.Contract
+import CodexWatcher.TurnOutput.Version (reviewerPromptVersion)
 import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)
   , CommitSha (..)
@@ -72,58 +80,25 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import System.FilePath ((</>))
 
-structuredTurnOutcomeInstructions :: Text
-structuredTurnOutcomeInstructions =
-  Text.unlines
-    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
-    , "Every schema includes outcome, reason, and summary; include every schema field, using empty strings or arrays when a field is not applicable."
-    , "Use outcome=blocked with a non-empty reason when you cannot proceed safely."
-    , "Use outcome=incomplete with a non-empty reason when follow-up is required."
-    , "Use outcome=complete with a non-empty summary when the turn is done; reason may be an empty string."
-    ]
-
-issuePlanStructuredTurnOutcomeInstructions :: Text
-issuePlanStructuredTurnOutcomeInstructions =
-  Text.unlines
-    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
-    , "Include every schema field, using an empty string when a string field is not applicable."
-    , "Use outcome=blocked with a non-empty reason when planning cannot proceed safely."
-    , "Use outcome=complete with a non-empty summary, empty reason, and non-empty plan_markdown when the plan is ready."
-    , "Do not use outcome=incomplete; this planning schema only accepts complete or blocked."
-    ]
-
-plannerStructuredTurnOutcomeInstructions :: Text
-plannerStructuredTurnOutcomeInstructions =
-  Text.unlines
-    [ "Return only JSON matching the active output schema. Plain prose completion is not accepted."
-    , "Include every schema field, using empty arrays, empty strings, or null parentIssueNumber when a field is not applicable."
-    , "Use outcome=blocked with a reason when you cannot proceed safely."
-    , "Use outcome=incomplete with a reason when follow-up investigation or issue creation re-entry is required."
-    , "Use outcome=complete with a summary when the issue graph is stable enough for the watcher to continue."
-    , "issues_to_create and subissues_to_create are watcher-applied requests; do not create issues directly."
-    , "dependencies is the authoritative planning graph input. The watcher recomputes canonical ready_issues and blocked_issues from dependencies and current GitHub issue facts."
-    , "ready_issues and blocked_issues must still be present for schema compatibility, but treat them as non-authoritative hints."
-    ]
-
 plannerTurnInputForScope :: [IssueNumber] -> Text
 plannerTurnInputForScope scopeIssues =
   renderTemplate
     plannerTemplate
-    [ ("structuredInstructions", plannerStructuredTurnOutcomeInstructions)
+    [ ("structuredInstructions", turnOutputContractInstructions plannerTurnOutputContract)
     , ("scopeInstructions", plannerTurnScopeInstructions scopeIssues)
     ]
 
 issuePlanTurnInput :: Text
 issuePlanTurnInput =
-  renderTemplate issuePlanTemplate [("structuredInstructions", issuePlanStructuredTurnOutcomeInstructions)]
+  renderTemplate issuePlanTemplate [("structuredInstructions", turnOutputContractInstructions issuePlanTurnOutputContract)]
 
 issueImplementationTurnInput :: Text
 issueImplementationTurnInput =
-  renderTemplate issueImplementationTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
+  renderTemplate issueImplementationTemplate [("structuredInstructions", turnOutputContractInstructions (issueImplementationTurnOutputContract Nothing Nothing))]
 
 prReviewWorkerTurnInput :: Text
 prReviewWorkerTurnInput =
-  renderTemplate prReviewWorkerTemplate [("structuredInstructions", structuredTurnOutcomeInstructions)]
+  renderTemplate prReviewWorkerTemplate [("structuredInstructions", turnOutputContractInstructions prReviewWorkerTurnOutputContract)]
 
 prReviewWorkerTurnInputWithEvidence :: Text -> ReviewEvidence -> Text
 prReviewWorkerTurnInputWithEvidence baseInput evidence =

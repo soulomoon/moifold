@@ -40,11 +40,8 @@ import CodexWatcher.Logging qualified as Log
 import CodexWatcher.Runtime.Interpreter (RuntimeInterpreter (..))
 import CodexWatcher.Runtime.Paths (runtimeStateDirPath)
 import CodexWatcher.Workflow.GitHub.Ids (CommitSha (..))
-import CodexWatcher.Core.State (SomeWatcherState (..), WatcherState (..), someDomain, somePhase)
-import CodexWatcher.Domain.IssueImplement.Watcher (IssueFinalReviewOutcome (..), IssueImplementObservation (..))
-import CodexWatcher.Domain.IssuePlanning.Watcher (IssuePlanningObservation (..))
+import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.Domain.PrReview.Types (CleanReviewEvidence (..), PrConfig (..))
-import CodexWatcher.Domain.PrReview.Watcher (PrReviewObservation (..))
 import CodexWatcher.Workflow.Daemon.Core qualified as WorkflowDaemon
 import CodexWatcher.Workflow.Execution
 import CodexWatcher.Workflow.Audit qualified as WorkflowAudit
@@ -61,19 +58,15 @@ import CodexWatcher.Workflow.Transaction.Core
   , runWorkflowPreparedDryRunTransaction
   , runWorkflowPreparedExecuteTransactionDetailed
   )
-import CodexWatcher.Workflow.Types (MoifoldSpec, legacyObservedPlannedTransition)
-import CodexWatcher.Workflow.Moifold.IssueImplement.Indexed qualified as WorkflowIssueImplementIndexed
-import CodexWatcher.Workflow.Moifold.IssuePlanning.Indexed qualified as WorkflowIssuePlanningIndexed
-import CodexWatcher.Workflow.Moifold.PrReview.Mergeability.Indexed qualified as WorkflowPrReviewMergeabilityIndexed
+import CodexWatcher.Workflow.Types (MoifoldSpec)
+import CodexWatcher.Workflow.Moifold.ObservationProjection
+  ( MoifoldObservedProjection (..)
+  , projectMoifoldObservation
+  )
 import Data.Aeson (toJSON)
 import Data.Aeson ((.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
-
-data PreparedDaemonObservation = PreparedDaemonObservation
-  { preparedDaemonObservationPlanned :: PlannedTransition MoifoldSpec
-  , preparedDaemonObservationFinalState :: SomeWatcherState
-  }
 
 runDaemonTickFromFile :: ActionExecutor IO -> DaemonOptions -> EffectPlan -> IO (Either DaemonFailure DaemonTickResult)
 runDaemonTickFromFile executor options nextEffects = do
@@ -174,7 +167,7 @@ runObservedDaemonTickWithEvents executor options events observation =
             , "phase" .= Text.pack (show (somePhase replay.replayState))
             ]
         )
-      case prepareDaemonObservation replay.replayState observation of
+      case projectMoifoldObservation replay.replayState observation of
         Left reason -> do
           Log.logWatcher
             executor.actionLogger
@@ -209,318 +202,6 @@ replayEventLogFromEvents events =
     Left failure -> Left (DaemonReplayFailed failure)
     Right replay -> Right replay
 
-prepareDaemonObservation
-  :: SomeWatcherState
-  -> DaemonObservation
-  -> Either Text PreparedDaemonObservation
-prepareDaemonObservation state observation =
-  case (state, observation) of
-    (SomeWatcherState PlanningReady {}, DaemonIssuePlanningObservation (ObservedPlanningTurnStarted threadId turnId)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningTurnStartedObservation
-          state
-          threadId
-          turnId
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningIssuesRequested requests)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningIssuesRequestedObservation
-          state
-          requests
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningGraphUpdated graph)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningGraphUpdatedObservation
-          state
-          graph
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningWaitingForReadyIssues {}, DaemonIssuePlanningObservation ObservedPlanningReadyIssuesFixed) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningReadyIssuesFixedObservation
-          state
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningReady {}, DaemonIssuePlanningObservation ObservedPlanningScopeCompleted) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningScopeCompletedObservation
-          state
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningTurnRetryRequested reason)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningTurnRetryObservation
-          state
-          reason
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation ObservedPlanningTurnCompleted) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningTurnCompletedObservation
-          state
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningReady {}, DaemonIssuePlanningObservation (ObservedPlanningBlocked reason)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedInitializedObservation
-          state
-          reason
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningTurnActive {}, DaemonIssuePlanningObservation (ObservedPlanningBlocked reason)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedActiveTurnObservation
-          state
-          reason
-      pure (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState PlanningWaitingForReadyIssues {}, DaemonIssuePlanningObservation (ObservedPlanningBlocked reason)) -> do
-      projected <-
-        WorkflowIssuePlanningIndexed.projectIssuePlanningBlockedWaitingReadyIssuesObservation
-          state
-          reason
-      pure
-        (preparedFromIssuePlanningProjection projected)
-    (SomeWatcherState IssueReadyToPlan {}, DaemonIssueImplementObservation (ObservedPlanTurnStarted turnId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPlanTurnStartedObservation
-          state
-          turnId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueInPlanMode {}, DaemonIssueImplementObservation (ObservedPlanCompleted planMarkdown maybeImplementationTurnId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPlanCompletedObservation
-          state
-          planMarkdown
-          maybeImplementationTurnId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueReadyToPlan {}, DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedReadyToPlanObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedIssueAttemptBranchAdvanced branch)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementAttemptBranchAdvancedObservation
-          state
-          branch
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedPullRequestCreated prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPullRequestCreatedImplementationReadyObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedPullRequestReused prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPullRequestReusedImplementationReadyObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePlanReady {}, DaemonIssueImplementObservation (ObservedPullRequestBodyUpdated prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPullRequestBodyUpdatedPlanReadyObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedIssueWorkerThreadRefreshed threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementWorkerThreadRefreshedImplementationReadyObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedImplementationTurnStarted turnId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationTurnStartedObservation
-          state
-          turnId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementationReady {}, DaemonIssueImplementObservation (ObservedImplementationBlocked reason)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationBlockedImplementationReadyObservation
-          state
-          reason
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementing {}, DaemonIssueImplementObservation (ObservedImplementationIncomplete reason)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationIncompleteObservation
-          state
-          reason
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementing {}, DaemonIssueImplementObservation (ObservedImplementationBlocked reason)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationBlockedImplementingObservation
-          state
-          reason
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueImplementing {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedImplementingObservation
-          state
-          prNumber
-          maybeReviewerThreadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffReady {}, DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffReadyObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffInitializedHandoffInitializedObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedReviewHandoffInitialized prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffInitializedWaitingForPrMergeObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffStartedHandoffInitializedObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedReviewHandoffStarted prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewHandoffStartedWaitingForPrMergeObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffReady {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedHandoffReadyObservation
-          state
-          prNumber
-          maybeReviewerThreadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedHandoffInitializedObservation
-          state
-          prNumber
-          maybeReviewerThreadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedImplementationCompleted prNumber maybeReviewerThreadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementationCompletedWaitingForPrMergeObservation
-          state
-          prNumber
-          maybeReviewerThreadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffReady {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffReadyObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueHandoffInitialized {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyHandoffInitializedObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyWaitingForPrMergeObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewPendingReviewer {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewPendingReviewerObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewReady {}, DaemonIssueImplementObservation (ObservedIssueReviewerThreadReady threadId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementReviewerThreadReadyPostMergeReviewReadyObservation
-          state
-          threadId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueWaitingForPrMerge {}, DaemonIssueImplementObservation (ObservedPullRequestMerged prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPullRequestMergedWaitingForPrMergeObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewReady {}, DaemonIssueImplementObservation (ObservedPostMergeReviewStarted commit turnId)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewStartedObservation
-          state
-          commit
-          turnId
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewClean evidence))) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeCleanObservation
-          state
-          evidence
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewRework evidence))) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeReworkObservation
-          state
-          evidence
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewIncomplete reason))) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeIncompleteObservation
-          state
-          reason
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssuePostMergeReviewing {}, DaemonIssueImplementObservation (ObservedPostMergeReviewerOutcome (IssueFinalReviewBlocked reason))) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementPostMergeReviewerOutcomeBlockedObservation
-          state
-          reason
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState IssueWaitingForIssueClose {}, DaemonIssueImplementObservation (ObservedIssueClosed prNumber)) -> do
-      projected <-
-        WorkflowIssueImplementIndexed.projectIssueImplementIssueClosedObservation
-          state
-          prNumber
-      pure (preparedFromIssueImplementProjection projected)
-    (SomeWatcherState PrWaitingForMergeability {}, DaemonPrReviewObservation (ObservedMergeabilityClean commit)) -> do
-      projected <-
-        WorkflowPrReviewMergeabilityIndexed.projectPrReviewMergeabilityCleanObservation
-          state
-          commit
-      pure
-        PreparedDaemonObservation
-          { preparedDaemonObservationPlanned =
-              projected.prReviewMergeabilityIndexedProjectionPlanned
-          , preparedDaemonObservationFinalState =
-              projected.prReviewMergeabilityIndexedProjectionFinalState
-          }
-    _ -> do
-      observed <- observeDaemonState state observation
-      pure
-        PreparedDaemonObservation
-          { preparedDaemonObservationPlanned =
-              legacyObservedPlannedTransition observed
-          , preparedDaemonObservationFinalState = observed.observedState
-          }
-
-preparedFromIssuePlanningProjection
-  :: WorkflowIssuePlanningIndexed.IssuePlanningIndexedProjection
-  -> PreparedDaemonObservation
-preparedFromIssuePlanningProjection projected =
-  PreparedDaemonObservation
-    { preparedDaemonObservationPlanned =
-        projected.issuePlanningIndexedProjectionPlanned
-    , preparedDaemonObservationFinalState =
-        projected.issuePlanningIndexedProjectionFinalState
-    }
-
-preparedFromIssueImplementProjection
-  :: WorkflowIssueImplementIndexed.IssueImplementIndexedProjection
-  -> PreparedDaemonObservation
-preparedFromIssueImplementProjection projected =
-  PreparedDaemonObservation
-    { preparedDaemonObservationPlanned =
-        projected.issueImplementIndexedProjectionPlanned
-    , preparedDaemonObservationFinalState =
-        projected.issueImplementIndexedProjectionFinalState
-    }
-
 runObservedDaemonDryRun
   :: Monad m
   => ActionExecutor m
@@ -528,7 +209,7 @@ runObservedDaemonDryRun
   -> [WatcherEvent]
   -> EventReplayResult
   -> DaemonObservation
-  -> PreparedDaemonObservation
+  -> MoifoldObservedProjection
   -> m (Either DaemonFailure DaemonObservedTickResult)
 runObservedDaemonDryRun executor options _events replay observation prepared =
   pure $
@@ -537,8 +218,8 @@ runObservedDaemonDryRun executor options _events replay observation prepared =
         (moifoldObservedTransactionHooks executor options)
         replay
         observation
-        prepared.preparedDaemonObservationPlanned
-        prepared.preparedDaemonObservationFinalState
+        prepared.moifoldObservedProjectionPlanned
+        prepared.moifoldObservedProjectionFinalState
 
 runObservedDaemonExecute
   :: Monad m
@@ -547,7 +228,7 @@ runObservedDaemonExecute
   -> [WatcherEvent]
   -> EventReplayResult
   -> DaemonObservation
-  -> PreparedDaemonObservation
+  -> MoifoldObservedProjection
   -> m (Either DaemonFailure DaemonObservedTickResult)
 runObservedDaemonExecute executor options events replay observation prepared = do
   result <-
@@ -556,7 +237,7 @@ runObservedDaemonExecute executor options events replay observation prepared = d
       events
       replay
       observation
-      prepared.preparedDaemonObservationPlanned
+      prepared.moifoldObservedProjectionPlanned
   pure case result of
     Left failure -> Left (daemonFailureFromObservedTransactionFailure failure)
     Right success -> Right (observedDetailedTransactionResultToDaemon options observation success)

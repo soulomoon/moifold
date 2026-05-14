@@ -497,25 +497,26 @@ recordPlanningGraphFixtureTest = do
 
 healthcheckPlannerReaderBoundaryTest :: IO Bool
 healthcheckPlannerReaderBoundaryTest = do
-  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
   assert
     "healthcheck keeps issue planning plannerState on planner-state.json and not planning-state.json"
-    ( "(\"plannerState\", \"planner-state.json\")" `Text.isInfixOf` healthcheckSource
-        && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
+    ( "(\"plannerState\", \"planner-state.json\")" `Text.isInfixOf` runtimeInspectionSource
+        && not ("planning-state.json" `Text.isInfixOf` runtimeInspectionSource)
     )
 
 healthcheckRuntimeStateReadNonReadContractTest :: IO Bool
 healthcheckRuntimeStateReadNonReadContractTest = do
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
   assert
     "healthcheck keeps consolidated runtime-state projection/non-read contract"
     ( textNeedlesInOrder
         [ "projectStateFiles :: SDomain kind -> FilePath -> Maybe SomeWatcherState -> IO Value"
         , "object <$> traverse projectStateFile (stateFileSpecs kind)"
-        , "writes = maybe [] (compatibilityStateWrites stateDir') replayState"
+        , "writes = maybe [] (compatibilityStateWrites stateDir) replayState"
         , "projectStateFile (key, fileName) = do"
         , "if fileName == \"runtime-owner.json\""
-        , "then readOptionalValueFile (stateDir' </> fileName)"
+        , "then readOptionalValueFile (stateDir </> fileName)"
         , "else pure (lookupProjectedState fileName writes)"
         , "pure (Key.fromText key .= fromMaybe Null value)"
         , "stateFileSpecs :: SDomain kind -> [(Text, FilePath)]"
@@ -539,28 +540,33 @@ healthcheckRuntimeStateReadNonReadContractTest = do
         , "lookupProjectedState :: FilePath -> [CompatibilityWrite] -> Maybe Value"
         , "takeFileName path == fileName"
         ]
-        healthcheckSource
+        runtimeInspectionSource
         && "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states" `Text.isInfixOf` healthcheckSource
-        && "states <- projectStateFiles kind stateDir' replayState" `Text.isInfixOf` healthcheckSource
+        && "states = inspection.runtimeInspectionProjectedStates" `Text.isInfixOf` healthcheckSource
         && not ("states <- readStateFiles kind stateDir'" `Text.isInfixOf` healthcheckSource)
         && not ("planning-state.json" `Text.isInfixOf` healthcheckSource)
+        && not ("planning-state.json" `Text.isInfixOf` runtimeInspectionSource)
         && not ("repair-state.json" `Text.isInfixOf` healthcheckSource)
+        && not ("repair-state.json" `Text.isInfixOf` runtimeInspectionSource)
         && not ("issue-snapshot.json" `Text.isInfixOf` healthcheckSource)
+        && not ("issue-snapshot.json" `Text.isInfixOf` runtimeInspectionSource)
         && not ("writeJsonValue" `Text.isInfixOf` healthcheckSource)
+        && not ("writeJsonValue" `Text.isInfixOf` runtimeInspectionSource)
         && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` healthcheckSource)
+        && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` runtimeInspectionSource)
     )
 
 daemonStateSourceBoundaryTest :: IO Bool
 daemonStateSourceBoundaryTest = do
-  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
   restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
   snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
   assert
     "daemon-state compatibility interactions keep projection paths without snapshot readers, restart cleanup, or repair rewrites"
-    ( "(\"daemonState\", \"daemon-state.json\")" `Text.isInfixOf` healthcheckSource
-        && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
-        && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
+    ( "(\"daemonState\", \"daemon-state.json\")" `Text.isInfixOf` runtimeInspectionSource
+        && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` runtimeInspectionSource
+        && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` runtimeInspectionSource
         && not snapshotSourceExists
         && not ("writeCompatibilityFiles" `Text.isInfixOf` replaySource)
         && not ("\"$state_dir/daemon-state.json\"" `Text.isInfixOf` restartSource)
@@ -569,7 +575,7 @@ daemonStateSourceBoundaryTest = do
 blockStateSourceBoundaryTest :: IO Bool
 blockStateSourceBoundaryTest = do
   runnerSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "AutomaticLoop" </> "Runner.hs")
-  healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
   restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
   snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
@@ -577,9 +583,9 @@ blockStateSourceBoundaryTest = do
     "block-state compatibility interactions keep projection/repair cleanup paths without snapshot readers, restart cleanup, or repair-failure writes"
     ( not ("repairFailureBlockStateJson" `Text.isInfixOf` runnerSource)
         && not ("writeJsonValue (stateDir </> \"block-state.json\")" `Text.isInfixOf` runnerSource)
-        && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
-        && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` healthcheckSource
-        && "(\"blockedState\", \"block-state.json\")" `Text.isInfixOf` healthcheckSource
+        && "SIssuePlanning ->\n    sharedStateFiles" `Text.isInfixOf` runtimeInspectionSource
+        && "SIssueImplement ->\n    sharedStateFiles" `Text.isInfixOf` runtimeInspectionSource
+        && "(\"blockedState\", \"block-state.json\")" `Text.isInfixOf` runtimeInspectionSource
         && not snapshotSourceExists
         && "removeFileIfExists (options.repairCliStateDir </> \"block-state.json\")" `Text.isInfixOf` replaySource
         && not ("\"$state_dir/block-state.json\"" `Text.isInfixOf` restartSource)
@@ -589,6 +595,7 @@ repairStateSourceBoundaryTest :: IO Bool
 repairStateSourceBoundaryTest = do
   replaySource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Cli" </> "Command" </> "Replay.hs")
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
   snapshotSourceExists <- doesFileExist ("src" </> "CodexWatcher" </> "Snapshot.hs")
   runtimeSources <- traverse TextIO.readFile runtimeSourceFiles
   automaticLoopSources <- traverse TextIO.readFile automaticLoopSourceFiles
@@ -644,9 +651,10 @@ repairStateSourceBoundaryTest = do
         )
     , assert
         "healthcheck remains a repair-state non-reader"
-        ( "projectStateFiles" `Text.isInfixOf` healthcheckSource
-            && "sharedStateFiles" `Text.isInfixOf` healthcheckSource
+        ( "projectStateFiles" `Text.isInfixOf` runtimeInspectionSource
+            && "sharedStateFiles" `Text.isInfixOf` runtimeInspectionSource
             && not ("repair-state.json" `Text.isInfixOf` healthcheckSource)
+            && not ("repair-state.json" `Text.isInfixOf` runtimeInspectionSource)
         )
     , assert
         "removed snapshot bridge, runtime, and automatic-loop sources remain repair-state non-readers"
@@ -658,19 +666,21 @@ repairStateSourceBoundaryTest = do
 runtimeOwnerSourceBoundaryTest :: IO Bool
 runtimeOwnerSourceBoundaryTest = do
   healthcheckSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Healthcheck.hs")
+  runtimeInspectionSource <- TextIO.readFile ("src" </> "CodexWatcher" </> "Runtime" </> "Inspection.hs")
   restartSource <- TextIO.readFile ("scripts" </> "restart-watcher")
   sequenceAnd
     [ assert
         "healthcheck keeps runtime-owner.json mapping and current runtimeOwner summary field path"
         ( all
-            (`Text.isInfixOf` healthcheckSource)
+            (`Text.isInfixOf` runtimeInspectionSource)
             [ "SIssuePlanning ->\n    sharedStateFiles"
             , "SIssueImplement ->\n    sharedStateFiles"
             , "SPrReview ->\n    [ (\"watcherState\", \"watcher-state.json\")"
             , "(\"runtimeOwner\", \"runtime-owner.json\")"
-            , "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states"
             ]
+            && "runtimeOwner' = config.runtimeOwner <|> lookupStateText [\"runtimeOwner\", \"owner\"] states" `Text.isInfixOf` healthcheckSource
             && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` healthcheckSource)
+            && not ("lookupStateText [\"runtimeOwner\", \"lease\", \"runtime\"]" `Text.isInfixOf` runtimeInspectionSource)
         )
     , assert
         "restart-watcher keeps runtime-owner pid extraction, stop, and cleanup behavior"

@@ -18,19 +18,13 @@ module CodexWatcher.Healthcheck
   ) where
 
 import CodexWatcher.AppServerProtocol
-import CodexWatcher.ChildDaemon (isPidRunning, readPidFile)
-import CodexWatcher.EventLog.File (loadEventLogFile)
-import CodexWatcher.EventLog.Replay (replayEventLog)
-import CodexWatcher.EventLog.Types
 import CodexWatcher.Healthcheck.Analysis
 import CodexWatcher.Healthcheck.Types
 import CodexWatcher.Runtime.Command.Render (commandText)
 import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (..))
-import CodexWatcher.Runtime.Compatibility (CompatibilityWrite (..), compatibilityStateWrites)
-import CodexWatcher.Runtime.File (readJsonValue)
+import CodexWatcher.Runtime.Inspection
 import CodexWatcher.Runtime.Json (commandJsonValue)
 import CodexWatcher.Runtime.Process (runRuntimeCommand, skippedCommand)
-import CodexWatcher.Core.State (SomeWatcherState, someDomain, somePhase)
 import CodexWatcher.WatcherLiveness
 import CodexWatcher.Workflow.Agent.Codex.Client (AppServerTurn (..), formatAppServerClientFailure, parseThreadReadTurns)
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerClientOptions (..), AppServerEndpoint, defaultAppServerClientOptions, sendOneAppServerRequest)
@@ -49,7 +43,6 @@ import Data.Aeson
   , object
   , (.=)
   )
-import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Lazy.Char8 qualified as LazyByteString
@@ -62,7 +55,7 @@ import System.Directory
   , doesFileExist
   , listDirectory
   )
-import System.FilePath (takeFileName, (</>))
+import System.FilePath ((</>))
 import System.IO.Error (isDoesNotExistError)
 
 runHealthcheck :: HealthcheckOptions -> IO ()
@@ -204,10 +197,18 @@ summarizeLoadedItem kind options item config = do
   let stateDir' = fromMaybe item.dir config.stateDir
       pidPath' = fallbackPidPath kind stateDir' config.pidPath
       eventsPath' = config.eventsPath <|> Just (stateDir' </> "events.jsonl")
-  pid <- readPid pidPath'
-  (eventReplayReport, replayState) <- checkEventReplayWithState kind eventsPath'
-  states <- projectStateFiles kind stateDir' replayState
-  let issueStatus' = lookupStateText ["issueState", "issue_status"] states
+  inspection <-
+    inspectRuntime
+      RuntimeInspectionConfig
+        { runtimeInspectionDomain = kind
+        , runtimeInspectionStateDir = stateDir'
+        , runtimeInspectionPidPath = pidPath'
+        , runtimeInspectionEventsPath = eventsPath'
+        }
+  let pid = inspection.runtimeInspectionPid
+      eventReplayReport = inspection.runtimeInspectionEventReplay.runtimeEventReplayReport
+      states = inspection.runtimeInspectionProjectedStates
+      issueStatus' = lookupStateText ["issueState", "issue_status"] states
       blocked' = lookupStateBool ["blockedState", "blocked"] states
       blockedReason' = lookupStateText ["blockedState", "reason"] states
       runtimeOwner' = config.runtimeOwner <|> lookupStateText ["runtimeOwner", "owner"] states
@@ -244,68 +245,9 @@ summarizeLoadedItem kind options item config = do
       , states
       }
 
-projectStateFiles :: SDomain kind -> FilePath -> Maybe SomeWatcherState -> IO Value
-projectStateFiles kind stateDir' replayState =
-  object <$> traverse projectStateFile (stateFileSpecs kind)
- where
-  writes = maybe [] (compatibilityStateWrites stateDir') replayState
-
-  projectStateFile (key, fileName) = do
-    value <-
-      if fileName == "runtime-owner.json"
-        then readOptionalValueFile (stateDir' </> fileName)
-        else pure (lookupProjectedState fileName writes)
-    pure (Key.fromText key .= fromMaybe Null value)
-
-stateFileSpecs :: SDomain kind -> [(Text, FilePath)]
-stateFileSpecs = \case
-  SIssuePlanning ->
-    sharedStateFiles
-      [ ("plannerState", "planner-state.json")
-      ]
-  SIssueImplement ->
-    sharedStateFiles
-      [ ("issueState", "issue-state.json")
-      ]
-  SPrReview ->
-    [ ("watcherState", "watcher-state.json")
-    , ("checkerState", "checker-state.json")
-    , ("agentState", "agent-state.json")
-    , ("reviewerState", "reviewer-state.json")
-    , ("blockedState", "block-state.json")
-    , ("runtimeOwner", "runtime-owner.json")
-    ]
-
-sharedStateFiles :: [(Text, FilePath)] -> [(Text, FilePath)]
-sharedStateFiles domainFiles =
-  ("daemonState", "daemon-state.json")
-    : domainFiles
-      <> [ ("blockedState", "block-state.json")
-         , ("runtimeOwner", "runtime-owner.json")
-         ]
-
-readOptionalValueFile :: FilePath -> IO (Maybe Value)
-readOptionalValueFile path = do
-  exists <- doesFileExist path
-  if not exists
-    then pure Nothing
-    else either (const Nothing) Just <$> readJsonValue path
-
-lookupProjectedState :: FilePath -> [CompatibilityWrite] -> Maybe Value
-lookupProjectedState fileName writes =
-  case [value | CompatibilityWrite path value <- writes, takeFileName path == fileName] of
-    value : _ -> Just value
-    [] -> Nothing
-
 fallbackPidPath :: SDomain kind -> FilePath -> Maybe FilePath -> FilePath
 fallbackPidPath kind stateDir' configured =
   fromMaybe (WatcherPaths.defaultPidPath (watcherDomainValue kind) stateDir') configured
-
-readPid :: FilePath -> IO PidReport
-readPid pidPath = do
-  pid' <- readPidFile pidPath
-  running <- maybe (pure False) isPidRunning pid'
-  pure PidReport {pidPath, pid = pid', running}
 
 checkWorkdir :: GenericConfig -> IO WorkdirReport
 checkWorkdir config =
@@ -377,44 +319,6 @@ checkReviewerThread SPrReview endpoint config =
 checkReviewerThread _ _ config =
   pure (skippedAppServerThread "not a PR watcher" config.reviewerThreadId)
 
-checkEventReplayWithState :: SDomain kind -> Maybe FilePath -> IO (EventReplayReport, Maybe SomeWatcherState)
-checkEventReplayWithState kind (Just path') = do
-  exists <- doesFileExist path'
-  if not exists
-    then pure (skippedEventReplay "events log does not exist" (Just path'), Nothing)
-    else do
-      loaded <- loadEventLogFile path'
-      pure case loaded of
-        Left error' -> (failedEventReplay path' (Text.pack error'), Nothing)
-        Right events ->
-          case replayEventLog events of
-            Left failure -> (failedEventReplay path' (Text.pack (formatReplayFailureForHealthcheck failure)), Nothing)
-            Right replay
-              | not (watcherDomainMatches kind replay.replayState) ->
-                  ( failedEventReplay
-                      path'
-                      ( "events replayed as "
-                          <> Text.pack (show (someDomain replay.replayState))
-                          <> " but config is "
-                          <> Text.pack (show (watcherDomainValue kind))
-                      )
-                  , Nothing
-                  )
-              | otherwise ->
-                  ( EventReplayReport
-                      { skipped = False
-                      , ok = True
-                      , reason = Nothing
-                      , eventsPath = Just path'
-                      , domain = Just (Text.pack (show (someDomain replay.replayState)))
-                      , phase = Just (Text.pack (show (somePhase replay.replayState)))
-                      , eventCount = Just (length events)
-                      , effectBatchCount = Just (length replay.replayEffects)
-                      }
-                  , Just replay.replayState
-                  )
-checkEventReplayWithState _kind Nothing = pure (skippedEventReplay "missing eventsPath" Nothing, Nothing)
-
 checkAppServerThread :: Maybe AppServerEndpoint -> Maybe Text -> IO AppServerThreadReport
 checkAppServerThread Nothing maybeThreadId =
   pure (skippedAppServerThread "healthcheck app-server endpoint not configured" maybeThreadId)
@@ -454,19 +358,6 @@ failedAppServerThread threadId' reason' =
     , turnCount = Nothing
     , latestTurnId = Nothing
     , latestTurnStatus = Nothing
-    }
-
-failedEventReplay :: FilePath -> Text -> EventReplayReport
-failedEventReplay path' reason' =
-  EventReplayReport
-    { skipped = False
-    , ok = False
-    , reason = Just reason'
-    , eventsPath = Just path'
-    , domain = Nothing
-    , phase = Nothing
-    , eventCount = Nothing
-    , effectBatchCount = Nothing
     }
 
 environmentCommands :: IO Value
@@ -558,12 +449,3 @@ emptyToNothing :: Text -> Maybe Text
 emptyToNothing text
   | Text.null (Text.strip text) = Nothing
   | otherwise = Just (Text.strip text)
-
-formatReplayFailureForHealthcheck :: ReplayFailure -> String
-formatReplayFailureForHealthcheck failure =
-  "event replay failed at event "
-    <> show failure.eventIndex
-    <> " ("
-    <> show failure.event
-    <> "): "
-    <> Text.unpack failure.reason
