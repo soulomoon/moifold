@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-004-core-ids-test-and-fixture-import-burndown",
+  "direction_id": "direction-011h-core-ids-workflow-test-imports",
+  "extracted_item_id": "direction-011h-workflow-agent-spec-core-ids-import",
+  "roadmap_item_id": "direction-011h-core-ids-workflow-test-imports",
+  "decision": "approved",
+  "evidence_summary": "WorkflowAgentSpec now imports direct Agent.Ids and GitHub.Ids owners; selected-file diff is import-only, Core.Ids target scan has no matches, broad scan leaves only expected later buckets, and cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed."
+}

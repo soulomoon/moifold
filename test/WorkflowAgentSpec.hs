@@ -63,7 +63,8 @@ import CodexWatcher.Domain.IssuePlanning.TurnClassifier
 import CodexWatcher.Domain.PrReview.TurnClassifier
 import CodexWatcher.Turn.Classifier.Common
 import CodexWatcher.TurnOutput
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.Agent.Ids (RequestId (..), ThreadId (..), TurnId (..), nextRequestId)
+import CodexWatcher.Workflow.GitHub.Ids (BranchName (..), CommitSha (..), IssueNumber (..), PrNumber (..), RepoName (..), ReviewThreadId (..))
 import CodexWatcher.Core.Kinds
 import CodexWatcher.Core.Limits
 import CodexWatcher.Core.Reason
