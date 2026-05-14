@@ -329,7 +329,7 @@ Candidate directions:
   cleanup, release approval, terminal completion, or public compatibility
   removal.
 
-### 4. [in-progress] Core.Ids Test And Fixture Import Burndown
+### 4. [completed] Core.Ids Test And Fixture Import Burndown
 
 Milestone id: `milestone-004-core-ids-test-and-fixture-import-burndown`
 Depends on: `milestone-003-core-ids-production-import-burndown`
@@ -342,7 +342,7 @@ reasons.
 Parallel lane: test Core.Ids lane
 Coordination notes: test policy surfaces may intentionally import facades, but
 that classification must be explicit and finite.
-Current status: in progress. Round 187 migrated
+Current status: completed by rounds 187 through 195. Round 187 migrated
 `test/TestSupport/Workflow.hs` from `CodexWatcher.Core.Ids` to direct
 `CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId)` and
 `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
@@ -393,14 +393,22 @@ checks, and broad remaining-user classification all passed. The
 `direction-011i-runtime-compatibility-fixture-core-ids-import` extracted item
 is complete. Direction 011i runtime/CLI test imports are complete: the current
 broad scan finds no remaining safe runtime or CLI test `Core.Ids` imports.
-Remaining `Core.Ids` test users are policy/aggregator candidates
-(`test/FacadeImportPolicySpec.hs`, `test/Main.hs`) for direction 011j. No app,
-reusable package, or production `src` users remain beyond the public facade
-module. Docs, Cabal exposure, and the public facade remain for later
-milestones or public-surface decisions. This status does not approve public
-facade deprecation/removal, Cabal exposure cleanup, docs cleanup, runtime
-compatibility cleanup, milestone 004 completion, release approval, terminal
-completion, or public compatibility removal.
+Round 195 classified the only remaining test `Core.Ids` imports as intentional
+evidence surfaces: `test/FacadeImportPolicySpec.hs` intentionally imports
+`CodexWatcher.Core.Ids` as facade-policy evidence, and `test/Main.hs`
+intentionally imports `CodexWatcher.Core.Ids` as watcher-core-test
+aggregate/property wiring evidence. The reviewer approved the artifact-only
+classification after focused import scans found only those two test imports and
+the broader scan found only out-of-scope public facade, Cabal exposure, and
+docs/policy references. Direction 011j is complete, and milestone 004 is
+complete: every safe test/fixture `Core.Ids` import has migrated, and the
+remaining test imports are explicitly classified with reviewer-approved
+reasons. No app, reusable package, or production `src` users remain beyond the
+public facade module. Docs, Cabal exposure, and the public facade remain for
+later milestones or public-surface decisions. This status does not approve
+public facade deprecation/removal, Cabal exposure cleanup, docs cleanup,
+runtime compatibility cleanup, release approval, terminal completion, or public
+compatibility removal.
 
 Candidate directions:
 
@@ -457,7 +465,16 @@ Candidate directions:
   Preconditions: safe test migrations have run.
   Parallel hints: artifact-only or narrow test-only round.
   Boundary notes: no public facade removal or policy weakening.
-  Extraction notes: record exact intentional facade users and why each remains.
+  Extraction notes: completed by round 195 as artifact-only classification
+  evidence. `test/FacadeImportPolicySpec.hs:11` intentionally imports
+  `CodexWatcher.Core.Ids` as facade-policy evidence. `test/Main.hs:67`
+  intentionally imports `CodexWatcher.Core.Ids` as watcher-core-test
+  aggregate/property wiring evidence. Focused scans found no other test or
+  fixture `Core.Ids` imports, and broader scans found only out-of-scope public
+  facade, Cabal exposure, and docs/policy references. This completes direction
+  011j and milestone 004 without approving public facade deprecation/removal,
+  Cabal exposure cleanup, docs cleanup, runtime compatibility cleanup, release
+  approval, terminal completion, or public compatibility removal.
 
 ### 5. [pending] EventLog And Permission Bridge Burndown
 
