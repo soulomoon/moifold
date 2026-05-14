@@ -9,11 +9,12 @@ module CliSpec
   ) where
 
 import CodexWatcher.Workflow.Agent.Codex.Transport (AppServerEndpoint (..))
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..))
 import CodexWatcher.Cli.Parser (parseCliCommand)
 import CodexWatcher.Cli.Types
-import CodexWatcher.Core.Ids (IssueNumber (..), RepoName (..), ThreadId (..))
 import CodexWatcher.Core.Kinds (Domain (..))
 import CodexWatcher.Core.Limits (PollSeconds, StaleSeconds, mkPollSeconds, mkStaleSeconds)
+import CodexWatcher.Workflow.GitHub.Ids (IssueNumber (..), RepoName (..))
 
 prop_cliParsesAppServerProbe :: Bool
 prop_cliParsesAppServerProbe =

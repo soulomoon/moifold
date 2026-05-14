@@ -1,0 +1,11 @@
+{
+  "roadmap_id": "2026-05-11-00-highest-value-cleanup",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
+  "milestone_id": "milestone-004-core-ids-test-and-fixture-import-burndown",
+  "direction_id": "direction-011i-core-ids-runtime-cli-test-imports",
+  "extracted_item_id": "direction-011i-cli-spec-core-ids-import",
+  "roadmap_item_id": "direction-011i-core-ids-runtime-cli-test-imports",
+  "decision": "approved",
+  "evidence_summary": "test/CliSpec.hs migrated from CodexWatcher.Core.Ids to direct Workflow.Agent.Ids and Workflow.GitHub.Ids imports with an import-only diff; CLI properties and test/Main wiring remain present; broad scan excludes CliSpec; cabal build all, cabal test watcher-core-test, git diff --check, and git diff --cached --check passed."
+}
