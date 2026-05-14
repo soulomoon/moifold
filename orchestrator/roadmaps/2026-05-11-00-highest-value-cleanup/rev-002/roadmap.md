@@ -358,14 +358,19 @@ PrNumber, RepoName, ReviewThreadId)` imports. Round 190 migrated
 `test/WorkflowExecutionSpec.hs` from `CodexWatcher.Core.Ids` to direct
 `CodexWatcher.Workflow.Agent.Ids (ThreadId, TurnId)` and
 `CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
+PrNumber, RepoName, ReviewThreadId)` imports. Round 191 migrated
+`test/WorkflowIndexedSpec.hs` from `CodexWatcher.Core.Ids` to direct
+`CodexWatcher.Workflow.Agent.Ids (RequestId, ThreadId, TurnId)` and
+`CodexWatcher.Workflow.GitHub.Ids (BranchName, CommitSha, IssueNumber,
 PrNumber, RepoName, ReviewThreadId)` imports. The reviewer approved the
-round-190 import-only diff after `cabal build all`,
+round-191 import-only diff after `cabal build all`,
 `cabal test watcher-core-test`, git diff checks, selected-file no-`Core.Ids`
-scan, selected-file no-`RequestId` scan, selected-file direct-owner imports,
-and broad remaining-user classification all passed. Remaining `Core.Ids` test
-users include the workflow spec `test/WorkflowIndexedSpec.hs`, runtime/CLI
-tests (`test/RuntimeSpec.hs`, `test/RuntimeCompatibilityFixtureSpec.hs`,
-`test/CliSpec.hs`), and policy/aggregator candidates
+scan, selected-file direct-owner imports, selected-file diff inspection, and
+broad remaining-user classification all passed. Direction 011h workflow test
+imports are complete: no workflow spec remains on `CodexWatcher.Core.Ids`.
+Remaining `Core.Ids` test users are runtime/CLI tests
+(`test/RuntimeSpec.hs`, `test/RuntimeCompatibilityFixtureSpec.hs`,
+`test/CliSpec.hs`) and policy/aggregator candidates
 (`test/FacadeImportPolicySpec.hs`, `test/Main.hs`). No app, reusable package,
 or production `src` users remain beyond the public facade module. Docs, Cabal
 exposure, and the public facade remain for later milestones or public-surface
@@ -393,8 +398,11 @@ Candidate directions:
   was completed by round 188 as an import-only direct-owner migration.
   `test/WorkflowAgentSpec.hs` was completed by round 189 as an import-only
   direct-owner migration. `test/WorkflowExecutionSpec.hs` was completed by
-  round 190 as an import-only direct-owner migration. The workflow spec file
-  that remains for a later slice is `test/WorkflowIndexedSpec.hs`.
+  round 190 as an import-only direct-owner migration.
+  `test/WorkflowIndexedSpec.hs` was completed by round 191 as an import-only
+  direct-owner migration. Direction 011h workflow test imports are complete;
+  continue milestone 004 with direction 011i runtime/CLI tests and direction
+  011j policy/aggregator classification.
 
 - Direction id: `direction-011i-core-ids-runtime-cli-test-imports`
   Summary: Migrate safe runtime and CLI test imports such as
