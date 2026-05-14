@@ -6,7 +6,7 @@
   "roadmap_revision": "rev-002",
   "roadmap_dir": "orchestrator/roadmaps/2026-05-11-00-highest-value-cleanup/rev-002",
   "stage": null,
-  "controller_stage": "dispatch-rounds",
+  "controller_stage": "done",
   "max_parallel_rounds": 1,
   "active_round_id": null,
   "active_rounds": [],
