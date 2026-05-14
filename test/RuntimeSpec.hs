@@ -27,14 +27,14 @@ import CodexWatcher.Runtime.Command.Types (CommandReport (..), RuntimeCommand (.
 import CodexWatcher.Runtime.Process (runProcessSpec)
 import CodexWatcher.Runtime.Defaults
 import CodexWatcher.AppServerProtocol (ThreadStartOptions (..), TurnStartOptions (..))
-import CodexWatcher.Core.Ids
+import CodexWatcher.Workflow.Agent.Ids (ThreadId (..))
+import CodexWatcher.Workflow.GitHub.Ids
   ( BranchName (..)
   , CommitSha (..)
   , IssueNumber (..)
   , PrNumber (..)
   , RepoName (..)
   , ReviewThreadId (..)
-  , ThreadId (..)
   )
 import CodexWatcher.Domain.IssueImplement.Types (IssueConfig (..))
 import CodexWatcher.Domain.IssuePlanning.Types (IssueCreationRequest (..))
